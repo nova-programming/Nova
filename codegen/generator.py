@@ -5,7 +5,7 @@ from nova.runtime.values import TypedValue
 from nova.runtime.builtins import BUILTIN_TYPES
 
 class CodeGen:
-    def __init__(self):
+    def __init__(self, diagnostics):
         self.array_metadata = {}
         self.builder = None
         self.classes = {} 
@@ -13,6 +13,7 @@ class CodeGen:
         self.class_fields = {}
         self.current_class_name = None
         self.data_structures = {}
+        self.diagnostics = diagnostics
         self.exports = {}
         self.free_fn = None
         self.functions = {}
@@ -28,6 +29,13 @@ class CodeGen:
         self.variable_types_stack = [{}]
         self.var_class_map = {}   # tracks variable name -> class name at compile time
         self.method_map = {}      # tracks "ClassName.method" -> "ClassName_method"
+
+    def error_value(self):
+        return TypedValue(
+            ir.Constant(ir.IntType(32), 0),
+            INT,
+            is_lvalue=False
+        )
 
     def push_scope(self):
         self.symbols_stack.append({})
@@ -60,9 +68,13 @@ class CodeGen:
                 self.data_structures[type_name]["llvm_type"]
             )
 
-        raise Exception(
-            f"Unknown type: {type_name}"
+        
+        self.diagnostics.report(
+            "Semantic",
+            f"Unknown variable type '{type_name}'"
         )
+
+        return INT
 
     def get_symbol(self, name):
         for scope in reversed(self.symbols_stack):
@@ -70,7 +82,13 @@ class CodeGen:
                 return scope[name]
         if name in self.exports:
             return self.exports[name]
-        raise Exception(f"Undefined variable: {name}")
+        
+        self.diagnostics.report(
+            "Semantic",
+            f"Undefined variable: '{name}'"
+        )
+
+        return self.error_value()
 
     def set_variable_type(self, name, var_type):
         print(
@@ -102,9 +120,13 @@ class CodeGen:
             if name in scope:
                 return scope[name]
 
-        raise Exception(
-            f"Unknown variable type: {name}"
+        
+        self.diagnostics.report(
+            "Semantic",
+            f"Unknown variable type: '{name}'"
         )
+
+        return INT
 
     def load_if_pointer(self, value):
         """
@@ -205,6 +227,10 @@ class CodeGen:
         if not self.builder.block.is_terminated:
             self.builder.ret(ir.Constant(ir.IntType(32), 0))
 
+        if self.diagnostics.has_errors():
+            self.diagnostics.print_all()
+            return None
+
         return str(self.module)
 
     def gen_expr(self, node):
@@ -228,7 +254,8 @@ class CodeGen:
         if isinstance(node, Variable):
 
             ptr = self.get_symbol(node.name)
-
+            if isinstance(ptr, TypedValue):
+                return ptr
             var_type = self.get_variable_type(
                 node.name
             )
@@ -400,7 +427,13 @@ class CodeGen:
         if isinstance(node, ClassMethodCall):
             return self.gen_class_method_call(node)
         
-        raise Exception(f"Unknown expression: {type(node)}")
+        
+        self.diagnostics.report(
+            "Semantic",
+            f"Unknown expression: '{type(node)}'"
+        )
+
+        return self.error_value()
 
 
     def gen_stmt(self, node):
@@ -567,17 +600,23 @@ class CodeGen:
         class_name = self.current_class_name
 
         if class_name not in self.class_fields:
-            raise Exception(
-                f"Unknown class: {class_name}"
+            
+            self.diagnostics.report(
+                "Semantic",
+                f"Unknown class: '{class_name}'"
             )
+
+            return INT
 
         field_map = self.class_fields[class_name]
 
         if field_name not in field_map:
-            raise Exception(
-                f"Unknown field '{field_name}' "
-                f"in class '{class_name}'"
+            self.diagnostics.report(
+                "Semantic",
+                f"Unknown field: '{field_name}' in class: '{class_name}'"
             )
+
+            return INT
 
         field_index = field_map[field_name]
 
@@ -739,9 +778,13 @@ class CodeGen:
                 is_lvalue=False
             )
 
-        raise Exception(
-            f"Unknown pointer property: {node.property}"
+        
+        self.diagnostics.report(
+            "Semantic",
+            f"Unknown pointer property: '{node.property}'"
         )
+
+        return INT
 
     def gen_pointer_assign(self, node):
         ptr_var = self.gen_expr(node.ptr)
@@ -756,7 +799,12 @@ class CodeGen:
                 ptr
             )
         else:
-            raise Exception(f"Cannot assign to property: {node.property}")
+            self.diagnostics.report(
+                "Semantic",
+                f"Can't assign to property: '{node.property}'"
+            )
+
+            return INT
 
     def gen_array_index(self, node):
         ptr_var = self.gen_expr(node.base)
@@ -830,9 +878,12 @@ class CodeGen:
 
     def gen_class_instance(self, node):
         if node.class_name not in self.class_types:
-            raise Exception(
-                f"Unknown class: {node.class_name}"
-            )
+            self.diagnostics.report(
+            "Semantic",
+            f"Unknown Class: '{node.class_name}'"
+        )
+
+        return INT
 
         struct_ty = self.class_types[node.class_name]
 
@@ -878,9 +929,12 @@ class CodeGen:
         method_name = f"{class_name}_{node.method_name}"
 
         if method_name not in self.module.globals:
-            raise Exception(
-                f"Unknown method: {method_name}"
+            self.diagnostics.report(
+                "Semantic",
+                f"Unkown method: '{method_name}'"
             )
+
+            return INT
 
         func = self.module.globals[method_name]
 
@@ -940,7 +994,12 @@ class CodeGen:
 
     def gen_data_instance(self, node):
         if node.data_name not in self.data_structures:
-            raise Exception(f"Unknown data structure: {node.data_name}")
+            self.diagnostics.report(
+                "Semantic",
+                f"Unknown data structure: '{node.data_name}'"
+            )
+
+            return INT
         
         data_info = self.data_structures[node.data_name]
         size = data_info["size"]
@@ -1030,10 +1089,12 @@ class CodeGen:
         # FAILURE
         # =================================================
 
-        raise Exception(
-            f"Unknown field: {field_name}"
+        self.diagnostics.report(
+            "Semantic",
+            f"Unkown field: '{field_name}'"
         )
 
+        return self.error_value()
 
     def gen_data_field_access(self, node):
         field_ptr = self.get_data_field_ptr(node)
@@ -1220,9 +1281,12 @@ class CodeGen:
             self.current_class_name = class_name
 
             if class_name not in self.class_types:
-                raise Exception(
-                    f"Unknown class type: {class_name}"
+                self.diagnostics.report(
+                    "Semantic",
+                    f"Unknown Class type: '{class_name}'"
                 )
+
+                return INT
 
             class_ptr_type = self.class_types[
                 class_name
@@ -1377,7 +1441,12 @@ class CodeGen:
         elif node.name in self.module.globals:
             func = self.module.globals[node.name]
         else:
-            raise Exception(f"Undefined function: {node.name}")
+            self.diagnostics.report(
+                "Semantic",
+                f"Undefined function: '{node.name}'"
+            )
+
+            return self.error_value()
         
         args = [
             self.load_if_pointer(

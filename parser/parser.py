@@ -1,11 +1,12 @@
 from nova.ast.nodes import *
+from nova.diagnostics import DiagnosticEngine
 
 
 class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
         self.pos = 0
-
+        self.diagnostics = DiagnosticEngine()
         self.in_raw = False
 
         self.data_structures = []
@@ -16,26 +17,74 @@ class Parser:
     # =========================================================
 
     def current(self):
-        if self.pos < len(self.tokens):
-            return self.tokens[self.pos]
-        return None
+
+        if self.pos >= len(self.tokens):
+            return None
+
+        return self.tokens[self.pos]
 
     def match(self, kind):
+
         token = self.current()
-        return token and token[0] == kind
+
+        return (
+            token is not None
+            and token[0] == kind
+        )
 
     def eat(self, kind):
+
         token = self.current()
 
         if token and token[0] == kind:
+
             self.pos += 1
             return token
 
-        raise SyntaxError(f"Expected {kind}, got {token}")
+        # ====================================
+        # ERROR REPORT
+        # ====================================
+
+        self.diagnostics.report(
+            "Parser",
+            f"Expected {kind}",
+            token
+        )
+
+        self.synchronize()
+
+        return None
+
+    def synchronize(self):
+
+        while self.current():
+
+            token_type = self.current()[0]
+
+            if token_type in (
+                "NEWLINE",
+                "SEMICOLON",
+                "RBRACE"
+            ):
+
+                self.advance()
+                return
+
+            self.advance()
+
+    def advance(self):
+
+        token = self.current()
+
+        if token is not None:
+            self.pos += 1
+
+        return token
 
     def skip_newlines(self):
+
         while self.match("NEWLINE"):
-            self.eat("NEWLINE")
+            self.advance()
 
     # =========================================================
     # EXPRESSIONS
@@ -192,7 +241,15 @@ class Parser:
         if kind == "IDENT":
             return self.parse_identifier_chain()
 
-        raise SyntaxError(f"Unexpected token: {token}")
+        self.diagnostics.report(
+            "Parser",
+            f"Unexpected token",
+            token
+        )
+
+        self.synchronize()
+
+        return Number(0)
 
     # =========================================================
     # IDENTIFIER / FIELD / METHOD CHAIN
@@ -329,7 +386,16 @@ class Parser:
     # =========================================================
 
     def parse_statement(self):
-        print("PARSE STATEMENT:", self.tokens[self.pos])
+        if self.pos >= len(self.tokens):
+            return None
+
+        if self.pos < len(self.tokens):
+            print(
+                "PARSE STATEMENT:",
+                self.tokens[self.pos]
+            )
+        else:
+            print("PARSE STATEMENT: EOF")
 
         if self.match("EXPORT"):
             return self.parse_export()
@@ -338,8 +404,6 @@ class Parser:
 
         token = self.current()
 
-        if self.pos >= len(self.tokens):
-            return None
 
         kind = token[0]
 
@@ -657,7 +721,10 @@ class Parser:
 
         body = []
 
-        while not self.match("RBRACE"):
+        while (
+            self.current() is not None
+            and not self.match("RBRACE")
+        ):
             self.skip_newlines()
 
             if self.match("RBRACE"):
@@ -670,7 +737,14 @@ class Parser:
 
             self.skip_newlines()
 
-        self.eat("RBRACE")
+        if self.match("RBRACE"):
+            self.advance()
+        else:
+            self.diagnostics.report(
+                "Parser",
+                "Expected closing '}'",
+                self.current()
+            )
 
         return body
 

@@ -14,11 +14,19 @@ def compile_source(file_path):
     print("[1] Reading source...")
     tokens = tokenize(source)
     print("[2] Tokenizing...")
-    ast = Parser(tokens).parse()
+    
+    parser = Parser(tokens)
+    ast = parser.parse()
+
+    if parser.diagnostics.has_errors():
+        parser.diagnostics.print_all()
+        return None
     print("[3] Parsing...")
     
-    gen = CodeGen()
+    gen = CodeGen(parser.diagnostics)
     llvm_ir = gen.generate(ast)
+    if llvm_ir is None:
+        return None
     print("[4] Generating LLVM IR...")
 
     ir_file = file_path + ".ll"
@@ -53,6 +61,8 @@ def main():
 
     if command == "run":
         ir_file = compile_source(file_path)
+        if ir_file is None:
+            return
         run_llvm(ir_file)
 
 
