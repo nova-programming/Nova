@@ -1,32 +1,8 @@
-# Data structure
-@raw {
-    data Point {
-        x: int
-        y: int
+class Player {
+    def speak() {
+        print(42)
     }
-    
-    p = Point()
-    p.x = 10
-    p.y = 20
-    print(p.x)
-    print(p.y)
 }
 
-# Function
-def add(a, b) {
-    return a + b
-}
-
-print(add(5, 3))
-
-# For loop
-for i = 0 to 5 {
-    print(i)
-}
-
-# While loop
-i = 0
-while i < 3 {
-    print(i)
-    i = i + 1
-}
+p = Player()
+p.speak()

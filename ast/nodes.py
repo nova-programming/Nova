@@ -297,3 +297,16 @@ class ClassMethodCall:
         self.args = args
     def __repr__(self):
         return f"ClassMethodCall({self.instance}, '{self.method_name}', {self.args})"
+
+class SelfFieldAccess:
+    def __init__(self, field_name):
+        self.field_name = field_name
+    def __repr__(self):
+        return f"SelfFieldAccess('{self.field_name}')"
+
+class SelfFieldAssign:
+    def __init__(self, field_name, value):
+        self.field_name = field_name
+        self.value = value
+    def __repr__(self):
+        return f"SelfFieldAssign('{self.field_name}', {self.value})"
