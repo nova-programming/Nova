@@ -1,8 +1,21 @@
-echo "__pycache__/" >> .gitignore
-echo "*.pyc" >> .gitignore
-echo "*.ll" >> .gitignore
-echo "*.exe" >> .gitignore
-echo "*.nv.ll" >> .gitignore
-echo "*.nv.exe" >> .gitignore
-echo ".venv/" >> .gitignore
-echo "venv/" >> .gitignore
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pycache*/
+
+# Compiled files
+*.ll
+*.exe
+*.out
+*.obj
+*.o
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
