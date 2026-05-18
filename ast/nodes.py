@@ -60,14 +60,6 @@ class Print:
     def __repr__(self):
         return f"Print({self.value})"
 
-class Function:
-    def __init__(self, name, params, body):
-        self.name = name
-        self.params = params
-        self.body = body
-    def __repr__(self):
-        return f"Function('{self.name}', {self.params}, {self.body})"
-
 class Call:
     def __init__(self, name, args):
         self.name = name
@@ -236,3 +228,72 @@ class ForLoop:
         self.is_downto = is_downto
     def __repr__(self):
         return f"ForLoop('{self.var_name}', {self.start}, {self.end}, {self.step}, {self.body})"
+
+# ========== ARRAY/LIST NODES ==========
+
+class ArrayLiteral:
+    def __init__(self, elements):
+        self.elements = elements
+    def __repr__(self):
+        return f"ArrayLiteral({self.elements})"
+
+class ArrayGet:
+    def __init__(self, array, index):
+        self.array = array
+        self.index = index
+    def __repr__(self):
+        return f"ArrayGet({self.array}, {self.index})"
+
+class ArraySet:
+    def __init__(self, array, index, value):
+        self.array = array
+        self.index = index
+        self.value = value
+    def __repr__(self):
+        return f"ArraySet({self.array}, {self.index}, {self.value})"
+
+class ArrayAppend:
+    def __init__(self, array, value):
+        self.array = array
+        self.value = value
+    def __repr__(self):
+        return f"ArrayAppend({self.array}, {self.value})"
+
+class ArrayLen:
+    def __init__(self, array):
+        self.array = array
+    def __repr__(self):
+        return f"ArrayLen({self.array})"
+
+# ========== CLASS NODES ==========
+
+class Function:
+    def __init__(self, name, params, body, is_method=False):
+        self.name = name
+        self.params = params
+        self.body = body
+        self.is_method = is_method
+    def __repr__(self):
+        return f"Function('{self.name}', {self.params}, {self.body}, is_method={self.is_method})"
+
+class Class:
+    def __init__(self, name, parent, methods):
+        self.name = name
+        self.parent = parent
+        self.methods = methods
+    def __repr__(self):
+        return f"Class('{self.name}', '{self.parent}', {self.methods})"
+
+class ClassInstance:
+    def __init__(self, class_name):
+        self.class_name = class_name
+    def __repr__(self):
+        return f"ClassInstance('{self.class_name}')"
+
+class ClassMethodCall:
+    def __init__(self, instance, method_name, args):
+        self.instance = instance
+        self.method_name = method_name
+        self.args = args
+    def __repr__(self):
+        return f"ClassMethodCall({self.instance}, '{self.method_name}', {self.args})"

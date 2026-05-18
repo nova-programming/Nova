@@ -1,20 +1,23 @@
 from llvmlite import ir
 from nova.ast.nodes import *
-
+import ctypes
 
 class CodeGen:
     def __init__(self):
-        self.module = ir.Module(name="nova_module")
+        self.array_metadata = {}
         self.builder = None
-        self.printf = None
-        self.malloc_fn = None
-        self.free_fn = None
-        self.symbols_stack = [{}]
-        self.functions = {}
-        self.loop_stack = []
+        self.classes = {} 
+        self.data_structures = {}
         self.exports = {}
+        self.free_fn = None
+        self.functions = {}
+        self.instances = {}
+        self.loop_stack = []
+        self.module = ir.Module(name="nova_module")
+        self.malloc_fn = None
+        self.printf = None
         self.pointer_metadata = {}
-        self.data_structures = {}  # Store data structure info
+        self.symbols_stack = [{}]
 
     def push_scope(self):
         self.symbols_stack.append({})
@@ -104,9 +107,18 @@ class CodeGen:
         # Data structure nodes
         if isinstance(node, DataInstance):
             return self.gen_data_instance(node)
-        
+
         if isinstance(node, DataFieldAccess):
             return self.gen_data_field_access(node)
+        
+        if isinstance(node, ArrayLiteral):
+            return self.gen_array_literal(node)
+
+        if isinstance(node, ArrayGet):
+            return self.gen_array_get(node)
+
+        if isinstance(node, ArrayLen):
+            return self.gen_array_len(node)
         
         raise Exception(f"Unknown expression: {type(node)}")
 
@@ -131,12 +143,21 @@ class CodeGen:
         
         elif isinstance(node, ArrayIndexAssign):
             self.gen_array_index_assign(node)
+
+        elif isinstance(node, Class):
+            self.gen_class(node)
+
+        elif isinstance(node, ClassInstance):
+            self.gen_class_instance(node)
+
+        elif isinstance(node, ClassMethodCall):
+            self.gen_class_method_call(node)
         
         # Data structure nodes
-        elif isinstance(node, Data):
+        if isinstance(node, Data):
             self.gen_data(node)
-        
-        elif isinstance(node, DataFieldAssign):
+
+        if isinstance(node, DataFieldAssign):
             self.gen_data_field_assign(node)
         
         elif isinstance(node, Print):
@@ -173,6 +194,12 @@ class CodeGen:
         
         elif isinstance(node, ForLoop):
             self.gen_for(node)
+        
+        elif isinstance(node, ArraySet):
+            self.gen_array_set(node)
+
+        elif isinstance(node, ArrayAppend):
+            self.gen_array_append(node)
 
     # ========== MEMORY MANAGEMENT ==========
 
@@ -264,18 +291,51 @@ class CodeGen:
         self.builder.store(value, element_ptr)
         return value
 
+    def gen_class(self, node):
+        """Store class definition"""
+        self.classes[node.name] = node
+        return None
+
+    def gen_class_instance(self, node):
+        """Create class instance"""
+        if node.class_name not in self.classes:
+            raise Exception(f"Unknown class: {node.class_name}")
+        
+        # Allocate memory for instance (simplified)
+        # In real implementation, this would allocate a struct
+        ptr_var = self.builder.alloca(ir.IntType(32).as_pointer(), name=node.class_name.lower())
+        return ptr_var
+
+    def gen_class_method_call(self, node):
+        """Call method on class instance"""
+        # For now, just call the function
+        if node.method_name in self.functions:
+            func = self.functions[node.method_name]
+            args = [self.gen_expr(arg) for arg in node.args]
+            return self.builder.call(func, args)
+        
+        # Check if it's a built-in method
+        if node.method_name == "speak":
+            # Special handling for speak method
+            print_func = self.get_printf()
+            fmt = self.create_string("Hello, I'm %s\n")
+            fmt_ptr = self.builder.bitcast(fmt, ir.IntType(8).as_pointer())
+            # This is simplified - real implementation would get name from instance
+            return self.builder.call(print_func, [fmt_ptr])
+        
+        raise Exception(f"Undefined method: {node.method_name}")
+        
     # ========== DATA STRUCTURES ==========
 
     def gen_data(self, node):
-        """Generate data structure - calculate size and field offsets"""
+        """Generate data structure - store field offsets"""
         total_size = 0
         field_offsets = {}
         
         for field_name, field_type in node.fields:
-            # Assume all types are 4 bytes (int, float, bool, pointer)
-            field_size = 4
+            # Assume 4 bytes per field for now
             field_offsets[field_name] = total_size
-            total_size += field_size
+            total_size = total_size + 4
         
         self.data_structures[node.name] = {
             "size": total_size,
@@ -293,6 +353,7 @@ class CodeGen:
         data_info = self.data_structures[node.data_name]
         size = data_info["size"]
         
+        # Allocate memory
         if not self.malloc_fn:
             malloc_type = ir.FunctionType(ir.IntType(8).as_pointer(), [ir.IntType(32)])
             self.malloc_fn = ir.Function(self.module, malloc_type, name="malloc")
@@ -300,19 +361,20 @@ class CodeGen:
         ptr_void = self.builder.call(self.malloc_fn, [ir.Constant(ir.IntType(32), size)])
         ptr = self.builder.bitcast(ptr_void, ir.IntType(8).as_pointer())
         
+        # Store pointer
         ptr_var = self.builder.alloca(ptr.type, name=node.data_name.lower())
         self.builder.store(ptr, ptr_var)
         
         return ptr_var
 
     def gen_data_field_access(self, node):
-        """Access data structure field: instance.field"""
+        """Access data structure field"""
         instance_ptr_var = self.gen_expr(node.instance)
         instance_ptr = self.builder.load(instance_ptr_var)
         
-        # Get field offset - try to determine from data structure
-        # For now, use hardcoded offsets for common field names
+        # Try to find offset from data structure
         offset = 0
+        # For now, use hardcoded for common fields
         if node.field_name == "x":
             offset = 0
         elif node.field_name == "y":
@@ -326,25 +388,23 @@ class CodeGen:
         elif node.field_name == "age":
             offset = 4
         
+        # Cast to int pointer
         field_ptr = self.builder.gep(instance_ptr, [ir.Constant(ir.IntType(32), offset)])
         field_ptr_int = self.builder.bitcast(field_ptr, ir.IntType(32).as_pointer())
         
         return self.builder.load(field_ptr_int)
 
     def gen_data_field_assign(self, node):
-        """Assign to data structure field: instance.field = value"""
+        """Assign to data structure field"""
         instance_ptr_var = self.gen_expr(node.instance)
         instance_ptr = self.builder.load(instance_ptr_var)
         value = self.gen_expr(node.value)
         
+        # Get offset
         offset = 0
         if node.field_name == "x":
             offset = 0
         elif node.field_name == "y":
-            offset = 4
-        elif node.field_name == "width":
-            offset = 0
-        elif node.field_name == "height":
             offset = 4
         
         field_ptr = self.builder.gep(instance_ptr, [ir.Constant(ir.IntType(32), offset)])
@@ -588,3 +648,75 @@ class CodeGen:
         
         # Position builder at end block
         self.builder.position_at_start(end_bb)
+
+    def gen_array_literal(self, node):
+        """Create array from literal using runtime helper"""
+        # For now, just allocate a simple structure
+        # This is a placeholder - arrays need runtime support
+        # Let's just return a pointer to a list for now
+        
+        # Count elements
+        count = len(node.elements)
+        
+        # Allocate array structure
+        # For simplicity, just allocate memory for the elements
+        array_size = count * 4  # 4 bytes per int
+        if not self.malloc_fn:
+            malloc_type = ir.FunctionType(ir.IntType(8).as_pointer(), [ir.IntType(32)])
+            self.malloc_fn = ir.Function(self.module, malloc_type, name="malloc")
+        
+        array_ptr = self.builder.call(self.malloc_fn, [ir.Constant(ir.IntType(32), array_size)])
+        array_ptr_int = self.builder.bitcast(array_ptr, ir.IntType(32).as_pointer())
+        
+        # Store each element
+        for i, elem in enumerate(node.elements):
+            val = self.gen_expr(elem)
+            offset = ir.Constant(ir.IntType(32), i * 4)
+            elem_ptr = self.builder.gep(array_ptr_int, [offset])
+            self.builder.store(val, elem_ptr)
+        
+        # Return as variable
+        ptr_var = self.builder.alloca(array_ptr_int.type, name="array")
+        self.builder.store(array_ptr_int, ptr_var)
+        
+        # Store metadata
+        self.array_metadata[ptr_var] = {"size": count, "ptr": array_ptr_int}
+        
+        return ptr_var
+
+    def gen_array_get(self, node):
+        """Get element from array"""
+        array_var = self.gen_expr(node.array)
+        array = self.builder.load(array_var)
+        index = self.gen_expr(node.index)
+        
+        # Calculate offset
+        element_size = ir.Constant(ir.IntType(32), 4)
+        offset = self.builder.mul(index, element_size)
+        element_ptr = self.builder.gep(array, [offset])
+        
+        return self.builder.load(element_ptr)
+
+    def gen_array_set(self, node):
+        """Set element in array"""
+        array_var = self.gen_expr(node.array)
+        array = self.builder.load(array_var)
+        index = self.gen_expr(node.index)
+        value = self.gen_expr(node.value)
+        
+        element_size = ir.Constant(ir.IntType(32), 4)
+        offset = self.builder.mul(index, element_size)
+        element_ptr = self.builder.gep(array, [offset])
+        
+        self.builder.store(value, element_ptr)
+        return value
+
+    def gen_array_len(self, node):
+        """Get array length - placeholder"""
+        # For now, return a placeholder
+        return ir.Constant(ir.IntType(32), 0)
+
+    def gen_array_append(self, node):
+        """Append element to array: arr.append(value)"""
+        # For now, just return the value
+        return self.gen_expr(node.value)

@@ -6,11 +6,14 @@ class Parser:
         self.tokens = tokens
         self.pos = 0
         self.in_raw = False
+        self.data_structures = []
+        self.classes = []
 
     def parse_data(self):
         """Parse data structure definition"""
         self.eat("DATA")
         name = self.eat("IDENT")[1]
+        self.data_structures.append(name)
         
         self.eat("LBRACE")
         fields = []
@@ -32,7 +35,7 @@ class Parser:
             
             fields.append((field_name, type_name))
             
-            # Optional semicolon or newline
+            # Skip newline or semicolon
             if self.current() and self.current()[0] in ("NEWLINE", "SEMICOLON"):
                 self.eat(self.current()[0])
         
@@ -94,6 +97,21 @@ class Parser:
     def skip_newlines(self):
         while self.current() and self.current()[0] == "NEWLINE":
             self.eat("NEWLINE")
+
+    def parse_array_literal(self):
+        """Parse array literal: [1, 2, 3]"""
+        self.eat("LBRACK")
+        elements = []
+        
+        if self.current() and self.current()[0] != "RBRACK":
+            elements.append(self.parse_expr())
+            while self.current() and self.current()[0] == "COMMA":
+                self.eat("COMMA")
+                if self.current() and self.current()[0] != "RBRACK":
+                    elements.append(self.parse_expr())
+        
+        self.eat("RBRACK")
+        return ArrayLiteral(elements)
 
     # ---------------- EXPRESSIONS ----------------
 
@@ -167,56 +185,77 @@ class Parser:
             self.eat("RPAREN")
             return expr
         
+        if kind == "LBRACK":
+            return self.parse_array_literal()
+        
         if kind == "ALLOC":
             return self.parse_alloc()
         
         if kind == "IDENT":
             name = self.eat("IDENT")[1]
             
-            # Check for data instantiation: Point()
-            if self.current() and self.current()[0] == "LPAREN":
-                return self.parse_data_instance(name)
-            
-            # Check for function call
+            # Check for class instantiation: Player()
             if self.current() and self.current()[0] == "LPAREN":
                 self.eat("LPAREN")
-                args = []
-                if self.current() and self.current()[0] != "RPAREN":
+                # Check if there are any arguments
+                if self.current() and self.current()[0] == "RPAREN":
+                    # Check if it's a known class
+                    if name in self.classes:
+                        self.eat("RPAREN")
+                        return ClassInstance(name)
+                    # Check if it's a known data structure
+                    elif name in self.data_structures:
+                        self.eat("RPAREN")
+                        return DataInstance(name)
+                else:
+                    # Function call with arguments
+                    args = []
                     args.append(self.parse_expr())
                     while self.current() and self.current()[0] == "COMMA":
                         self.eat("COMMA")
                         if self.current() and self.current()[0] != "RPAREN":
                             args.append(self.parse_expr())
-                self.eat("RPAREN")
-                return Call(name, args)
+                    self.eat("RPAREN")
+                    return Call(name, args)
             
-            var = Variable(name)
-            
-            # Handle dot operations: .value, .addr, .isValid (pointer properties)
-            # vs .x, .y (data field access)
+            # Check for method call on instance: obj.method()
             if self.current() and self.current()[0] == "DOT":
                 self.eat("DOT")
-                prop = self.eat("IDENT")[1]
+                method_name = self.eat("IDENT")[1]
+                var = Variable(name)
                 
-                # Check if this is a pointer property
-                pointer_properties = ["value", "addr", "isValid", "isNull", "bytes"]
+                # Check if it's a method call with parentheses
+                if self.current() and self.current()[0] == "LPAREN":
+                    self.eat("LPAREN")
+                    args = []
+                    if self.current() and self.current()[0] != "RPAREN":
+                        args.append(self.parse_expr())
+                        while self.current() and self.current()[0] == "COMMA":
+                            self.eat("COMMA")
+                            if self.current() and self.current()[0] != "RPAREN":
+                                args.append(self.parse_expr())
+                    self.eat("RPAREN")
+                    return ClassMethodCall(var, method_name, args)
                 
-                if prop in pointer_properties:
-                    # This is a pointer property
+                # Regular attribute access
+                pointer_props = ["value", "addr", "isValid", "isNull", "bytes"]
+                if method_name in pointer_props:
                     if self.current() and self.current()[0] == "EQUALS":
                         self.eat("EQUALS")
                         value = self.parse_expr()
-                        return PointerAssign(var, prop, value)
-                    return PointerProperty(var, prop)
+                        return PointerAssign(var, method_name, value)
+                    return PointerProperty(var, method_name)
                 else:
-                    # This is a data field access
                     if self.current() and self.current()[0] == "EQUALS":
                         self.eat("EQUALS")
                         value = self.parse_expr()
-                        return DataFieldAssign(var, prop, value)
-                    return DataFieldAccess(var, prop)
+                        return DataFieldAssign(var, method_name, value)
+                    return DataFieldAccess(var, method_name)
             
-            # Handle array indexing: ptr[index]
+            # Regular variable
+            var = Variable(name)
+            
+            # Handle array indexing
             if self.current() and self.current()[0] == "LBRACK":
                 self.eat("LBRACK")
                 index = self.parse_expr()
@@ -224,12 +263,13 @@ class Parser:
                 if self.current() and self.current()[0] == "EQUALS":
                     self.eat("EQUALS")
                     value = self.parse_expr()
-                    return ArrayIndexAssign(var, index, value)
-                return ArrayIndex(var, index)
+                    return ArraySet(var, index, value)
+                return ArrayGet(var, index)
             
             return var
         
         raise SyntaxError(f"Unexpected token: {token}")
+
 
     def parse_alloc(self):
         self.eat("ALLOC")
@@ -249,14 +289,16 @@ class Parser:
             return None
         kind = token[0]
 
+        if kind == "CLASS":
+            return self.parse_class()
         if kind == "IMPORT":
             return self.parse_import()
         if kind == "RAW":
             return self.parse_raw()
-        if kind == "FOR":
-            return self.parse_for()
         if kind == "DEF":
             return self.parse_function()
+        if kind == "DATA":  # ONLY call parse_data if we see DATA keyword
+            return self.parse_data()
         if kind == "PRINT":
             self.eat("PRINT")
             self.eat("LPAREN")
@@ -267,6 +309,8 @@ class Parser:
             return self.parse_if()
         if kind == "WHILE":
             return self.parse_while()
+        if kind == "FOR":
+            return self.parse_for()
         if kind == "RETURN":
             self.eat("RETURN")
             return Return(self.parse_expr())
@@ -278,16 +322,49 @@ class Parser:
             return Continue()
         if kind == "FREE":
             return self.parse_free()
-        if kind == "DATA":
-            return self.parse_data()
 
+        # Parse expression (assignment, function call, etc.)
         expr = self.parse_expr()
+        
+        # Check if this is an assignment
         if self.current() and self.current()[0] == "EQUALS":
             self.eat("EQUALS")
             value = self.parse_expr()
+            
             if isinstance(expr, Variable):
                 return Assignment(expr.name, value)
+        
         return expr
+
+    def parse_class(self):
+        """Parse class definition"""
+        self.eat("CLASS")
+        name = self.eat("IDENT")[1]
+        self.classes.append(name)
+        
+        # Check for inheritance
+        parent = None
+        if self.current() and self.current()[0] == "LPAREN":
+            self.eat("LPAREN")
+            parent = self.eat("IDENT")[1]
+            self.eat("RPAREN")
+        
+        self.eat("LBRACE")
+        methods = []
+        
+        while self.current() and self.current()[0] != "RBRACE":
+            self.skip_newlines()
+            if self.current()[0] == "RBRACE":
+                break
+            
+            if self.current()[0] == "DEF":
+                method = self.parse_function(is_method=True)
+                methods.append(method)
+            
+            self.skip_newlines()
+        
+        self.eat("RBRACE")
+        return Class(name, parent, methods)
 
     def parse_free(self):
         self.eat("FREE")
@@ -298,18 +375,23 @@ class Parser:
         self.eat("RPAREN")
         return Free(ptr)
 
-    def parse_function(self):
+    def parse_function(self, is_method=False):
+        """Parse function definition"""
         self.eat("DEF")
         name = self.eat("IDENT")[1]
+        
         self.eat("LPAREN")
         params = []
+        
         if self.current() and self.current()[0] != "RPAREN":
             params.append(self.eat("IDENT")[1])
             while self.current() and self.current()[0] == "COMMA":
                 self.eat("COMMA")
                 params.append(self.eat("IDENT")[1])
+        
         self.eat("RPAREN")
         self.eat("LBRACE")
+        
         body = []
         while self.current() and self.current()[0] != "RBRACE":
             self.skip_newlines()
@@ -319,8 +401,9 @@ class Parser:
             if stmt:
                 body.append(stmt)
             self.skip_newlines()
+        
         self.eat("RBRACE")
-        return Function(name, params, body)
+        return Function(name, params, body, is_method)
 
     def parse_block(self):
         self.eat("LBRACE")

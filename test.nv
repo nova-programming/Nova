@@ -1,7 +1,32 @@
-print("=== NESTED FOR LOOPS ===")
-for i = 1 to 3 {
-    for j = 1 to 3 {
-        print(i * j)
+# Data structure
+@raw {
+    data Point {
+        x: int
+        y: int
     }
-    print(0)
+    
+    p = Point()
+    p.x = 10
+    p.y = 20
+    print(p.x)
+    print(p.y)
+}
+
+# Function
+def add(a, b) {
+    return a + b
+}
+
+print(add(5, 3))
+
+# For loop
+for i = 0 to 5 {
+    print(i)
+}
+
+# While loop
+i = 0
+while i < 3 {
+    print(i)
+    i = i + 1
 }
