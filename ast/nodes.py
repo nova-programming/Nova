@@ -1,4 +1,4 @@
-"""Abstract Syntax Tree node definitions"""
+"""Abstract Syntax Tree node definitions with pointer support"""
 
 class Number:
     def __init__(self, value):
@@ -60,38 +60,20 @@ class Print:
     def __repr__(self):
         return f"Print({self.value})"
 
-# OOP Nodes
-class Class:
-    def __init__(self, name, parent, methods):
-        self.name = name
-        self.parent = parent  # For inheritance
-        self.methods = methods  # List of Function nodes
-    def __repr__(self):
-        return f"Class('{self.name}', {self.parent}, {self.methods})"
-
 class Function:
-    def __init__(self, name, params, body, is_method=False):
+    def __init__(self, name, params, body):
         self.name = name
         self.params = params
         self.body = body
-        self.is_method = is_method
     def __repr__(self):
         return f"Function('{self.name}', {self.params}, {self.body})"
 
 class Call:
-    def __init__(self, name, args, obj=None):
+    def __init__(self, name, args):
         self.name = name
         self.args = args
-        self.obj = obj  # For method calls: obj.method()
     def __repr__(self):
         return f"Call('{self.name}', {self.args})"
-
-class Attribute:
-    def __init__(self, obj, attr):
-        self.obj = obj
-        self.attr = attr
-    def __repr__(self):
-        return f"Attribute({self.obj}, '{self.attr}')"
 
 class Return:
     def __init__(self, value):
@@ -122,12 +104,10 @@ class Continue:
     def __repr__(self):
         return "Continue()"
 
-# Low-level nodes
 class RawBlock:
-    def __init__(self, body, exports=None, mode="raw"):
+    def __init__(self, body, exports=None):
         self.body = body
         self.exports = exports or []
-        self.mode = mode
     def __repr__(self):
         return f"RawBlock({self.body}, {self.exports})"
 
@@ -145,19 +125,18 @@ class Import:
     def __repr__(self):
         return f"Import('{self.module}', {self.items})"
 
-# Data structure (low-level procedural)
-class Data:
-    def __init__(self, name, fields):
-        self.name = name
-        self.fields = fields  # List of (name, type) tuples
+class Attribute:
+    def __init__(self, obj, attr):
+        self.obj = obj
+        self.attr = attr
     def __repr__(self):
-        return f"Data('{self.name}', {self.fields})"
+        return f"Attribute({self.obj}, '{self.attr}')"
 
-# Pointer nodes
+# ========== NEW POINTER NODES ==========
+
 class Alloc:
-    def __init__(self, size, type_hint=None):
+    def __init__(self, size):
         self.size = size
-        self.type_hint = type_hint
     def __repr__(self):
         return f"Alloc({self.size})"
 
@@ -170,7 +149,7 @@ class Free:
 class PointerProperty:
     def __init__(self, ptr, property_name):
         self.ptr = ptr
-        self.property = property_name
+        self.property = property_name  # "value", "addr", "isValid", "isNull", "bytes"
     def __repr__(self):
         return f"PointerProperty({self.ptr}, '{self.property}')"
 
@@ -181,6 +160,13 @@ class PointerAssign:
         self.value = value
     def __repr__(self):
         return f"PointerAssign({self.ptr}, '{self.property}', {self.value})"
+
+class PointerOffset:
+    def __init__(self, ptr, offset):
+        self.ptr = ptr
+        self.offset = offset
+    def __repr__(self):
+        return f"PointerOffset({self.ptr}, {self.offset})"
 
 class ArrayIndex:
     def __init__(self, base, index):
@@ -196,27 +182,6 @@ class ArrayIndexAssign:
         self.value = value
     def __repr__(self):
         return f"ArrayIndexAssign({self.base}, {self.index}, {self.value})"
-
-# Dynamic buffer nodes
-class DynamicBuffer:
-    def __init__(self, capacity):
-        self.capacity = capacity
-    def __repr__(self):
-        return f"DynamicBuffer({self.capacity})"
-
-class DynamicPush:
-    def __init__(self, buffer, value):
-        self.buffer = buffer
-        self.value = value
-    def __repr__(self):
-        return f"DynamicPush({self.buffer}, {self.value})"
-
-class DynamicProperty:
-    def __init__(self, buffer, property_name):
-        self.buffer = buffer
-        self.property = property_name  # "used", "free", "capacity"
-    def __repr__(self):
-        return f"DynamicProperty({self.buffer}, '{self.property}')"
 
 class NovaError(Exception):
     pass

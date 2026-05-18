@@ -106,10 +106,26 @@ class Parser:
                 self.eat("RPAREN")
                 return Call(name, args)
             var = Variable(name)
+            # Handle pointer dot operations: ptr.value, ptr.addr, ptr.isValid, etc.
+            if self.current() and self.current()[0] == "DOT":
+                self.eat("DOT")
+                prop = self.eat("IDENT")[1]
+                # Check if this is an assignment (ptr.value = x)
+                if self.current() and self.current()[0] == "EQUALS":
+                    self.eat("EQUALS")
+                    value = self.parse_expr()
+                    return PointerAssign(var, prop, value)
+                return PointerProperty(var, prop)
+            # Handle pointer offset: ptr.offset(4)
             if self.current() and self.current()[0] == "LBRACK":
                 self.eat("LBRACK")
                 index = self.parse_expr()
                 self.eat("RBRACK")
+                # Check if this is an assignment (ptr[0] = x)
+                if self.current() and self.current()[0] == "EQUALS":
+                    self.eat("EQUALS")
+                    value = self.parse_expr()
+                    return ArrayIndexAssign(var, index, value)
                 return ArrayIndex(var, index)
             return var
         raise SyntaxError(f"Unexpected token: {token}")
@@ -132,6 +148,8 @@ class Parser:
             return None
         kind = token[0]
 
+        if kind == "IMPORT":
+            return self.parse_import()
         if kind == "RAW":
             return self.parse_raw()
         if kind == "DEF":
@@ -164,8 +182,6 @@ class Parser:
             value = self.parse_expr()
             if isinstance(expr, Variable):
                 return Assignment(expr.name, value)
-            elif isinstance(expr, ArrayIndex):
-                return ArrayIndexAssign(expr.base, expr.index, value)
         return expr
 
     def parse_free(self):
@@ -214,6 +230,11 @@ class Parser:
             self.skip_newlines()
         self.eat("RBRACE")
         return body
+
+    def parse_import(self):
+        self.eat("IMPORT")
+        module_name = self.eat("IDENT")[1]
+        return Import(module_name)
 
     def parse_raw(self):
         self.eat("RAW")

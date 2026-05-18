@@ -1,46 +1,80 @@
-# Clean and push script for Nova compiler
 Write-Host "=== Cleaning Nova Repository ===" -ForegroundColor Green
 
-# Remove all __pycache__ folders
-Write-Host "Removing __pycache__ folders..." -ForegroundColor Yellow
+# Remove from git tracking
+Write-Host "Removing __pycache__ from git tracking..." -ForegroundColor Yellow
+git rm -r --cached __pycache__ 2>$null
+git rm -r --cached */__pycache__ 2>$null
+git rm -r --cached */*/__pycache__ 2>$null
+git rm -r --cached */*/*/__pycache__ 2>$null
+git rm --cached *.pyc 2>$null
+
+# Remove from filesystem
+Write-Host "Deleting __pycache__ folders..." -ForegroundColor Yellow
 Get-ChildItem -Path . -Name __pycache__ -Directory -Recurse | Remove-Item -Recurse -Force
 
-# Remove compiled files
-Write-Host "Removing compiled files..." -ForegroundColor Yellow
-Remove-Item -Path *.pyc -Force -ErrorAction SilentlyContinue
-Remove-Item -Path *.ll -Force -ErrorAction SilentlyContinue
-Remove-Item -Path *.exe -Force -ErrorAction SilentlyContinue
+Write-Host "Deleting .pyc files..." -ForegroundColor Yellow
+Get-ChildItem -Path . -Filter *.pyc -Recurse | Remove-Item -Force
 
-# Create .gitignore if not exists
-if (-not (Test-Path ".gitignore")) {
-    Write-Host "Creating .gitignore..." -ForegroundColor Yellow
-    @"
+# Ensure .gitignore has correct entries
+Write-Host "Updating .gitignore..." -ForegroundColor Yellow
+$gitignore = @"
+# Python cache files
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.pycache*/
+
+# LLVM and compiled outputs
 *.ll
 *.exe
 *.out
 *.obj
 *.o
+
+# IDE and editor files
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 .DS_Store
 Thumbs.db
+
+# Virtual environments
 venv/
 .venv/
 env/
+.env/
+
+# Build directories
+build/
+dist/
+*.egg-info/
+
+# Logs and databases
 *.log
+*.sqlite
+*.db
+
+# OS generated files
+.DS_Store
+Thumbs.db
+ehthumbs.db
 *.tmp
-"@ | Out-File -FilePath .gitignore -Encoding utf8
-}
+"@
 
-# Git operations
-Write-Host "Git operations..." -ForegroundColor Yellow
-git add .
-git status
+$gitignore | Out-File -FilePath .gitignore -Encoding utf8
 
-Write-Host "`nReady to commit. Run:" -ForegroundColor Green
-Write-Host "git commit -m 'Clean version with proper .gitignore'" -ForegroundColor Yellow
-Write-Host "git push origin main" -ForegroundColor Yellow
+# Stage the .gitignore changes
+git add .gitignore
+
+# Commit
+Write-Host "Committing changes..." -ForegroundColor Yellow
+git commit -m "Clean repository: remove __pycache__ folders and update .gitignore"
+
+# Push
+Write-Host "Pushing to GitHub..." -ForegroundColor Yellow
+git push origin main
+
+Write-Host "Done! Repository is now clean." -ForegroundColor Green
