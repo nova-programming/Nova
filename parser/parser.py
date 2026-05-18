@@ -7,6 +7,44 @@ class Parser:
         self.pos = 0
         self.in_raw = False
 
+    def parse_data(self):
+        """Parse data structure definition"""
+        self.eat("DATA")
+        name = self.eat("IDENT")[1]
+        
+        self.eat("LBRACE")
+        fields = []
+        
+        while self.current() and self.current()[0] != "RBRACE":
+            self.skip_newlines()
+            if self.current()[0] == "RBRACE":
+                break
+            
+            field_name = self.eat("IDENT")[1]
+            self.eat("COLON")
+            
+            # Handle type keywords
+            type_token = self.current()
+            if type_token[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
+                type_name = self.eat(type_token[0])[1]
+            else:
+                type_name = self.eat("IDENT")[1]
+            
+            fields.append((field_name, type_name))
+            
+            # Optional semicolon or newline
+            if self.current() and self.current()[0] in ("NEWLINE", "SEMICOLON"):
+                self.eat(self.current()[0])
+        
+        self.eat("RBRACE")
+        return Data(name, fields)
+
+    def parse_data_instance(self, data_name):
+        """Parse data instance creation: Point()"""
+        self.eat("LPAREN")
+        self.eat("RPAREN")
+        return DataInstance(data_name)
+
     def current(self):
         if self.pos < len(self.tokens):
             return self.tokens[self.pos]
@@ -76,24 +114,36 @@ class Parser:
         if kind == "NUMBER":
             self.eat("NUMBER")
             return Number(int(value))
+        
         if kind == "STRING":
             self.eat("STRING")
             return String(value[1:-1])
+        
         if kind == "TRUE":
             self.eat("TRUE")
             return Boolean(True)
+        
         if kind == "FALSE":
             self.eat("FALSE")
             return Boolean(False)
+        
         if kind == "LPAREN":
             self.eat("LPAREN")
             expr = self.parse_expr()
             self.eat("RPAREN")
             return expr
+        
         if kind == "ALLOC":
             return self.parse_alloc()
+        
         if kind == "IDENT":
             name = self.eat("IDENT")[1]
+            
+            # Check for data instantiation: Point()
+            if self.current() and self.current()[0] == "LPAREN":
+                return self.parse_data_instance(name)
+            
+            # Check for function call
             if self.current() and self.current()[0] == "LPAREN":
                 self.eat("LPAREN")
                 args = []
@@ -105,29 +155,46 @@ class Parser:
                             args.append(self.parse_expr())
                 self.eat("RPAREN")
                 return Call(name, args)
+            
             var = Variable(name)
-            # Handle pointer dot operations: ptr.value, ptr.addr, ptr.isValid, etc.
+            
+            # Handle dot operations: .value, .addr, .isValid (pointer properties)
+            # vs .x, .y (data field access)
             if self.current() and self.current()[0] == "DOT":
                 self.eat("DOT")
                 prop = self.eat("IDENT")[1]
-                # Check if this is an assignment (ptr.value = x)
-                if self.current() and self.current()[0] == "EQUALS":
-                    self.eat("EQUALS")
-                    value = self.parse_expr()
-                    return PointerAssign(var, prop, value)
-                return PointerProperty(var, prop)
-            # Handle pointer offset: ptr.offset(4)
+                
+                # Check if this is a pointer property
+                pointer_properties = ["value", "addr", "isValid", "isNull", "bytes"]
+                
+                if prop in pointer_properties:
+                    # This is a pointer property
+                    if self.current() and self.current()[0] == "EQUALS":
+                        self.eat("EQUALS")
+                        value = self.parse_expr()
+                        return PointerAssign(var, prop, value)
+                    return PointerProperty(var, prop)
+                else:
+                    # This is a data field access
+                    if self.current() and self.current()[0] == "EQUALS":
+                        self.eat("EQUALS")
+                        value = self.parse_expr()
+                        return DataFieldAssign(var, prop, value)
+                    return DataFieldAccess(var, prop)
+            
+            # Handle array indexing: ptr[index]
             if self.current() and self.current()[0] == "LBRACK":
                 self.eat("LBRACK")
                 index = self.parse_expr()
                 self.eat("RBRACK")
-                # Check if this is an assignment (ptr[0] = x)
                 if self.current() and self.current()[0] == "EQUALS":
                     self.eat("EQUALS")
                     value = self.parse_expr()
                     return ArrayIndexAssign(var, index, value)
                 return ArrayIndex(var, index)
+            
             return var
+        
         raise SyntaxError(f"Unexpected token: {token}")
 
     def parse_alloc(self):
@@ -175,6 +242,8 @@ class Parser:
             return Continue()
         if kind == "FREE":
             return self.parse_free()
+        if kind == "DATA":
+            return self.parse_data()
 
         expr = self.parse_expr()
         if self.current() and self.current()[0] == "EQUALS":
@@ -295,3 +364,4 @@ class Parser:
             if stmt:
                 program.append(stmt)
         return program
+

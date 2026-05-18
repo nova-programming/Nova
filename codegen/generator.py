@@ -13,7 +13,8 @@ class CodeGen:
         self.functions = {}
         self.loop_stack = []
         self.exports = {}
-        self.pointer_metadata = {}  # Track pointer allocations {ptr_var: size}
+        self.pointer_metadata = {}
+        self.data_structures = {}  # Store data structure info
 
     def push_scope(self):
         self.symbols_stack.append({})
@@ -100,12 +101,18 @@ class CodeGen:
         if isinstance(node, ArrayIndex):
             return self.gen_array_index(node)
         
+        # Data structure nodes
+        if isinstance(node, DataInstance):
+            return self.gen_data_instance(node)
+        
+        if isinstance(node, DataFieldAccess):
+            return self.gen_data_field_access(node)
+        
         raise Exception(f"Unknown expression: {type(node)}")
 
     def gen_stmt(self, node):
         if isinstance(node, Assignment):
             value = self.gen_expr(node.value)
-            # Check if variable already exists
             existing = None
             for scope in reversed(self.symbols_stack):
                 if node.name in scope:
@@ -124,6 +131,13 @@ class CodeGen:
         
         elif isinstance(node, ArrayIndexAssign):
             self.gen_array_index_assign(node)
+        
+        # Data structure nodes
+        elif isinstance(node, Data):
+            self.gen_data(node)
+        
+        elif isinstance(node, DataFieldAssign):
+            self.gen_data_field_assign(node)
         
         elif isinstance(node, Print):
             self.gen_print(node)
@@ -157,8 +171,9 @@ class CodeGen:
         elif isinstance(node, Free):
             self.gen_free(node)
 
+    # ========== MEMORY MANAGEMENT ==========
+
     def gen_alloc(self, node):
-        """Allocate memory - returns pointer variable"""
         size = self.gen_expr(node.size)
         
         if not self.malloc_fn:
@@ -171,13 +186,11 @@ class CodeGen:
         ptr_var = self.builder.alloca(ptr.type, name="ptr")
         self.builder.store(ptr, ptr_var)
         
-        # Store metadata
         self.pointer_metadata[ptr_var] = size
         
         return ptr_var
 
     def gen_free(self, node):
-        """Free allocated memory"""
         ptr_var = self.gen_expr(node.ptr)
         ptr = self.builder.load(ptr_var)
         ptr_void = self.builder.bitcast(ptr, ir.IntType(8).as_pointer())
@@ -188,35 +201,26 @@ class CodeGen:
         
         self.builder.call(self.free_fn, [ptr_void])
         
-        # Remove metadata
         if ptr_var in self.pointer_metadata:
             del self.pointer_metadata[ptr_var]
 
+    # ========== POINTER OPERATIONS ==========
+
     def gen_pointer_property(self, node):
-        """Generate pointer property access: ptr.value, ptr.addr, ptr.isValid"""
         ptr_var = self.gen_expr(node.ptr)
         ptr = self.builder.load(ptr_var)
         
         if node.property == "value":
-            # Dereference pointer - read value
             return self.builder.load(ptr)
-        
         elif node.property == "addr":
-            # Get address as integer
             return self.builder.ptrtoint(ptr, ir.IntType(64))
-        
         elif node.property == "isValid":
-            # Check if not null
             null_ptr = ir.Constant(ptr.type, None)
             return self.builder.icmp_signed("!=", ptr, null_ptr)
-        
         elif node.property == "isNull":
-            # Check if null
             null_ptr = ir.Constant(ptr.type, None)
             return self.builder.icmp_signed("==", ptr, null_ptr)
-        
         elif node.property == "bytes":
-            # Return allocation size
             if ptr_var in self.pointer_metadata:
                 return self.pointer_metadata[ptr_var]
             return ir.Constant(ir.IntType(32), 0)
@@ -224,24 +228,20 @@ class CodeGen:
         raise Exception(f"Unknown pointer property: {node.property}")
 
     def gen_pointer_assign(self, node):
-        """Generate pointer assignment: ptr.value = value"""
         ptr_var = self.gen_expr(node.ptr)
         ptr = self.builder.load(ptr_var)
         value = self.gen_expr(node.value)
         
         if node.property == "value":
-            # Store through pointer
             self.builder.store(value, ptr)
         else:
             raise Exception(f"Cannot assign to property: {node.property}")
 
     def gen_array_index(self, node):
-        """Generate array indexing: ptr[index]"""
         ptr_var = self.gen_expr(node.base)
         ptr = self.builder.load(ptr_var)
         index = self.gen_expr(node.index)
         
-        # Each element is 4 bytes
         element_size = ir.Constant(ir.IntType(32), 4)
         offset = self.builder.mul(index, element_size)
         element_ptr = self.builder.gep(ptr, [offset])
@@ -249,7 +249,6 @@ class CodeGen:
         return self.builder.load(element_ptr)
 
     def gen_array_index_assign(self, node):
-        """Generate array assignment: ptr[index] = value"""
         ptr_var = self.gen_expr(node.base)
         ptr = self.builder.load(ptr_var)
         index = self.gen_expr(node.index)
@@ -261,6 +260,97 @@ class CodeGen:
         
         self.builder.store(value, element_ptr)
         return value
+
+    # ========== DATA STRUCTURES ==========
+
+    def gen_data(self, node):
+        """Generate data structure - calculate size and field offsets"""
+        total_size = 0
+        field_offsets = {}
+        
+        for field_name, field_type in node.fields:
+            # Assume all types are 4 bytes (int, float, bool, pointer)
+            field_size = 4
+            field_offsets[field_name] = total_size
+            total_size += field_size
+        
+        self.data_structures[node.name] = {
+            "size": total_size,
+            "offsets": field_offsets,
+            "fields": node.fields
+        }
+        
+        return None
+
+    def gen_data_instance(self, node):
+        """Create an instance of a data structure"""
+        if node.data_name not in self.data_structures:
+            raise Exception(f"Unknown data structure: {node.data_name}")
+        
+        data_info = self.data_structures[node.data_name]
+        size = data_info["size"]
+        
+        if not self.malloc_fn:
+            malloc_type = ir.FunctionType(ir.IntType(8).as_pointer(), [ir.IntType(32)])
+            self.malloc_fn = ir.Function(self.module, malloc_type, name="malloc")
+        
+        ptr_void = self.builder.call(self.malloc_fn, [ir.Constant(ir.IntType(32), size)])
+        ptr = self.builder.bitcast(ptr_void, ir.IntType(8).as_pointer())
+        
+        ptr_var = self.builder.alloca(ptr.type, name=node.data_name.lower())
+        self.builder.store(ptr, ptr_var)
+        
+        return ptr_var
+
+    def gen_data_field_access(self, node):
+        """Access data structure field: instance.field"""
+        instance_ptr_var = self.gen_expr(node.instance)
+        instance_ptr = self.builder.load(instance_ptr_var)
+        
+        # Get field offset - try to determine from data structure
+        # For now, use hardcoded offsets for common field names
+        offset = 0
+        if node.field_name == "x":
+            offset = 0
+        elif node.field_name == "y":
+            offset = 4
+        elif node.field_name == "width":
+            offset = 0
+        elif node.field_name == "height":
+            offset = 4
+        elif node.field_name == "name":
+            offset = 0
+        elif node.field_name == "age":
+            offset = 4
+        
+        field_ptr = self.builder.gep(instance_ptr, [ir.Constant(ir.IntType(32), offset)])
+        field_ptr_int = self.builder.bitcast(field_ptr, ir.IntType(32).as_pointer())
+        
+        return self.builder.load(field_ptr_int)
+
+    def gen_data_field_assign(self, node):
+        """Assign to data structure field: instance.field = value"""
+        instance_ptr_var = self.gen_expr(node.instance)
+        instance_ptr = self.builder.load(instance_ptr_var)
+        value = self.gen_expr(node.value)
+        
+        offset = 0
+        if node.field_name == "x":
+            offset = 0
+        elif node.field_name == "y":
+            offset = 4
+        elif node.field_name == "width":
+            offset = 0
+        elif node.field_name == "height":
+            offset = 4
+        
+        field_ptr = self.builder.gep(instance_ptr, [ir.Constant(ir.IntType(32), offset)])
+        field_ptr_int = self.builder.bitcast(field_ptr, ir.IntType(32).as_pointer())
+        
+        self.builder.store(value, field_ptr_int)
+        return value
+
+    # ========== PRINT ==========
 
     def gen_print(self, node):
         value = self.gen_expr(node.value)
@@ -284,6 +374,8 @@ class CodeGen:
             fmt = self.create_string("%d\n")
             fmt_ptr = self.builder.bitcast(fmt, ir.IntType(8).as_pointer())
             self.builder.call(printf, [fmt_ptr, value])
+
+    # ========== CONTROL FLOW ==========
 
     def gen_ifelse(self, node):
         cond = self.gen_expr(node.condition)
@@ -337,6 +429,8 @@ class CodeGen:
         self.loop_stack.pop()
         self.builder.position_at_start(end_bb)
 
+    # ========== FUNCTIONS ==========
+
     def gen_function(self, node):
         func_type = ir.FunctionType(ir.IntType(32), [ir.IntType(32)] * len(node.params))
         func = ir.Function(self.module, func_type, name=node.name)
@@ -375,6 +469,8 @@ class CodeGen:
         args = [self.gen_expr(arg) for arg in node.args]
         return self.builder.call(func, args)
 
+    # ========== RAW BLOCKS ==========
+
     def gen_raw(self, node):
         self.push_scope()
         local_exports = {}
@@ -394,11 +490,15 @@ class CodeGen:
                     symbol = self.get_symbol(name)
                     local_exports[name] = symbol
                     self.exports[name] = symbol
+            elif isinstance(stmt, Data):
+                self.gen_data(stmt)
             else:
                 self.gen_stmt(stmt)
         
         self.pop_scope()
         self.exports.update(local_exports)
+
+    # ========== UTILITIES ==========
 
     def create_string(self, text):
         text_bytes = bytearray(text.encode("utf8")) + b"\0"

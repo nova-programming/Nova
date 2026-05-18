@@ -1,27 +1,14 @@
 @raw {
-    ptr = alloc(16)
+    data Point {
+        x: int
+        y: int
+    }
     
-    # Test all properties
-    print(ptr.isValid)
-    print(ptr.isNull)
-    print(ptr.addr)
-    print(ptr.bytes)
+    p = Point()
+    p.x = 10
+    p.y = 20
     
-    # Test value access
-    ptr.value = 99
-    print(ptr.value)
-    
-    # Test array access
-    ptr[0] = 10
-    ptr[4] = 20
-    ptr[8] = 30
-    
-    print(ptr[0])
-    print(ptr[4])
-    print(ptr[8])
-    
-    free(ptr)
-    
-    # Check after free
-    print(ptr.isValid)
+    print(p.x)
+    print(p.y)
+    print(p.x + p.y)
 }

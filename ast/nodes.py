@@ -188,3 +188,40 @@ class NovaError(Exception):
 
 def runtime_error(msg):
     raise NovaError(f"[Nova Runtime Error] {msg}")
+
+# ========== DATA STRUCTURE NODES ==========
+
+class Data:
+    def __init__(self, name, fields):
+        self.name = name
+        self.fields = fields  # List of (name, type) tuples
+    def __repr__(self):
+        return f"Data('{self.name}', {self.fields})"
+
+class DataField:
+    def __init__(self, name, type_name):
+        self.name = name
+        self.type_name = type_name
+    def __repr__(self):
+        return f"DataField('{self.name}', '{self.type_name}')"
+
+class DataInstance:
+    def __init__(self, data_name):
+        self.data_name = data_name
+    def __repr__(self):
+        return f"DataInstance('{self.data_name}')"
+
+class DataFieldAccess:
+    def __init__(self, instance, field_name):
+        self.instance = instance
+        self.field_name = field_name
+    def __repr__(self):
+        return f"DataFieldAccess({self.instance}, '{self.field_name}')"
+
+class DataFieldAssign:
+    def __init__(self, instance, field_name, value):
+        self.instance = instance
+        self.field_name = field_name
+        self.value = value
+    def __repr__(self):
+        return f"DataFieldAssign({self.instance}, '{self.field_name}', {self.value})"
