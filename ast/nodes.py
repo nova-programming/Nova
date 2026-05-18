@@ -225,3 +225,14 @@ class DataFieldAssign:
         self.value = value
     def __repr__(self):
         return f"DataFieldAssign({self.instance}, '{self.field_name}', {self.value})"
+
+class ForLoop:
+    def __init__(self, var_name, start, end, step, body, is_downto=False):
+        self.var_name = var_name
+        self.start = start
+        self.end = end
+        self.step = step
+        self.body = body
+        self.is_downto = is_downto
+    def __repr__(self):
+        return f"ForLoop('{self.var_name}', {self.start}, {self.end}, {self.step}, {self.body})"

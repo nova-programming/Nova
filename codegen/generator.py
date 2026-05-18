@@ -170,6 +170,9 @@ class CodeGen:
         
         elif isinstance(node, Free):
             self.gen_free(node)
+        
+        elif isinstance(node, ForLoop):
+            self.gen_for(node)
 
     # ========== MEMORY MANAGEMENT ==========
 
@@ -517,3 +520,71 @@ class CodeGen:
         func_type = ir.FunctionType(ir.IntType(32), [ir.IntType(8).as_pointer()], var_arg=True)
         self.printf = ir.Function(self.module, func_type, name="printf")
         return self.printf
+    
+    def gen_for(self, node):
+        """Generate for loop: for i = start to end step step { body }"""
+        
+        # Create variables for start, end, step
+        start_val = self.gen_expr(node.start)
+        end_val = self.gen_expr(node.end)
+        step_val = self.gen_expr(node.step)
+        
+        # Allocate loop variable
+        var_ptr = self.builder.alloca(ir.IntType(32), name=node.var_name)
+        self.set_symbol(node.var_name, var_ptr)
+        self.builder.store(start_val, var_ptr)
+        
+        # Get function
+        func = self.builder.function
+        
+        # Create blocks
+        cond_bb = func.append_basic_block("for.cond")
+        body_bb = func.append_basic_block("for.body")
+        step_bb = func.append_basic_block("for.step")
+        end_bb = func.append_basic_block("for.end")
+        
+        # Push loop context for break/continue
+        self.loop_stack.append((step_bb, end_bb))
+        
+        # Branch to condition
+        self.builder.branch(cond_bb)
+        
+        # Condition block
+        self.builder.position_at_start(cond_bb)
+        current_var = self.builder.load(var_ptr)
+        
+        if node.is_downto:
+            # For downto: current >= end
+            cond = self.builder.icmp_signed(">=", current_var, end_val)
+        else:
+            # For to: current <= end
+            cond = self.builder.icmp_signed("<=", current_var, end_val)
+        
+        self.builder.cbranch(cond, body_bb, end_bb)
+        
+        # Body block
+        self.builder.position_at_start(body_bb)
+        for stmt in node.body:
+            self.gen_stmt(stmt)
+        
+        # Branch to step block
+        if not self.builder.block.is_terminated:
+            self.builder.branch(step_bb)
+        
+        # Step block (increment/decrement)
+        self.builder.position_at_start(step_bb)
+        current = self.builder.load(var_ptr)
+        
+        if node.is_downto:
+            new_val = self.builder.sub(current, step_val)
+        else:
+            new_val = self.builder.add(current, step_val)
+        
+        self.builder.store(new_val, var_ptr)
+        self.builder.branch(cond_bb)
+        
+        # Pop loop context
+        self.loop_stack.pop()
+        
+        # Position builder at end block
+        self.builder.position_at_start(end_bb)

@@ -45,6 +45,40 @@ class Parser:
         self.eat("RPAREN")
         return DataInstance(data_name)
 
+    def parse_for(self):
+        """Parse for loop: for i = 0 to 10 { body }"""
+        self.eat("FOR")
+        var_name = self.eat("IDENT")[1]
+        self.eat("EQUALS")
+        start = self.parse_expr()
+        
+        # Check direction
+        is_downto = False
+        if self.current() and self.current()[0] == "TO":
+            self.eat("TO")
+            is_downto = False
+        elif self.current() and self.current()[0] == "DOWNTO":
+            self.eat("DOWNTO")
+            is_downto = True
+        else:
+            raise SyntaxError("Expected 'to' or 'downto' in for loop")
+        
+        end = self.parse_expr()
+        
+        # Optional step
+        step = None
+        if self.current() and self.current()[0] == "STEP":
+            self.eat("STEP")
+            step = self.parse_expr()
+        
+        body = self.parse_block()
+        
+        # Default step is 1
+        if step is None:
+            step = Number(1)
+        
+        return ForLoop(var_name, start, end, step, body, is_downto)
+
     def current(self):
         if self.pos < len(self.tokens):
             return self.tokens[self.pos]
@@ -219,6 +253,8 @@ class Parser:
             return self.parse_import()
         if kind == "RAW":
             return self.parse_raw()
+        if kind == "FOR":
+            return self.parse_for()
         if kind == "DEF":
             return self.parse_function()
         if kind == "PRINT":

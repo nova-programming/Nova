@@ -1,14 +1,7 @@
-@raw {
-    data Point {
-        x: int
-        y: int
+print("=== NESTED FOR LOOPS ===")
+for i = 1 to 3 {
+    for j = 1 to 3 {
+        print(i * j)
     }
-    
-    p = Point()
-    p.x = 10
-    p.y = 20
-    
-    print(p.x)
-    print(p.y)
-    print(p.x + p.y)
+    print(0)
 }
