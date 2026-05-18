@@ -7,6 +7,78 @@ class Parser:
         self.pos = 0
         self.in_raw = False
 
+    def parse_data(self):
+        """Parse data structure definition"""
+        self.eat("DATA")
+        name = self.eat("IDENT")[1]
+        
+        self.eat("LBRACE")
+        fields = []
+        
+        while self.current() and self.current()[0] != "RBRACE":
+            self.skip_newlines()
+            if self.current()[0] == "RBRACE":
+                break
+            
+            field_name = self.eat("IDENT")[1]
+            self.eat("COLON")
+            
+            # Handle type keywords
+            type_token = self.current()
+            if type_token[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
+                type_name = self.eat(type_token[0])[1]
+            else:
+                type_name = self.eat("IDENT")[1]
+            
+            fields.append((field_name, type_name))
+            
+            # Optional semicolon or newline
+            if self.current() and self.current()[0] in ("NEWLINE", "SEMICOLON"):
+                self.eat(self.current()[0])
+        
+        self.eat("RBRACE")
+        return Data(name, fields)
+
+    def parse_data_instance(self, data_name):
+        """Parse data instance creation: Point()"""
+        self.eat("LPAREN")
+        self.eat("RPAREN")
+        return DataInstance(data_name)
+
+    def parse_for(self):
+        """Parse for loop: for i = 0 to 10 { body }"""
+        self.eat("FOR")
+        var_name = self.eat("IDENT")[1]
+        self.eat("EQUALS")
+        start = self.parse_expr()
+        
+        # Check direction
+        is_downto = False
+        if self.current() and self.current()[0] == "TO":
+            self.eat("TO")
+            is_downto = False
+        elif self.current() and self.current()[0] == "DOWNTO":
+            self.eat("DOWNTO")
+            is_downto = True
+        else:
+            raise SyntaxError("Expected 'to' or 'downto' in for loop")
+        
+        end = self.parse_expr()
+        
+        # Optional step
+        step = None
+        if self.current() and self.current()[0] == "STEP":
+            self.eat("STEP")
+            step = self.parse_expr()
+        
+        body = self.parse_block()
+        
+        # Default step is 1
+        if step is None:
+            step = Number(1)
+        
+        return ForLoop(var_name, start, end, step, body, is_downto)
+
     def current(self):
         if self.pos < len(self.tokens):
             return self.tokens[self.pos]
@@ -76,24 +148,36 @@ class Parser:
         if kind == "NUMBER":
             self.eat("NUMBER")
             return Number(int(value))
+        
         if kind == "STRING":
             self.eat("STRING")
             return String(value[1:-1])
+        
         if kind == "TRUE":
             self.eat("TRUE")
             return Boolean(True)
+        
         if kind == "FALSE":
             self.eat("FALSE")
             return Boolean(False)
+        
         if kind == "LPAREN":
             self.eat("LPAREN")
             expr = self.parse_expr()
             self.eat("RPAREN")
             return expr
+        
         if kind == "ALLOC":
             return self.parse_alloc()
+        
         if kind == "IDENT":
             name = self.eat("IDENT")[1]
+            
+            # Check for data instantiation: Point()
+            if self.current() and self.current()[0] == "LPAREN":
+                return self.parse_data_instance(name)
+            
+            # Check for function call
             if self.current() and self.current()[0] == "LPAREN":
                 self.eat("LPAREN")
                 args = []
@@ -105,13 +189,46 @@ class Parser:
                             args.append(self.parse_expr())
                 self.eat("RPAREN")
                 return Call(name, args)
+            
             var = Variable(name)
+            
+            # Handle dot operations: .value, .addr, .isValid (pointer properties)
+            # vs .x, .y (data field access)
+            if self.current() and self.current()[0] == "DOT":
+                self.eat("DOT")
+                prop = self.eat("IDENT")[1]
+                
+                # Check if this is a pointer property
+                pointer_properties = ["value", "addr", "isValid", "isNull", "bytes"]
+                
+                if prop in pointer_properties:
+                    # This is a pointer property
+                    if self.current() and self.current()[0] == "EQUALS":
+                        self.eat("EQUALS")
+                        value = self.parse_expr()
+                        return PointerAssign(var, prop, value)
+                    return PointerProperty(var, prop)
+                else:
+                    # This is a data field access
+                    if self.current() and self.current()[0] == "EQUALS":
+                        self.eat("EQUALS")
+                        value = self.parse_expr()
+                        return DataFieldAssign(var, prop, value)
+                    return DataFieldAccess(var, prop)
+            
+            # Handle array indexing: ptr[index]
             if self.current() and self.current()[0] == "LBRACK":
                 self.eat("LBRACK")
                 index = self.parse_expr()
                 self.eat("RBRACK")
+                if self.current() and self.current()[0] == "EQUALS":
+                    self.eat("EQUALS")
+                    value = self.parse_expr()
+                    return ArrayIndexAssign(var, index, value)
                 return ArrayIndex(var, index)
+            
             return var
+        
         raise SyntaxError(f"Unexpected token: {token}")
 
     def parse_alloc(self):
@@ -132,8 +249,12 @@ class Parser:
             return None
         kind = token[0]
 
+        if kind == "IMPORT":
+            return self.parse_import()
         if kind == "RAW":
             return self.parse_raw()
+        if kind == "FOR":
+            return self.parse_for()
         if kind == "DEF":
             return self.parse_function()
         if kind == "PRINT":
@@ -157,6 +278,8 @@ class Parser:
             return Continue()
         if kind == "FREE":
             return self.parse_free()
+        if kind == "DATA":
+            return self.parse_data()
 
         expr = self.parse_expr()
         if self.current() and self.current()[0] == "EQUALS":
@@ -164,8 +287,6 @@ class Parser:
             value = self.parse_expr()
             if isinstance(expr, Variable):
                 return Assignment(expr.name, value)
-            elif isinstance(expr, ArrayIndex):
-                return ArrayIndexAssign(expr.base, expr.index, value)
         return expr
 
     def parse_free(self):
@@ -214,6 +335,11 @@ class Parser:
             self.skip_newlines()
         self.eat("RBRACE")
         return body
+
+    def parse_import(self):
+        self.eat("IMPORT")
+        module_name = self.eat("IDENT")[1]
+        return Import(module_name)
 
     def parse_raw(self):
         self.eat("RAW")
@@ -274,3 +400,4 @@ class Parser:
             if stmt:
                 program.append(stmt)
         return program
+

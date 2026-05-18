@@ -19,6 +19,10 @@ TOKEN_SPEC = [
     ("IF",       r"if\b"),
     ("ELSE",     r"else\b"),
     ("WHILE",    r"while\b"),
+    ("FOR",      r"for\b"),
+    ("TO",       r"to\b"),
+    ("DOWNTO",   r"downto\b"),
+    ("STEP",     r"step\b"),
     ("AND",      r"and\b"),
     ("OR",       r"or\b"),
     ("NOT",      r"not\b"),
@@ -28,7 +32,6 @@ TOKEN_SPEC = [
     ("AS",       r"as\b"),
     ("ALLOC",    r"alloc\b"),
     ("FREE",     r"free\b"),
-    ("DYNAMIC",  r"dynamic\b"),
 
     # Directives
     ("RAW",      r"@raw"),
@@ -68,7 +71,7 @@ TOKEN_SPEC = [
     ("RBRACK",   r"\]"),
     ("COMMA",    r","),
     ("DOT",      r"\."),
-    ("COLON",    r":"),      # ADD THIS LINE
+    ("COLON",    r":"),
     ("SEMICOLON", r";"),
 
     # Formatting & Metadata
