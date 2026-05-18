@@ -1,8 +1,10 @@
-class Player {
-    def speak() {
-        print(42)
+@raw {
+    memory = alloc(100)
+    memory[0] = 42
+
+    @export {
+        memory
     }
 }
 
-p = Player()
-p.speak()
+print(memory[0])
