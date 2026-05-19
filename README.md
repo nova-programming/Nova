@@ -50,20 +50,24 @@ while i < 10 {
 
 ## Language Features
 - ✅ Variables and expressions
-
 - ✅ Functions with parameters
-
 - ✅ While loops
-
+- ✅ For loops
 - ✅ If-else conditionals
-
 - ✅ Print statement
-
-- ✅ Raw memory allocation
-
-- 🔄 Data structures (planned)
-
+- ✅ Raw memory allocation (`alloc`, `free`)
+- ✅ Data structures (`data` blocks)
+- ✅ Low-level / High-level bridge (`@raw` and `@export`)
+- ✅ Classes and Objects
 - 🔄 Arrays/Lists (planned)
+
+## Future Roadmap: Top 5 Paths
+
+1. **Custom Compiler Backend (Independence):** Remove dependencies on Python and LLVM by writing a custom compiler backend directly in Nova or C/Rust. This will generate machine code directly or a custom VM bytecode, achieving total independence.
+2. **Advanced OOP & Type System:** Expand current Classes and Objects to support inheritance, interfaces, and methods. Implement a robust type checker for static typing guarantees, including type inference.
+3. **Comprehensive Standard Library:** Build out a rich standard library natively in Nova, including file I/O, networking, and common data structures (HashMaps, Arrays/Lists).
+4. **C Interoperability (FFI):** Leverage the `@raw` blocks to build a seamless Foreign Function Interface (FFI) for linking and using C libraries directly without complex wrappers.
+5. **Memory Management Improvements:** Introduce a hybrid memory management model (e.g., optional garbage collection for high-level objects, while retaining manual `alloc`/`free` for `@raw` low-level blocks).
 
 ## Project Structure
 ```
