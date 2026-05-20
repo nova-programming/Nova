@@ -192,6 +192,11 @@ class Compiler:
                 self.emit(OpCode.STORE_PTR)
             else:
                 raise Exception(f"Cannot assign to pointer property {node.property}")
+        elif isinstance(node, ArrayIndexAssign):
+            self.compile_expr(node.value)
+            self.compile_expr(node.base)
+            self.compile_expr(node.index)
+            self.emit(OpCode.STORE_INDEX)
         elif isinstance(node, ForLoop):
             # for var_name = start to end step step { body }
             self.compile_expr(node.start)
@@ -304,6 +309,10 @@ class Compiler:
         elif isinstance(node, Alloc):
             self.compile_expr(node.size)
             self.emit(OpCode.ALLOC)
+        elif isinstance(node, ArrayIndex):
+            self.compile_expr(node.base)
+            self.compile_expr(node.index)
+            self.emit(OpCode.LOAD_INDEX)
         elif isinstance(node, PointerProperty):
             self.compile_expr(node.ptr)
             if node.property == "value":

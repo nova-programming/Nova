@@ -5,6 +5,8 @@ from lexer.tokenizer import tokenize
 from parser.parser import Parser
 from vm.compiler import Compiler
 from vm.machine import VirtualMachine
+from compiler.type_checker import TypeChecker, StaticTypeError
+import sys
 
 
 def run_source(file_path):
@@ -17,6 +19,12 @@ def run_source(file_path):
     # print("[2] Parsing...")
     ast = Parser(tokens).parse()
     
+    try:
+        TypeChecker().check(ast)
+    except StaticTypeError as e:
+        print(f"StaticTypeError: {e}")
+        sys.exit(1)
+
     # print("[3] Compiling to Custom Bytecode...")
     compiler = Compiler()
     program = compiler.compile(ast)

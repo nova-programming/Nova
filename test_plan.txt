@@ -1,0 +1,171 @@
+1. **Update Lexer Tokens**
+    - Use `replace_with_git_merge_diff` to edit `lexer/tokens.py`. I will append `("ARROW", r"->")` below `("EQUALS", r"="),` (line 67). I will append `("MUT", r"mut\b")` below `("TYPE_INT", r"int\b"),` (line 45).
+
+2. **AST Node Extensions**
+    - Use `replace_with_git_merge_diff` to edit `ast/nodes.py`.
+    - Modify `Function.__init__` to `def __init__(self, name, params, body, return_type=None):` and set `self.return_type`.
+    - Modify `Assignment.__init__` to `def __init__(self, name, value, type_name=None, is_mut=False):` and set them.
+    - Modify `Variable.__init__` to `def __init__(self, name, type_name=None):` and set it.
+    - Add `Type` class to `ast/nodes.py` to represent complex types.
+
+3. **Update Parser**
+    - Use `replace_with_git_merge_diff` to edit `parser/parser.py`.
+    - In `parse_function`, add logic to check for type parameters (`self.eat("COLON"); type_name = self.eat("IDENT")[1]`). Then after `self.eat("RPAREN")`, check for return type (`if self.current()[0] == "ARROW": self.eat("ARROW"); return_type = self.eat("IDENT")[1]`). Pass these to the `Function` constructor.
+    - In `parse_statement`, when parsing assignments, handle `MUT`:
+```python
+        is_mut = False
+        type_name = None
+        if kind == "MUT":
+            self.eat("MUT")
+            is_mut = True
+            token = self.current()
+            kind = token[0]
+```
+      And check for colons for type declarations:
+```python
+        expr = self.parse_expr()
+        if isinstance(expr, Variable) and self.current() and self.current()[0] == "COLON":
+            self.eat("COLON")
+            if self.current()[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
+                type_name = self.eat(self.current()[0])[1]
+            else:
+                type_name = self.eat("IDENT")[1]
+            expr.type_name = type_name
+
+        if self.current() and self.current()[0] == "EQUALS":
+            self.eat("EQUALS")
+            value = self.parse_expr()
+            if isinstance(expr, Variable):
+                return Assignment(expr.name, value, type_name=expr.type_name, is_mut=is_mut)
+```
+
+4. **Create Type Checker**
+    - Use `write_file` to create `compiler/type_checker.py`. Implement `TypeChecker` class that traverses AST and tracks types using an environment stack.
+    - The file will contain:
+```python
+from ast.nodes import *
+
+class StaticTypeError(Exception):
+    pass
+
+class TypeChecker:
+    def __init__(self):
+        self.env_stack = [{}]
+    def visit(self, node):
+        if hasattr(self, f"visit_{type(node).__name__}"):
+            return getattr(self, f"visit_{type(node).__name__}")(node)
+        return "any"
+    def check(self, ast):
+        for stmt in ast:
+            self.visit(stmt)
+    def visit_Number(self, node): return "int" if isinstance(node.value, int) else "float"
+    def visit_String(self, node): return "string"
+    def visit_Boolean(self, node): return "bool"
+    def visit_Assignment(self, node):
+        t = self.visit(node.value)
+        if node.is_mut:
+            self.env_stack[-1][node.name] = "dyn"
+        else:
+            if node.name in self.env_stack[-1]:
+                if self.env_stack[-1][node.name] != "dyn" and self.env_stack[-1][node.name] != t:
+                    raise StaticTypeError(f"Cannot assign {t} to variable of type {self.env_stack[-1][node.name]}")
+            else:
+                self.env_stack[-1][node.name] = node.type_name if node.type_name else t
+        return t
+    def visit_Variable(self, node):
+        for env in reversed(self.env_stack):
+            if node.name in env: return env[node.name]
+        return "any"
+    def visit_BinOp(self, node):
+        left_t = self.visit(node.left)
+        right_t = self.visit(node.right)
+        if left_t != right_t and left_t != "dyn" and right_t != "dyn" and left_t != "any" and right_t != "any":
+            raise StaticTypeError(f"Type Error in binary operation: {left_t} {node.op} {right_t}")
+        return left_t
+    def visit_Function(self, node):
+        pass # Simplified for test
+```
+
+5. **Verify Type Checker implementation**
+    - Use `run_in_bash_session` to run `python -m py_compile compiler/type_checker.py`.
+
+6. **Hook Type Checker in Main**
+    - Use `replace_with_git_merge_diff` to edit `main.py` to import `TypeChecker` and `StaticTypeError`. Insert `TypeChecker().check(ast)` after `Parser(tokens).parse()`.
+
+7. **String Mutability in VM**
+    - Use `replace_with_git_merge_diff` to edit `vm/opcodes.py` to add `LOAD_INDEX = auto()` and `STORE_INDEX = auto()`.
+    - Use `replace_with_git_merge_diff` to edit `vm/compiler.py` to compile `ArrayIndex` and `ArrayIndexAssign`.
+```python
+        elif isinstance(node, ArrayIndex):
+            self.compile_expr(node.base)
+            self.compile_expr(node.index)
+            self.emit(OpCode.LOAD_INDEX)
+        elif isinstance(node, ArrayIndexAssign):
+            self.compile_expr(node.value)
+            self.compile_expr(node.base)
+            self.compile_expr(node.index)
+            self.emit(OpCode.STORE_INDEX)
+```
+    - Use `replace_with_git_merge_diff` to edit `vm/machine.py`.
+```python
+            elif opcode == OpCode.LOAD_INDEX:
+                index = self.stack.pop()
+                base = self.stack.pop()
+                self.stack.append(base[index] if isinstance(base, list) else chr(base[index]))
+            elif opcode == OpCode.STORE_INDEX:
+                index = self.stack.pop()
+                base = self.stack.pop()
+                val = self.stack.pop()
+                if isinstance(base, bytearray):
+                    base[index] = ord(val)
+                else:
+                    base[index] = val
+```
+    - Modify `LOAD_STR` in `vm/machine.py` to `self.stack.append(bytearray(self.strings[arg].encode('utf-8')))`
+    - Modify `PRINT` and `LEN` in `vm/machine.py`:
+```python
+            elif opcode == OpCode.PRINT:
+                val = self.stack.pop()
+                if isinstance(val, bytearray):
+                    print(val.decode('utf-8'))
+                else:
+                    print(val)
+```
+```python
+            elif opcode == OpCode.LEN:
+                val = self.stack.pop()
+                if isinstance(val, (str, bytearray, list)):
+                    self.stack.append(len(val))
+                else:
+                    raise Exception("len() applied to invalid type")
+```
+
+8. **Verify String Mutability**
+    - Use `write_file` to create `test_strings.nv`:
+      ```
+      mut s = "cat"
+      s[0] = "b"
+      print(s)
+      ```
+    - Run `python main.py run test_strings.nv` in bash.
+
+9. **Write Tests**
+    - Use `write_file` to create `tests/test_type_inference.nv`:
+      ```
+      x = 5
+      y = 10
+      mut dyn_val = "hello"
+      dyn_val = 5
+      ```
+    - Use `write_file` to create `tests/test_type_errors.nv`:
+      ```
+      x = 5
+      x = "hello"
+      ```
+
+10. **Run Tests**
+    - Execute the new test files using `main.py` in bash.
+    - Execute the `test.nv` using `main.py run test.nv` in bash to check for regressions.
+
+11. **Pre-commit checks**
+    - Complete pre-commit steps to ensure proper testing, verification, review, and reflection are done.
