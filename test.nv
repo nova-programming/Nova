@@ -4,10 +4,10 @@ data Point {
 }
 
 class SystemMonitor {
-    name
-    version
+    name: string
+    version: int
 
-    def init(monitorName, v) {
+    def init(monitorName: string, v: int) {
         self.name = monitorName
         self.version = v
         print("SystemMonitor Initialized:")
@@ -15,7 +15,7 @@ class SystemMonitor {
         print(self.version)
     }
 
-    def checkMemory(iterations) {
+    def checkMemory(iterations: int) {
         print("Starting Memory Test...")
         # Nested loops and conditions
         for i = 1 to iterations step 1 {
@@ -63,11 +63,50 @@ def loadFFI() {
     }
 }
 
-def fibonacci(n) {
+def fibonacci(n: int) -> int {
     if n <= 1 {
         return n
     }
     return fibonacci(n - 1) + fibonacci(n - 2)
+}
+
+def test_types_and_mutability() {
+    print("Testing Gradual Typing and Mutability...")
+
+    # Inferred static
+    x = 100
+    print("Inferred integer:")
+    print(x)
+
+    # Explicit static
+    y: int = 200
+    print("Explicit integer:")
+    print(y)
+
+    # Dynamic (mut)
+    mut dynamic_var = 500
+    print("Dynamic initially int:")
+    print(dynamic_var)
+
+    dynamic_var = "Now I am a string!"
+    print("Dynamic changed to string:")
+    print(dynamic_var)
+
+    # Mutable String Test
+    mut pet = "cat"
+    print("Original string:")
+    print(pet)
+
+    pet[0] = "b"
+    print("Mutated string:")
+    print(pet)
+
+    # Test comparison
+    if pet[0] == "b" {
+        print("Comparison check passed: pet[0] == 'b'")
+    } else {
+        print("Comparison check failed!")
+    }
 }
 
 print("=== STARTING ULTIMATE TEST ===")
@@ -80,6 +119,9 @@ print(len(word))
 # Recursion Test
 print("Fibonacci of 6:")
 print(fibonacci(6))
+
+# Gradual Typing and Mutable Strings Test
+test_types_and_mutability()
 
 # OOP and Complex Flow Test
 monitor = SystemMonitor()

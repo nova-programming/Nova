@@ -165,7 +165,7 @@ class VirtualMachine:
                 index = self.stack.pop()
                 base = self.stack.pop()
                 if isinstance(base, bytearray):
-                    self.stack.append(bytearray([base[index]]).decode('utf-8'))
+                    self.stack.append(bytearray([base[index]]))
                 else:
                     self.stack.append(base[index])
             elif opcode == OpCode.STORE_INDEX:
