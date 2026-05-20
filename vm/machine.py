@@ -60,7 +60,7 @@ class VirtualMachine:
             if opcode == OpCode.LOAD_CONST:
                 self.stack.append(self.constants[arg])
             elif opcode == OpCode.LOAD_STR:
-                self.stack.append(self.strings[arg])
+                self.stack.append(bytearray(self.strings[arg].encode('utf-8')))
             elif opcode == OpCode.LOAD_BOOL:
                 self.stack.append(arg)
             elif opcode == OpCode.LOAD_NAME:
@@ -138,7 +138,10 @@ class VirtualMachine:
                     self.ip = arg
             elif opcode == OpCode.PRINT:
                 val = self.stack.pop()
-                print(val)
+                if isinstance(val, bytearray):
+                    print(val.decode('utf-8'))
+                else:
+                    print(val)
             elif opcode == OpCode.ALLOC:
                 size = self.stack.pop()
                 ptr = self.heap_ptr
@@ -158,6 +161,30 @@ class VirtualMachine:
                 ptr = self.stack.pop()
                 val = struct.unpack_from("<i", self.heap, ptr)[0]
                 self.stack.append(val)
+            elif opcode == OpCode.LOAD_INDEX:
+                index = self.stack.pop()
+                base = self.stack.pop()
+                if isinstance(base, bytearray):
+                    self.stack.append(bytearray([base[index]]))
+                else:
+                    self.stack.append(base[index])
+            elif opcode == OpCode.STORE_INDEX:
+                index = self.stack.pop()
+                base = self.stack.pop()
+                val = self.stack.pop()
+                if isinstance(base, bytearray):
+                    if isinstance(val, str):
+                        if len(val) != 1:
+                            raise Exception("ValueError: can only assign single character string to bytearray index")
+                        base[index] = ord(val)
+                    elif isinstance(val, bytearray):
+                        if len(val) != 1:
+                            raise Exception("ValueError: can only assign single character string to bytearray index")
+                        base[index] = val[0]
+                    else:
+                        base[index] = val
+                else:
+                    base[index] = val
             elif opcode == OpCode.SIZEOF:
                 val = self.stack.pop()
                 if isinstance(val, int) and val in self.allocations: # It's a pointer
@@ -173,9 +200,7 @@ class VirtualMachine:
                     self.stack.append(4) # default
             elif opcode == OpCode.LEN:
                 val = self.stack.pop()
-                if isinstance(val, str):
-                    self.stack.append(len(val))
-                elif isinstance(val, list):
+                if isinstance(val, (str, bytearray, list)):
                     self.stack.append(len(val))
                 else:
                     raise Exception("len() applied to invalid type")
@@ -233,6 +258,8 @@ class VirtualMachine:
                     for a in args:
                         if isinstance(a, str):
                             ctypes_args.append(a.encode('utf-8'))
+                        elif isinstance(a, bytearray):
+                            ctypes_args.append(bytes(a))
                         elif isinstance(a, int):
                             ctypes_args.append(ctypes.c_int(a))
                         elif isinstance(a, float):
@@ -258,6 +285,8 @@ class VirtualMachine:
                 self.ip = func_meta["ip"]
             elif opcode == OpCode.LOAD_LIB:
                 lib_path = self.stack.pop()
+                if isinstance(lib_path, bytearray):
+                    lib_path = lib_path.decode('utf-8')
                 alias = arg
 
                 # Use ctypes to load the shared library
@@ -299,6 +328,8 @@ class VirtualMachine:
                 for a in args:
                     if isinstance(a, str):
                         ctypes_args.append(a.encode('utf-8'))
+                    elif isinstance(a, bytearray):
+                        ctypes_args.append(bytes(a))
                     elif isinstance(a, int):
                         ctypes_args.append(ctypes.c_int(a))
                     elif isinstance(a, float):

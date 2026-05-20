@@ -19,10 +19,11 @@ class Boolean:
         return f"Boolean({self.value})"
 
 class Variable:
-    def __init__(self, name):
+    def __init__(self, name, type_name=None):
         self.name = name
+        self.type_name = type_name
     def __repr__(self):
-        return f"Variable({self.name})"
+        return f"Variable({self.name}, {self.type_name})"
 
 class UnaryOp:
     def __init__(self, op, value):
@@ -48,11 +49,13 @@ class Compare:
         return f"Compare({self.left}, '{self.op}', {self.right})"
 
 class Assignment:
-    def __init__(self, name, value):
+    def __init__(self, name, value, type_name=None, is_mut=False):
         self.name = name
         self.value = value
+        self.type_name = type_name
+        self.is_mut = is_mut
     def __repr__(self):
-        return f"Assignment('{self.name}', {self.value})"
+        return f"Assignment('{self.name}', {self.value}, type={self.type_name}, mut={self.is_mut})"
 
 class Print:
     def __init__(self, value):
@@ -61,12 +64,13 @@ class Print:
         return f"Print({self.value})"
 
 class Function:
-    def __init__(self, name, params, body):
+    def __init__(self, name, params, body, return_type=None):
         self.name = name
         self.params = params
         self.body = body
+        self.return_type = return_type
     def __repr__(self):
-        return f"Function('{self.name}', {self.params}, {self.body})"
+        return f"Function('{self.name}', {self.params}, {self.body}, return_type={self.return_type})"
 
 class Call:
     def __init__(self, name, args):
@@ -189,6 +193,12 @@ class ArrayIndexAssign:
         self.value = value
     def __repr__(self):
         return f"ArrayIndexAssign({self.base}, {self.index}, {self.value})"
+
+class Type:
+    def __init__(self, name):
+        self.name = name
+    def __repr__(self):
+        return f"Type('{self.name}')"
 
 class NovaError(Exception):
     pass

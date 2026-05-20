@@ -45,6 +45,8 @@ class OpCode(Enum):
     LOAD_PTR = auto()     # Load value from pointer address
     STORE_PTR = auto()    # Store value to pointer address
     PTR_OFFSET = auto()   # Calculate pointer offset (for arrays/structs)
+    LOAD_INDEX = auto()   # Load from array index
+    STORE_INDEX = auto()  # Store to array index
 
     # Built-ins
     PRINT = auto()

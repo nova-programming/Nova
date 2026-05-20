@@ -295,11 +295,20 @@ class Parser:
                 methods.append(self.parse_function())
             else:
                 field_name = self.eat("IDENT")[1]
+                field_type = None
+
+                if self.current() and self.current()[0] == "COLON":
+                    self.eat("COLON")
+                    if self.current()[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
+                        field_type = self.eat(self.current()[0])[1]
+                    else:
+                        field_type = self.eat("IDENT")[1]
+
                 # Default assignments in class body not yet supported, just taking names
-                if self.current()[0] == "EQUALS":
+                if self.current() and self.current()[0] == "EQUALS":
                     self.eat("EQUALS")
                     self.parse_expr() # Skip initial values for now
-                fields.append(field_name)
+                fields.append((field_name, field_type))
             self.skip_newlines()
 
         self.eat("RBRACE")
@@ -346,12 +355,29 @@ class Parser:
         if kind == "DATA":
             return self.parse_data()
 
+        is_mut = False
+        type_name = None
+        if kind == "MUT":
+            self.eat("MUT")
+            is_mut = True
+            token = self.current()
+            kind = token[0]
+
         expr = self.parse_expr()
+
+        if isinstance(expr, Variable) and self.current() and self.current()[0] == "COLON":
+            self.eat("COLON")
+            if self.current()[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
+                type_name = self.eat(self.current()[0])[1]
+            else:
+                type_name = self.eat("IDENT")[1]
+            expr.type_name = type_name
+
         if self.current() and self.current()[0] == "EQUALS":
             self.eat("EQUALS")
             value = self.parse_expr()
             if isinstance(expr, Variable):
-                return Assignment(expr.name, value)
+                return Assignment(expr.name, value, type_name=expr.type_name, is_mut=is_mut)
         return expr
 
     def parse_free(self):
@@ -369,11 +395,37 @@ class Parser:
         self.eat("LPAREN")
         params = []
         if self.current() and self.current()[0] != "RPAREN":
-            params.append(self.eat("IDENT")[1])
+            param_name = self.eat("IDENT")[1]
+            param_type = None
+            if self.current() and self.current()[0] == "COLON":
+                self.eat("COLON")
+                if self.current()[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
+                    param_type = self.eat(self.current()[0])[1]
+                else:
+                    param_type = self.eat("IDENT")[1]
+            params.append((param_name, param_type))
+
             while self.current() and self.current()[0] == "COMMA":
                 self.eat("COMMA")
-                params.append(self.eat("IDENT")[1])
+                param_name = self.eat("IDENT")[1]
+                param_type = None
+                if self.current() and self.current()[0] == "COLON":
+                    self.eat("COLON")
+                    if self.current()[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
+                        param_type = self.eat(self.current()[0])[1]
+                    else:
+                        param_type = self.eat("IDENT")[1]
+                params.append((param_name, param_type))
         self.eat("RPAREN")
+
+        return_type = None
+        if self.current() and self.current()[0] == "ARROW":
+            self.eat("ARROW")
+            if self.current()[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
+                return_type = self.eat(self.current()[0])[1]
+            else:
+                return_type = self.eat("IDENT")[1]
+
         self.eat("LBRACE")
         body = []
         while self.current() and self.current()[0] != "RBRACE":
@@ -385,7 +437,7 @@ class Parser:
                 body.append(stmt)
             self.skip_newlines()
         self.eat("RBRACE")
-        return Function(name, params, body)
+        return Function(name, params, body, return_type=return_type)
 
     def parse_block(self):
         self.eat("LBRACE")

@@ -46,6 +46,7 @@ TOKEN_SPEC = [
     ("TYPE_FLOAT",  r"float\b"),
     ("TYPE_BOOL",   r"bool\b"),
     ("TYPE_STRING", r"string\b"),
+    ("MUT",         r"mut\b"),
 
     # Identifiers
     ("IDENT",    r"[a-zA-Z_][a-zA-Z0-9_]*"),
@@ -60,6 +61,7 @@ TOKEN_SPEC = [
 
     # Arithmetic & Assignment Operators
     ("PLUS",     r"\+"),
+    ("ARROW",    r"->"),
     ("MINUS",    r"-"),
     ("STAR",     r"\*"),
     ("SLASH",    r"/"),
