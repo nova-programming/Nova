@@ -145,75 +145,103 @@ class Parser:
             raise SyntaxError("Unexpected EOF")
         kind, value = token
 
+        node = None
+
         if kind == "NUMBER":
             self.eat("NUMBER")
-            return Number(int(value))
+            node = Number(int(value))
         
-        if kind == "STRING":
+        elif kind == "STRING":
             self.eat("STRING")
-            return String(value[1:-1])
+            node = String(value[1:-1])
         
-        if kind == "TRUE":
+        elif kind == "TRUE":
             self.eat("TRUE")
-            return Boolean(True)
+            node = Boolean(True)
         
-        if kind == "FALSE":
+        elif kind == "FALSE":
             self.eat("FALSE")
-            return Boolean(False)
+            node = Boolean(False)
         
-        if kind == "LPAREN":
+        elif kind == "LPAREN":
             self.eat("LPAREN")
-            expr = self.parse_expr()
+            node = self.parse_expr()
             self.eat("RPAREN")
-            return expr
 
-        if kind == "SIZEOF":
+        elif kind == "SIZEOF":
             self.eat("SIZEOF")
             self.eat("LPAREN")
             target = self.parse_expr()
             self.eat("RPAREN")
-            return SizeOf(target)
+            node = SizeOf(target)
 
-        if kind == "LEN":
+        elif kind == "LEN":
             self.eat("LEN")
             self.eat("LPAREN")
             target = self.parse_expr()
             self.eat("RPAREN")
-            return Len(target)
+            node = Len(target)
 
-        if kind == "OPEN":
+        elif kind == "STR":
+            self.eat("STR")
+            self.eat("LPAREN")
+            target = self.parse_expr()
+            self.eat("RPAREN")
+            node = StrConvert(target)
+
+        elif kind == "OPEN":
             self.eat("OPEN")
             self.eat("LPAREN")
             path = self.parse_expr()
             self.eat("COMMA")
             mode = self.parse_expr()
             self.eat("RPAREN")
-            return OpenFile(path, mode)
+            node = OpenFile(path, mode)
 
-        if kind == "READ":
+        elif kind == "READ":
             self.eat("READ")
             self.eat("LPAREN")
             fd = self.parse_expr()
             self.eat("RPAREN")
-            return ReadFile(fd)
+            node = ReadFile(fd)
 
-        if kind == "SELF":
+        elif kind == "SELF":
             self.eat("SELF")
-            # self.property
-            if self.current() and self.current()[0] == "DOT":
-                self.eat("DOT")
-                prop = self.eat("IDENT")[1]
-                if self.current() and self.current()[0] == "EQUALS":
-                    self.eat("EQUALS")
-                    value = self.parse_expr()
-                    return DataFieldAssign(Self(), prop, value)
-                return DataFieldAccess(Self(), prop)
-            return Self()
+            node = Self()
         
-        if kind == "ALLOC":
-            return self.parse_alloc()
+        elif kind == "ALLOC":
+            node = self.parse_alloc()
         
-        if kind == "IDENT":
+        elif kind == "LBRACK":
+            self.eat("LBRACK")
+            elements = []
+            if self.current() and self.current()[0] != "RBRACK":
+                elements.append(self.parse_expr())
+                while self.current() and self.current()[0] == "COMMA":
+                    self.eat("COMMA")
+                    if self.current() and self.current()[0] != "RBRACK":
+                        elements.append(self.parse_expr())
+            self.eat("RBRACK")
+            node = ListLiteral(elements)
+
+        elif kind == "LBRACE":
+            self.eat("LBRACE")
+            keys = []
+            values = []
+            if self.current() and self.current()[0] != "RBRACE":
+                keys.append(self.parse_expr())
+                self.eat("COLON")
+                values.append(self.parse_expr())
+                while self.current() and self.current()[0] == "COMMA":
+                    self.eat("COMMA")
+                    if self.current() and self.current()[0] != "RBRACE":
+                        keys.append(self.parse_expr())
+                        self.eat("COLON")
+                        values.append(self.parse_expr())
+            self.eat("RBRACE")
+            node = DictLiteral(keys, values)
+
+        elif kind == "IDENT":
             name = self.eat("IDENT")[1]
             
             # Check for function call / class instantiation / data instantiation
@@ -227,18 +255,23 @@ class Parser:
                         if self.current() and self.current()[0] != "RPAREN":
                             args.append(self.parse_expr())
                 self.eat("RPAREN")
-                # We return a Call node; the VM will resolve whether this is a Function, Class, or Data
-                return Call(name, args)
+                node = Call(name, args)
+            else:
+                node = Variable(name)
+        else:
+            raise SyntaxError(f"Unexpected token: {token}")
+
+        # Now, parse trailing suffix operators (. and [) in a loop
+        while True:
+            if not self.current():
+                break
             
-            var = Variable(name)
-            
-            # Handle dot operations: .value, .addr, .isValid (pointer properties)
-            # vs .x, .y (data field access) vs .method() (OOP)
-            if self.current() and self.current()[0] == "DOT":
+            next_kind = self.current()[0]
+            if next_kind == "DOT":
                 self.eat("DOT")
                 prop = self.eat("IDENT")[1]
                 
-                # Check if it's a method call
+                # Method call?
                 if self.current() and self.current()[0] == "LPAREN":
                     self.eat("LPAREN")
                     args = []
@@ -249,40 +282,40 @@ class Parser:
                             if self.current() and self.current()[0] != "RPAREN":
                                 args.append(self.parse_expr())
                     self.eat("RPAREN")
-                    return MethodCall(var, prop, args)
-
-                # Check if this is a pointer property
-                pointer_properties = ["value", "addr", "isValid", "isNull", "bytes"]
+                    node = MethodCall(node, prop, args)
+                    continue
                 
+                # Pointer property vs Data field
+                pointer_properties = ["value", "addr", "isValid", "isNull", "bytes"]
                 if prop in pointer_properties:
-                    # This is a pointer property
                     if self.current() and self.current()[0] == "EQUALS":
                         self.eat("EQUALS")
                         value = self.parse_expr()
-                        return PointerAssign(var, prop, value)
-                    return PointerProperty(var, prop)
+                        return PointerAssign(node, prop, value)
+                    node = PointerProperty(node, prop)
                 else:
-                    # This is a data field access
                     if self.current() and self.current()[0] == "EQUALS":
                         self.eat("EQUALS")
                         value = self.parse_expr()
-                        return DataFieldAssign(var, prop, value)
-                    return DataFieldAccess(var, prop)
-            
-            # Handle array indexing: ptr[index]
-            if self.current() and self.current()[0] == "LBRACK":
+                        return DataFieldAssign(node, prop, value)
+                    node = DataFieldAccess(node, prop)
+                continue
+                
+            elif next_kind == "LBRACK":
                 self.eat("LBRACK")
                 index = self.parse_expr()
                 self.eat("RBRACK")
                 if self.current() and self.current()[0] == "EQUALS":
                     self.eat("EQUALS")
                     value = self.parse_expr()
-                    return ArrayIndexAssign(var, index, value)
-                return ArrayIndex(var, index)
-            
-            return var
-        
-        raise SyntaxError(f"Unexpected token: {token}")
+                    return ArrayIndexAssign(node, index, value)
+                node = ArrayIndex(node, index)
+                continue
+                
+            else:
+                break
+                
+        return node
 
     def parse_alloc(self):
         self.eat("ALLOC")
@@ -386,10 +419,16 @@ class Parser:
             return self.parse_data()
 
         is_mut = False
+        is_const = False
         type_name = None
         if kind == "MUT":
             self.eat("MUT")
             is_mut = True
+            token = self.current()
+            kind = token[0]
+        elif kind == "CONST":
+            self.eat("CONST")
+            is_const = True
             token = self.current()
             kind = token[0]
 
@@ -407,7 +446,7 @@ class Parser:
             self.eat("EQUALS")
             value = self.parse_expr()
             if isinstance(expr, Variable):
-                return Assignment(expr.name, value, type_name=expr.type_name, is_mut=is_mut)
+                return Assignment(expr.name, value, type_name=expr.type_name, is_mut=is_mut, is_const=is_const)
         return expr
 
     def parse_free(self):
@@ -493,9 +532,13 @@ class Parser:
             alias = self.eat("IDENT")[1]
             return LoadLib(lib_path, alias)
 
-        # Otherwise standard module import `import std`
+        # Standard .nv module import `import math` or `import math as m`
         module_name = self.eat("IDENT")[1]
-        return Import(module_name)
+        alias = None
+        if self.current() and self.current()[0] == "AS":
+            self.eat("AS")
+            alias = self.eat("IDENT")[1]
+        return Import(module_name, alias=alias)
 
     def parse_raw(self):
         self.eat("RAW")

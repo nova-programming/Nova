@@ -12,10 +12,12 @@ class Instance:
         self.ref_count = 0
 
 class Frame:
-    def __init__(self, return_address, local_env, self_context=None):
+    def __init__(self, return_address, local_env, self_context=None, is_init=False, pending_action=None):
         self.return_address = return_address
         self.locals = local_env.copy() if local_env else {}
         self.self_context = self_context
+        self.is_init = is_init
+        self.pending_action = pending_action  # Action to perform on return value (e.g. 'print')
 
 class VirtualMachine:
     def __init__(self, program):
@@ -92,19 +94,58 @@ class VirtualMachine:
             elif opcode == OpCode.ADD:
                 b = self.stack.pop()
                 a = self.stack.pop()
+                if isinstance(a, Instance):
+                    method_name = f"{a.class_name}.__add__"
+                    if method_name in self.functions:
+                        func_meta = self.functions[method_name]
+                        local_env = {}
+                        params = func_meta["params"]
+                        if len(params) > 0:
+                            p = params[0][0] if isinstance(params[0], (list, tuple)) else params[0]
+                            local_env[p] = b
+                        self.frames.append(Frame(self.ip, local_env, self_context=a))
+                        self.ip = func_meta["ip"]
+                        continue
                 self.stack.append(a + b)
             elif opcode == OpCode.SUB:
                 b = self.stack.pop()
                 a = self.stack.pop()
+                if isinstance(a, Instance):
+                    method_name = f"{a.class_name}.__sub__"
+                    if method_name in self.functions:
+                        func_meta = self.functions[method_name]
+                        local_env = {}
+                        params = func_meta["params"]
+                        if len(params) > 0:
+                            p = params[0][0] if isinstance(params[0], (list, tuple)) else params[0]
+                            local_env[p] = b
+                        self.frames.append(Frame(self.ip, local_env, self_context=a))
+                        self.ip = func_meta["ip"]
+                        continue
                 self.stack.append(a - b)
             elif opcode == OpCode.MUL:
                 b = self.stack.pop()
                 a = self.stack.pop()
+                if isinstance(a, Instance):
+                    method_name = f"{a.class_name}.__mul__"
+                    if method_name in self.functions:
+                        func_meta = self.functions[method_name]
+                        local_env = {}
+                        params = func_meta["params"]
+                        if len(params) > 0:
+                            p = params[0][0] if isinstance(params[0], (list, tuple)) else params[0]
+                            local_env[p] = b
+                        self.frames.append(Frame(self.ip, local_env, self_context=a))
+                        self.ip = func_meta["ip"]
+                        continue
                 self.stack.append(a * b)
             elif opcode == OpCode.DIV:
                 b = self.stack.pop()
                 a = self.stack.pop()
-                self.stack.append(a / b)
+                if isinstance(a, int) and isinstance(b, int):
+                    self.stack.append(a // b)
+                else:
+                    self.stack.append(a / b)
             elif opcode == OpCode.MOD:
                 b = self.stack.pop()
                 a = self.stack.pop()
@@ -112,6 +153,18 @@ class VirtualMachine:
             elif opcode == OpCode.CMP_EQ:
                 b = self.stack.pop()
                 a = self.stack.pop()
+                if isinstance(a, Instance):
+                    method_name = f"{a.class_name}.__eq__"
+                    if method_name in self.functions:
+                        func_meta = self.functions[method_name]
+                        local_env = {}
+                        params = func_meta["params"]
+                        if len(params) > 0:
+                            p = params[0][0] if isinstance(params[0], (list, tuple)) else params[0]
+                            local_env[p] = b
+                        self.frames.append(Frame(self.ip, local_env, self_context=a))
+                        self.ip = func_meta["ip"]
+                        continue
                 self.stack.append(a == b)
             elif opcode == OpCode.CMP_LT:
                 b = self.stack.pop()
@@ -133,6 +186,17 @@ class VirtualMachine:
                 b = self.stack.pop()
                 a = self.stack.pop()
                 self.stack.append(a != b)
+            elif opcode == OpCode.AND:
+                b = self.stack.pop()
+                a = self.stack.pop()
+                self.stack.append(a and b)
+            elif opcode == OpCode.OR:
+                b = self.stack.pop()
+                a = self.stack.pop()
+                self.stack.append(a or b)
+            elif opcode == OpCode.NOT:
+                a = self.stack.pop()
+                self.stack.append(not a)
             elif opcode == OpCode.JUMP:
                 self.ip = arg
             elif opcode == OpCode.JUMP_IF_FALSE:
@@ -141,7 +205,16 @@ class VirtualMachine:
                     self.ip = arg
             elif opcode == OpCode.PRINT:
                 val = self.stack.pop()
-                if isinstance(val, bytearray):
+                if isinstance(val, Instance):
+                    method_name = f"{val.class_name}.__str__"
+                    if method_name in self.functions:
+                        func_meta = self.functions[method_name]
+                        self.frames.append(Frame(self.ip, {}, self_context=val, pending_action='print'))
+                        self.ip = func_meta["ip"]
+                        continue
+                    else:
+                        print(f"<{val.class_name} instance>")
+                elif isinstance(val, bytearray):
                     print(val.decode('utf-8'))
                 else:
                     print(val)
@@ -169,6 +242,12 @@ class VirtualMachine:
                 base = self.stack.pop()
                 if isinstance(base, bytearray):
                     self.stack.append(bytearray([base[index]]))
+                elif isinstance(base, dict):
+                    if isinstance(index, bytearray):
+                        index = index.decode('utf-8')
+                    if index not in base:
+                        raise Exception(f"KeyError: {index} not found in dictionary")
+                    self.stack.append(base[index])
                 else:
                     self.stack.append(base[index])
             elif opcode == OpCode.STORE_INDEX:
@@ -186,8 +265,27 @@ class VirtualMachine:
                         base[index] = val[0]
                     else:
                         base[index] = val
+                elif isinstance(base, dict):
+                    if isinstance(index, bytearray):
+                        index = index.decode('utf-8')
+                    base[index] = val
                 else:
                     base[index] = val
+            elif opcode == OpCode.NEW_LIST:
+                elements = []
+                for _ in range(arg):
+                    elements.append(self.stack.pop())
+                elements.reverse()
+                self.stack.append(elements)
+            elif opcode == OpCode.BUILD_DICT:
+                d = {}
+                for _ in range(arg):
+                    k = self.stack.pop()
+                    v = self.stack.pop()
+                    if isinstance(k, bytearray):
+                        k = k.decode('utf-8')
+                    d[k] = v
+                self.stack.append(d)
             elif opcode == OpCode.SIZEOF:
                 val = self.stack.pop()
                 if isinstance(val, int) and val in self.allocations: # It's a pointer
@@ -203,7 +301,16 @@ class VirtualMachine:
                     self.stack.append(4) # default
             elif opcode == OpCode.LEN:
                 val = self.stack.pop()
-                if isinstance(val, (str, bytearray, list)):
+                if isinstance(val, Instance):
+                    method_name = f"{val.class_name}.__len__"
+                    if method_name in self.functions:
+                        func_meta = self.functions[method_name]
+                        self.frames.append(Frame(self.ip, {}, self_context=val))
+                        self.ip = func_meta["ip"]
+                        continue
+                    else:
+                        raise Exception(f"len() not defined for {val.class_name}")
+                elif isinstance(val, (str, bytearray, list)):
                     self.stack.append(len(val))
                 else:
                     raise Exception("len() applied to invalid type")
@@ -305,6 +412,44 @@ class VirtualMachine:
                     self.stack.append(result)
                     continue
 
+                if isinstance(instance, list):
+                    if method_name == "append":
+                        instance.append(args[0])
+                        self.stack.append(0)
+                    elif method_name == "pop":
+                        self.stack.append(instance.pop() if len(instance) > 0 else 0)
+                    elif method_name == "insert":
+                        instance.insert(args[0], args[1])
+                        self.stack.append(0)
+                    elif method_name == "clear":
+                        instance.clear()
+                        self.stack.append(0)
+                    else:
+                        raise Exception(f"List method {method_name} not supported")
+                    continue
+
+                if isinstance(instance, dict):
+                    if method_name == "has":
+                        k = args[0]
+                        if isinstance(k, bytearray):
+                            k = k.decode('utf-8')
+                        self.stack.append(k in instance)
+                    elif method_name == "remove":
+                        k = args[0]
+                        if isinstance(k, bytearray):
+                            k = k.decode('utf-8')
+                        if k in instance:
+                            del instance[k]
+                        self.stack.append(0)
+                    elif method_name == "keys":
+                        keys = [bytearray(k.encode('utf-8')) if isinstance(k, str) else k for k in instance.keys()]
+                        self.stack.append(keys)
+                    elif method_name == "values":
+                        self.stack.append(list(instance.values()))
+                    else:
+                        raise Exception(f"Dict method {method_name} not supported")
+                    continue
+
                 full_name = f"{instance.class_name}.{method_name}"
                 if full_name not in self.functions:
                     raise Exception(f"Method {full_name} not found")
@@ -314,7 +459,8 @@ class VirtualMachine:
 
                 local_env = {}
                 for i, param in enumerate(func_meta["params"]):
-                    local_env[param] = args[i] if i < len(args) else 0
+                    param_name = param[0] if isinstance(param, (list, tuple)) else param
+                    local_env[param_name] = args[i] if i < len(args) else 0
 
                 self.frames.append(Frame(self.ip, local_env, self_context=instance))
                 self.ip = func_meta["ip"]
@@ -376,6 +522,23 @@ class VirtualMachine:
                 result = func(*ctypes_args)
                 self.stack.append(result)
 
+            elif opcode == OpCode.STR_CONVERT:
+                val = self.stack.pop()
+                if isinstance(val, Instance):
+                    method_name = f"{val.class_name}.__str__"
+                    if method_name in self.functions:
+                        func_meta = self.functions[method_name]
+                        self.frames.append(Frame(self.ip, {}, self_context=val))
+                        self.ip = func_meta["ip"]
+                        continue
+                    else:
+                        self.stack.append(bytearray(f"<{val.class_name} instance>".encode('utf-8')))
+                elif isinstance(val, bytearray):
+                    self.stack.append(val)  # Already a string
+                elif isinstance(val, bool):
+                    self.stack.append(bytearray(str(val).lower().encode('utf-8')))
+                else:
+                    self.stack.append(bytearray(str(val).encode('utf-8')))
             elif opcode == OpCode.CALL:
                 func_name, num_args = arg
                 args = [self.stack.pop() for _ in range(num_args)]
@@ -384,9 +547,20 @@ class VirtualMachine:
                 # Check if it's actually a class or struct instantiation
                 if func_name in self.classes:
                     instance = Instance(func_name)
-                    # We would call __init__ here if it existed properly mapped.
-                    # For now we'll just push the instance. The user manually calls init.
-                    self.stack.append(instance)
+                    # Auto-call __init__ if it exists and args were provided
+                    init_name = f"{func_name}.__init__"
+                    if init_name in self.functions:
+                        func_meta = self.functions[init_name]
+                        local_env = {}
+                        for i, param in enumerate(func_meta["params"]):
+                            param_name = param[0] if isinstance(param, (list, tuple)) else param
+                            local_env[param_name] = args[i] if i < len(args) else 0
+                        # Push instance first (it will be the return value after __init__)
+                        self.stack.append(instance)
+                        self.frames.append(Frame(self.ip, local_env, self_context=instance, is_init=True))
+                        self.ip = func_meta["ip"]
+                    else:
+                        self.stack.append(instance)
                     continue
 
                 if func_name not in self.functions:
@@ -396,7 +570,8 @@ class VirtualMachine:
                 func_meta = self.functions[func_name]
                 local_env = {}
                 for i, param in enumerate(func_meta["params"]):
-                    local_env[param] = args[i] if i < len(args) else 0
+                    param_name = param[0] if isinstance(param, (list, tuple)) else param
+                    local_env[param_name] = args[i] if i < len(args) else 0
 
                 self.frames.append(Frame(self.ip, local_env))
                 self.ip = func_meta["ip"]
@@ -407,6 +582,19 @@ class VirtualMachine:
                     # ARC: when a frame pops, release all locals
                     for val in frame.locals.values():
                         self.release(val)
+
+                    # If returning from __init__, discard the return value
+                    # (the instance is already on the stack below it)
+                    if frame.is_init:
+                        self.stack.pop()  # Discard __init__'s return value (usually 0)
+
+                    # Execute pending action on the return value
+                    if frame.pending_action == 'print':
+                        ret_val = self.stack.pop()
+                        if isinstance(ret_val, bytearray):
+                            print(ret_val.decode('utf-8'))
+                        else:
+                            print(ret_val)
 
                     self.ip = frame.return_address
                 else:

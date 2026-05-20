@@ -1,0 +1,481 @@
+# ============================================================
+# Nova Self-Hosted Parser (stdlib/parser.nv)
+# ============================================================
+
+import lexer
+
+data AstNode {
+    kind: string
+    val_int: int
+    val_str: string
+    left: AstNode
+    right: AstNode
+    cond: AstNode
+    body: list
+    else_body: list
+    params: list
+    args: list
+    is_mut: int
+}
+
+data ParserState {
+    tokens: list
+    pos: int
+}
+
+def current_tok(state: ParserState) -> Token {
+    if state.pos < len(state.tokens) {
+        return state.tokens[state.pos]
+    }
+    mut t = Token()
+    t.kind = "EOF"
+    t.val = ""
+    return t
+}
+
+def eat_tok(state: ParserState, expected_kind: string) -> Token {
+    mut tok = current_tok(state)
+    if tok.kind == expected_kind {
+        state.pos = state.pos + 1
+        return tok
+    }
+    print("Parser Error: expected " + expected_kind + " but got " + tok.kind)
+    return tok
+}
+
+# ---------------- EXPRESSIONS ----------------
+
+def parse_primary(state: ParserState) -> AstNode {
+    mut tok = current_tok(state)
+    mut node = AstNode()
+    
+    if tok.kind == "NUMBER" {
+        eat_tok(state, "NUMBER")
+        node.kind = "Number"
+        node.val_int = atoi(tok.val)
+    } else {
+        if tok.kind == "STRING" {
+            eat_tok(state, "STRING")
+            node.kind = "String"
+            node.val_str = tok.val
+        } else {
+            if tok.kind == "TRUE" {
+                eat_tok(state, "TRUE")
+                node.kind = "Boolean"
+                node.val_int = 1
+            } else {
+                if tok.kind == "FALSE" {
+                    eat_tok(state, "FALSE")
+                    node.kind = "Boolean"
+                    node.val_int = 0
+                } else {
+                    if tok.kind == "IDENT" {
+                        eat_tok(state, "IDENT")
+                        mut next_tok = current_tok(state)
+                        if next_tok.kind == "LPAREN" {
+                            eat_tok(state, "LPAREN")
+                            node.kind = "Call"
+                            node.val_str = tok.val
+                            node.args = []
+                            mut check = current_tok(state)
+                            if check.kind != "RPAREN" {
+                                node.args.append(parse_expr(state))
+                                check = current_tok(state)
+                                while check.kind == "COMMA" {
+                                    eat_tok(state, "COMMA")
+                                    node.args.append(parse_expr(state))
+                                    check = current_tok(state)
+                                }
+                            }
+                            eat_tok(state, "RPAREN")
+                        } else {
+                            node.kind = "Variable"
+                            node.val_str = tok.val
+                        }
+                    } else {
+                        print("Parser Error: unexpected token in primary: " + tok.kind)
+                        state.pos = state.pos + 1
+                    }
+                }
+            }
+        }
+    }
+    
+    # Handle array index or property access
+    mut loop = 1
+    while loop == 1 {
+        mut next_tok = current_tok(state)
+        if next_tok.kind == "LBRACK" {
+            eat_tok(state, "LBRACK")
+            mut index_node = parse_expr(state)
+            eat_tok(state, "RBRACK")
+            
+            mut assign_tok = current_tok(state)
+            if assign_tok.kind == "EQUALS" {
+                eat_tok(state, "EQUALS")
+                mut val_node = parse_expr(state)
+                mut array_assign = AstNode()
+                array_assign.kind = "ArrayIndexAssign"
+                array_assign.left = node  # base
+                array_assign.right = index_node # index
+                array_assign.cond = val_node # value
+                node = array_assign
+                return node
+            } else {
+                mut array_node = AstNode()
+                array_node.kind = "ArrayIndex"
+                array_node.left = node # base
+                array_node.right = index_node # index
+                node = array_node
+            }
+        } else {
+            loop = 0
+        }
+    }
+    
+    return node
+}
+
+def parse_unary(state: ParserState) -> AstNode {
+    mut tok = current_tok(state)
+    if tok.kind == "MINUS" or tok.kind == "NOT" {
+        eat_tok(state, tok.kind)
+        mut node = AstNode()
+        node.kind = "UnaryOp"
+        node.val_str = tok.val
+        node.left = parse_unary(state)
+        return node
+    }
+    return parse_primary(state)
+}
+
+def parse_mul(state: ParserState) -> AstNode {
+    mut left = parse_unary(state)
+    mut loop = 1
+    while loop == 1 {
+        mut tok = current_tok(state)
+        if tok.kind == "STAR" or tok.kind == "SLASH" or tok.kind == "PERCENT" {
+            eat_tok(state, tok.kind)
+            mut right = parse_unary(state)
+            mut node = AstNode()
+            node.kind = "BinOp"
+            node.val_str = tok.val
+            node.left = left
+            node.right = right
+            left = node
+        } else {
+            loop = 0
+        }
+    }
+    return left
+}
+
+def parse_add(state: ParserState) -> AstNode {
+    mut left = parse_mul(state)
+    mut loop = 1
+    while loop == 1 {
+        mut tok = current_tok(state)
+        if tok.kind == "PLUS" or tok.kind == "MINUS" {
+            eat_tok(state, tok.kind)
+            mut right = parse_mul(state)
+            mut node = AstNode()
+            node.kind = "BinOp"
+            node.val_str = tok.val
+            node.left = left
+            node.right = right
+            left = node
+        } else {
+            loop = 0
+        }
+    }
+    return left
+}
+
+def parse_compare(state: ParserState) -> AstNode {
+    mut left = parse_add(state)
+    mut loop = 1
+    while loop == 1 {
+        mut tok = current_tok(state)
+        if tok.kind == "EQEQ" or tok.kind == "NOTEQ" or tok.kind == "LT" or tok.kind == "GT" or tok.kind == "LE" or tok.kind == "GE" {
+            eat_tok(state, tok.kind)
+            mut right = parse_add(state)
+            mut node = AstNode()
+            node.kind = "Compare"
+            node.val_str = tok.val
+            node.left = left
+            node.right = right
+            left = node
+        } else {
+            loop = 0
+        }
+    }
+    return left
+}
+
+def parse_logic(state: ParserState) -> AstNode {
+    mut left = parse_compare(state)
+    mut loop = 1
+    while loop == 1 {
+        mut tok = current_tok(state)
+        if tok.kind == "AND" or tok.kind == "OR" {
+            eat_tok(state, tok.kind)
+            mut right = parse_compare(state)
+            mut node = AstNode()
+            node.kind = "BinOp"
+            node.val_str = tok.val
+            node.left = left
+            node.right = right
+            left = node
+        } else {
+            loop = 0
+        }
+    }
+    return left
+}
+
+def parse_expr(state: ParserState) -> AstNode {
+    return parse_logic(state)
+}
+
+# ---------------- STATEMENTS ----------------
+
+def parse_block(state: ParserState) -> list {
+    eat_tok(state, "LBRACE")
+    mut body = []
+    mut loop = 1
+    while loop == 1 {
+        mut tok = current_tok(state)
+        if tok.kind == "RBRACE" or tok.kind == "EOF" {
+            loop = 0
+        } else {
+            mut stmt = parse_statement(state)
+            if stmt.kind != "NONE" {
+                body.append(stmt)
+            }
+        }
+    }
+    eat_tok(state, "RBRACE")
+    return body
+}
+
+def parse_statement(state: ParserState) -> AstNode {
+    mut tok = current_tok(state)
+    
+    if tok.kind == "PRINT" {
+        eat_tok(state, "PRINT")
+        eat_tok(state, "LPAREN")
+        mut expr = parse_expr(state)
+        eat_tok(state, "RPAREN")
+        mut node = AstNode()
+        node.kind = "Print"
+        node.left = expr
+        return node
+    }
+    
+    if tok.kind == "IF" {
+        eat_tok(state, "IF")
+        mut cond = parse_expr(state)
+        mut then_body = parse_block(state)
+        mut else_body = []
+        mut next_tok = current_tok(state)
+        if next_tok.kind == "ELSE" {
+            eat_tok(state, "ELSE")
+            else_body = parse_block(state)
+        }
+        mut node = AstNode()
+        node.kind = "IfElse"
+        node.cond = cond
+        node.body = then_body
+        node.else_body = else_body
+        return node
+    }
+    
+    if tok.kind == "WHILE" {
+        eat_tok(state, "WHILE")
+        mut cond = parse_expr(state)
+        mut body = parse_block(state)
+        mut node = AstNode()
+        node.kind = "While"
+        node.cond = cond
+        node.body = body
+        return node
+    }
+
+    if tok.kind == "FOR" {
+        eat_tok(state, "FOR")
+        mut var_name = eat_tok(state, "IDENT").val
+        eat_tok(state, "EQUALS")
+        mut start_expr = parse_expr(state)
+        mut is_downto = 0
+        mut next_tok = current_tok(state)
+        if next_tok.kind == "DOWNTO" {
+            eat_tok(state, "DOWNTO")
+            is_downto = 1
+        } else {
+            eat_tok(state, "TO")
+        }
+        mut end_expr = parse_expr(state)
+        
+        mut step_expr = AstNode()
+        step_expr.kind = "Number"
+        step_expr.val_int = 1
+        
+        next_tok = current_tok(state)
+        if next_tok.kind == "STEP" {
+            eat_tok(state, "STEP")
+            step_expr = parse_expr(state)
+        }
+        
+        mut body = parse_block(state)
+        
+        mut node = AstNode()
+        node.kind = "ForLoop"
+        node.val_str = var_name
+        node.val_int = is_downto
+        node.left = start_expr
+        node.right = end_expr
+        node.cond = step_expr
+        node.body = body
+        return node
+    }
+
+    if tok.kind == "BREAK" {
+        eat_tok(state, "BREAK")
+        mut node = AstNode()
+        node.kind = "Break"
+        return node
+    }
+    if tok.kind == "CONTINUE" {
+        eat_tok(state, "CONTINUE")
+        mut node = AstNode()
+        node.kind = "Continue"
+        return node
+    }
+    
+    if tok.kind == "RETURN" {
+        eat_tok(state, "RETURN")
+        mut expr = parse_expr(state)
+        mut node = AstNode()
+        node.kind = "Return"
+        node.left = expr
+        return node
+    }
+
+    if tok.kind == "DEF" {
+        eat_tok(state, "DEF")
+        mut name = eat_tok(state, "IDENT").val
+        eat_tok(state, "LPAREN")
+        mut params = []
+        mut check = current_tok(state)
+        if check.kind != "RPAREN" {
+            params.append(eat_tok(state, "IDENT").val)
+            check = current_tok(state)
+            if check.kind == "COLON" {
+                eat_tok(state, "COLON")
+                eat_tok(state, current_tok(state).kind) # skip type
+            }
+            check = current_tok(state)
+            while check.kind == "COMMA" {
+                eat_tok(state, "COMMA")
+                params.append(eat_tok(state, "IDENT").val)
+                check = current_tok(state)
+                if check.kind == "COLON" {
+                    eat_tok(state, "COLON")
+                    eat_tok(state, current_tok(state).kind) # skip type
+                }
+                check = current_tok(state)
+            }
+        }
+        eat_tok(state, "RPAREN")
+        
+        mut check_arrow = current_tok(state)
+        if check_arrow.kind == "ARROW" {
+            eat_tok(state, "ARROW")
+            eat_tok(state, current_tok(state).kind) # skip return type
+        }
+        
+        mut body = parse_block(state)
+        mut node = AstNode()
+        node.kind = "Function"
+        node.val_str = name
+        node.params = params
+        node.body = body
+        return node
+    }
+
+    # Assignment or standalone expr
+    mut is_mut = 0
+    if tok.kind == "MUT" {
+        eat_tok(state, "MUT")
+        is_mut = 1
+    }
+    
+    mut expr = parse_expr(state)
+    mut next_tok = current_tok(state)
+    if next_tok.kind == "EQUALS" {
+        eat_tok(state, "EQUALS")
+        mut val_expr = parse_expr(state)
+        if expr.kind == "Variable" {
+            mut node = AstNode()
+            node.kind = "Assignment"
+            node.val_str = expr.val_str
+            node.is_mut = is_mut
+            node.left = val_expr
+            return node
+        }
+    }
+    
+    return expr
+}
+
+def parse(tokens: list) -> list {
+    mut state = ParserState()
+    state.tokens = tokens
+    state.pos = 0
+    mut program = []
+    
+    mut loop = 1
+    while loop == 1 {
+        mut tok = current_tok(state)
+        if tok.kind == "EOF" {
+            loop = 0
+        } else {
+            mut stmt = parse_statement(state)
+            if stmt.kind != "NONE" {
+                program.append(stmt)
+            }
+        }
+    }
+    
+    return program
+}
+
+# --- Utility: atoi ---
+def atoi(s: string) -> int {
+    mut val = 0
+    mut i = 0
+    mut sign = 1
+    if len(s) > 0 {
+        if s[0] == "-" {
+            sign = -1
+            i = 1
+        }
+    }
+    while i < len(s) {
+        mut ch = s[i]
+        mut digit = 0
+        if ch == "0" { digit = 0 }
+        if ch == "1" { digit = 1 }
+        if ch == "2" { digit = 2 }
+        if ch == "3" { digit = 3 }
+        if ch == "4" { digit = 4 }
+        if ch == "5" { digit = 5 }
+        if ch == "6" { digit = 6 }
+        if ch == "7" { digit = 7 }
+        if ch == "8" { digit = 8 }
+        if ch == "9" { digit = 9 }
+        val = val * 10 + digit
+        i = i + 1
+    }
+    return val * sign
+}

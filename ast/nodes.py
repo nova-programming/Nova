@@ -49,13 +49,14 @@ class Compare:
         return f"Compare({self.left}, '{self.op}', {self.right})"
 
 class Assignment:
-    def __init__(self, name, value, type_name=None, is_mut=False):
+    def __init__(self, name, value, type_name=None, is_mut=False, is_const=False):
         self.name = name
         self.value = value
         self.type_name = type_name
         self.is_mut = is_mut
+        self.is_const = is_const
     def __repr__(self):
-        return f"Assignment('{self.name}', {self.value}, type={self.type_name}, mut={self.is_mut})"
+        return f"Assignment('{self.name}', {self.value}, type={self.type_name}, mut={self.is_mut}, const={self.is_const})"
 
 class Print:
     def __init__(self, value):
@@ -246,6 +247,12 @@ class Len:
     def __repr__(self):
         return f"Len({self.target})"
 
+class StrConvert:
+    def __init__(self, target):
+        self.target = target
+    def __repr__(self):
+        return f"StrConvert({self.target})"
+
 class ClassDef:
     def __init__(self, name, methods, fields):
         self.name = name
@@ -320,3 +327,16 @@ class ForLoop:
         self.is_downto = is_downto
     def __repr__(self):
         return f"ForLoop('{self.var_name}', {self.start}, {self.end}, {self.step}, {self.body})"
+
+class ListLiteral:
+    def __init__(self, elements):
+        self.elements = elements
+    def __repr__(self):
+        return f"ListLiteral({self.elements})"
+
+class DictLiteral:
+    def __init__(self, keys, values):
+        self.keys = keys
+        self.values = values
+    def __repr__(self):
+        return f"DictLiteral({self.keys}, {self.values})"

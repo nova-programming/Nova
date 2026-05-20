@@ -3,20 +3,19 @@
 import re
 
 TOKEN_SPEC = [
-    # Literals
-    ("NUMBER",   r"\d+"),
+    # Literals (FLOAT must come before NUMBER so 3.14 isn't split)
     ("FLOAT",    r"\d+\.\d+"),
-    ("STRING",   r'"[^"]*"'),
+    ("NUMBER",   r"\d+"),
+    ("STRING",   r'"(?:[^"\\]|\\.)*"'),
     ("TRUE",     r"true\b"),
     ("FALSE",    r"false\b"),
     ("NULL",     r"null\b"),
 
     # Keywords
-    ("CLASS",    r"class\b"), 
+    ("CLASS",    r"class\b"),
     ("PRINT",    r"print\b"),
     ("DEF",      r"def\b"),
     ("DATA",     r"data\b"),
-    ("CLASS",    r"class\b"),
     ("SELF",     r"self\b"),
     ("SIZEOF",   r"sizeof\b"),
     ("LEN",      r"len\b"),
@@ -37,6 +36,7 @@ TOKEN_SPEC = [
     ("NOT",      r"not\b"),
     ("BREAK",    r"break\b"),
     ("CONTINUE", r"continue\b"),
+    ("FROM",     r"from\b"),
     ("IMPORT",   r"import\b"),
     ("AS",       r"as\b"),
     ("ALLOC",    r"alloc\b"),
@@ -52,6 +52,8 @@ TOKEN_SPEC = [
     ("TYPE_BOOL",   r"bool\b"),
     ("TYPE_STRING", r"string\b"),
     ("MUT",         r"mut\b"),
+    ("CONST",       r"const\b"),
+    ("STR",         r"str\b"),
 
     # Identifiers
     ("IDENT",    r"[a-zA-Z_][a-zA-Z0-9_]*"),
@@ -88,7 +90,7 @@ TOKEN_SPEC = [
     # Formatting & Metadata
     ("NEWLINE",  r"\n"),
     ("COMMENT",  r"\#.*"),
-    ("SKIP",     r"[ \t]+"),
+    ("SKIP",     r"[ \t\r]+"),
     ("MISMATCH", r"."),
 ]
 

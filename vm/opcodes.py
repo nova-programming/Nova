@@ -67,3 +67,8 @@ class OpCode(Enum):
     STORE_ATTR = auto()   # Store property to object
     CALL_METHOD = auto()  # Call method on object
     LOAD_SELF = auto()    # Load 'self' context
+    NEW_LIST = auto()     # Create a new dynamic list
+    STR_CONVERT = auto()  # Convert value to string
+
+    # Dictionaries
+    BUILD_DICT = auto()

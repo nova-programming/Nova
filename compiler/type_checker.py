@@ -1,13 +1,17 @@
 from ast.nodes import *
 
+
 class StaticTypeError(Exception):
     pass
+
 
 class TypeChecker:
     def __init__(self):
         self.env_stack = [{}]
         self.functions = {}
         self.current_function_return_type = None
+        self.in_raw = False  # Track if we're inside a @raw block
+        self.const_vars = set()  # Track const variable names
 
     def push_env(self):
         self.env_stack.append({})
@@ -19,7 +23,10 @@ class TypeChecker:
         if node is None:
             return "any"
         if hasattr(self, f"visit_{type(node).__name__}"):
-            return getattr(self, f"visit_{type(node).__name__}")(node)
+            t = getattr(self, f"visit_{type(node).__name__}")(node)
+            node.inferred_type = t
+            return t
+        node.inferred_type = "any"
         return "any"
 
     def check(self, ast):
@@ -46,6 +53,16 @@ class TypeChecker:
 
     def visit_Assignment(self, node):
         t = self.visit(node.value)
+
+        # Check for const reassignment
+        if not node.is_const and not node.is_mut:
+            if node.name in self.const_vars:
+                raise StaticTypeError(f"Cannot reassign const variable '{node.name}'")
+
+        # Track const variables
+        if node.is_const:
+            self.const_vars.add(node.name)
+
         if node.is_mut:
             self.env_stack[-1][node.name] = "dyn"
         else:
@@ -67,6 +84,9 @@ class TypeChecker:
             if node.name in env:
                 return env[node.name]
         return "any"
+
+    def visit_UnaryOp(self, node):
+        return self.visit(node.value)
 
     def visit_BinOp(self, node):
         left_t = self.visit(node.left)
@@ -158,3 +178,129 @@ class TypeChecker:
 
     def visit_Print(self, node):
         self.visit(node.value)
+
+    def visit_Import(self, node):
+        # Import type checking is a no-op; the compiler handles resolution
+        pass
+
+    def visit_RawBlock(self, node):
+        # Enter @raw context — unsafe operations allowed
+        prev_raw = self.in_raw
+        self.in_raw = True
+        for stmt in node.body:
+            self.visit(stmt)
+        self.in_raw = prev_raw
+
+    def visit_Export(self, node):
+        # Export is handled inside @raw blocks
+        pass
+
+    def visit_Data(self, node):
+        # Data struct definitions are type-checked passively
+        pass
+
+    def visit_Compare(self, node):
+        self.visit(node.left)
+        self.visit(node.right)
+        return "bool"
+
+    def visit_UnaryOp(self, node):
+        return self.visit(node.value)
+
+    def visit_DataFieldAssign(self, node):
+        self.visit(node.instance)
+        return self.visit(node.value)
+
+    def visit_DataFieldAccess(self, node):
+        self.visit(node.instance)
+        return "any"
+
+    def visit_LoadLib(self, node):
+        pass
+
+    def visit_Alloc(self, node):
+        if not self.in_raw:
+            raise StaticTypeError("alloc() is only available inside @raw blocks")
+        self.visit(node.size)
+        return "any"
+
+    def visit_Free(self, node):
+        if not self.in_raw:
+            raise StaticTypeError("free() is only available inside @raw blocks")
+        self.visit(node.ptr)
+
+    def visit_PointerProperty(self, node):
+        if not self.in_raw:
+            raise StaticTypeError("Pointer operations are only available inside @raw blocks")
+        self.visit(node.ptr)
+        return "any"
+
+    def visit_PointerAssign(self, node):
+        if not self.in_raw:
+            raise StaticTypeError("Pointer operations are only available inside @raw blocks")
+        self.visit(node.ptr)
+        self.visit(node.value)
+
+    def visit_ArrayIndex(self, node):
+        self.visit(node.base)
+        self.visit(node.index)
+        return "any"
+
+    def visit_ArrayIndexAssign(self, node):
+        self.visit(node.base)
+        self.visit(node.index)
+        self.visit(node.value)
+
+    def visit_SizeOf(self, node):
+        self.visit(node.target)
+        return "int"
+
+    def visit_Len(self, node):
+        self.visit(node.target)
+        return "int"
+
+    def visit_StrConvert(self, node):
+        self.visit(node.target)
+        return "string"
+
+    def visit_OpenFile(self, node):
+        self.visit(node.path)
+        self.visit(node.mode)
+        return "int"
+
+    def visit_ReadFile(self, node):
+        self.visit(node.fd)
+        return "string"
+
+    def visit_WriteFile(self, node):
+        self.visit(node.fd)
+        self.visit(node.content)
+
+    def visit_CloseFile(self, node):
+        self.visit(node.fd)
+
+    def visit_Self(self, node):
+        return "any"
+
+    def visit_Break(self, node):
+        pass
+
+    def visit_Continue(self, node):
+        pass
+
+    def visit_ListLiteral(self, node):
+        for element in node.elements:
+            self.visit(element)
+        return "any"
+
+    def visit_DictLiteral(self, node):
+        for k, v in zip(node.keys, node.values):
+            self.visit(k)
+            self.visit(v)
+        return "any"
+
+    def visit_Assignment(self, node):
+        return "any"
+
+    def visit_DataInstance(self, node):
+        return "any"
