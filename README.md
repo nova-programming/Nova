@@ -1,6 +1,6 @@
 # Nova Programming Language
 
-A language that bridges high-level simplicity with low-level control.
+A language that bridges high-level Pythonic simplicity with low-level C-like control. Nova empowers developers by removing cryptic syntax (like `*` or `&` for pointers), integrating high-level Automatic Reference Counting (ARC) alongside manual memory management blocks, and compiling down to a custom high-performance Virtual Machine.
 
 ## Installation
 
@@ -9,76 +9,82 @@ A language that bridges high-level simplicity with low-level control.
 git clone https://github.com/laksh-goyal22/Nova.git
 cd Nova
 
-# Install dependencies
-pip install llvmlite
-
-# Ensure clang is installed (for LLVM)
-# On Windows: download LLVM from https://releases.llvm.org/
-# On Linux: sudo apt-get install clang
-# On Mac: brew install llvm
+# The compiler runs on standard Python 3. No external C++ or LLVM dependencies required!
 ```
 
 ## Usage
 ```bash
 # Run a Nova program
-.\nova run program.nv
+python main.py run program.nv
+```
 
-# Build only (generate LLVM IR)
-.\nova build program.nv
-Example
-nova
-def fibonacci(n) {
-    a = 0
-    b = 1
-    i = 0
-    while i < n {
-        temp = a
-        a = b
-        b = temp + b
-        i = i + 1
+## Example (High-Level and Low-Level Combined)
+```nova
+data Point {
+    x: int
+    y: int
+}
+
+class SystemMonitor {
+    name
+    version
+
+    def init(monitorName, v) {
+        self.name = monitorName
+        self.version = v
+        print("Initialized:")
+        print(self.name)
     }
-    return a
+
+    def checkMemory() {
+        @raw {
+            # Low Level C-like memory control
+            import "c" as libc
+            libc.puts("Running FFI inside Nova!")
+
+            mem_ptr = alloc(8)
+            print(sizeof(mem_ptr)) # Returns bytes allocated
+
+            mem_ptr.value = 99
+            free(mem_ptr)
+        }
+    }
 }
 
-i = 0
-while i < 10 {
-    print(fibonacci(i))
-    i = i + 1
-}
-
+monitor = SystemMonitor()
+monitor.init("NovaCore", 1)
+monitor.checkMemory()
 ```
 
 ## Language Features
 - ✅ Variables and expressions
 - ✅ Functions with parameters
-- ✅ While loops
-- ✅ For loops
+- ✅ While & For loops
 - ✅ If-else conditionals
 - ✅ Print statement
 - ✅ Raw memory allocation (`alloc`, `free`)
 - ✅ Data structures (`data` blocks)
 - ✅ Low-level / High-level bridge (`@raw` and `@export`)
-- ✅ Classes and Objects
+- ✅ Classes and Objects (OOP with `self`)
+- ✅ Seamless C Interoperability (FFI via `import`)
+- ✅ High-Level Automatic Reference Counting (ARC) Memory Model
+- ✅ Custom Bytecode Virtual Machine Backend
 - 🔄 Arrays/Lists (planned)
 
-## Future Roadmap: Top 5 Paths
+## Architecture Details
 
-1. **Custom Compiler Backend (Independence):** Remove dependencies on Python and LLVM by writing a custom compiler backend directly in Nova or C/Rust. This will generate machine code directly or a custom VM bytecode, achieving total independence.
-2. **Advanced OOP & Type System:** Expand current Classes and Objects to support inheritance, interfaces, and methods. Implement a robust type checker for static typing guarantees, including type inference.
-3. **Comprehensive Standard Library:** Build out a rich standard library natively in Nova, including file I/O, networking, and common data structures (HashMaps, Arrays/Lists).
-4. **C Interoperability (FFI):** Leverage the `@raw` blocks to build a seamless Foreign Function Interface (FFI) for linking and using C libraries directly without complex wrappers.
-5. **Memory Management Improvements:** Introduce a hybrid memory management model (e.g., optional garbage collection for high-level objects, while retaining manual `alloc`/`free` for `@raw` low-level blocks).
+To understand the core mechanics and reasoning behind Nova's keywords, please see:
+* [ROADMAP.md](ROADMAP.md) - The future plans and logic for language features.
+* [KEYWORDS_AND_LOGIC.md](KEYWORDS_AND_LOGIC.md) - Detailed breakdown of every keyword's backend logic and usage intent.
 
 ## Project Structure
 ```
 nova/
-├── ast/        # Abstract Syntax Tree
-├── lexer/      # Tokenizer
-├── parser/     # Parser
-├── codegen/    # LLVM Code Generator
+├── ast/        # Abstract Syntax Tree Nodes
+├── lexer/      # Tokenizer and Regex definitions
+├── parser/     # Recursive Descent Parser
+├── vm/         # Custom Bytecode Compiler & Virtual Machine
 ├── main.py     # Entry point
-└── nova.bat    # Runner script
-
 ```
 
 ## License
