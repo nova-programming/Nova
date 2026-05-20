@@ -1,3 +1,134 @@
-x = y + z
+data Point {
+    x: int
+    y: int
+}
 
-print(test)
+class SystemMonitor {
+    name: string
+    version: int
+
+    def init(monitorName: string, v: int) {
+        self.name = monitorName
+        self.version = v
+        print("SystemMonitor Initialized:")
+        print(self.name)
+        print(self.version)
+    }
+
+    def checkMemory(iterations: int) {
+        print("Starting Memory Test...")
+        # Nested loops and conditions
+        for i = 1 to iterations step 1 {
+            if i % 2 == 0 {
+                print("Even iteration:")
+                print(i)
+            } else {
+                print("Odd iteration:")
+                print(i)
+            }
+        }
+
+        # Testing @raw bridging and built-ins
+        print("Testing @raw block allocation:")
+        @raw {
+            # Allocating 8 bytes for two integers
+            mem_ptr = alloc(8)
+
+            print("Bytes allocated:")
+            print(sizeof(mem_ptr))
+
+            # Writing values to memory using pointer properties
+            mem_ptr.value = 99
+
+            print("Value in memory:")
+            print(mem_ptr.value)
+
+            print("Freeing memory...")
+            free(mem_ptr)
+        }
+
+        # Testing data structs
+        @raw {
+            p = Point()
+            print("Point struct allocated successfully.")
+        }
+    }
+}
+
+def loadFFI() {
+    print("Testing FFI...")
+    @raw {
+        import "c" as libc
+        libc.puts("Hello from C FFI via libc!")
+    }
+}
+
+def fibonacci(n: int) -> int {
+    if n <= 1 {
+        return n
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2)
+}
+
+def test_types_and_mutability() {
+    print("Testing Gradual Typing and Mutability...")
+
+    # Inferred static
+    x = 100
+    print("Inferred integer:")
+    print(x)
+
+    # Explicit static
+    y: int = 200
+    print("Explicit integer:")
+    print(y)
+
+    # Dynamic (mut)
+    mut dynamic_var = 500
+    print("Dynamic initially int:")
+    print(dynamic_var)
+
+    dynamic_var = "Now I am a string!"
+    print("Dynamic changed to string:")
+    print(dynamic_var)
+
+    # Mutable String Test
+    mut pet = "cat"
+    print("Original string:")
+    print(pet)
+
+    pet[0] = "b"
+    print("Mutated string:")
+    print(pet)
+
+    # Test comparison
+    if pet[0] == "b" {
+        print("Comparison check passed: pet[0] == 'b'")
+    } else {
+        print("Comparison check failed!")
+    }
+}
+
+print("=== STARTING ULTIMATE TEST ===")
+
+# Test length built-in
+word = "Nova Language Benchmark"
+print("Length of string:")
+print(len(word))
+
+# Recursion Test
+print("Fibonacci of 6:")
+print(fibonacci(6))
+
+# Gradual Typing and Mutable Strings Test
+test_types_and_mutability()
+
+# OOP and Complex Flow Test
+monitor = SystemMonitor()
+monitor.init("NovaCore", 1)
+monitor.checkMemory(3)
+
+# Test FFI
+loadFFI()
+
+print("=== TEST COMPLETE ===")

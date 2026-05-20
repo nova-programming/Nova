@@ -16,6 +16,14 @@ TOKEN_SPEC = [
     ("PRINT",    r"print\b"),
     ("DEF",      r"def\b"),
     ("DATA",     r"data\b"),
+    ("CLASS",    r"class\b"),
+    ("SELF",     r"self\b"),
+    ("SIZEOF",   r"sizeof\b"),
+    ("LEN",      r"len\b"),
+    ("OPEN",     r"open\b"),
+    ("READ",     r"read\b"),
+    ("WRITE",    r"write\b"),
+    ("CLOSE",    r"close\b"),
     ("RETURN",   r"return\b"),
     ("IF",       r"if\b"),
     ("ELSE",     r"else\b"),
@@ -43,6 +51,7 @@ TOKEN_SPEC = [
     ("TYPE_FLOAT",  r"float\b"),
     ("TYPE_BOOL",   r"bool\b"),
     ("TYPE_STRING", r"string\b"),
+    ("MUT",         r"mut\b"),
 
     # Identifiers
     ("IDENT",    r"[a-zA-Z_][a-zA-Z0-9_]*"),
@@ -57,6 +66,7 @@ TOKEN_SPEC = [
 
     # Arithmetic & Assignment Operators
     ("PLUS",     r"\+"),
+    ("ARROW",    r"->"),
     ("MINUS",    r"-"),
     ("STAR",     r"\*"),
     ("SLASH",    r"/"),
