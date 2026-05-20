@@ -1,0 +1,38 @@
+# Math utility module for Nova
+# Provides basic math functions
+
+def square(n: int) -> int {
+    return n * n
+}
+
+def cube(n: int) -> int {
+    return n * n * n
+}
+
+def abs_val(n: int) -> int {
+    if n < 0 {
+        return 0 - n
+    }
+    return n
+}
+
+def max_of(a: int, b: int) -> int {
+    if a > b {
+        return a
+    }
+    return b
+}
+
+def min_of(a: int, b: int) -> int {
+    if a < b {
+        return a
+    }
+    return b
+}
+
+def factorial(n: int) -> int {
+    if n <= 1 {
+        return 1
+    }
+    return n * factorial(n - 1)
+}

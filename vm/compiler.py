@@ -1,16 +1,21 @@
 """Custom compiler that translates AST to custom bytecode"""
 
+import os
 from .opcodes import OpCode
 from ast.nodes import *
+from modules.resolver import ModuleResolver
+
 
 class Compiler:
-    def __init__(self):
+    def __init__(self, base_dir=None):
         self.code = []       # List of (opcode, arg)
         self.constants = []  # List of constant values
         self.strings = []    # List of string literals
         self.functions = {}  # name -> starting instruction index
         self.classes = {}    # name -> ClassDef node (metadata)
         self.loop_stack = [] # Stack of (start_idx, end_jump_indices)
+        self.resolver = ModuleResolver(base_dir=base_dir)
+        self.base_dir = base_dir or os.getcwd()
 
     def add_const(self, value):
         if value in self.constants:
@@ -32,11 +37,62 @@ class Compiler:
     def patch_jump(self, idx, target):
         self.code[idx][1] = target
 
+    def compile_import(self, node):
+        """Resolve and compile a .nv module import."""
+        module_name = node.module
+        try:
+            imported_ast = self.resolver.resolve(module_name, self.base_dir)
+        except FileNotFoundError as e:
+            raise Exception(str(e))
+
+        # First pass: collect functions, classes, and data from the imported module
+        for stmt in imported_ast:
+            if isinstance(stmt, ClassDef):
+                self.classes[stmt.name] = stmt
+            elif isinstance(stmt, Data):
+                self.classes[stmt.name] = stmt
+            elif isinstance(stmt, Function):
+                self.functions[stmt.name] = {
+                    "ip": -1,
+                    "params": stmt.params
+                }
+            elif isinstance(stmt, RawBlock):
+                for raw_stmt in stmt.body:
+                    if isinstance(raw_stmt, Function):
+                        self.functions[raw_stmt.name] = {
+                            "ip": -1,
+                            "params": raw_stmt.params
+                        }
+
+        # Second pass: compile function/method bodies from the imported module
+        for stmt in imported_ast:
+            if isinstance(stmt, ClassDef):
+                for method in stmt.methods:
+                    method_name = f"{stmt.name}.{method.name}"
+                    self.functions[method_name] = {
+                        "ip": len(self.code),
+                        "params": method.params
+                    }
+                    self.compile_function_body(method)
+            elif isinstance(stmt, Function):
+                self.functions[stmt.name]["ip"] = len(self.code)
+                self.compile_function_body(stmt)
+
+        # Third pass: compile top-level statements (non-function/class) from the imported module
+        for stmt in imported_ast:
+            if not isinstance(stmt, (ClassDef, Function, Data, Import)):
+                self.compile_stmt(stmt)
+
     def compile(self, statements):
         # We start by adding a jump to main. Later, we'll patch this.
         entry_jump = self.emit(OpCode.JUMP, 0)
 
         main_start = -1
+
+        # Pre-pass: handle all imports first
+        for stmt in statements:
+            if isinstance(stmt, Import):
+                self.compile_import(stmt)
 
         # First pass: collect classes and functions metadata
         for stmt in statements:
@@ -78,21 +134,13 @@ class Compiler:
         main_start = len(self.code)
 
         for stmt in statements:
-            if not isinstance(stmt, ClassDef) and not isinstance(stmt, Function):
+            if not isinstance(stmt, (ClassDef, Function, Import)):
                 self.compile_stmt(stmt)
 
         if main_start == -1:
             main_start = len(self.code)
 
         self.patch_jump(entry_jump, main_start)
-
-        # When execution naturally falls off the main body, it should stop.
-        # But our entry_jump goes straight to main_start, so the VM will keep
-        # executing until the array ends, except if we hit function bodies
-        # before main_start or after. Let's ensure main code is properly isolated
-        # Actually in our pass, function bodies are compiled BEFORE main code.
-        # So main_start correctly points to where the main script starts executing.
-        # The script will just naturally fall off the end of `self.code` arrays and terminate.
 
         return {
             "code": self.code,
@@ -126,6 +174,9 @@ class Compiler:
         elif isinstance(node, LoadLib):
             self.emit(OpCode.LOAD_STR, self.add_string(node.lib_path))
             self.emit(OpCode.LOAD_LIB, node.alias)
+        elif isinstance(node, Import):
+            # Imports are handled in the pre-pass of compile(), skip here
+            pass
         elif isinstance(node, IfElse):
             self.compile_expr(node.condition)
             jump_if_false = self.emit(OpCode.JUMP_IF_FALSE)
@@ -240,6 +291,9 @@ class Compiler:
             _, break_jumps = self.loop_stack.pop()
             for jump_idx in break_jumps:
                 self.patch_jump(jump_idx, len(self.code))
+        elif isinstance(node, Data):
+            # Data definitions are handled in the first pass metadata collection
+            pass
 
     def compile_expr(self, node):
         if isinstance(node, Number):
@@ -252,13 +306,23 @@ class Compiler:
             self.emit(OpCode.LOAD_NAME, node.name)
         elif isinstance(node, Self):
             self.emit(OpCode.LOAD_SELF)
+        elif isinstance(node, UnaryOp):
+            self.compile_expr(node.value)
+            if node.op == "-":
+                # To do negative, we load 0, load expr, SUB. Or we can just LOAD_CONST -1 and MUL. 
+                # Let's LOAD_CONST -1 and MUL!
+                self.emit(OpCode.LOAD_CONST, self.add_const(-1))
+                self.emit(OpCode.MUL)
+            elif node.op == "not":
+                self.emit(OpCode.NOT)
         elif isinstance(node, BinOp):
             self.compile_expr(node.left)
             self.compile_expr(node.right)
             ops = {
                 "+": OpCode.ADD, "-": OpCode.SUB,
                 "*": OpCode.MUL, "/": OpCode.DIV,
-                "%": OpCode.MOD
+                "%": OpCode.MOD,
+                "and": OpCode.AND, "or": OpCode.OR
             }
             self.emit(ops[node.op])
         elif isinstance(node, Compare):
@@ -290,19 +354,6 @@ class Compiler:
             self.compile_expr(node.instance)
             self.emit(OpCode.LOAD_ATTR, node.field_name)
         elif isinstance(node, MethodCall):
-            # Check if this is an FFI library call disguised as a method call `libc.puts`
-            is_ffi = False
-            if isinstance(node.instance, Variable):
-                # If the variable exists as an FFI alias somewhere (not purely static to check, but we can assume
-                # if it's called as a module function and not a standard instance method, it might be FFI.
-                # Since we don't have static types to differentiate `monitor.init()` from `libc.puts()`,
-                # we'll emit a special hybrid opcode or determine it at runtime.
-                # Actually, standard approach: we can just emit CALL_METHOD, and in the VM,
-                # if the instance string matches a loaded library, treat it as CALL_LIB.
-                # However, our MethodCall puts `node.instance` on the stack. If it's `libc`, it might not exist as a variable.
-                # We'll handle this purely by changing parsing or adding a special lookup.
-                pass
-
             for arg in node.args:
                 self.compile_expr(arg)
             self.compile_expr(node.instance)
@@ -335,5 +386,17 @@ class Compiler:
                 pass # Already top of stack
             else:
                 raise Exception(f"Pointer property {node.property} not yet implemented in VM")
+        elif isinstance(node, StrConvert):
+            self.compile_expr(node.target)
+            self.emit(OpCode.STR_CONVERT)
+        elif isinstance(node, ListLiteral):
+            for el in node.elements:
+                self.compile_expr(el)
+            self.emit(OpCode.NEW_LIST, len(node.elements))
+        elif isinstance(node, DictLiteral):
+            for k, v in zip(node.keys, node.values):
+                self.compile_expr(v)
+                self.compile_expr(k)
+            self.emit(OpCode.BUILD_DICT, len(node.keys))
         else:
             raise Exception(f"Compiler unhandled expr: {type(node)}")

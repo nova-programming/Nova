@@ -1,0 +1,37 @@
+# ============================================================
+# Nova Self-Hosted Compiler Entry Point (stdlib/compiler.nv)
+# ============================================================
+# This is the main entry point for the self-hosted Nova compiler.
+# It reads a .nv source file, tokenizes it, parses the token
+# stream into an AST, and generates x86 assembly output.
+# ============================================================
+
+import lexer
+import parser
+import codegen
+
+def compile_file(path: string) -> string {
+    # Read the source file
+    mut fd = open(path, "r")
+    mut source = read(fd)
+    close(fd)
+
+    # Step 1: Tokenize
+    mut tokens = tokenize(source)
+
+    # Step 2: Parse into AST
+    mut ast = parse(tokens)
+
+    # Step 3: Generate x86 assembly
+    mut asm = generate_assembly(ast)
+
+    return asm
+}
+
+def compile_to_file(input_path: string, output_path: string) {
+    mut asm = compile_file(input_path)
+    mut fd = open(output_path, "w")
+    write(fd, asm)
+    close(fd)
+    print("Compiled: " + input_path + " -> " + output_path)
+}

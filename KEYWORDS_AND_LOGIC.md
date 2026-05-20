@@ -11,8 +11,44 @@ Nova aims to simplify programming by blending high-level ease with low-level pow
 **Logic:** The compiler maps this to a `Function` or `ClassDef` method node. At runtime, the VM sets up a new local `Frame` and jumps the Instruction Pointer (IP) to the function's bytecode block.
 
 ### `class`
-**Use:** Defines an OOP blueprint.
-**Logic:** Creates a metadata definition in the compiler. At runtime, calling `ClassName()` evaluates a `NEW` OpCode, which instantiates a Virtual Machine `Instance` dictionary containing the class fields.
+**Use:** Defines an OOP blueprint with special "dunder" methods.
+**Logic:** Creates a metadata definition in the compiler. At runtime, calling `ClassName(args)` instantiates a VM `Instance` dictionary and auto-calls `__init__` if defined.
+
+**Supported dunder methods:**
+| Method | Trigger | Description |
+|--------|---------|-------------|
+| `__init__(...)` | `ClassName(args)` | Auto-constructor — called on instantiation |
+| `__str__()` | `print(obj)`, `str(obj)` | String representation |
+| `__len__()` | `len(obj)` | Length/size |
+| `__eq__(other)` | `obj == other` | Equality comparison |
+| `__add__(other)` | `obj + other` | Addition operator |
+| `__sub__(other)` | `obj - other` | Subtraction operator |
+| `__mul__(other)` | `obj * other` | Multiplication operator |
+
+**Example:**
+```nova
+class Vector {
+    x: int
+    y: int
+
+    def __init__(vx: int, vy: int) {
+        self.x = vx
+        self.y = vy
+    }
+
+    def __str__() -> string {
+        return "Vector(" + str(self.x) + ", " + str(self.y) + ")"
+    }
+
+    def __add__(other) {
+        return Vector(self.x + other.x, self.y + other.y)
+    }
+}
+
+v = Vector(3, 4)     # auto-calls __init__
+print(v)             # auto-calls __str__ → "Vector(3, 4)"
+v2 = v + Vector(1,2) # auto-calls __add__ → Vector(4, 6)
+```
 
 ### `self`
 **Use:** Refers to the current class instance.
@@ -21,16 +57,54 @@ Nova aims to simplify programming by blending high-level ease with low-level pow
 ### `import`
 **Use:** Loads external Nova modules or C libraries.
 **Logic:**
-1. `import module`: Compiles additional Nova files.
-2. `import "lib" as alias`: Triggers FFI. Uses Python's `ctypes` in the VM to dynamically link the `.so`/`.dll` object into the runtime environment.
+1. `import module_name`: The `ModuleResolver` searches for `module_name.nv` in three locations (relative to importing file, project root, `stdlib/` directory). The file is tokenized, parsed, and its functions/classes/data are compiled into the current program's bytecode. A circular import cache prevents infinite loops.
+2. `import module_name as alias`: Same as above but registers under an alias namespace.
+3. `import "lib" as alias`: Triggers FFI. Uses Python's `ctypes` in the VM to dynamically link the `.so`/`.dll` object into the runtime environment.
+
+### `from` *(reserved)*
+**Use:** Selective imports (planned).
+**Logic:** Token is reserved for future `from module import func1, func2` syntax. Not yet implemented.
 
 ### `if`, `else`, `while`, `for`
 **Use:** Control flow.
 **Logic:** Compiles to `JUMP` and `JUMP_IF_FALSE` opcodes. The compiler tracks offsets to efficiently skip blocks of bytecode based on stack comparisons.
 
+### `for` (extended)
+**Use:** Range-based iteration with `to`, `downto`, and optional `step`.
+**Logic:** `for i = start to end step s { ... }` compiles to: initialize counter → loop condition (CMP_LE or CMP_GE) → body → increment/decrement → jump back. `downto` reverses the comparison and uses subtraction.
+
+### `break`, `continue`
+**Use:** Loop control.
+**Logic:** `break` emits a `JUMP` to the end of the loop (patched after loop compilation). `continue` emits a `JUMP` back to the loop's condition check.
+
+### `and`, `or`, `not`
+**Use:** Logical operators.
+**Logic:** Compile to `AND`, `OR`, and `NOT` opcodes. `AND` pops two values and pushes their logical conjunction. `OR` pushes the disjunction. `NOT` inverts the top of stack.
+
 ### `print`
 **Use:** Outputs to console.
-**Logic:** Pops the top value of the stack and writes to standard output natively.
+**Logic:** Pops the top value of the stack and writes to standard output. If the value is an `Instance` with a `__str__` method, it auto-calls the method and prints the result.
+
+### `return`
+**Use:** Returns a value from a function.
+**Logic:** Pushes the return value onto the stack and emits a `RETURN` opcode, which pops the current frame and restores the instruction pointer to the caller.
+
+### `mut`
+**Use:** Declares a mutable/dynamic variable (can change type).
+**Logic:** In the type checker, `mut` variables are assigned the `dyn` type, allowing reassignment to any type without triggering a `StaticTypeError`. Without `mut`, variables are statically typed based on their initial assignment.
+
+### `const`
+**Use:** Declares an immutable variable that cannot be reassigned.
+**Logic:** In the type checker, `const` variables are tracked in a `const_vars` set. Any subsequent assignment to a `const` variable raises a `StaticTypeError`.
+
+**Example:**
+```nova
+const PI = 3
+x = 42       # mutable (default)
+mut y = 10   # dynamic (can change type)
+y = "hello"  # OK — y is dynamic
+# PI = 4     # ERROR: Cannot reassign const variable 'PI'
+```
 
 ---
 
@@ -38,18 +112,18 @@ Nova aims to simplify programming by blending high-level ease with low-level pow
 
 ### `@raw`
 **Use:** Enters the unsafe, high-performance low-level mode.
-**Logic:** Suspends high-level safety constraints. Allows manual memory operations (`alloc`/`free`). Does not impact scoping, but conceptually grants the developer direct CPU/memory logic control.
+**Logic:** Enables manual memory operations (`alloc`/`free`) and pointer access. The type checker **enforces** this boundary — using `alloc`, `free`, or pointer operations outside a `@raw` block raises a `StaticTypeError` at compile time.
 
 ### `@export`
 **Use:** Bridges `@raw` elements out to high-level code.
 **Logic:** While currently passively handled in the VM, in compiled static versions, it exposes C-linkage pointers/structs to the safe GC/ARC memory space.
 
 ### `alloc(size)`
-**Use:** Allocates raw bytes.
+**Use:** Allocates raw bytes. **Only inside `@raw`.**
 **Logic:** Evaluates an `ALLOC` opcode. The VM shifts its `heap_ptr` across the simulated 1MB `bytearray` heap, returning the integer pointer address and tracking the allocation size.
 
 ### `free(ptr)`
-**Use:** Deallocates raw bytes.
+**Use:** Deallocates raw bytes. **Only inside `@raw`.**
 **Logic:** Erases the pointer from the active allocations tracker in the VM, simulating a native memory free. (In a true native compiler, maps directly to OS `free()`).
 
 ### `data`
@@ -62,12 +136,110 @@ Nova aims to simplify programming by blending high-level ease with low-level pow
 
 ### `sizeof(var)`
 **Use:** Gets the memory size in bytes.
-**Logic:** Evaluates a `SIZEOF` opcode. The VM checks if the variable is a tracked heap pointer (returning allocated bytes), an integer (returns 4), a string (returns length), or an object (returns property count * 4).
+**Logic:** Evaluates a `SIZEOF` opcode. The VM checks if the variable is a tracked heap pointer (returning allocated bytes), an integer (returns 4), a string (returns length), or an object (returns property count × 4).
 
 ### `len(var)`
 **Use:** Gets the logical element count.
-**Logic:** Evaluates a `LEN` opcode. Determines the underlying Python-backed length of the string, list, or array representation on the stack.
+**Logic:** Evaluates a `LEN` opcode. For lists/strings, returns the Python-backed length. For class instances, auto-calls `__len__()` if defined.
+
+### `str(var)`
+**Use:** Converts any value to a string.
+**Logic:** Evaluates a `STR_CONVERT` opcode. For class instances, auto-calls `__str__()` if defined. For primitives, converts to their string representation (ints → digits, bools → "true"/"false").
+
+**Example:**
+```nova
+x = 42
+print("x = " + str(x))     # "x = 42"
+print("flag: " + str(true)) # "flag: true"
+```
 
 ### `open(path, mode)`, `read(fd)`, `write(fd, content)`, `close(fd)`
 **Use:** Standard File I/O operations.
 **Logic:** Evaluates to `OPEN_FILE`, `READ_FILE`, `WRITE_FILE`, and `CLOSE_FILE` opcodes. The VM maintains a map of open file descriptors (integer handles) to actual Python file objects natively.
+
+---
+
+## String Escape Sequences
+
+Nova strings support the following escape sequences:
+
+| Escape | Character | Description |
+|--------|-----------|-------------|
+| `\n` | Newline | Line feed |
+| `\t` | Tab | Horizontal tab |
+| `\r` | Return | Carriage return |
+| `\\` | Backslash | Literal backslash |
+| `\"` | Quote | Double quote inside string |
+| `\0` | Null | Null character |
+| `\b` | Backspace | Backspace |
+| `\a` | Bell | Alert/bell |
+| `\f` | Form feed | Form feed |
+| `\v` | VTab | Vertical tab |
+
+**Example:**
+```nova
+print("Hello\nWorld")       # Two lines
+print("Tab:\there")          # Tab-separated
+print("She said \"hi\"")    # Escaped quotes
+```
+
+---
+
+## Type Keywords
+
+### `int`, `float`, `bool`, `string`
+**Use:** Explicit type annotations for variables, parameters, and return types.
+**Logic:** Used by the parser to attach type metadata to `Assignment`, `Function`, and `Data` nodes. The `TypeChecker` validates type consistency at compile time — mismatched assignments or function arguments raise a `StaticTypeError` before bytecode generation.
+
+---
+
+## List Operations
+
+### List Literals: `[1, 2, 3]`
+**Use:** Create a list with initial elements.
+**Logic:** Evaluates a `BUILD_LIST` opcode that pops N elements from the stack and creates a Python list in the VM.
+
+### `.append(val)`, `.pop()`, `.insert(idx, val)`, `.clear()`
+**Use:** Dynamic list manipulation methods.
+**Logic:** Evaluate to `LIST_APPEND`, `LIST_POP`, `LIST_INSERT`, and `LIST_CLEAR` opcodes respectively. The VM operates directly on the underlying Python list.
+
+### `list[idx]` and `list[idx] = val`
+**Use:** Index-based access and mutation.
+**Logic:** Evaluates to `LOAD_INDEX` and `STORE_INDEX` opcodes.
+
+---
+
+## CLI Modes
+
+Nova supports two execution modes:
+
+| Command | Mode | Description |
+|---------|------|-------------|
+| `nova dev <file.nv>` | Development | Runs in VM — fast iteration, no .exe build step |
+| `nova build <file.nv>` | Production | Compiles to native x86 executable via GCC |
+| `nova run <file.nv>` | Development | Backward-compatible alias for `dev` |
+
+---
+
+## Self-Hosted Compiler Components
+
+### `stdlib/lexer.nv`
+**Use:** Tokenizer written entirely in Nova.
+**Logic:** Character-by-character scanner using `is_digit()`, `is_alpha()`, and `match_keyword()` helper functions. Produces a list of `Token` structs with `kind` and `val` fields. Handles strings with escape sequences, multi-character operators (`==`, `!=`, `<=`, `>=`, `->`), comments, and all Nova keywords.
+
+### `stdlib/parser.nv`
+**Use:** Recursive-descent parser written in Nova.
+**Logic:** Imports `lexer.nv`. Implements a full expression hierarchy (`parse_primary` → `parse_unary` → `parse_mul` → `parse_add` → `parse_compare` → `parse_logic` → `parse_expr`) and statement parsing (`parse_statement` for assignments, if/else, while, for, break, continue, return, functions). Produces a list of `AstNode` structs representing the program AST.
+
+### `stdlib/codegen.nv`
+**Use:** x86-32 assembly code generator written in Nova.
+**Logic:** Imports `parser.nv`. Walks the AST and emits Intel-syntax x86 assembly using a `CodegenState` struct that tracks assembly lines, data section entries, string literals, label counters, local variable offsets, and loop label stacks. Implements:
+- Stack-based function calling convention (`push ebp` / `mov ebp, esp`)
+- Variable scanning for local stack allocation
+- Loop label stacks for `break`/`continue` support
+- Comparison operators via conditional jumps
+- Format string selection (`fmt_int` vs `fmt_str`) for `print`
+
+### `stdlib/compiler.nv`
+**Use:** Compiler entry point that orchestrates the full pipeline.
+**Logic:** Imports `lexer.nv`, `parser.nv`, and `codegen.nv`. Exposes `compile_file(path)` which reads a `.nv` source file, tokenizes → parses → generates assembly, and `compile_to_file(input, output)` which writes the assembly to a `.s` file ready for GCC.

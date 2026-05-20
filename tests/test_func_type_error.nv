@@ -1,3 +1,0 @@
-def compute(a: int) -> int {
-    return "string_value"
-}

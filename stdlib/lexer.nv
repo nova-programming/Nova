@@ -1,0 +1,219 @@
+# ============================================================
+# Nova Self-Hosted Lexer (stdlib/lexer.nv)
+# ============================================================
+
+data Token {
+    kind: string
+    val: string
+}
+
+def is_digit(ch: string) -> int {
+    if "0" <= ch and ch <= "9" { return 1 }
+    return 0
+}
+
+def is_alpha(ch: string) -> int {
+    if ch == "_" { return 1 }
+    if "a" <= ch and ch <= "z" { return 1 }
+    if "A" <= ch and ch <= "Z" { return 1 }
+    return 0
+}
+
+def is_whitespace(ch: string) -> int {
+    if ch == " " { return 1 }
+    if ch == "\n" { return 1 }
+    if ch == "\r" { return 1 }
+    if ch == "\t" { return 1 }
+    return 0
+}
+
+def match_keyword(word: string) -> string {
+    if word == "def" { return "DEF" }
+    if word == "if" { return "IF" }
+    if word == "else" { return "ELSE" }
+    if word == "while" { return "WHILE" }
+    if word == "for" { return "FOR" }
+    if word == "to" { return "TO" }
+    if word == "downto" { return "DOWNTO" }
+    if word == "step" { return "STEP" }
+    if word == "break" { return "BREAK" }
+    if word == "continue" { return "CONTINUE" }
+    if word == "return" { return "RETURN" }
+    if word == "mut" { return "MUT" }
+    if word == "const" { return "CONST" }
+    if word == "class" { return "CLASS" }
+    if word == "data" { return "DATA" }
+    if word == "import" { return "IMPORT" }
+    if word == "as" { return "AS" }
+    if word == "raw" { return "RAW" }
+    if word == "export" { return "EXPORT" }
+    if word == "alloc" { return "ALLOC" }
+    if word == "free" { return "FREE" }
+    if word == "sizeof" { return "SIZEOF" }
+    if word == "len" { return "LEN" }
+    if word == "str" { return "STR" }
+    if word == "self" { return "SELF" }
+    if word == "print" { return "PRINT" }
+    if word == "open" { return "OPEN" }
+    if word == "read" { return "READ" }
+    if word == "write" { return "WRITE" }
+    if word == "close" { return "CLOSE" }
+    if word == "and" { return "AND" }
+    if word == "or" { return "OR" }
+    if word == "not" { return "NOT" }
+    if word == "true" { return "TRUE" }
+    if word == "false" { return "FALSE" }
+    if word == "int" { return "TYPE_INT" }
+    if word == "float" { return "TYPE_FLOAT" }
+    if word == "bool" { return "TYPE_BOOL" }
+    if word == "string" { return "TYPE_STRING" }
+    return "IDENT"
+}
+
+def tokenize(src: string) -> list {
+    mut tokens = []
+    mut i = 0
+    mut length = len(src)
+
+    while i < length {
+        mut ch = src[i]
+
+        if is_whitespace(ch) == 1 {
+            i = i + 1
+            continue
+        }
+
+        if ch == "#" {
+            while i < length and src[i] != "\n" {
+                i = i + 1
+            }
+            continue
+        }
+
+        if is_digit(ch) == 1 {
+            mut start = i
+            while i < length and is_digit(src[i]) == 1 {
+                i = i + 1
+            }
+            mut num_str = ""
+            mut j = start
+            while j < i {
+                num_str = num_str + src[j]
+                j = j + 1
+            }
+            mut tok = Token()
+            tok.kind = "NUMBER"
+            tok.val = num_str
+            tokens.append(tok)
+            continue
+        }
+
+        if is_alpha(ch) == 1 {
+            mut start = i
+            while i < length and (is_alpha(src[i]) == 1 or is_digit(src[i]) == 1) {
+                i = i + 1
+            }
+            mut ident_str = ""
+            mut j = start
+            while j < i {
+                ident_str = ident_str + src[j]
+                j = j + 1
+            }
+            mut kind = match_keyword(ident_str)
+            mut tok = Token()
+            tok.kind = kind
+            tok.val = ident_str
+            tokens.append(tok)
+            continue
+        }
+
+        if ch == "\"" {
+            mut start = i
+            i = i + 1
+            mut str_val = "\""
+            while i < length and src[i] != "\"" {
+                if src[i] == "\\" and i + 1 < length {
+                    str_val = str_val + "\\"
+                    i = i + 1
+                    str_val = str_val + src[i]
+                } else {
+                    str_val = str_val + src[i]
+                }
+                i = i + 1
+            }
+            if i < length {
+                str_val = str_val + "\""
+                i = i + 1
+            }
+            mut tok = Token()
+            tok.kind = "STRING"
+            tok.val = str_val
+            tokens.append(tok)
+            continue
+        }
+
+        mut tok = Token()
+        mut matched = 1
+
+        if i + 1 < length {
+            mut two_char = src[i] + src[i+1]
+            if two_char == "==" {
+                tok.kind = "EQEQ"
+                tok.val = two_char
+                i = i + 2
+                matched = 2
+            }
+            if two_char == "!=" {
+                tok.kind = "NOTEQ"
+                tok.val = two_char
+                i = i + 2
+                matched = 2
+            }
+            if two_char == "<=" {
+                tok.kind = "LE"
+                tok.val = two_char
+                i = i + 2
+                matched = 2
+            }
+            if two_char == ">=" {
+                tok.kind = "GE"
+                tok.val = two_char
+                i = i + 2
+                matched = 2
+            }
+            if two_char == "->" {
+                tok.kind = "ARROW"
+                tok.val = two_char
+                i = i + 2
+                matched = 2
+            }
+        }
+
+        if matched == 1 {
+            tok.val = ch
+            if ch == "+" { tok.kind = "PLUS" }
+            if ch == "-" { tok.kind = "MINUS" }
+            if ch == "*" { tok.kind = "STAR" }
+            if ch == "/" { tok.kind = "SLASH" }
+            if ch == "%" { tok.kind = "PERCENT" }
+            if ch == "=" { tok.kind = "EQUALS" }
+            if ch == "<" { tok.kind = "LT" }
+            if ch == ">" { tok.kind = "GT" }
+            if ch == "(" { tok.kind = "LPAREN" }
+            if ch == ")" { tok.kind = "RPAREN" }
+            if ch == "{" { tok.kind = "LBRACE" }
+            if ch == "}" { tok.kind = "RBRACE" }
+            if ch == "[" { tok.kind = "LBRACK" }
+            if ch == "]" { tok.kind = "RBRACK" }
+            if ch == "," { tok.kind = "COMMA" }
+            if ch == ":" { tok.kind = "COLON" }
+            if ch == "." { tok.kind = "DOT" }
+            if ch == ";" { tok.kind = "SEMICOLON" }
+            i = i + 1
+        }
+        
+        tokens.append(tok)
+    }
+
+    return tokens
+}

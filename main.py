@@ -6,44 +6,100 @@ from parser.parser import Parser
 from vm.compiler import Compiler
 from vm.machine import VirtualMachine
 from compiler.type_checker import TypeChecker, StaticTypeError
-import sys
 
 
 def run_source(file_path):
+    """Run a Nova program in the VM (development mode — fast execution)."""
+    file_path = os.path.abspath(file_path)
+    base_dir = os.path.dirname(file_path)
+
     with open(file_path, "r", encoding="utf-8") as f:
         source = f.read()
 
-    # print("[1] Tokenizing...")
     tokens = tokenize(source)
-
-    # print("[2] Parsing...")
     ast = Parser(tokens).parse()
-    
+
     try:
         TypeChecker().check(ast)
     except StaticTypeError as e:
         print(f"StaticTypeError: {e}")
         sys.exit(1)
 
-    # print("[3] Compiling to Custom Bytecode...")
-    compiler = Compiler()
+    compiler = Compiler(base_dir=base_dir)
     program = compiler.compile(ast)
 
-    # print("[4] Executing on Custom VM...")
     vm = VirtualMachine(program)
     vm.run()
 
 
+def compile_native(file_path):
+    """Compile a Nova program to a native executable (build mode)."""
+    file_path = os.path.abspath(file_path)
+    base_dir = os.path.dirname(file_path)
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        source = f.read()
+
+    tokens = tokenize(source)
+    ast = Parser(tokens).parse()
+
+    try:
+        TypeChecker().check(ast)
+    except StaticTypeError as e:
+        print(f"StaticTypeError: {e}")
+        sys.exit(1)
+
+    from compiler.codegen_x86 import X86Codegen
+    codegen = X86Codegen(ast)
+    asm_code = codegen.generate()
+
+    asm_file = file_path.rsplit(".", 1)[0] + ".s"
+    exe_file = file_path.rsplit(".", 1)[0] + ".exe"
+
+    with open(asm_file, "w", encoding="utf-8") as f:
+        f.write(asm_code)
+
+    print(f"Generated assembly: {asm_file}")
+    
+    import subprocess
+    cmd = ["gcc", asm_file, "-o", exe_file]
+    print(f"Running command: {' '.join(cmd)}")
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        print("GCC Compilation Failed:")
+        print(res.stderr)
+        sys.exit(1)
+    print(f"Successfully compiled native executable: {exe_file}")
+
+
+def print_usage():
+    print("Nova Programming Language")
+    print("")
+    print("Usage:")
+    print("  nova dev <file.nv>     Run in VM (fast, for development)")
+    print("  nova build <file.nv>   Compile to native executable")
+    print("  nova run <file.nv>     Alias for 'dev' (backward compatible)")
+    print("")
+    print("Examples:")
+    print("  python main.py dev program.nv")
+    print("  python main.py build program.nv")
+
+
 def main():
     if len(sys.argv) < 3:
-        print("Usage: nova run <file.nv>")
+        print_usage()
         return
 
     command = sys.argv[1]
     file_path = sys.argv[2]
 
-    if command == "run":
+    if command in ("dev", "run"):
         run_source(file_path)
+    elif command == "build":
+        compile_native(file_path)
+    else:
+        print(f"Unknown command: {command}")
+        print_usage()
 
 
 if __name__ == "__main__":
