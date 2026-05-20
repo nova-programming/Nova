@@ -24,7 +24,7 @@ With our Custom Bytecode Virtual Machine, foundational OOP features, High-Level 
 
 **Goal:** Build a rich, built-in standard library so developers don't have to rely on external tools for basic tasks.
 
-*   **Built Natively in Nova:** The standard library (File I/O, Networking, Timers) will be written entirely in Nova, wrapping core `@raw` system calls inside high-level intuitive classes (e.g., `File`).
+*   **Built Natively in Nova:** The standard library (File I/O, Networking, Timers) will be written entirely in Nova, wrapping core `@raw` system calls inside high-level intuitive classes (e.g., `File`). (Foundation laid: `open`, `read`, `write`, `close` now exist as built-in VM opcodes).
 *   **Advanced Collections:** Implement core data structures (Lists, Maps, Sets) using highly optimized Data Structures and Algorithms underneath. High-level programming will feel extraordinarily fast due to the `@raw` memory control optimizing the backend collections.
 *   **Simplicity Focus:** Standardize intuitive methods. For example, reading a file should just be `content = File.read("data.txt")`.
 
