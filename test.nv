@@ -7,7 +7,7 @@ class SystemMonitor {
     name
     version
 
-    def init(monitorName, v) {
+    def __init__(monitorName, v) {
         self.name = monitorName
         self.version = v
         print("SystemMonitor Initialized:")
@@ -82,8 +82,7 @@ print("Fibonacci of 6:")
 print(fibonacci(6))
 
 # OOP and Complex Flow Test
-monitor = SystemMonitor()
-monitor.init("NovaCore", 1)
+monitor = SystemMonitor("NovaCore", 1)
 monitor.checkMemory(3)
 
 # Test FFI

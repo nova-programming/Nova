@@ -16,6 +16,7 @@ class Frame:
         self.return_address = return_address
         self.locals = local_env.copy() if local_env else {}
         self.self_context = self_context
+        self.is_init = False # Tracks if this frame is a constructor
 
 class VirtualMachine:
     def __init__(self, program):
@@ -184,8 +185,22 @@ class VirtualMachine:
                 args = [self.stack.pop() for _ in range(num_args)]
                 args.reverse()
                 instance = Instance(class_name)
-                # Initialization (__init__) logic could go here
-                self.stack.append(instance)
+                self.retain(instance) # Hold a reference initially
+
+                # Check for __init__ method
+                init_name = f"{class_name}.__init__"
+                if init_name in self.functions:
+                    func_meta = self.functions[init_name]
+                    local_env = {}
+                    for i, param in enumerate(func_meta["params"]):
+                        local_env[param] = args[i] if i < len(args) else 0
+
+                    frame = Frame(self.ip, local_env, self_context=instance)
+                    frame.is_init = True
+                    self.frames.append(frame)
+                    self.ip = func_meta["ip"]
+                else:
+                    self.stack.append(instance)
             elif opcode == OpCode.LOAD_ATTR:
                 prop = arg
                 instance = self.stack.pop()
@@ -315,14 +330,6 @@ class VirtualMachine:
                 args = [self.stack.pop() for _ in range(num_args)]
                 args.reverse()
 
-                # Check if it's actually a class or struct instantiation
-                if func_name in self.classes:
-                    instance = Instance(func_name)
-                    # We would call __init__ here if it existed properly mapped.
-                    # For now we'll just push the instance. The user manually calls init.
-                    self.stack.append(instance)
-                    continue
-
                 if func_name not in self.functions:
                     raise Exception(f"Function {func_name} not found")
 
@@ -343,6 +350,13 @@ class VirtualMachine:
                         self.release(val)
 
                     self.ip = frame.return_address
+
+                    # If returning from __init__, we want to return the instance itself
+                    # (and override whatever dummy 0 return was compiled at the end)
+                    if frame.is_init:
+                        # Pop the dummy return value
+                        self.stack.pop()
+                        self.stack.append(frame.self_context)
                 else:
                     break # Exit VM
             else:

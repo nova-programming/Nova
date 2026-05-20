@@ -292,8 +292,11 @@ class Compiler:
             for arg in node.args:
                 self.compile_expr(arg)
 
+            # Check if this is an instantiation of a known Class or Data
+            if node.name in self.classes:
+                self.emit(OpCode.NEW, (node.name, len(node.args)))
             # If the name has a dot, it might be an FFI call `libc.printf`
-            if "." in node.name:
+            elif "." in node.name:
                 lib_name, func_name = node.name.split(".", 1)
                 self.emit(OpCode.CALL_LIB, (lib_name, func_name, len(node.args)))
             else:
