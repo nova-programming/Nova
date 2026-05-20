@@ -1,4 +1,4 @@
-from nova.ast.nodes import *
+from ast.nodes import *
 
 
 class Parser:
@@ -166,6 +166,33 @@ class Parser:
             expr = self.parse_expr()
             self.eat("RPAREN")
             return expr
+
+        if kind == "SIZEOF":
+            self.eat("SIZEOF")
+            self.eat("LPAREN")
+            target = self.parse_expr()
+            self.eat("RPAREN")
+            return SizeOf(target)
+
+        if kind == "LEN":
+            self.eat("LEN")
+            self.eat("LPAREN")
+            target = self.parse_expr()
+            self.eat("RPAREN")
+            return Len(target)
+
+        if kind == "SELF":
+            self.eat("SELF")
+            # self.property
+            if self.current() and self.current()[0] == "DOT":
+                self.eat("DOT")
+                prop = self.eat("IDENT")[1]
+                if self.current() and self.current()[0] == "EQUALS":
+                    self.eat("EQUALS")
+                    value = self.parse_expr()
+                    return DataFieldAssign(Self(), prop, value)
+                return DataFieldAccess(Self(), prop)
+            return Self()
         
         if kind == "ALLOC":
             return self.parse_alloc()
@@ -173,11 +200,7 @@ class Parser:
         if kind == "IDENT":
             name = self.eat("IDENT")[1]
             
-            # Check for data instantiation: Point()
-            if self.current() and self.current()[0] == "LPAREN":
-                return self.parse_data_instance(name)
-            
-            # Check for function call
+            # Check for function call / class instantiation / data instantiation
             if self.current() and self.current()[0] == "LPAREN":
                 self.eat("LPAREN")
                 args = []
@@ -188,16 +211,30 @@ class Parser:
                         if self.current() and self.current()[0] != "RPAREN":
                             args.append(self.parse_expr())
                 self.eat("RPAREN")
+                # We return a Call node; the VM will resolve whether this is a Function, Class, or Data
                 return Call(name, args)
             
             var = Variable(name)
             
             # Handle dot operations: .value, .addr, .isValid (pointer properties)
-            # vs .x, .y (data field access)
+            # vs .x, .y (data field access) vs .method() (OOP)
             if self.current() and self.current()[0] == "DOT":
                 self.eat("DOT")
                 prop = self.eat("IDENT")[1]
                 
+                # Check if it's a method call
+                if self.current() and self.current()[0] == "LPAREN":
+                    self.eat("LPAREN")
+                    args = []
+                    if self.current() and self.current()[0] != "RPAREN":
+                        args.append(self.parse_expr())
+                        while self.current() and self.current()[0] == "COMMA":
+                            self.eat("COMMA")
+                            if self.current() and self.current()[0] != "RPAREN":
+                                args.append(self.parse_expr())
+                    self.eat("RPAREN")
+                    return MethodCall(var, prop, args)
+
                 # Check if this is a pointer property
                 pointer_properties = ["value", "addr", "isValid", "isNull", "bytes"]
                 
@@ -242,6 +279,32 @@ class Parser:
 
     # ---------------- STATEMENTS ----------------
 
+    def parse_class(self):
+        self.eat("CLASS")
+        name = self.eat("IDENT")[1]
+        self.eat("LBRACE")
+        methods = []
+        fields = []
+        while self.current() and self.current()[0] != "RBRACE":
+            self.skip_newlines()
+            if self.current()[0] == "RBRACE":
+                break
+
+            # Simple field vs method parsing
+            if self.current()[0] == "DEF":
+                methods.append(self.parse_function())
+            else:
+                field_name = self.eat("IDENT")[1]
+                # Default assignments in class body not yet supported, just taking names
+                if self.current()[0] == "EQUALS":
+                    self.eat("EQUALS")
+                    self.parse_expr() # Skip initial values for now
+                fields.append(field_name)
+            self.skip_newlines()
+
+        self.eat("RBRACE")
+        return ClassDef(name, methods, fields)
+
     def parse_statement(self):
         self.skip_newlines()
         token = self.current()
@@ -249,6 +312,8 @@ class Parser:
             return None
         kind = token[0]
 
+        if kind == "CLASS":
+            return self.parse_class()
         if kind == "IMPORT":
             return self.parse_import()
         if kind == "RAW":
@@ -338,6 +403,15 @@ class Parser:
 
     def parse_import(self):
         self.eat("IMPORT")
+
+        # Check if it's an FFI string import `import "c" as libc`
+        if self.current() and self.current()[0] == "STRING":
+            lib_path = self.eat("STRING")[1][1:-1] # Remove quotes
+            self.eat("AS")
+            alias = self.eat("IDENT")[1]
+            return LoadLib(lib_path, alias)
+
+        # Otherwise standard module import `import std`
         module_name = self.eat("IDENT")[1]
         return Import(module_name)
 

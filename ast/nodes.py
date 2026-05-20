@@ -125,6 +125,13 @@ class Import:
     def __repr__(self):
         return f"Import('{self.module}', {self.items})"
 
+class LoadLib:
+    def __init__(self, lib_path, alias):
+        self.lib_path = lib_path
+        self.alias = alias
+    def __repr__(self):
+        return f"LoadLib('{self.lib_path}', '{self.alias}')"
+
 class Attribute:
     def __init__(self, obj, attr):
         self.obj = obj
@@ -188,6 +195,47 @@ class NovaError(Exception):
 
 def runtime_error(msg):
     raise NovaError(f"[Nova Runtime Error] {msg}")
+
+# ========== OOP AND BUILTIN NODES ==========
+
+class SizeOf:
+    def __init__(self, target):
+        self.target = target
+    def __repr__(self):
+        return f"SizeOf({self.target})"
+
+class Len:
+    def __init__(self, target):
+        self.target = target
+    def __repr__(self):
+        return f"Len({self.target})"
+
+class ClassDef:
+    def __init__(self, name, methods, fields):
+        self.name = name
+        self.methods = methods
+        self.fields = fields
+    def __repr__(self):
+        return f"ClassDef('{self.name}', {self.methods}, {self.fields})"
+
+class NewInstance:
+    def __init__(self, class_name, args):
+        self.class_name = class_name
+        self.args = args
+    def __repr__(self):
+        return f"NewInstance('{self.class_name}', {self.args})"
+
+class Self:
+    def __repr__(self):
+        return "Self()"
+
+class MethodCall:
+    def __init__(self, instance, method_name, args):
+        self.instance = instance
+        self.method_name = method_name
+        self.args = args
+    def __repr__(self):
+        return f"MethodCall({self.instance}, '{self.method_name}', {self.args})"
 
 # ========== DATA STRUCTURE NODES ==========
 
