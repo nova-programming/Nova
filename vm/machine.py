@@ -37,6 +37,9 @@ class VirtualMachine:
 
         self.libraries = {} # loaded C libraries (FFI)
 
+        self.open_files = {} # fd -> file object
+        self.next_fd = 1
+
     def retain(self, obj):
         if isinstance(obj, Instance):
             obj.ref_count += 1
@@ -204,6 +207,38 @@ class VirtualMachine:
                     self.stack.append(len(val))
                 else:
                     raise Exception("len() applied to invalid type")
+            elif opcode == OpCode.OPEN_FILE:
+                mode_val = self.stack.pop()
+                path_val = self.stack.pop()
+                mode = mode_val.decode('utf-8') if isinstance(mode_val, bytearray) else mode_val
+                path = path_val.decode('utf-8') if isinstance(path_val, bytearray) else path_val
+                try:
+                    f = open(path, mode)
+                    fd = self.next_fd
+                    self.open_files[fd] = f
+                    self.next_fd += 1
+                    self.stack.append(fd)
+                except Exception as e:
+                    print(f"Error opening file: {e}")
+                    self.stack.append(0) # 0 for failure
+            elif opcode == OpCode.READ_FILE:
+                fd = self.stack.pop()
+                if fd in self.open_files:
+                    content = self.open_files[fd].read()
+                    self.stack.append(bytearray(content.encode('utf-8')))
+                else:
+                    self.stack.append(bytearray(b""))
+            elif opcode == OpCode.WRITE_FILE:
+                content_val = self.stack.pop()
+                fd = self.stack.pop()
+                content = content_val.decode('utf-8') if isinstance(content_val, bytearray) else content_val
+                if fd in self.open_files:
+                    self.open_files[fd].write(str(content))
+            elif opcode == OpCode.CLOSE_FILE:
+                fd = self.stack.pop()
+                if fd in self.open_files:
+                    self.open_files[fd].close()
+                    del self.open_files[fd]
             elif opcode == OpCode.NEW:
                 class_name, num_args = arg
                 args = [self.stack.pop() for _ in range(num_args)]

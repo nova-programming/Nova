@@ -52,6 +52,10 @@ class OpCode(Enum):
     PRINT = auto()
     SIZEOF = auto()
     LEN = auto()
+    OPEN_FILE = auto()
+    READ_FILE = auto()
+    WRITE_FILE = auto()
+    CLOSE_FILE = auto()
 
     # FFI
     LOAD_LIB = auto()
