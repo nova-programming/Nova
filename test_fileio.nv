@@ -1,0 +1,24 @@
+print("Testing File I/O in Nova...")
+
+# Write to file
+print("Writing to file...")
+fd = open("test_output.txt", "w")
+if fd != 0 {
+    write(fd, "Hello, Nova File I/O!\nThis is a second line.")
+    close(fd)
+    print("Write complete.")
+} else {
+    print("Failed to open file for writing.")
+}
+
+# Read from file
+print("Reading from file...")
+fd_read = open("test_output.txt", "r")
+if fd_read != 0 {
+    content = read(fd_read)
+    close(fd_read)
+    print("Content read:")
+    print(content)
+} else {
+    print("Failed to open file for reading.")
+}

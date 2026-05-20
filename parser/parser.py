@@ -181,6 +181,22 @@ class Parser:
             self.eat("RPAREN")
             return Len(target)
 
+        if kind == "OPEN":
+            self.eat("OPEN")
+            self.eat("LPAREN")
+            path = self.parse_expr()
+            self.eat("COMMA")
+            mode = self.parse_expr()
+            self.eat("RPAREN")
+            return OpenFile(path, mode)
+
+        if kind == "READ":
+            self.eat("READ")
+            self.eat("LPAREN")
+            fd = self.parse_expr()
+            self.eat("RPAREN")
+            return ReadFile(fd)
+
         if kind == "SELF":
             self.eat("SELF")
             # self.property
@@ -337,6 +353,20 @@ class Parser:
             value = self.parse_expr()
             self.eat("RPAREN")
             return Print(value)
+        if kind == "WRITE":
+            self.eat("WRITE")
+            self.eat("LPAREN")
+            fd = self.parse_expr()
+            self.eat("COMMA")
+            content = self.parse_expr()
+            self.eat("RPAREN")
+            return WriteFile(fd, content)
+        if kind == "CLOSE":
+            self.eat("CLOSE")
+            self.eat("LPAREN")
+            fd = self.parse_expr()
+            self.eat("RPAREN")
+            return CloseFile(fd)
         if kind == "IF":
             return self.parse_if()
         if kind == "WHILE":

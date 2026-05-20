@@ -185,6 +185,13 @@ class Compiler:
         elif isinstance(node, Free):
             self.compile_expr(node.ptr)
             self.emit(OpCode.FREE)
+        elif isinstance(node, WriteFile):
+            self.compile_expr(node.fd)
+            self.compile_expr(node.content)
+            self.emit(OpCode.WRITE_FILE)
+        elif isinstance(node, CloseFile):
+            self.compile_expr(node.fd)
+            self.emit(OpCode.CLOSE_FILE)
         elif isinstance(node, PointerAssign):
             if node.property == "value":
                 self.compile_expr(node.value) # value to store
@@ -269,6 +276,13 @@ class Compiler:
         elif isinstance(node, Len):
             self.compile_expr(node.target)
             self.emit(OpCode.LEN)
+        elif isinstance(node, OpenFile):
+            self.compile_expr(node.path)
+            self.compile_expr(node.mode)
+            self.emit(OpCode.OPEN_FILE)
+        elif isinstance(node, ReadFile):
+            self.compile_expr(node.fd)
+            self.emit(OpCode.READ_FILE)
         elif isinstance(node, DataFieldAccess):
             if isinstance(node.instance, Variable):
                 # We need to distinguish between global instances and `this` at compile time

@@ -208,6 +208,32 @@ def runtime_error(msg):
 
 # ========== OOP AND BUILTIN NODES ==========
 
+class OpenFile:
+    def __init__(self, path, mode):
+        self.path = path
+        self.mode = mode
+    def __repr__(self):
+        return f"OpenFile({self.path}, {self.mode})"
+
+class ReadFile:
+    def __init__(self, fd):
+        self.fd = fd
+    def __repr__(self):
+        return f"ReadFile({self.fd})"
+
+class WriteFile:
+    def __init__(self, fd, content):
+        self.fd = fd
+        self.content = content
+    def __repr__(self):
+        return f"WriteFile({self.fd}, {self.content})"
+
+class CloseFile:
+    def __init__(self, fd):
+        self.fd = fd
+    def __repr__(self):
+        return f"CloseFile({self.fd})"
+
 class SizeOf:
     def __init__(self, target):
         self.target = target
