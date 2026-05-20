@@ -180,8 +180,10 @@ class Compiler:
             pass
         elif isinstance(node, Call): # Ignore standalone function call results
             self.compile_expr(node)
+            self.emit(OpCode.POP)
         elif isinstance(node, MethodCall):
             self.compile_expr(node)
+            self.emit(OpCode.POP)
         elif isinstance(node, Free):
             self.compile_expr(node.ptr)
             self.emit(OpCode.FREE)

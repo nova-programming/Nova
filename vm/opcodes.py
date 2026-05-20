@@ -6,6 +6,7 @@ class OpCode(Enum):
     # Constants
     LOAD_CONST = auto()   # Push constant onto stack
     LOAD_STR = auto()     # Push string onto stack
+    POP = auto()          # Pop from stack
     LOAD_BOOL = auto()    # Push boolean onto stack
 
     # Variables

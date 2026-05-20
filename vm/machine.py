@@ -35,6 +35,8 @@ class VirtualMachine:
         self.heap = bytearray(1024 * 1024)
         self.heap_ptr = 1 # 0 is null
         self.allocations = {} # ptr -> size
+        self.free_list = [] # List of tuples: (ptr, size)
+        self.method_cache = {} # Cache for inline method resolution
 
         self.libraries = {} # loaded C libraries (FFI)
 
@@ -58,7 +60,10 @@ class VirtualMachine:
             opcode, arg = self.code[self.ip]
             self.ip += 1
 
-            if opcode == OpCode.LOAD_CONST:
+            if opcode == OpCode.POP:
+                if self.stack:
+                    self.stack.pop()
+            elif opcode == OpCode.LOAD_CONST:
                 self.stack.append(self.constants[arg])
             elif opcode == OpCode.LOAD_STR:
                 self.stack.append(self.strings[arg])
@@ -142,13 +147,27 @@ class VirtualMachine:
                 print(val)
             elif opcode == OpCode.ALLOC:
                 size = self.stack.pop()
-                ptr = self.heap_ptr
-                self.heap_ptr += size
-                self.allocations[ptr] = size
+
+                # Best-fit search
+                best_idx = -1
+                best_size = float('inf')
+                for i, (f_ptr, f_size) in enumerate(self.free_list):
+                    if f_size >= size and f_size < best_size:
+                        best_size = f_size
+                        best_idx = i
+
+                if best_idx != -1:
+                    ptr, f_size = self.free_list.pop(best_idx)
+                    self.allocations[ptr] = f_size # We allocate the whole block to avoid fragmentation logic for now
+                else:
+                    ptr = self.heap_ptr
+                    self.heap_ptr += size
+                    self.allocations[ptr] = size
                 self.stack.append(ptr)
             elif opcode == OpCode.FREE:
                 ptr = self.stack.pop()
                 if ptr in self.allocations:
+                    self.free_list.append((ptr, self.allocations[ptr]))
                     del self.allocations[ptr]
             elif opcode == OpCode.STORE_PTR:
                 ptr = self.stack.pop()
@@ -258,13 +277,18 @@ class VirtualMachine:
                     self.stack.append(result)
                     continue
 
-                full_name = f"{instance.class_name}.{method_name}"
-                if full_name not in self.functions:
-                    raise Exception(f"Method {full_name} not found")
+                # Safe Polymorphic Caching: O(1) method resolution
+                cache_key = (instance.class_name, method_name)
+                if cache_key in self.method_cache:
+                    func_meta = self.method_cache[cache_key]
+                else:
+                    full_name = f"{instance.class_name}.{method_name}"
+                    if full_name not in self.functions:
+                        raise Exception(f"Method {full_name} not found")
+                    func_meta = self.functions[full_name]
+                    self.method_cache[cache_key] = func_meta
 
                 # Setup local frame for method execution
-                func_meta = self.functions[full_name]
-
                 local_env = {}
                 for i, param in enumerate(func_meta["params"]):
                     local_env[param] = args[i] if i < len(args) else 0
