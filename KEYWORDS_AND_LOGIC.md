@@ -67,3 +67,7 @@ Nova aims to simplify programming by blending high-level ease with low-level pow
 ### `len(var)`
 **Use:** Gets the logical element count.
 **Logic:** Evaluates a `LEN` opcode. Determines the underlying Python-backed length of the string, list, or array representation on the stack.
+
+### `open(path, mode)`, `read(fd)`, `write(fd, content)`, `close(fd)`
+**Use:** Standard File I/O operations.
+**Logic:** Evaluates to `OPEN_FILE`, `READ_FILE`, `WRITE_FILE`, and `CLOSE_FILE` opcodes. The VM maintains a map of open file descriptors (integer handles) to actual Python file objects natively.

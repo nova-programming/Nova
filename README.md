@@ -69,6 +69,7 @@ monitor.checkMemory()
 - ✅ Seamless C Interoperability (FFI via `import`)
 - ✅ High-Level Automatic Reference Counting (ARC) Memory Model
 - ✅ Custom Bytecode Virtual Machine Backend
+- ✅ Built-in File I/O (`open`, `read`, `write`, `close`)
 - 🔄 Arrays/Lists (planned)
 
 ## Architecture Details
