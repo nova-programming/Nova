@@ -322,7 +322,8 @@ class Compiler:
                 "+": OpCode.ADD, "-": OpCode.SUB,
                 "*": OpCode.MUL, "/": OpCode.DIV,
                 "%": OpCode.MOD,
-                "and": OpCode.AND, "or": OpCode.OR
+                "and": OpCode.AND, "or": OpCode.OR,
+                "&": OpCode.BIT_AND, "<<": OpCode.SHL, ">>": OpCode.SAR
             }
             self.emit(ops[node.op])
         elif isinstance(node, Compare):
@@ -331,7 +332,8 @@ class Compiler:
             ops = {
                 "==": OpCode.CMP_EQ, "!=": OpCode.CMP_NEQ,
                 "<": OpCode.CMP_LT, ">": OpCode.CMP_GT,
-                "<=": OpCode.CMP_LE, ">=": OpCode.CMP_GE
+                "<=": OpCode.CMP_LE, ">=": OpCode.CMP_GE,
+                "has": OpCode.HAS
             }
             self.emit(ops[node.op])
         elif isinstance(node, SizeOf):
@@ -378,6 +380,17 @@ class Compiler:
             self.compile_expr(node.base)
             self.compile_expr(node.index)
             self.emit(OpCode.LOAD_INDEX)
+        elif isinstance(node, Slice):
+            self.compile_expr(node.base)
+            if node.start:
+                self.compile_expr(node.start)
+            else:
+                self.emit(OpCode.LOAD_CONST, self.add_const(0))
+            if node.end:
+                self.compile_expr(node.end)
+            else:
+                self.emit(OpCode.LOAD_CONST, self.add_const(-1))
+            self.emit(OpCode.SLICE)
         elif isinstance(node, PointerProperty):
             self.compile_expr(node.ptr)
             if node.property == "value":

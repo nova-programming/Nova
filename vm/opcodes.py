@@ -31,6 +31,12 @@ class OpCode(Enum):
     # Logic
     AND = auto()
     OR = auto()
+
+    # Bitwise
+    BIT_AND = auto()
+    SHL = auto()
+    SAR = auto()
+    HAS = auto()
     NOT = auto()
 
     # Control Flow
@@ -72,3 +78,6 @@ class OpCode(Enum):
 
     # Dictionaries
     BUILD_DICT = auto()
+
+    # Slicing
+    SLICE = auto()

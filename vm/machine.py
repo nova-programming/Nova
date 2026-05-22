@@ -194,6 +194,22 @@ class VirtualMachine:
                 b = self.stack.pop()
                 a = self.stack.pop()
                 self.stack.append(a or b)
+            elif opcode == OpCode.BIT_AND:
+                b = self.stack.pop()
+                a = self.stack.pop()
+                self.stack.append(a & b)
+            elif opcode == OpCode.SHL:
+                b = self.stack.pop()
+                a = self.stack.pop()
+                self.stack.append(a << b)
+            elif opcode == OpCode.SAR:
+                b = self.stack.pop()
+                a = self.stack.pop()
+                self.stack.append(a >> b)
+            elif opcode == OpCode.HAS:
+                b = self.stack.pop()
+                a = self.stack.pop()
+                self.stack.append(b in a)
             elif opcode == OpCode.NOT:
                 a = self.stack.pop()
                 self.stack.append(not a)
@@ -522,6 +538,18 @@ class VirtualMachine:
                 result = func(*ctypes_args)
                 self.stack.append(result)
 
+            elif opcode == OpCode.SLICE:
+                end = self.stack.pop()
+                start = self.stack.pop()
+                base = self.stack.pop()
+                if end == -1:
+                    end = len(base)
+                if isinstance(base, bytearray):
+                    self.stack.append(bytearray(base[start:end]))
+                elif isinstance(base, list):
+                    self.stack.append(base[start:end])
+                else:
+                    raise Exception(f"Slice not supported for type {type(base)}")
             elif opcode == OpCode.STR_CONVERT:
                 val = self.stack.pop()
                 if isinstance(val, Instance):

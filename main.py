@@ -32,6 +32,32 @@ def run_source(file_path):
     vm.run()
 
 
+def expand_imports(ast, base_dir, resolver=None, visited=None):
+    from modules.resolver import ModuleResolver
+    from ast.nodes import Import
+    import sys
+    if resolver is None:
+        resolver = ModuleResolver(base_dir=base_dir)
+    if visited is None:
+        visited = set()
+
+    expanded_ast = []
+    for node in ast:
+        if isinstance(node, Import):
+            if node.module not in visited:
+                visited.add(node.module)
+                try:
+                    imported_ast = resolver.resolve(node.module, base_dir)
+                    # Recursively expand imports inside the imported file
+                    expanded_ast.extend(expand_imports(imported_ast, base_dir, resolver, visited))
+                except FileNotFoundError as e:
+                    print(e)
+                    sys.exit(1)
+        else:
+            expanded_ast.append(node)
+    return expanded_ast
+
+
 def compile_native(file_path):
     """Compile a Nova program to a native executable (build mode)."""
     file_path = os.path.abspath(file_path)
@@ -42,6 +68,8 @@ def compile_native(file_path):
 
     tokens = tokenize(source)
     ast = Parser(tokens).parse()
+    
+    ast = expand_imports(ast, base_dir)
 
     try:
         TypeChecker().check(ast)

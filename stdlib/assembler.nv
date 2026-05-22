@@ -1,0 +1,1214 @@
+# ============================================================
+# Nova x86-32 Assembler & PE Linker (stdlib/assembler.nv)
+# ============================================================
+
+# --- Utility functions (Nova-compatible) ---
+
+def str_sub(s: string, start: int, end: int) -> string {
+    result = ""
+    i = start
+    while i < end {
+        result = result + s[i]
+        i = i + 1
+    }
+    return result
+}
+
+def str_contains(haystack: string, needle: string) -> int {
+    if len(needle) == 0 { return 1 }
+    if len(needle) > len(haystack) { return 0 }
+    i = 0
+    while i <= len(haystack) - len(needle) {
+        found = 1
+        j = 0
+        while j < len(needle) {
+            if haystack[i + j] != needle[j] {
+                found = 0
+                break
+            }
+            j = j + 1
+        }
+        if found == 1 { return 1 }
+        i = i + 1
+    }
+    return 0
+}
+
+def append_imm32(state, val: int) {
+    # Emit 4 bytes in little-endian order.
+    # Uses sequential subtraction to ensure exact division in both VM and native.
+    remaining = val
+    i = 0
+    while i < 4 {
+        low_byte = remaining % 256
+        if low_byte < 0 { low_byte = low_byte + 256 }
+        state.code.append(low_byte)
+        remaining = remaining - low_byte
+        remaining = remaining / 256
+        i = i + 1
+    }
+}
+
+def byte_extract(val: int, shift: int) -> int {
+    # Extract byte at position 'shift' from two's complement value.
+    # Works consistently in VM (floor division) and native (trunc division).
+    remaining = val
+    i = 0
+    while i <= shift {
+        if i == shift {
+            r = remaining % 256
+            if r < 0 { r = r + 256 }
+            return r
+        }
+        low_byte = remaining % 256
+        if low_byte < 0 { low_byte = low_byte + 256 }
+        remaining = remaining - low_byte
+        remaining = remaining / 256
+        i = i + 8
+    }
+    return 0
+}
+
+def byte_mask(val: int) -> int {
+    r = val % 256
+    if r < 0 { r = r + 256 }
+    return r
+}
+
+# --- Register Encoding ---
+# eax=0, ecx=1, edx=2, ebx=3, esp=4, ebp=5, esi=6, edi=7
+
+def reg_code(name: string) -> int {
+    if name == "eax" { return 0 }
+    if name == "ecx" { return 1 }
+    if name == "edx" { return 2 }
+    if name == "ebx" { return 3 }
+    if name == "esp" { return 4 }
+    if name == "ebp" { return 5 }
+    if name == "esi" { return 6 }
+    if name == "edi" { return 7 }
+    if name == "al" { return 0 }
+    if name == "cl" { return 1 }
+    if name == "bl" { return 3 }
+    return -1
+}
+
+def is_32bit_reg(name: string) -> int {
+    if name == "eax" { return 1 }
+    if name == "ecx" { return 1 }
+    if name == "edx" { return 1 }
+    if name == "ebx" { return 1 }
+    if name == "esp" { return 1 }
+    if name == "ebp" { return 1 }
+    if name == "esi" { return 1 }
+    if name == "edi" { return 1 }
+    return 0
+}
+
+# --- ModR/M Byte Builder ---
+# ModR/M = mod(2) | reg(3) | r/m(3)
+def build_modrm(mod: int, reg: int, rm: int) -> int {
+    return mod * 64 + reg * 8 + rm
+}
+
+# --- SIB Byte Builder ---
+# SIB = scale(2) | index(3) | base(3)
+def build_sib(scale: int, index: int, base: int) -> int {
+    return scale * 64 + index * 8 + base
+}
+
+# --- Data structures ---
+
+data AsmLine {
+    kind: string     # "label", "instruction", "directive", "empty"
+    label: string    # label name (for kind="label")
+    mnemonic: string # for kind="instruction"
+    operands: list   # list of strings for each operand
+    directive: string # for kind="directive"
+    dir_arg: string  # directive argument
+    raw: string      # original line text
+}
+
+data LabelEntry {
+    name: string
+    offset: int      # byte offset in section
+    defined: int     # 1 if defined, 0 if referenced (extern)
+}
+
+data Fixup {
+    offset: int      # byte offset to patch
+    target: string   # label name to resolve
+    size: int        # 1 or 4 bytes for patch
+}
+
+data AssemblerState {
+    lines: list      # parsed AsmLine list
+    labels: list     # list of LabelEntry
+    fixups: list     # list of Fixup
+    code: list       # emitted code bytes (integers 0-255)
+    data_bytes: list # data section bytes
+    section: int     # 0=code, 1=data
+    org: int         # current offset in section
+    externs: list    # external symbol names
+    globals: list    # global symbol names
+}
+
+# --- Assembly Line Parser ---
+
+def trim(s: string) -> string {
+    start = 0
+    while start < len(s) {
+        if s[start] != " " and s[start] != "\t" { break }
+        start = start + 1
+    }
+    end = len(s)
+    while end > start {
+        if s[end - 1] != " " and s[end - 1] != "\t" and s[end - 1] != "\r" { break }
+        end = end - 1
+    }
+    if start >= end { return "" }
+    return str_sub(s, start, end)
+}
+
+def parse_line(raw: string) -> AsmLine {
+    line = AsmLine()
+    line.raw = raw
+    trimmed = trim(raw)
+
+    if len(trimmed) == 0 {
+        line.kind = "empty"
+        return line
+    }
+
+    # Skip comments
+    if trimmed[0] == "#" {
+        line.kind = "empty"
+        return line
+    }
+
+    # Check for label
+    colon_idx = -1
+    i = 0
+    while i < len(trimmed) {
+        if trimmed[i] == ":" {
+            colon_idx = i
+            break
+        }
+        i = i + 1
+    }
+
+    if colon_idx >= 0 {
+        line.kind = "label"
+        line.label = trim(str_sub(trimmed, 0, colon_idx))
+        # Rest after label ignored for now (label-only lines)
+        return line
+    }
+
+    # Check for directive
+    if trimmed[0] == "." {
+        line.kind = "directive"
+        space_idx = -1
+        i = 0
+        while i < len(trimmed) {
+            if trimmed[i] == " " or trimmed[i] == "\t" {
+                space_idx = i
+                break
+            }
+            i = i + 1
+        }
+        if space_idx >= 0 {
+            line.directive = str_sub(trimmed, 0, space_idx)
+            line.dir_arg = trim(str_sub(trimmed, space_idx + 1, len(trimmed)))
+        } else {
+            line.directive = trimmed
+            line.dir_arg = ""
+        }
+        return line
+    }
+
+    # Instruction
+    line.kind = "instruction"
+    line.operands = []
+
+    space_idx = -1
+    i = 0
+    while i < len(trimmed) {
+        if trimmed[i] == " " or trimmed[i] == "\t" {
+            space_idx = i
+            break
+        }
+        i = i + 1
+    }
+
+    if space_idx >= 0 {
+        line.mnemonic = str_sub(trimmed, 0, space_idx)
+        ops_str = trim(str_sub(trimmed, space_idx + 1, len(trimmed)))
+        # Parse comma-separated operands
+        start = 0
+        in_bracket = 0
+        i = 0
+        while i < len(ops_str) {
+            if ops_str[i] == "[" { in_bracket = 1 }
+            if ops_str[i] == "]" { in_bracket = 0 }
+            if ops_str[i] == "," and in_bracket == 0 {
+                line.operands.append(trim(str_sub(ops_str, start, i)))
+                start = i + 1
+            }
+            i = i + 1
+        }
+        if start < len(ops_str) {
+            line.operands.append(trim(str_sub(ops_str, start, len(ops_str))))
+        }
+    } else {
+        line.mnemonic = trimmed
+    }
+
+    return line
+}
+
+# --- Operand Parsing ---
+
+data OperandInfo {
+    kind: string     # "reg", "imm", "mem", "rel", "reg8", "offset"
+    reg: int         # register code
+    imm_val: int     # immediate value
+    mem_base: int    # base register code for memory
+    mem_index: int   # index register code for memory (-1 if none)
+    mem_scale: int   # scale for index (1,2,4,8)
+    mem_disp: int    # displacement
+    label: string    # label name for rel/offset
+}
+
+def parse_operand(op_str: string) -> OperandInfo {
+    info = OperandInfo()
+    info.mem_index = -1
+    info.reg = -1
+    op_str = trim(op_str)
+
+    # Check for register
+    if is_32bit_reg(op_str) == 1 or op_str == "al" or op_str == "cl" or op_str == "bl" {
+        info.kind = "reg"
+        info.reg = reg_code(op_str)
+        if op_str == "al" or op_str == "cl" or op_str == "bl" {
+            info.kind = "reg8"
+        }
+        return info
+    }
+
+    # Check for memory operand
+    if op_str[0] == "[" {
+        content = str_sub(op_str, 1, len(op_str) - 1)
+        content = trim(content)
+        info.kind = "mem"
+
+        # Check for [eax + ecx * 4] pattern (SIB)
+        star_idx = -1
+        i = 0
+        while i < len(content) {
+            if content[i] == "*" {
+                star_idx = i
+                break
+            }
+            i = i + 1
+        }
+
+        if star_idx >= 0 {
+            # Has scale: [base + index * scale]
+            plus_idx = -1
+            i = 0
+            while i < star_idx {
+                if content[i] == "+" {
+                    plus_idx = i
+                    break
+                }
+                i = i + 1
+            }
+            if plus_idx >= 0 {
+                base_str = trim(str_sub(content, 0, plus_idx))
+                index_str = trim(str_sub(content, plus_idx + 1, star_idx))
+                scale_str = trim(str_sub(content, star_idx + 1, len(content)))
+                info.mem_base = reg_code(base_str)
+                info.mem_index = reg_code(index_str)
+                if scale_str == "1" { info.mem_scale = 0 }
+                if scale_str == "2" { info.mem_scale = 1 }
+                if scale_str == "4" { info.mem_scale = 2 }
+                if scale_str == "8" { info.mem_scale = 3 }
+            }
+        } else {
+            # Check for displacement: [base + disp] or [base - disp]
+            has_plus = 0
+            has_minus = 0
+            i = 0
+            while i < len(content) {
+                if content[i] == "+" {
+                    has_plus = 1
+                    break
+                }
+                if content[i] == "-" {
+                    has_minus = 1
+                    break
+                }
+                i = i + 1
+            }
+
+            if has_plus == 1 or has_minus == 1 {
+                sep_idx = -1
+                i = 0
+                while i < len(content) {
+                    if content[i] == "+" or content[i] == "-" {
+                        sep_idx = i
+                        break
+                    }
+                    i = i + 1
+                }
+                if sep_idx >= 0 {
+                    base_str = trim(str_sub(content, 0, sep_idx))
+                    disp_str = trim(str_sub(content, sep_idx, len(content)))
+                    info.mem_base = reg_code(base_str)
+                    info.mem_disp = atoi(disp_str)
+                }
+            } else {
+                # Just [base] or [disp] or label
+                maybe_reg = reg_code(content)
+                if maybe_reg >= 0 {
+                    info.mem_base = maybe_reg
+                } else {
+                    # Direct address: [label] or [number]
+                    info.mem_base = 5  # mod=00, r/m=101 means disp32
+                    info.mem_disp = 0
+                    info.label = content
+                }
+            }
+        }
+        return info
+    }
+
+    # Check for immediate (starts with digit or -)
+    first = op_str[0]
+    if (first >= "0" and first <= "9") or first == "-" {
+        info.kind = "imm"
+        info.imm_val = atoi(op_str)
+        return info
+    }
+
+    # Check for "offset <label>" or "<label>"
+    if len(op_str) >= 6 {
+        prefix = str_sub(op_str, 0, 6)
+        if prefix == "offset" {
+            info.kind = "offset"
+            info.label = trim(str_sub(op_str, 6, len(op_str)))
+            return info
+        }
+    }
+
+    # Must be a label reference
+    info.kind = "rel"
+    info.label = op_str
+
+    return info
+}
+
+# --- ModR/M Memory Encoding Helpers ---
+
+def encode_modrm_mem(state, mem: OperandInfo, reg_field: int) {
+    if mem.mem_base >= 0 {
+        if mem.mem_base == 5 and mem.mem_disp == 0 and len(mem.label) == 0 {
+            # [ebp] needs disp8=0
+            state.code.append(build_modrm(1, reg_field, 5))
+            state.code.append(0)
+            return
+        }
+        if mem.mem_disp == 0 and mem.mem_base != 5 {
+            # [base] no displacement
+            state.code.append(build_modrm(0, reg_field, mem.mem_base))
+            return
+        }
+        if mem.mem_disp >= -128 and mem.mem_disp <= 127 {
+            # [base+disp8]
+            state.code.append(build_modrm(1, reg_field, mem.mem_base))
+            state.code.append(byte_mask(mem.mem_disp))
+            return
+        }
+        # [base+disp32]
+        state.code.append(build_modrm(2, reg_field, mem.mem_base))
+        append_imm32(state, mem.mem_disp)
+        return
+    }
+    # Direct address: [disp32] or [label]
+    state.code.append(build_modrm(0, reg_field, 5))
+    if len(mem.label) > 0 {
+        append_label_ref(state, mem.label, 4)
+    } else {
+        append_imm32(state, mem.mem_disp)
+    }
+}
+
+def encode_modrm_sib_reg(state, mem: OperandInfo, reg_field: int) {
+    if mem.mem_disp == 0 and mem.mem_base != 5 {
+        state.code.append(build_modrm(0, reg_field, 4))
+        state.code.append(build_sib(mem.mem_scale, mem.mem_index, mem.mem_base))
+        return
+    }
+    if mem.mem_disp >= -128 and mem.mem_disp <= 127 {
+        state.code.append(build_modrm(1, reg_field, 4))
+        state.code.append(build_sib(mem.mem_scale, mem.mem_index, mem.mem_base))
+        state.code.append(byte_mask(mem.mem_disp))
+        return
+    }
+    state.code.append(build_modrm(2, reg_field, 4))
+    state.code.append(build_sib(mem.mem_scale, mem.mem_index, mem.mem_base))
+    append_imm32(state, mem.mem_disp)
+}
+
+def encode_modrm_mem_reg(state, mem: OperandInfo, reg_field: int) {
+    if mem.mem_base >= 0 {
+        if mem.mem_base == 5 and mem.mem_disp == 0 {
+            state.code.append(build_modrm(1, reg_field, 5))
+            state.code.append(0)
+            return
+        }
+        if mem.mem_disp == 0 and mem.mem_base != 5 {
+            state.code.append(build_modrm(0, reg_field, mem.mem_base))
+            return
+        }
+        if mem.mem_disp >= -128 and mem.mem_disp <= 127 {
+            state.code.append(build_modrm(1, reg_field, mem.mem_base))
+            state.code.append(byte_mask(mem.mem_disp))
+            return
+        }
+        state.code.append(build_modrm(2, reg_field, mem.mem_base))
+        append_imm32(state, mem.mem_disp)
+        return
+    }
+    state.code.append(build_modrm(0, reg_field, 5))
+    if len(mem.label) > 0 {
+        append_label_ref(state, mem.label, 4)
+    } else {
+        append_imm32(state, mem.mem_disp)
+    }
+}
+
+# --- Immediate/Reference Appenders ---
+
+def append_label_ref(state, name: string, size: int) {
+    found = 0
+    i = 0
+    while i < len(state.labels) {
+        if state.labels[i].name == name and state.labels[i].defined == 1 {
+            val = state.labels[i].offset
+            if size == 4 {
+                current_off = len(state.code)
+                rel = val - (current_off + 4)
+                append_imm32(state, rel)
+            } else {
+                state.code.append(byte_mask(val))
+            }
+            found = 1
+            break
+        }
+        i = i + 1
+    }
+    if found == 0 {
+        fixup = Fixup()
+        fixup.offset = len(state.code)
+        fixup.target = name
+        fixup.size = size
+        state.fixups.append(fixup)
+        if size == 4 {
+            state.code.append(0)
+            state.code.append(0)
+            state.code.append(0)
+            state.code.append(0)
+        } else {
+            state.code.append(0)
+        }
+    }
+}
+
+# --- Instruction Encoders ---
+
+def encode_mov(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+
+    # mov reg, imm32
+    if op1.kind == "reg" and op2.kind == "imm" {
+        state.code.append(184 + op1.reg)
+        append_imm32(state, op2.imm_val)
+        return
+    }
+
+    # mov reg, reg
+    if op1.kind == "reg" and op2.kind == "reg" {
+        state.code.append(137)
+        state.code.append(build_modrm(3, op2.reg, op1.reg))
+        return
+    }
+
+    # mov mem, reg (dword)
+    if op1.kind == "mem" and op2.kind == "reg" {
+        state.code.append(137)
+        encode_modrm_mem_reg(state, op1, op2.reg)
+        return
+    }
+
+    # mov reg, mem (dword)
+    if op1.kind == "reg" and op2.kind == "mem" {
+        state.code.append(139)
+        encode_modrm_mem_reg(state, op2, op1.reg)
+        return
+    }
+
+    # mov reg, reg8 (movzx)
+    if op1.kind == "reg" and op2.kind == "reg8" {
+        state.code.append(15)
+        state.code.append(182)
+        state.code.append(build_modrm(3, op1.reg, reg_code(ops[1])))
+        return
+    }
+
+    # mov [dword ptr] mem, imm32
+    if op1.kind == "mem" and op2.kind == "imm" and str_contains(ops[0], "dword ptr") == 1 {
+        state.code.append(199)
+        encode_modrm_mem(state, op1, 0)
+        append_imm32(state, op2.imm_val)
+        return
+    }
+
+    # mov [byte ptr] mem, imm8
+    if op1.kind == "mem" and op2.kind == "imm" and str_contains(ops[0], "byte ptr") == 1 {
+        state.code.append(198)
+        encode_modrm_mem(state, op1, 0)
+        state.code.append(byte_mask(op2.imm_val))
+        return
+    }
+
+    # mov [byte ptr] mem, reg8
+    if op1.kind == "mem" and op2.kind == "reg8" and str_contains(ops[0], "byte ptr") == 1 {
+        state.code.append(136)
+        encode_modrm_mem(state, op1, op2.reg)
+        return
+    }
+
+    # mov mem, imm (without dword ptr prefix)
+    if op1.kind == "mem" and op2.kind == "imm" {
+        state.code.append(199)
+        encode_modrm_mem(state, op1, 0)
+        append_imm32(state, op2.imm_val)
+        return
+    }
+
+    # mov [base+index*scale], reg
+    if op1.kind == "mem" and op1.mem_index >= 0 and op2.kind == "reg" {
+        state.code.append(137)
+        encode_modrm_sib_reg(state, op1, op2.reg)
+        return
+    }
+
+    # mov reg, [base+index*scale]
+    if op1.kind == "reg" and op2.kind == "mem" and op2.mem_index >= 0 {
+        state.code.append(139)
+        encode_modrm_sib_reg(state, op2, op1.reg)
+        return
+    }
+}
+
+def encode_push(state, ops: list) {
+    op = parse_operand(ops[0])
+
+    if op.kind == "reg" {
+        state.code.append(80 + op.reg)
+        return
+    }
+
+    if op.kind == "imm" {
+        state.code.append(104)
+        append_imm32(state, op.imm_val)
+        return
+    }
+
+    if op.kind == "offset" {
+        state.code.append(104)
+        append_label_ref(state, op.label, 4)
+        return
+    }
+
+    if op.kind == "mem" {
+        state.code.append(255)
+        encode_modrm_mem(state, op, 6)
+        return
+    }
+
+    # "dword ptr [...]" in operand
+    if str_contains(ops[0], "dword ptr") == 1 {
+        state.code.append(255)
+        encode_modrm_mem(state, op, 6)
+        return
+    }
+}
+
+def encode_pop(state, ops: list) {
+    op = parse_operand(ops[0])
+    if op.kind == "reg" {
+        state.code.append(88 + op.reg)
+    }
+}
+
+def encode_call(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(232)
+    append_label_ref(state, op.label, 4)
+}
+
+def encode_jmp(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(233)
+    append_label_ref(state, op.label, 4)
+}
+
+def encode_je(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(15)
+    state.code.append(132)
+    append_label_ref(state, op.label, 4)
+}
+
+def encode_jne(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(15)
+    state.code.append(133)
+    append_label_ref(state, op.label, 4)
+}
+
+def encode_jl(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(15)
+    state.code.append(140)
+    append_label_ref(state, op.label, 4)
+}
+
+def encode_jle(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(15)
+    state.code.append(142)
+    append_label_ref(state, op.label, 4)
+}
+
+def encode_jg(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(15)
+    state.code.append(143)
+    append_label_ref(state, op.label, 4)
+}
+
+def encode_jge(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(15)
+    state.code.append(141)
+    append_label_ref(state, op.label, 4)
+}
+
+# --- ALU helpers ---
+
+def base_op_reg(base_op: int) -> int {
+    # Map opcode to /reg field value for imm forms
+    # 0x01=add → /0, 0x29=sub → /5, 0x39=cmp → /7
+    # 0x21=and → /4, 0x09=or  → /1
+    if base_op == 1 or base_op == 3 { return 0 }
+    if base_op == 41 or base_op == 43 { return 5 }
+    if base_op == 57 or base_op == 59 { return 7 }
+    if base_op == 33 or base_op == 35 { return 4 }
+    if base_op == 9 or base_op == 11 { return 1 }
+    return 0
+}
+
+def encode_alu_imm(state, reg_field: int, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+
+    if op1.kind == "reg" {
+        if op2.imm_val >= -128 and op2.imm_val <= 127 {
+            state.code.append(131)
+            state.code.append(build_modrm(3, reg_field, op1.reg))
+            state.code.append(byte_mask(op2.imm_val))
+        } else {
+            state.code.append(129)
+            state.code.append(build_modrm(3, reg_field, op1.reg))
+            append_imm32(state, op2.imm_val)
+        }
+    }
+}
+
+def encode_add(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+
+    if op1.kind == "reg" and op2.kind == "reg" {
+        state.code.append(1)
+        state.code.append(build_modrm(3, op2.reg, op1.reg))
+        return
+    }
+    if op1.kind == "reg" and op2.kind == "imm" {
+        encode_alu_imm(state, 0, ops)
+        return
+    }
+}
+
+def encode_sub(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+
+    if op1.kind == "reg" and op2.kind == "reg" {
+        state.code.append(41)
+        state.code.append(build_modrm(3, op2.reg, op1.reg))
+        return
+    }
+    if op1.kind == "reg" and op2.kind == "imm" {
+        encode_alu_imm(state, 5, ops)
+        return
+    }
+}
+
+def encode_cmp(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+
+    if op1.kind == "reg" and op2.kind == "reg" {
+        state.code.append(57)
+        state.code.append(build_modrm(3, op2.reg, op1.reg))
+        return
+    }
+    if op1.kind == "reg" and op2.kind == "imm" {
+        encode_alu_imm(state, 7, ops)
+        return
+    }
+}
+
+def encode_imul(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+    state.code.append(15)
+    state.code.append(175)
+    state.code.append(build_modrm(3, op1.reg, op2.reg))
+}
+
+def encode_idiv(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(247)
+    state.code.append(build_modrm(3, 7, op.reg))
+}
+
+def encode_neg(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(247)
+    state.code.append(build_modrm(3, 3, op.reg))
+}
+
+def encode_inc(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(64 + op.reg)
+}
+
+def encode_dec(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(72 + op.reg)
+}
+
+def encode_shl(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+    state.code.append(193)
+    state.code.append(build_modrm(3, 4, op1.reg))
+    state.code.append(byte_mask(op2.imm_val))
+}
+
+def encode_sete(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(15)
+    state.code.append(148)
+    state.code.append(build_modrm(3, 0, op.reg))
+}
+
+def encode_movzx(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+    state.code.append(15)
+    state.code.append(182)
+
+    if op2.kind == "reg8" {
+        state.code.append(build_modrm(3, op1.reg, op2.reg))
+        return
+    }
+    if op2.kind == "mem" {
+        encode_modrm_mem(state, op2, op1.reg)
+        return
+    }
+}
+
+def encode_and(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+    state.code.append(33)
+    state.code.append(build_modrm(3, op2.reg, op1.reg))
+}
+
+def encode_or(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+    state.code.append(9)
+    state.code.append(build_modrm(3, op2.reg, op1.reg))
+}
+
+# --- Instruction Dispatching ---
+
+def emit_instruction(state, line: AsmLine) {
+    if line.mnemonic == "ret" {
+        state.code.append(195)
+        return
+    }
+    if line.mnemonic == "cdq" {
+        state.code.append(153)
+        return
+    }
+    if line.mnemonic == "push" {
+        encode_push(state, line.operands)
+        return
+    }
+    if line.mnemonic == "pop" {
+        encode_pop(state, line.operands)
+        return
+    }
+    if line.mnemonic == "call" {
+        encode_call(state, line.operands)
+        return
+    }
+    if line.mnemonic == "jmp" {
+        encode_jmp(state, line.operands)
+        return
+    }
+    if line.mnemonic == "je" {
+        encode_je(state, line.operands)
+        return
+    }
+    if line.mnemonic == "jne" {
+        encode_jne(state, line.operands)
+        return
+    }
+    if line.mnemonic == "jl" {
+        encode_jl(state, line.operands)
+        return
+    }
+    if line.mnemonic == "jle" {
+        encode_jle(state, line.operands)
+        return
+    }
+    if line.mnemonic == "jg" {
+        encode_jg(state, line.operands)
+        return
+    }
+    if line.mnemonic == "jge" {
+        encode_jge(state, line.operands)
+        return
+    }
+    if line.mnemonic == "mov" {
+        encode_mov(state, line.operands)
+        return
+    }
+    if line.mnemonic == "add" {
+        encode_add(state, line.operands)
+        return
+    }
+    if line.mnemonic == "sub" {
+        encode_sub(state, line.operands)
+        return
+    }
+    if line.mnemonic == "cmp" {
+        encode_cmp(state, line.operands)
+        return
+    }
+    if line.mnemonic == "imul" {
+        encode_imul(state, line.operands)
+        return
+    }
+    if line.mnemonic == "idiv" {
+        encode_idiv(state, line.operands)
+        return
+    }
+    if line.mnemonic == "neg" {
+        encode_neg(state, line.operands)
+        return
+    }
+    if line.mnemonic == "inc" {
+        encode_inc(state, line.operands)
+        return
+    }
+    if line.mnemonic == "dec" {
+        encode_dec(state, line.operands)
+        return
+    }
+    if line.mnemonic == "shl" {
+        encode_shl(state, line.operands)
+        return
+    }
+    if line.mnemonic == "sete" {
+        encode_sete(state, line.operands)
+        return
+    }
+    if line.mnemonic == "movzx" {
+        encode_movzx(state, line.operands)
+        return
+    }
+    if line.mnemonic == "and" {
+        encode_and(state, line.operands)
+        return
+    }
+    if line.mnemonic == "or" {
+        encode_or(state, line.operands)
+        return
+    }
+}
+
+# --- Directive Handlers ---
+
+def emit_asciz(state, arg: string) {
+    trimmed = trim(arg)
+    if len(trimmed) >= 2 and trimmed[0] == "\"" {
+        str_content = str_sub(trimmed, 1, len(trimmed) - 1)
+        bytes_list = process_string_escapes(str_content)
+        j = 0
+        while j < len(bytes_list) {
+            state.data_bytes.append(bytes_list[j])
+            j = j + 1
+        }
+        state.data_bytes.append(0)
+    }
+}
+
+def process_string_escapes(s: string) -> list {
+    result = []
+    i = 0
+    while i < len(s) {
+        if s[i] == "\\" and i + 1 < len(s) {
+            next = s[i + 1]
+            if next == "n" { result.append(10) }
+            else {
+                if next == "t" { result.append(9) }
+                else {
+                    if next == "r" { result.append(13) }
+                    else {
+                        if next == "0" { result.append(0) }
+                        else {
+                            if next == "\\" { result.append(92) }
+                            else {
+                                if next == "\"" { result.append(34) }
+                                else {
+                                    if next == "b" { result.append(8) }
+                                    else {
+                                        if next == "a" { result.append(7) }
+                                        else {
+                                            if next == "f" { result.append(12) }
+                                            else {
+                                                if next == "v" { result.append(11) }
+                                                else { result.append(ord(next)) }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            i = i + 2
+        } else {
+            result.append(ord(s[i]))
+            i = i + 1
+        }
+    }
+    return result
+}
+
+# --- Pass 1: Parse and Compute Sizes ---
+
+def pass1_collect_labels(state) {
+    i = 0
+    while i < len(state.lines) {
+        line = state.lines[i]
+
+        if line.kind == "label" {
+            found = 0
+            j = 0
+            while j < len(state.labels) {
+                if state.labels[j].name == line.label {
+                    state.labels[j].offset = len(state.code)
+                    state.labels[j].defined = 1
+                    found = 1
+                    break
+                }
+                j = j + 1
+            }
+            if found == 0 {
+                lbl = LabelEntry()
+                lbl.name = line.label
+                lbl.offset = len(state.code)
+                lbl.defined = 1
+                state.labels.append(lbl)
+            }
+        }
+
+        if line.kind == "directive" {
+            if line.directive == ".text" { state.section = 0 }
+            if line.directive == ".data" { state.section = 1 }
+            if line.directive == ".asciz" { emit_asciz(state, line.dir_arg) }
+            if line.directive == ".extern" {
+                sym_name = line.dir_arg
+                found = 0
+                j = 0
+                while j < len(state.labels) {
+                    if state.labels[j].name == sym_name {
+                        found = 1
+                        break
+                    }
+                    j = j + 1
+                }
+                if found == 0 {
+                    lbl = LabelEntry()
+                    lbl.name = sym_name
+                    lbl.offset = 0
+                    lbl.defined = 0
+                    state.labels.append(lbl)
+                }
+            }
+            if line.directive == ".global" {
+                state.globals.append(line.dir_arg)
+            }
+        }
+
+        if line.kind == "instruction" {
+            emit_instruction(state, line)
+        }
+
+        i = i + 1
+    }
+}
+
+# --- Fixup Resolution ---
+
+def resolve_label(state, name: string) -> int {
+    i = 0
+    while i < len(state.labels) {
+        if state.labels[i].name == name and state.labels[i].defined == 1 {
+            return state.labels[i].offset
+        }
+        i = i + 1
+    }
+    return 0
+}
+
+def resolve_fixups(state) {
+    i = 0
+    while i < len(state.fixups) {
+        fixup = state.fixups[i]
+        target_off = resolve_label(state, fixup.target)
+        if target_off >= 0 {
+            if fixup.size == 4 {
+                rel = target_off - (fixup.offset + 4)
+                state.code[fixup.offset] = byte_extract(rel, 0)
+                state.code[fixup.offset + 1] = byte_extract(rel, 8)
+                state.code[fixup.offset + 2] = byte_extract(rel, 16)
+                state.code[fixup.offset + 3] = byte_extract(rel, 24)
+            } else {
+                state.code[fixup.offset] = byte_mask(target_off)
+            }
+        }
+        i = i + 1
+    }
+}
+
+# --- Main Assembly Entry Point ---
+
+def assemble(asm_lines: list) -> list {
+    state = AssemblerState()
+    state.lines = []
+    state.labels = []
+    state.fixups = []
+    state.code = []
+    state.data_bytes = []
+    state.section = 0
+    state.org = 0
+    state.externs = []
+    state.globals = []
+
+    # Pass 0: Parse all lines
+    i = 0
+    while i < len(asm_lines) {
+        state.lines.append(parse_line(asm_lines[i]))
+        i = i + 1
+    }
+
+    # Pass 1: Collect labels and encode instructions
+    pass1_collect_labels(state)
+
+    # Resolve fixups
+    resolve_fixups(state)
+
+    result = []
+    result.append(state.code)
+    result.append(state.data_bytes)
+    return result
+}
+
+# --- ord function ---
+
+def ord(ch: string) -> int {
+    if ch == "\n" { return 10 }
+    if ch == "\r" { return 13 }
+    if ch == "\t" { return 9 }
+    if ch == " " { return 32 }
+    if ch == "!" { return 33 }
+    if ch == "\"" { return 34 }
+    if ch == "#" { return 35 }
+    if ch == "$" { return 36 }
+    if ch == "%" { return 37 }
+    if ch == "&" { return 38 }
+    if ch == "'" { return 39 }
+    if ch == "(" { return 40 }
+    if ch == ")" { return 41 }
+    if ch == "*" { return 42 }
+    if ch == "+" { return 43 }
+    if ch == "," { return 44 }
+    if ch == "-" { return 45 }
+    if ch == "." { return 46 }
+    if ch == "/" { return 47 }
+    if ch == "0" { return 48 } if ch == "1" { return 49 } if ch == "2" { return 50 }
+    if ch == "3" { return 51 } if ch == "4" { return 52 } if ch == "5" { return 53 }
+    if ch == "6" { return 54 } if ch == "7" { return 55 } if ch == "8" { return 56 }
+    if ch == "9" { return 57 }
+    if ch == ":" { return 58 } if ch == ";" { return 59 }
+    if ch == "<" { return 60 } if ch == "=" { return 61 } if ch == ">" { return 62 }
+    if ch == "?" { return 63 } if ch == "@" { return 64 }
+    if ch == "A" { return 65 } if ch == "B" { return 66 } if ch == "C" { return 67 }
+    if ch == "D" { return 68 } if ch == "E" { return 69 } if ch == "F" { return 70 }
+    if ch == "G" { return 71 } if ch == "H" { return 72 } if ch == "I" { return 73 }
+    if ch == "J" { return 74 } if ch == "K" { return 75 } if ch == "L" { return 76 }
+    if ch == "M" { return 77 } if ch == "N" { return 78 } if ch == "O" { return 79 }
+    if ch == "P" { return 80 } if ch == "Q" { return 81 } if ch == "R" { return 82 }
+    if ch == "S" { return 83 } if ch == "T" { return 84 } if ch == "U" { return 85 }
+    if ch == "V" { return 86 } if ch == "W" { return 87 } if ch == "X" { return 88 }
+    if ch == "Y" { return 89 } if ch == "Z" { return 90 }
+    if ch == "[" { return 91 } if ch == "\\" { return 92 } if ch == "]" { return 93 }
+    if ch == "^" { return 94 } if ch == "_" { return 95 }
+    if ch == "`" { return 96 }
+    if ch == "a" { return 97 } if ch == "b" { return 98 } if ch == "c" { return 99 }
+    if ch == "d" { return 100 } if ch == "e" { return 101 } if ch == "f" { return 102 }
+    if ch == "g" { return 103 } if ch == "h" { return 104 } if ch == "i" { return 105 }
+    if ch == "j" { return 106 } if ch == "k" { return 107 } if ch == "l" { return 108 }
+    if ch == "m" { return 109 } if ch == "n" { return 110 } if ch == "o" { return 111 }
+    if ch == "p" { return 112 } if ch == "q" { return 113 } if ch == "r" { return 114 }
+    if ch == "s" { return 115 } if ch == "t" { return 116 } if ch == "u" { return 117 }
+    if ch == "v" { return 118 } if ch == "w" { return 119 } if ch == "x" { return 120 }
+    if ch == "y" { return 121 } if ch == "z" { return 122 }
+    if ch == "{" { return 123 } if ch == "|" { return 124 } if ch == "}" { return 125 }
+    if ch == "~" { return 126 }
+    return 0
+}

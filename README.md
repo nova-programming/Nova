@@ -27,7 +27,7 @@ python main.py run program.nv
 
 # Self-hosted compilation pipeline (Nova compiling Nova)
 python main.py dev stdlib/compiler.nv    # Compiles test_input.nv -> test_output.s
-gcc -m32 test_output.s -o program.exe    # Assemble with GCC
+gcc test_output.s -o program.exe         # Assemble with GCC
 ./program.exe                            # Run native binary
 ```
 
@@ -65,9 +65,45 @@ v2 = Vector(1, 2)
 print(v1 + v2)          # Vector(4, 6)
 print("v1 = " + str(v1)) # v1 = Vector(3, 4)
 
-# Const and escape sequences
+# Mutable by default, const for immutability
 const MAX = 100
+counter = 0             # mutable
+counter = counter + 1   # OK
+# MAX = 200             # ERROR: const cannot be reassigned
+
 print("Max is:\t" + str(MAX))
+
+# Bitwise and logical operators
+a = 0b1010 & 0b1100     # 8
+b = 1 << 8              # 256
+c = 256 >> 4            # 16
+
+# Data struct field checking with `has`
+data Person {
+    name: string
+    age: int
+}
+p = Person("Alice", 30)
+if p has "age" {
+    print("has age field")   # prints
+}
+if p has "xyz" {
+    print("has xyz")         # does not print
+}
+
+# elif chains
+x = 2
+if x == 1 {
+    print("one")
+} elif x == 2 {
+    print("two")             # prints
+} else {
+    print("other")
+}
+
+# String slicing
+s = "hello world"
+print(s[0:5])                # "hello"
 
 # Low-level memory management (safety-enforced)
 @raw {
@@ -80,16 +116,20 @@ print("Max is:\t" + str(MAX))
 
 ## Language Features
 - ✅ Variables and expressions (inferred and explicit types)
-- ✅ Gradual typing with `mut` for dynamic variables
-- ✅ Immutable variables with `const`
+- ✅ **Mutable by default** — variables can be reassigned; use `const` for immutability
+- ✅ `const` for immutable variables
 - ✅ Functions with typed parameters and return types
 - ✅ While & For loops (with `to`, `downto`, `step`)
-- ✅ If-else conditionals (nested)
+- ✅ If-elif-else conditionals (nested)
+- ✅ `elif` keyword — replaces `else if`
 - ✅ Break and Continue
 - ✅ Logical operators (`and`, `or`, `not`)
+- ✅ Bitwise operators (`&`, `<<`, `>>`)
+- ✅ Data struct field check (`has`)
 - ✅ Print statement (with `__str__` dunder support)
 - ✅ String escape sequences (`\n`, `\t`, `\\`, `\"`, `\r`, `\0`, `\b`, `\a`, `\f`, `\v`)
 - ✅ `str()` built-in for value-to-string conversion
+- ✅ String slicing (`s[i:j]`)
 - ✅ Raw memory allocation (`alloc`, `free`, pointer operations)
 - ✅ **`@raw` safety boundary** — `alloc`/`free`/pointer ops error outside `@raw`
 - ✅ Data structures (`data` blocks with typed fields)
@@ -160,4 +200,4 @@ This project is licensed under **CC BY-NC 4.0** (Creative Commons Attribution-No
 - ✅ Contributions welcome
 - ❌ Commercial use strictly prohibited
 
-For commercial licensing, contact: [developer.laksh22@gmail.com]
+For commercial licensing, contact: [developer.laksh22@gmail.com](mailto:developer.laksh22@gmail.com)

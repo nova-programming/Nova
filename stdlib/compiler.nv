@@ -1,37 +1,93 @@
-# ============================================================
-# Nova Self-Hosted Compiler Entry Point (stdlib/compiler.nv)
-# ============================================================
-# This is the main entry point for the self-hosted Nova compiler.
-# It reads a .nv source file, tokenizes it, parses the token
-# stream into an AST, and generates x86 assembly output.
-# ============================================================
-
 import lexer
 import parser
 import codegen
 
-def compile_file(path: string) -> string {
+def contains(lst: list, item: string) -> int {
+    i = 0
+    while i < len(lst) {
+        if lst[i] == item { return 1 }
+        i = i + 1
+    }
+    return 0
+}
+
+def resolve_imports(ast: list, visited: list) -> list {
+    expanded = []
+    i = 0
+    while i < len(ast) {
+        node = ast[i]
+        if node.kind == "Import" {
+            module_name = node.val_str
+            if contains(visited, module_name) == 0 {
+                visited.append(module_name)
+                fd = open(module_name + ".nv", "r")
+                if fd == 0 {
+                    fd = open("stdlib/" + module_name + ".nv", "r")
+                }
+                if fd == 0 {
+                    print("Import Error: Could not resolve module " + module_name)
+                } else {
+                    source = read(fd)
+                    close(fd)
+                    print("Tokenizing... " + module_name)
+                    tokens = tokenize(source)
+                    imported_ast = parse(tokens)
+                    resolved_ast = resolve_imports(imported_ast, visited)
+                    j = 0
+                    while j < len(resolved_ast) {
+                        expanded.append(resolved_ast[j])
+                        j = j + 1
+                    }
+                }
+            }
+        } else {
+            expanded.append(node)
+        }
+        i = i + 1
+    }
+    return expanded
+}
+
+def compile_file(path: string) -> list {
+    print("Reading file: " + path)
     # Read the source file
-    mut fd = open(path, "r")
-    mut source = read(fd)
+    fd = open(path, "r")
+    source = read(fd)
     close(fd)
 
+    print("Tokenizing...")
     # Step 1: Tokenize
-    mut tokens = tokenize(source)
+    tokens = tokenize(source)
 
+    print("Parsing...")
     # Step 2: Parse into AST
-    mut ast = parse(tokens)
+    ast = parse(tokens)
+    
+    print("Resolving imports...")
+    # Step 2.5: Resolve Imports
+    visited = []
+    ast = resolve_imports(ast, visited)
 
+    print("Generating assembly...")
     # Step 3: Generate x86 assembly
-    mut asm = generate_assembly(ast)
+    asm = generate_assembly(ast)
 
+    print("Compilation finished.")
     return asm
 }
 
 def compile_to_file(input_path: string, output_path: string) {
-    mut asm = compile_file(input_path)
-    mut fd = open(output_path, "w")
-    write(fd, asm)
+    asm = compile_file(input_path)
+    fd = open(output_path, "w")
+    i = 0
+    while i < len(asm) {
+        write(fd, asm[i])
+        write(fd, "\n")
+        i = i + 1
+    }
     close(fd)
     print("Compiled: " + input_path + " -> " + output_path)
 }
+
+# ===== DRIVER =====
+compile_to_file("stdlib/compiler.nv", "stdlib/compiler_stage2.s")

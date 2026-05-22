@@ -41,6 +41,8 @@ TOKEN_SPEC = [
     ("AS",       r"as\b"),
     ("ALLOC",    r"alloc\b"),
     ("FREE",     r"free\b"),
+    ("HAS",      r"has\b"),
+    ("ELIF",     r"elif\b"),
 
     # Directives
     ("RAW",      r"@raw"),
@@ -51,7 +53,6 @@ TOKEN_SPEC = [
     ("TYPE_FLOAT",  r"float\b"),
     ("TYPE_BOOL",   r"bool\b"),
     ("TYPE_STRING", r"string\b"),
-    ("MUT",         r"mut\b"),
     ("CONST",       r"const\b"),
     ("STR",         r"str\b"),
 
@@ -63,6 +64,8 @@ TOKEN_SPEC = [
     ("NOTEQ",    r"!="),
     ("GE",       r">="),
     ("LE",       r"<="),
+    ("GTGT",     r">>"),
+    ("LTLT",     r"<<"),
     ("GT",       r">"),
     ("LT",       r"<"),
 
@@ -73,6 +76,7 @@ TOKEN_SPEC = [
     ("STAR",     r"\*"),
     ("SLASH",    r"/"),
     ("PERCENT",  r"%"),
+    ("AMPERSAND", r"&"),
     ("EQUALS",   r"="),
 
     # Delimiters
