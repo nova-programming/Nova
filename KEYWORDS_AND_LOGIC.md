@@ -65,9 +65,21 @@ v2 = v + Vector(1,2) # auto-calls __add__ → Vector(4, 6)
 **Use:** Selective imports (planned).
 **Logic:** Token is reserved for future `from module import func1, func2` syntax. Not yet implemented.
 
-### `if`, `else`, `while`, `for`
+### `if`, `elif`, `else`, `while`, `for`
 **Use:** Control flow.
-**Logic:** Compiles to `JUMP` and `JUMP_IF_FALSE` opcodes. The compiler tracks offsets to efficiently skip blocks of bytecode based on stack comparisons.
+**Logic:** Compiles to `JUMP` and `JUMP_IF_FALSE` opcodes. The compiler tracks offsets to efficiently skip blocks of bytecode based on stack comparisons. `elif` is a single keyword — there is no `else if` syntax.
+
+**Example:**
+```nova
+x = 2
+if x == 1 {
+    print("one")
+} elif x == 2 {
+    print("two")
+} else {
+    print("other")
+}
+```
 
 ### `for` (extended)
 **Use:** Range-based iteration with `to`, `downto`, and optional `step`.
@@ -81,6 +93,36 @@ v2 = v + Vector(1,2) # auto-calls __add__ → Vector(4, 6)
 **Use:** Logical operators.
 **Logic:** Compile to `AND`, `OR`, and `NOT` opcodes. `AND` pops two values and pushes their logical conjunction. `OR` pushes the disjunction. `NOT` inverts the top of stack.
 
+### `&`, `<<`, `>>`
+**Use:** Bitwise operators.
+**Logic:** `a & b` computes bitwise AND. `a << b` shifts `a` left by `b` bits. `a >> b` shifts `a` right by `b` bits. All operate on integer values and push the integer result.
+
+**Example:**
+```nova
+a = 0b1010 & 0b1100     # 8 (bitwise AND)
+b = 1 << 8              # 256 (left shift)
+c = 256 >> 4            # 16  (right shift)
+```
+
+### `has`
+**Use:** Checks if a `data` struct has a specific field by name.
+**Logic:** At compile time, the type checker resolves the struct definition and verifies the field name exists. If the field is found, the expression evaluates to `true`; otherwise `false`. Only works with `data` structs.
+
+**Example:**
+```nova
+data Person {
+    name: string
+    age: int
+}
+p = Person("Alice", 30)
+if p has "age" {
+    print("has age field")   # prints
+}
+if p has "xyz" {
+    print("has xyz")         # does not print
+}
+```
+
 ### `print`
 **Use:** Outputs to console.
 **Logic:** Pops the top value of the stack and writes to standard output. If the value is an `Instance` with a `__str__` method, it auto-calls the method and prints the result.
@@ -89,21 +131,18 @@ v2 = v + Vector(1,2) # auto-calls __add__ → Vector(4, 6)
 **Use:** Returns a value from a function.
 **Logic:** Pushes the return value onto the stack and emits a `RETURN` opcode, which pops the current frame and restores the instruction pointer to the caller.
 
-### `mut`
-**Use:** Declares a mutable/dynamic variable (can change type).
-**Logic:** In the type checker, `mut` variables are assigned the `dyn` type, allowing reassignment to any type without triggering a `StaticTypeError`. Without `mut`, variables are statically typed based on their initial assignment.
+### Variable Mutability
 
-### `const`
-**Use:** Declares an immutable variable that cannot be reassigned.
-**Logic:** In the type checker, `const` variables are tracked in a `const_vars` set. Any subsequent assignment to a `const` variable raises a `StaticTypeError`.
+**Use:** Variables are **mutable by default**. Use `const` for immutability.
+
+**Logic:** In the type checker, regular variables can be reassigned freely. `const` variables are tracked in a `const_vars` set — any subsequent assignment to a `const` variable raises a `StaticTypeError`.
 
 **Example:**
 ```nova
-const PI = 3
-x = 42       # mutable (default)
-mut y = 10   # dynamic (can change type)
-y = "hello"  # OK — y is dynamic
-# PI = 4     # ERROR: Cannot reassign const variable 'PI'
+const MAX = 100
+x = 42       # mutable (default) — can be reassigned
+x = 43       # OK
+# MAX = 101  # ERROR: Cannot reassign const variable 'MAX'
 ```
 
 ---
@@ -159,7 +198,20 @@ print("flag: " + str(true)) # "flag: true"
 
 ---
 
-## String Escape Sequences
+## String Operations
+
+### String Slicing: `s[i:j]`
+**Use:** Extract a substring from index `i` (inclusive) to `j` (exclusive).
+**Logic:** Evaluates to a `SLICE` opcode in the VM. For native codegen, calls a `_slice_string` runtime helper that allocates a new buffer, copies the bytes, and null-terminates the result.
+
+**Example:**
+```nova
+s = "hello world"
+print(s[0:5])    # "hello"
+print(s[6:11])   # "world"
+```
+
+### String Escape Sequences
 
 Nova strings support the following escape sequences:
 
@@ -225,11 +277,11 @@ Nova supports two execution modes:
 
 ### `stdlib/lexer.nv`
 **Use:** Tokenizer written entirely in Nova.
-**Logic:** Character-by-character scanner using `is_digit()`, `is_alpha()`, and `match_keyword()` helper functions. Produces a list of `Token` structs with `kind` and `val` fields. Handles strings with escape sequences, multi-character operators (`==`, `!=`, `<=`, `>=`, `->`), comments, and all Nova keywords.
+**Logic:** Character-by-character scanner using `is_digit()`, `is_alpha()`, and `match_keyword()` helper functions. Produces a list of `Token` structs with `kind` and `val` fields. Handles strings with escape sequences, multi-character operators (`==`, `!=`, `<=`, `>=`, `->`), comments, and all Nova keywords including `elif`, `has`, `const`.
 
 ### `stdlib/parser.nv`
 **Use:** Recursive-descent parser written in Nova.
-**Logic:** Imports `lexer.nv`. Implements a full expression hierarchy (`parse_primary` → `parse_unary` → `parse_mul` → `parse_add` → `parse_compare` → `parse_logic` → `parse_expr`) and statement parsing (`parse_statement` for assignments, if/else, while, for, break, continue, return, functions). Produces a list of `AstNode` structs representing the program AST.
+**Logic:** Imports `lexer.nv`. Implements a full expression hierarchy (`parse_primary` → `parse_unary` → `parse_mul` → `parse_add` → `parse_compare` → `parse_logic` → `parse_expr`) and statement parsing (`parse_statement` for assignments, if/elif/else, while, for, break, continue, return, functions). Produces a list of `AstNode` structs representing the program AST.
 
 ### `stdlib/codegen.nv`
 **Use:** x86-32 assembly code generator written in Nova.
@@ -239,6 +291,8 @@ Nova supports two execution modes:
 - Loop label stacks for `break`/`continue` support
 - Comparison operators via conditional jumps
 - Format string selection (`fmt_int` vs `fmt_str`) for `print`
+- String concatenation via `_concat_strings` runtime helper
+- String slicing via `_slice_string` runtime helper
 
 ### `stdlib/compiler.nv`
 **Use:** Compiler entry point that orchestrates the full pipeline.

@@ -12,6 +12,13 @@ class X86Codegen:
         self.local_vars = {} # var_name -> stack_offset
         self.local_offset = 0
         self.loop_labels = [] # stack of (start_label, end_label)
+        self.prop_offsets = {}
+        self.structs = set()
+
+    def get_prop_offset(self, name):
+        if name not in self.prop_offsets:
+            self.prop_offsets[name] = len(self.prop_offsets) * 4
+        return self.prop_offsets[name]
 
     def next_label(self, prefix="L"):
         self.label_count += 1
@@ -21,9 +28,27 @@ class X86Codegen:
         """Check if an expression evaluates to a string at compile time."""
         if isinstance(node, String):
             return True
+        # Check inferred_type from the type checker
+        inferred = getattr(node, 'inferred_type', None)
+        if inferred == 'string':
+            return True
         if isinstance(node, Variable):
             string_vars = getattr(self, 'string_vars', set())
             return node.name in string_vars
+        if isinstance(node, BinOp) and node.op == '+':
+            return self._is_string_expr(node.left) or self._is_string_expr(node.right)
+        if isinstance(node, Call):
+            return False  # Can't determine statically
+        if isinstance(node, ArrayIndex):
+            return self._is_string_expr(node.base)
+        if isinstance(node, DataFieldAccess):
+            # Hack: assume fields like val_str, name are strings
+            if node.field_name in ['val_str', 'kind', 'name', 'struct_names', 'prop_names', 'local_var_names', 'field_name']:
+                return True
+        if isinstance(node, StrConvert):
+            return True
+        if isinstance(node, Slice):
+            return self._is_string_expr(node.base)
         return False
 
     def add_string_literal(self, value):
@@ -32,8 +57,12 @@ class X86Codegen:
         self.str_count += 1
         label = f"str_const_{self.str_count}"
         self.string_literals[value] = label
-        # Escaping quotes and newlines for assembly
-        escaped = value.replace('"', '\\"')
+        # Escape special characters for GAS .asciz directives
+        escaped = value.replace('\\', '\\\\')
+        escaped = escaped.replace('"', '\\"')
+        escaped = escaped.replace('\n', '\\n')
+        escaped = escaped.replace('\r', '\\r')
+        escaped = escaped.replace('\t', '\\t')
         self.data_section.append(f'{label}: .asciz "{escaped}"')
         return label
 
@@ -49,19 +78,28 @@ class X86Codegen:
         self.assembly.append(".extern _fread")
         self.assembly.append(".extern _fputs")
         self.assembly.append(".extern _fclose")
+        self.assembly.append(".extern _strlen")
+        self.assembly.append(".extern _strcpy")
+        self.assembly.append(".extern _strcat")
+        self.assembly.append(".extern _realloc")
+        self.assembly.append(".extern _sprintf")
+        self.assembly.append(".extern _strcmp")
+        self.assembly.append(".extern _fflush")
         
         # We also need format strings for printing
         self.data_section.append('fmt_int: .asciz "%d\\n"')
+        self.data_section.append('fmt_int_pure: .asciz "%d"')
         self.data_section.append('fmt_str: .asciz "%s\\n"')
 
-        # Compile functions and top-level code
-        # We compile top-level statements inside a "_main" wrapper
-        
-        self.assembly.append(".text")
-        
         # Split functions from top-level code
         functions = [node for node in self.ast if isinstance(node, Function)]
         top_level = [node for node in self.ast if not isinstance(node, Function) and not isinstance(node, Import) and not isinstance(node, ClassDef) and not isinstance(node, Data)]
+        
+        for n in self.ast:
+            if isinstance(n, Data) or isinstance(n, ClassDef):
+                self.structs.add(n.name)
+        
+        self.assembly.append(".text")
         
         # Compile functions first
         for fn in functions:
@@ -71,15 +109,29 @@ class X86Codegen:
         self.assembly.append("_main:")
         self.assembly.append("    push ebp")
         self.assembly.append("    mov ebp, esp")
+        self.assembly.append("    and esp, -16")
         
         # Scan top-level code for variables to allocate local space
         self.local_vars = {}
         self.local_offset = 0
+        
+        # Reserve slots for __argc and __argv from C runtime
+        self.local_offset += 4
+        self.local_vars["__argc"] = self.local_offset
+        self.local_offset += 4
+        self.local_vars["__argv"] = self.local_offset
+        
         for node in top_level:
             self.scan_vars(node)
             
         if self.local_offset > 0:
             self.assembly.append(f"    sub esp, {self.local_offset}")
+        
+        # Store argc/argv from cdecl convention
+        self.assembly.append("    mov eax, [ebp + 8]")  # argc
+        self.assembly.append(f"    mov [ebp - {self.local_vars['__argc']}], eax")
+        self.assembly.append("    mov eax, [ebp + 12]") # argv
+        self.assembly.append(f"    mov [ebp - {self.local_vars['__argv']}], eax")
             
         for node in top_level:
             self.compile_stmt(node)
@@ -87,6 +139,76 @@ class X86Codegen:
         self.assembly.append("    mov esp, ebp")
         self.assembly.append("    pop ebp")
         self.assembly.append("    mov eax, 0")
+        self.assembly.append("    ret")
+
+        # Generic String Concat Helper
+        self.assembly.append("_concat_strings:")
+        self.assembly.append("    push ebp")
+        self.assembly.append("    mov ebp, esp")
+        self.assembly.append("    push dword ptr [ebp+8]") # left
+        self.assembly.append("    call _strlen")
+        self.assembly.append("    add esp, 4")
+        self.assembly.append("    mov ebx, eax") # len_a
+        self.assembly.append("    push dword ptr [ebp+12]") # right
+        self.assembly.append("    call _strlen")
+        self.assembly.append("    add esp, 4")
+        self.assembly.append("    add ebx, eax") # len_a + len_b
+        self.assembly.append("    inc ebx") # +1 for null
+        self.assembly.append("    push ebx")
+        self.assembly.append("    call _malloc")
+        self.assembly.append("    add esp, 4")
+        self.assembly.append("    push eax") # save dest
+        self.assembly.append("    push dword ptr [ebp+8]")
+        self.assembly.append("    push eax")
+        self.assembly.append("    call _strcpy")
+        self.assembly.append("    add esp, 8")
+        self.assembly.append("    pop eax")
+        self.assembly.append("    push eax")
+        self.assembly.append("    push dword ptr [ebp+12]")
+        self.assembly.append("    push eax")
+        self.assembly.append("    call _strcat")
+        self.assembly.append("    add esp, 8")
+        self.assembly.append("    pop eax")
+        self.assembly.append("    pop ebp")
+        self.assembly.append("    ret")
+        
+        # String slice helper: _slice_string(base, start, end) -> new string
+        self.assembly.append("_slice_string:")
+        self.assembly.append("    push ebp")
+        self.assembly.append("    mov ebp, esp")
+        self.assembly.append("    push esi")
+        self.assembly.append("    push edi")
+        self.assembly.append("    push ebx")
+        self.assembly.append("    mov esi, [ebp+8]")  # base (esi is callee-saved)
+        self.assembly.append("    mov ebx, [ebp+12]") # start
+        self.assembly.append("    mov ecx, [ebp+16]") # end
+        self.assembly.append("    sub ecx, ebx")       # len = end - start
+        self.assembly.append("    push ecx")           # save len
+        self.assembly.append("    inc ecx")
+        self.assembly.append("    push ecx")
+        self.assembly.append("    call _malloc")
+        self.assembly.append("    add esp, 4")
+        self.assembly.append("    pop ecx")            # ecx = len
+        self.assembly.append("    mov edi, eax")       # edi = dest
+        self.assembly.append("    add esi, ebx")       # esi = base + start
+        # Manual byte copy
+        self.assembly.append("    push edi")           # save dest
+        self.assembly.append("    push ecx")           # save len
+        self.assembly.append("L_slice_copy:")
+        self.assembly.append("    mov al, [esi]")
+        self.assembly.append("    mov [edi], al")
+        self.assembly.append("    inc esi")
+        self.assembly.append("    inc edi")
+        self.assembly.append("    dec ecx")
+        self.assembly.append("    jnz L_slice_copy")
+        self.assembly.append("    pop ecx")            # ecx = len
+        self.assembly.append("    pop edi")            # edi = original dest
+        self.assembly.append("    mov byte ptr [edi + ecx], 0")  # null term
+        self.assembly.append("    mov eax, edi")
+        self.assembly.append("    pop ebx")
+        self.assembly.append("    pop edi")
+        self.assembly.append("    pop esi")
+        self.assembly.append("    pop ebp")
         self.assembly.append("    ret")
         
         # Append data section
@@ -125,11 +247,17 @@ class X86Codegen:
         # Save function arguments in local_vars map
         # Under cdecl: ebp + 8 is 1st arg, ebp + 12 is 2nd, etc.
         old_local_vars = self.local_vars.copy()
+        old_string_vars = getattr(self, 'string_vars', set()).copy()
         self.local_vars = {}
+        self.string_vars = set()
         for i, param in enumerate(fn.params):
             param_name = param[0] if isinstance(param, (list, tuple)) else param
+            param_type = param[1] if isinstance(param, (list, tuple)) and len(param) > 1 else None
             # Argument offset from ebp: ebp + 8 + i * 4
             self.local_vars[param_name] = -(8 + i * 4) # Negative offset to represent arguments
+            # Track string parameters
+            if param_type == 'string':
+                self.string_vars.add(param_name)
             
         # Scan function body for local variables
         self.local_offset = 0
@@ -148,6 +276,7 @@ class X86Codegen:
         self.assembly.append("    ret")
         
         self.local_vars = old_local_vars
+        self.string_vars = old_string_vars
 
     def compile_stmt(self, node):
         if isinstance(node, Assignment):
@@ -156,9 +285,16 @@ class X86Codegen:
             offset = self.local_vars[node.name]
             self.assembly.append(f"    mov [ebp - {offset}], eax")
             # Track if this variable holds a string
-            if isinstance(node.value, String):
+            if self._is_string_expr(node.value):
                 self.string_vars = getattr(self, 'string_vars', set())
                 self.string_vars.add(node.name)
+        elif isinstance(node, DataFieldAssign):
+            self.compile_expr(node.value)
+            self.compile_expr(node.instance)
+            self.assembly.append("    pop eax") # instance
+            self.assembly.append("    pop ebx") # value
+            offset = self.get_prop_offset(node.field_name)
+            self.assembly.append(f"    mov [eax + {offset}], ebx")
         elif isinstance(node, Print):
             self.compile_expr(node.value)
             # Check type of target (we default to int printing unless it's a string)
@@ -170,6 +306,9 @@ class X86Codegen:
                 self.assembly.append("    push offset fmt_int")
                 self.assembly.append("    call _printf")
                 self.assembly.append("    add esp, 8")
+            self.assembly.append("    push 0")
+            self.assembly.append("    call _fflush")
+            self.assembly.append("    add esp, 4")
         elif isinstance(node, Return):
             self.compile_expr(node.value)
             self.assembly.append("    pop eax")
@@ -288,10 +427,11 @@ class X86Codegen:
             self.compile_expr(node.value)
             self.compile_expr(node.index)
             self.compile_expr(node.base)
-            self.assembly.append("    pop edx") # base address
+            self.assembly.append("    pop edx") # base (list struct pointer)
             self.assembly.append("    pop ecx") # index
             self.assembly.append("    pop eax") # value
-            # Store 32-bit int: base + index * 4
+            # List: data pointer is at [edx + 8]
+            self.assembly.append("    mov edx, [edx + 8]")
             self.assembly.append("    mov [edx + ecx * 4], eax")
         elif isinstance(node, WriteFile):
             self.compile_expr(node.content)
@@ -339,7 +479,14 @@ class X86Codegen:
             self.assembly.append("    pop ebx") # right
             self.assembly.append("    pop eax") # left
             if node.op == "+":
-                self.assembly.append("    add eax, ebx")
+                is_str = self._is_string_expr(node.left) or self._is_string_expr(node.right)
+                if is_str:
+                    self.assembly.append("    push ebx")
+                    self.assembly.append("    push eax")
+                    self.assembly.append("    call _concat_strings")
+                    self.assembly.append("    add esp, 8")
+                else:
+                    self.assembly.append("    add eax, ebx")
             elif node.op == "-":
                 self.assembly.append("    sub eax, ebx")
             elif node.op == "*":
@@ -355,6 +502,14 @@ class X86Codegen:
                 self.assembly.append("    and eax, ebx")
             elif node.op == "or":
                 self.assembly.append("    or eax, ebx")
+            elif node.op == "&":
+                self.assembly.append("    and eax, ebx")
+            elif node.op == "<<":
+                self.assembly.append("    mov ecx, ebx")
+                self.assembly.append("    shl eax, cl")
+            elif node.op == ">>":
+                self.assembly.append("    mov ecx, ebx")
+                self.assembly.append("    sar eax, cl")
             self.assembly.append("    push eax")
         elif isinstance(node, UnaryOp):
             self.compile_expr(node.value)
@@ -371,10 +526,37 @@ class X86Codegen:
             self.compile_expr(node.right)
             self.assembly.append("    pop ebx") # right
             self.assembly.append("    pop eax") # left
-            self.assembly.append("    cmp eax, ebx")
+            
+            # Determine if this is a string comparison based on type info
+            left_type = getattr(node.left, 'inferred_type', 'any')
+            right_type = getattr(node.right, 'inferred_type', 'any')
+            is_str_cmp = self._is_string_expr(node.left) or self._is_string_expr(node.right)
+            # Also treat 'any' comparisons involving string literals as string
+            if not is_str_cmp and (left_type == 'string' or right_type == 'string'):
+                is_str_cmp = True
             
             label_true = self.next_label("L_cmp_true")
             label_end = self.next_label("L_cmp_end")
+            
+            if node.op == "has":
+                # String containment: call strstr(haystack, needle)
+                self.assembly.append("    push ebx")
+                self.assembly.append("    push eax")
+                self.assembly.append("    call _strstr")
+                self.assembly.append("    add esp, 8")
+                # strstr returns non-null (non-zero) if found
+                self.assembly.append("    cmp eax, 0")
+                self.assembly.append(f"    jne {label_true}")
+            elif is_str_cmp:
+                # Use strcmp for string comparisons
+                self.assembly.append("    push ebx")
+                self.assembly.append("    push eax")
+                self.assembly.append("    call _strcmp")
+                self.assembly.append("    add esp, 8")
+                # strcmp returns 0 if equal, <0 or >0 otherwise
+                self.assembly.append("    cmp eax, 0")
+            else:
+                self.assembly.append("    cmp eax, ebx")
             
             if node.op == "==":
                 self.assembly.append(f"    je {label_true}")
@@ -395,13 +577,23 @@ class X86Codegen:
             self.assembly.append("    push 1")
             self.assembly.append(f"{label_end}:")
         elif isinstance(node, Call):
-            # Push arguments in reverse order (right-to-left)
-            for arg in reversed(node.args):
-                self.compile_expr(arg)
-            self.assembly.append(f"    call _{node.name}")
-            # Clean up stack after call
-            if len(node.args) > 0:
-                self.assembly.append(f"    add esp, {len(node.args) * 4}")
+            if hasattr(self, 'structs') and node.name in self.structs:
+                self.assembly.append("    push 128") # Allocate generous size for any struct
+                self.assembly.append("    call _malloc")
+                self.assembly.append("    add esp, 4")
+                self.assembly.append("    push eax")
+            else:
+                for arg in reversed(node.args):
+                    self.compile_expr(arg)
+                self.assembly.append(f"    call _{node.name}")
+                if len(node.args) > 0:
+                    self.assembly.append(f"    add esp, {len(node.args) * 4}")
+                self.assembly.append("    push eax")
+        elif isinstance(node, DataFieldAccess):
+            self.compile_expr(node.instance)
+            self.assembly.append("    pop eax")
+            offset = self.get_prop_offset(node.field_name)
+            self.assembly.append(f"    mov eax, [eax + {offset}]")
             self.assembly.append("    push eax")
         elif isinstance(node, Alloc):
             self.compile_expr(node.size)
@@ -419,13 +611,36 @@ class X86Codegen:
             else:
                 raise Exception(f"Property {node.property} not supported in native codegen")
         elif isinstance(node, ArrayIndex):
-            # base[index]
+            # base[index] - need to distinguish string vs list indexing
+            base_type = getattr(node.base, 'inferred_type', 'any')
+            is_str = self._is_string_expr(node.base) or base_type == 'string'
+            # Override: list-of-string fields store string POINTERS in data array
+            if isinstance(node.base, DataFieldAccess) and node.base.field_name in ['struct_names', 'prop_names', 'local_var_names']:
+                is_str = False
+            
             self.compile_expr(node.index)
             self.compile_expr(node.base)
             self.assembly.append("    pop edx") # base address
             self.assembly.append("    pop ecx") # index
-            self.assembly.append("    mov eax, [edx + ecx * 4]")
-            self.assembly.append("    push eax")
+            
+            if is_str:
+                # String byte access: create a 2-byte C string [char, 0]
+                self.assembly.append("    push edx")
+                self.assembly.append("    push ecx")
+                self.assembly.append("    push 2")
+                self.assembly.append("    call _malloc")
+                self.assembly.append("    add esp, 4")
+                self.assembly.append("    pop ecx")
+                self.assembly.append("    pop edx")
+                self.assembly.append("    movzx ebx, byte ptr [edx + ecx]")
+                self.assembly.append("    mov byte ptr [eax], bl")
+                self.assembly.append("    mov byte ptr [eax + 1], 0")
+                self.assembly.append("    push eax")
+            else:
+                # List access: data pointer is at [base + 8]
+                self.assembly.append("    mov edx, [edx + 8]")
+                self.assembly.append("    mov eax, [edx + ecx * 4]")
+                self.assembly.append("    push eax")
         elif isinstance(node, OpenFile):
             self.compile_expr(node.mode)
             self.compile_expr(node.path)
@@ -458,5 +673,108 @@ class X86Codegen:
             self.assembly.append("    pop ebx") # restore buffer pointer
             self.assembly.append("    mov byte ptr [ebx + eax], 0")
             self.assembly.append("    push ebx") # push buffer pointer as result
+        elif isinstance(node, ListLiteral):
+            self.assembly.append("    push 12")
+            self.assembly.append("    call _malloc")
+            self.assembly.append("    add esp, 4")
+            self.assembly.append("    push eax")
+            cap = max(4, len(node.elements))
+            self.assembly.append(f"    push {cap * 4}")
+            self.assembly.append("    call _malloc")
+            self.assembly.append("    add esp, 4")
+            self.assembly.append("    pop ebx")
+            self.assembly.append(f"    mov dword ptr [ebx], {len(node.elements)}")
+            self.assembly.append(f"    mov dword ptr [ebx+4], {cap}")
+            self.assembly.append("    mov [ebx+8], eax")
+            for i, el in enumerate(node.elements):
+                self.assembly.append("    push ebx")
+                self.assembly.append("    push eax")
+                self.compile_expr(el)
+                self.assembly.append("    pop ecx")
+                self.assembly.append("    pop eax")
+                self.assembly.append("    pop ebx")
+                self.assembly.append(f"    mov [eax + {i*4}], ecx")
+            self.assembly.append("    push ebx")
+        elif isinstance(node, MethodCall):
+            if node.method_name == "append":
+                self.compile_expr(node.args[0])
+                self.compile_expr(node.instance)
+                self.assembly.append("    pop ebx")
+                self.assembly.append("    pop ecx")
+                self.assembly.append("    mov eax, [ebx]")
+                self.assembly.append("    mov edx, [ebx+4]")
+                self.assembly.append("    cmp eax, edx")
+                no_realloc_label = self.next_label("L_no_realloc")
+                self.assembly.append(f"    jl {no_realloc_label}")
+                self.assembly.append("    shl edx, 1")
+                self.assembly.append("    mov [ebx+4], edx")
+                self.assembly.append("    push ebx")
+                self.assembly.append("    push ecx")
+                self.assembly.append("    shl edx, 2")
+                self.assembly.append("    push edx")
+                self.assembly.append("    push dword ptr [ebx+8]")
+                self.assembly.append("    call _realloc")
+                self.assembly.append("    add esp, 8")
+                self.assembly.append("    pop ecx")
+                self.assembly.append("    pop ebx")
+                self.assembly.append("    mov [ebx+8], eax")
+                self.assembly.append(f"{no_realloc_label}:")
+                self.assembly.append("    mov eax, [ebx]")
+                self.assembly.append("    mov edx, [ebx+8]")
+                self.assembly.append("    mov [edx + eax*4], ecx")
+                self.assembly.append("    inc eax")
+                self.assembly.append("    mov [ebx], eax")
+                self.assembly.append("    push 0")
+            elif node.method_name == "pop":
+                self.compile_expr(node.instance)
+                self.assembly.append("    pop ebx")
+                self.assembly.append("    mov eax, [ebx]")
+                self.assembly.append("    dec eax")
+                self.assembly.append("    mov [ebx], eax")
+                self.assembly.append("    mov edx, [ebx+8]")
+                self.assembly.append("    mov ecx, [edx + eax*4]")
+                self.assembly.append("    push ecx")
+        elif isinstance(node, Len):
+            self.compile_expr(node.target)
+            is_str = self._is_string_expr(node.target)
+            # Override: list-type fields should use list length, not strlen
+            if isinstance(node.target, DataFieldAccess) and node.target.field_name in ['struct_names', 'prop_names', 'local_var_names']:
+                is_str = False
+            if is_str:
+                self.assembly.append("    call _strlen")
+                self.assembly.append("    add esp, 4")
+                self.assembly.append("    push eax")
+            else:
+                self.assembly.append("    pop eax")
+                self.assembly.append("    mov eax, [eax]")
+                self.assembly.append("    push eax")
+        elif isinstance(node, Slice):
+            is_str = self._is_string_expr(node.base)
+            if is_str:
+                if node.start and node.end:
+                    self.compile_expr(node.end)
+                    self.compile_expr(node.start)
+                    self.compile_expr(node.base)
+                    self.assembly.append("    call _slice_string")
+                    self.assembly.append("    add esp, 12")
+                    self.assembly.append("    push eax")
+                else:
+                    raise Exception("Slice with omitted start/end not supported in native codegen yet")
+            else:
+                raise Exception("List slicing not supported in native codegen yet")
+        elif isinstance(node, StrConvert):
+            self.compile_expr(node.target)
+            self.assembly.append("    pop ebx") # int to convert
+            self.assembly.append("    push 16") # buffer size
+            self.assembly.append("    call _malloc")
+            self.assembly.append("    add esp, 4")
+            self.assembly.append("    push eax") # save buffer
+            self.assembly.append("    push ebx")
+            self.assembly.append("    push offset fmt_int_pure") 
+            self.assembly.append("    push eax")
+            self.assembly.append("    call _sprintf")
+            self.assembly.append("    add esp, 12")
+            self.assembly.append("    pop eax") # restore buffer pointer
+            self.assembly.append("    push eax")
         else:
             raise Exception(f"Native codegen unhandled node: {type(node)}")

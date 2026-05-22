@@ -55,28 +55,24 @@ class TypeChecker:
         t = self.visit(node.value)
 
         # Check for const reassignment
-        if not node.is_const and not node.is_mut:
-            if node.name in self.const_vars:
-                raise StaticTypeError(f"Cannot reassign const variable '{node.name}'")
+        if node.name in self.const_vars and not node.is_const:
+            raise StaticTypeError(f"Cannot reassign const variable '{node.name}'")
 
         # Track const variables
         if node.is_const:
             self.const_vars.add(node.name)
 
-        if node.is_mut:
-            self.env_stack[-1][node.name] = "dyn"
-        else:
-            found_env = None
-            for env in reversed(self.env_stack):
-                if node.name in env:
-                    found_env = env
-                    break
+        found_env = None
+        for env in reversed(self.env_stack):
+            if node.name in env:
+                found_env = env
+                break
 
-            if found_env is not None:
-                if found_env[node.name] != "dyn" and found_env[node.name] != t and found_env[node.name] != "any" and t != "any":
-                    raise StaticTypeError(f"Cannot assign {t} to variable of type {found_env[node.name]}")
-            else:
-                self.env_stack[-1][node.name] = node.type_name if node.type_name else t
+        if found_env is not None:
+            if found_env[node.name] != "dyn" and found_env[node.name] != t and found_env[node.name] != "any" and t != "any":
+                raise StaticTypeError(f"Cannot assign {t} to variable of type {found_env[node.name]}")
+        else:
+            self.env_stack[-1][node.name] = node.type_name if node.type_name else t
         return t
 
     def visit_Variable(self, node):
@@ -244,6 +240,14 @@ class TypeChecker:
     def visit_ArrayIndex(self, node):
         self.visit(node.base)
         self.visit(node.index)
+        return "any"
+
+    def visit_Slice(self, node):
+        self.visit(node.base)
+        if node.start:
+            self.visit(node.start)
+        if node.end:
+            self.visit(node.end)
         return "any"
 
     def visit_ArrayIndexAssign(self, node):

@@ -1,100 +1,109 @@
-# Nova Future Roadmap
+# Nova Future Roadmap: The Path to "True" Self-Hosting
 
-The Nova programming language aims to provide Python-like simplicity while maintaining full low-level control comparable to C/Rust. A key philosophy of Nova is **avoiding cryptic syntax** (like `*` or `&` for pointers) in favor of intuitive, logical abstractions (such as `ptr.value`, `ptr.addr`, or array-like indexing).
+Nova has achieved a self-hosting fixed point, meaning the native compiler can compile its own source code and generate an identical compiler. While this is a monumental milestone, the compiler still relies on a few external crutches (like `gcc`, Python, and the C Standard Library). 
 
-With our Custom Bytecode Virtual Machine, OOP with dunder methods, High-Level ARC, FFI bridging, `.nv` file imports, a self-hosted Lexer & Parser, Dynamic Lists, a **Self-Hosted Native Compiler**, and the recent **Python-Simplicity Features** now implemented, here are the **next top 5 paths** for the future development of Nova:
+To make Nova **truly independent and robust**, we must systematically eliminate these dependencies. The roadmap below breaks down the five major phases required to achieve True Self-Hosting.
 
-## 1. Self-Hosting the Compiler ✅ *(Phase 1 & 2 Complete)*
+---
 
-**Goal:** Rewrite the Nova compiler (Lexer, Parser, Code Generator) directly in Nova, making the language completely independent.
+## ✅ Completed Milestones
 
-### Completed
-*   **Self-Hosted Lexer (`stdlib/lexer.nv`):** A complete character-by-character tokenizer written entirely in Nova. Recognizes all token types: keywords, identifiers, numbers, strings, operators, delimiters, directives, and comments.
-*   **Self-Hosted Parser (`stdlib/parser.nv`):** A recursive-descent parser written in Nova that generates an AST for all major language constructs (functions, classes, data structs, control flow, imports).
-*   **Self-Hosted Code Generator (`stdlib/codegen.nv`):** A full x86-32 assembly emitter written in Nova with stack-based variable management, loop label stacks, and function compilation.
-*   **Self-Hosted Compiler Entry Point (`stdlib/compiler.nv`):** Orchestrates the pipeline by importing `lexer.nv`, `parser.nv`, and `codegen.nv`. Reads a `.nv` file, tokenizes → parses → generates assembly.
-*   **`.nv` File Import System (`modules/resolver.py`):** Full module resolution with circular import prevention, multi-directory search (relative, project root, stdlib/), and seamless integration with the compiler pipeline.
-*   **Dynamic Arrays/Lists:** Full in-memory AST construction using lists with `append`, `pop`, `insert`, and `clear` operations.
+The following features have been implemented in both the Python host compiler and the self-hosted Nova compiler:
 
-### Supported Features (Self-Hosted Compiler)
-*   Functions with parameters and return values
-*   Recursive function calls (e.g., factorial, fibonacci, power)
-*   If/else control flow (nested)
-*   While loops (including nested)
-*   For loops (`to`, `downto`, `step`)
-*   Break and Continue (with loop label stacks)
-*   Logical operators: `and`, `or`, `not`
-*   Unary negation (`-x`)
-*   String and integer print output (with automatic type inference)
-*   All arithmetic operators: `+`, `-`, `*`, `/`, `%`
-*   All comparison operators: `==`, `!=`, `<`, `>`, `<=`, `>=`
-*   Variable declarations (`mut`) and assignments
+| Feature | Description |
+|---------|-------------|
+| `elif` keyword | Replaces `else if` — single keyword conditional chaining |
+| `has` operator | Runtime field-existence check for `data` structs |
+| `&` bitwise AND | Integer bitwise AND operator |
+| `<<` left shift | Integer left-shift operator |
+| `>>` right shift | Integer right-shift operator |
+| `const` keyword | Immutable variables; all variables are mutable by default |
+| String slicing `s[i:j]` | Substring extraction in VM and native codegen |
+| Native `_slice_string` | x86 assembly runtime helper for string slicing |
+| Native `_concat_strings` | x86 assembly runtime helper for string concatenation |
 
-### Known Limitations (Self-Hosted Compiler)
-*   No support for classes, data structs, or lists in native codegen
-*   No `str()` conversion in native codegen (use VM dev mode for string operations)
-*   Generates 32-bit x86 assembly (requires GCC with `-m32` flag)
+---
 
-### Remaining
-*   **Full Feature Parity:** Extend the self-hosted compiler to support all Nova language features (classes, data structs, lists, for loops, boolean operators).
-*   **Self-Compilation (Bootstrapping):** Compile `stdlib/compiler.nv` using itself — the ultimate test of language independence.
-*   **64-bit x86_64 Support:** Generate 64-bit assembly for modern platforms.
+## Phase 1: Full Feature Parity in Native Codegen
 
-## 2. Python-Simplicity Features ✅ *(Complete)*
+The self-hosted codegen (`stdlib/codegen.nv`) currently relies on hardcoded struct sizes for bootstrapping and lacks dynamic string, list, and class implementations. We must port the advanced Python `codegen_x86.py` logic directly into `stdlib/codegen.nv`.
 
-**Goal:** Make Nova feel as natural as Python while maintaining full low-level control.
+**Action Plan:**
+1. **Dynamic Data Struct Sizing:** 
+   - Parse `Data` declarations during the compilation pass to dynamically calculate the sizes of structs instead of relying on hardcoded heap allocations.
+   - Maintain a symbol table for structs and their field byte-offsets to allow dynamic field access.
+2. **Native Class & OOP Support:** 
+   - Implement vtables or dynamic method dispatch in the native codegen to support classes.
+   - Port `__init__` constructor wrapping and dunder method (`__str__`, `__len__`, etc.) logic from the Python compiler into `codegen.nv`.
+3. **Advanced Built-in Types:** 
+   - Write native assembly routines for dynamic string concatenation (`+`) and comparison (`==`).
+   - Re-implement native dynamic array (list) scaling, allowing lists to grow gracefully when they exceed their initial capacity instead of crashing.
+4. **Boolean Operators:** 
+   - Fully support complex boolean operations (`and`, `or`, `not`) with short-circuit evaluation in the native assembly logic.
 
-### Completed
-*   **Auto-Constructor (`__init__`):** Classes can now define `__init__` methods that are automatically called on instantiation. `Vehicle("NovaCar", 60)` just works — no separate `.init()` call needed.
-*   **Dunder Methods (Special Methods):** Full Python-like operator overloading:
-    - `__str__()` — auto-called by `print()` and `str()`
-    - `__len__()` — auto-called by `len()`
-    - `__eq__(other)` — auto-called by `==` operator
-    - `__add__(other)` — auto-called by `+` operator
-    - `__sub__(other)` — auto-called by `-` operator
-    - `__mul__(other)` — auto-called by `*` operator
-*   **String Escape Sequences:** Full support for `\n`, `\t`, `\r`, `\\`, `\"`, `\0`, `\b`, `\a`, `\f`, `\v`.
-*   **`str()` Built-in:** Convert any value to string: `str(42)` → `"42"`, `str(true)` → `"true"`. Supports `__str__` for class instances.
-*   **`const` Keyword:** Opt-in immutability — `const PI = 3` prevents reassignment at compile time.
-*   **`@raw` Safety Boundary:** The type checker now **enforces** that `alloc()`, `free()`, and pointer operations are only used inside `@raw` blocks. Using them outside raises a `StaticTypeError`.
-*   **Dev/Build CLI Modes:** `nova dev file.nv` for fast VM iteration, `nova build file.nv` for native compilation.
+---
 
-## 3. Advanced Static Type System & Inference
+## Phase 2: Native Assembler & Linker (Dropping GCC)
 
-**Goal:** Introduce strict compile-time safety while keeping the typing system mostly invisible to the developer.
+Currently, Nova outputs `.s` assembly text and invokes `gcc` to assemble it and link it into an `.exe`. We need to write an Assembler & Linker natively in Nova that emits executable binaries directly (e.g., PE files for Windows or ELF files for Linux).
 
-### Completed
-*   **Static Type Checker (`compiler/type_checker.py`):** Validates type consistency for assignments, function parameters, return types, and binary operations at compile time. Supports gradual typing via `mut` for dynamic variables. Enforces `@raw` safety boundary and `const` immutability.
+**Action Plan:**
+1. **Instruction Encoding (Assembler):**
+   - Write a module (`stdlib/assembler.nv`) that translates x86 text instructions (like `mov eax, 1` or `push ebx`) into their raw hexadecimal opcode counterparts (machine code).
+   - Resolve internal jump labels to relative memory addresses during an assembler pass.
+2. **Binary Header Generation (Linker):**
+   - Study the PE (Portable Executable) format for Windows and the ELF (Executable and Linkable Format) for Linux.
+   - Write a linker module (`stdlib/linker.nv`) that wraps the machine code inside the appropriate binary headers (DOS stub, PE headers, Section headers, etc.).
+3. **Standalone Executable Output:**
+   - Integrate the Assembler and Linker into `stdlib/compiler.nv`.
+   - Instead of writing a `.s` file and invoking a shell command for GCC, write raw binary bytes to `output.exe` directly.
 
-### Remaining
-*   **Type Inference Engine:** Implement a system where types are strictly checked at compile-time but rarely need to be explicitly declared by the user (e.g., `x = 5` is strictly an `int`, verified by the compiler without requiring `int x = 5`).
-*   **Interfaces and Traits:** Expand the current Class system by introducing Interfaces. Keep OOP simple by avoiding the "diamond problem" (no multiple inheritance).
-*   **Compiler Validations:** Throw clear `NovaError`s during the bytecode compilation phase if an incorrect type is passed to a function or method, rather than failing at runtime.
+---
 
-## 4. Comprehensive Native Standard Library
+## Phase 3: Raw Syscall Integration (C-Free)
 
-**Goal:** Build a rich, built-in standard library so developers don't have to rely on external tools for basic tasks.
+Nova still relies on the C Standard Library (imported via `extern _printf`, `_malloc`, `_fopen`, etc.) to interface with the operating system. We need to bypass the C runtime entirely by issuing OS-level syscalls directly via assembly.
 
-### Completed
-*   **Math Utilities (`stdlib/math_utils.nv`):** Square, cube, absolute value, min, max, factorial — all written in Nova and importable via the module system.
-*   **File I/O:** `open`, `read`, `write`, `close` exist as built-in VM opcodes.
+**Action Plan:**
+1. **Syscall Abstraction Layer:**
+   - Identify the core Syscall numbers for Windows (e.g., `NtWriteFile`, `NtAllocateVirtualMemory`) and Linux (e.g., `sys_write`, `sys_mmap`).
+   - Create a platform-specific OS interface file (e.g., `stdlib/os_win.nv` or `stdlib/os_linux.nv`).
+2. **Native Memory Management (`malloc`/`free`):**
+   - Replace C's `malloc` and `free`. Write a custom memory allocator in Nova that requests bulk memory pages from the OS using raw syscalls and sub-allocates them to the application.
+3. **Native I/O (`printf`, `fopen`):**
+   - Replace `printf` by formatting strings in memory natively and passing the resulting string buffer directly to the OS `sys_write` / `WriteFile` syscall.
+   - Replace `fopen`/`read`/`write`/`close` with their direct OS file handler syscall equivalents.
 
-### Remaining
-*   **Built Natively in Nova:** The standard library (Networking, Timers) will be written entirely in Nova, wrapping core `@raw` system calls inside high-level intuitive classes (e.g., `File`).
-*   **Advanced Collections:** Implement core data structures (Lists, Maps, Sets) using highly optimized Data Structures and Algorithms underneath. High-level programming will feel extraordinarily fast due to the `@raw` memory control optimizing the backend collections.
-*   **Simplicity Focus:** Standardize intuitive methods. For example, reading a file should just be `content = File.read("data.txt")`.
+---
 
-## 5. Multi-Threading and Concurrency
+## Phase 4: Self-Hosted Virtual Machine
 
-**Goal:** Introduce modern, safe, and intuitive multi-threading capabilities.
+Right now, running `nova dev file.nv` uses the Python VM. To unify the toolchain, we need to write the bytecode interpreter natively in Nova so the entire ecosystem (VM + Compiler + CLI) exists within a single native binary.
 
-*   **Async/Await Syntax:** Provide high-level asynchronous programming using Python-like `async` and `await` keywords, making network and file I/O operations non-blocking by default.
-*   **Low-Level Threading via `@raw`:** For performance-critical blocks, allow developers to spawn raw OS threads using the C FFI (`pthreads`), directly mapping work to CPU cores without fighting a Global Interpreter Lock.
+**Action Plan:**
+1. **Bytecode Definition:**
+   - Standardize the Nova bytecode specification. Create `enum`-like constants representing every opcode (e.g., `OP_ADD`, `OP_JUMP`, `OP_PRINT`).
+2. **The Execution Loop:**
+   - Write the core VM loop (`stdlib/vm.nv`) consisting of a massive `if/else` block (or computed goto) that fetches, decodes, and executes bytecode instructions.
+3. **Native Memory & Stack Simulation:**
+   - Implement the VM's operand stack and environment maps (for variable storage) natively. 
+   - Bridge native pointers and memory manipulation into the VM environment using Nova's `@raw` system.
+4. **CLI Integration:**
+   - Replace `main.py` entirely. Write a `cli.nv` entry point that takes arguments (e.g., `dev` or `build`).
+   - If `dev` is passed, the native CLI parses the file to an AST, generates bytecode, and feeds it into the Native VM. If `build` is passed, it feeds the AST to the Native Codegen.
 
-## 6. Enhanced Tooling and Package Manager
+---
 
-**Goal:** Provide a world-class developer experience straight out of the box.
+## Phase 5: 64-bit x86_64 Support
 
-*   **Nova Package Manager (NPM / NVP):** A built-in command line tool for easily sharing and downloading Nova libraries globally.
-*   **Built-in Formatter & Linter:** Enforce clean, readable code style universally across all Nova projects automatically via `nova fmt`.
-*   **Language Server Protocol (LSP):** Build an LSP to integrate deeply with VSCode, providing real-time autocompletion, type hinting (from the inference engine), and inline documentation for developers.
+Nova currently generates 32-bit x86 assembly. Modern operating systems and architectures are strictly 64-bit, meaning Nova must eventually adopt x86_64 machine code.
+
+**Action Plan:**
+1. **64-bit Registers & Pointers:**
+   - Update `stdlib/codegen.nv` to emit 64-bit registers (`rax`, `rbx`, `rcx`, `rsp`, `rbp` instead of `eax`, `ebx`, etc.).
+   - Expand all memory pointer calculations and struct layouts to account for 8-byte pointer sizes instead of 4-byte.
+2. **Calling Convention Update:**
+   - 32-bit assembly relies heavily on pushing arguments to the stack (`push eax`). 
+   - Update the codegen to comply with modern 64-bit calling conventions (e.g., System V AMD64 ABI passes the first 6 arguments in registers: `rdi`, `rsi`, `rdx`, `rcx`, `r8`, `r9`, and Windows x64 uses `rcx`, `rdx`, `r8`, `r9`).
+3. **Stack Alignment Constraints:**
+   - Implement strict 16-byte stack boundary alignment before making any function or system calls, which is mandatory in 64-bit execution environments.

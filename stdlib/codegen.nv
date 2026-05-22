@@ -14,10 +14,13 @@ data CodegenState {
     local_offset: int
     loop_start_labels: list
     loop_end_labels: list
+    struct_names: list
+    struct_sizes: list
+    prop_names: list
 }
 
 def new_codegen() -> CodegenState {
-    mut state = CodegenState()
+    state = CodegenState()
     state.asm_lines = []
     state.data_lines = []
     state.str_count = 0
@@ -27,6 +30,9 @@ def new_codegen() -> CodegenState {
     state.local_offset = 0
     state.loop_start_labels = []
     state.loop_end_labels = []
+    state.struct_names = []
+    state.struct_sizes = []
+    state.prop_names = []
     return state
 }
 
@@ -45,7 +51,7 @@ def next_label(state: CodegenState, prefix: string) -> string {
 
 def add_string_literal(state: CodegenState, raw_val: string) -> string {
     # Check if already added
-    mut i = 0
+    i = 0
     while i < len(state.local_var_names) {
         if state.local_var_names[i] == raw_val {
             return state.local_vars[i]
@@ -53,7 +59,7 @@ def add_string_literal(state: CodegenState, raw_val: string) -> string {
         i = i + 1
     }
     state.str_count = state.str_count + 1
-    mut label = "str_const_" + str(state.str_count)
+    label = "str_const_" + str(state.str_count)
     state.local_var_names.append(raw_val)
     state.local_vars.append(label)
     emit_data(state, label + ": .asciz " + raw_val)
@@ -61,7 +67,7 @@ def add_string_literal(state: CodegenState, raw_val: string) -> string {
 }
 
 def find_var_offset(state: CodegenState, name: string) -> int {
-    mut i = 0
+    i = 0
     while i < len(state.local_var_names) {
         if state.local_var_names[i] == name {
             return state.local_vars[i]
@@ -73,7 +79,7 @@ def find_var_offset(state: CodegenState, name: string) -> int {
 
 def register_var(state: CodegenState, name: string) -> int {
     # Check if already registered
-    mut i = 0
+    i = 0
     while i < len(state.local_var_names) {
         if state.local_var_names[i] == name {
             return state.local_vars[i]
@@ -86,6 +92,59 @@ def register_var(state: CodegenState, name: string) -> int {
     return state.local_offset
 }
 
+def get_prop_offset(state: CodegenState, name: string) -> int {
+    i = 0
+    while i < len(state.prop_names) {
+        if state.prop_names[i] == name {
+            return i * 4
+        }
+        i = i + 1
+    }
+    state.prop_names.append(name)
+    return i * 4
+}
+
+def is_string_expr(node: AstNode) -> int {
+    if node.kind == "String" {
+        return 1
+    }
+    if node.kind == "StrConvert" {
+        return 1
+    }
+
+    if node.kind == "BinOp" {
+        if node.val_str == "+" {
+            if is_string_expr(node.left) == 1 {
+                return 1
+            }
+            if is_string_expr(node.right) == 1 {
+                return 1
+            }
+        }
+    }
+    if node.kind == "ArrayIndex" {
+        if is_string_expr(node.left) == 1 {
+            return 1
+        }
+    }
+    if node.kind == "Slice" {
+        if is_string_expr(node.left) == 1 {
+            return 1
+        }
+    }
+    if node.kind == "DataFieldAccess" {
+        print("is_string_expr: DataFieldAccess to " + node.val_str)
+        if node.val_str == "val_str" { return 1 }
+        if node.val_str == "kind" { return 1 }
+        if node.val_str == "name" { return 1 }
+        if node.val_str == "struct_names" { return 1 }
+        if node.val_str == "prop_names" { return 1 }
+        if node.val_str == "local_var_names" { return 1 }
+        if node.val_str == "field_name" { return 1 }
+    }
+    return 0
+}
+
 # --- Variable scanning ---
 
 def scan_vars(state: CodegenState, node: AstNode) {
@@ -93,7 +152,7 @@ def scan_vars(state: CodegenState, node: AstNode) {
         register_var(state, node.val_str)
     }
     if node.kind == "IfElse" {
-        mut i = 0
+        i = 0
         while i < len(node.body) {
             scan_vars(state, node.body[i])
             i = i + 1
@@ -105,7 +164,7 @@ def scan_vars(state: CodegenState, node: AstNode) {
         }
     }
     if node.kind == "While" {
-        mut i = 0
+        i = 0
         while i < len(node.body) {
             scan_vars(state, node.body[i])
             i = i + 1
@@ -113,7 +172,7 @@ def scan_vars(state: CodegenState, node: AstNode) {
     }
     if node.kind == "ForLoop" {
         register_var(state, node.val_str)
-        mut i = 0
+        i = 0
         while i < len(node.body) {
             scan_vars(state, node.body[i])
             i = i + 1
@@ -124,21 +183,22 @@ def scan_vars(state: CodegenState, node: AstNode) {
 # --- Expression compilation ---
 
 def compile_expr(state: CodegenState, node: AstNode) {
+    print("    expr kind: " + node.kind)
     if node.kind == "Number" {
         emit(state, "    push " + str(node.val_int))
     }
     if node.kind == "String" {
-        mut label = add_string_literal(state, node.val_str)
+        label = add_string_literal(state, node.val_str)
         emit(state, "    push offset " + label)
     }
     if node.kind == "Boolean" {
         emit(state, "    push " + str(node.val_int))
     }
     if node.kind == "Variable" {
-        mut offset = find_var_offset(state, node.val_str)
+        offset = find_var_offset(state, node.val_str)
         if offset < 0 {
             # Function argument
-            mut abs_off = 0 - offset
+            abs_off = 0 - offset
             emit(state, "    mov eax, [ebp + " + str(abs_off) + "]")
         } else {
             emit(state, "    mov eax, [ebp - " + str(offset) + "]")
@@ -146,35 +206,196 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    push eax")
     }
     if node.kind == "BinOp" {
+        if node.val_str == "and" {
+            end_lbl = next_label(state, "L_and_end")
+            compile_expr(state, node.left)
+            emit(state, "    pop eax")
+            emit(state, "    cmp eax, 0")
+            emit(state, "    je " + end_lbl)
+            compile_expr(state, node.right)
+            emit(state, "    pop eax")
+            emit(state, end_lbl + ":")
+            emit(state, "    push eax")
+        } else {
+            if node.val_str == "or" {
+                end_lbl = next_label(state, "L_or_end")
+                compile_expr(state, node.left)
+                emit(state, "    pop eax")
+                emit(state, "    cmp eax, 0")
+                emit(state, "    jne " + end_lbl)
+                compile_expr(state, node.right)
+                emit(state, "    pop eax")
+                emit(state, end_lbl + ":")
+                emit(state, "    push eax")
+            } else {
+                print("      BinOp: compiling left")
+                compile_expr(state, node.left)
+                print("      BinOp: compiling right")
+                compile_expr(state, node.right)
+                print("      BinOp: children compiled")
+                emit(state, "    pop ebx")
+                emit(state, "    pop eax")
+                
+                is_cmp = 0
+                if node.val_str == "==" { is_cmp = 1 }
+                if node.val_str == "!=" { is_cmp = 1 }
+                if node.val_str == "<" { is_cmp = 1 }
+                if node.val_str == "<=" { is_cmp = 1 }
+                if node.val_str == ">" { is_cmp = 1 }
+                if node.val_str == ">=" { is_cmp = 1 }
+                if node.val_str == "has" { is_cmp = 1 }
+                
+                if is_cmp == 1 {
+                    # Comparison operators
+                    is_str_cmp = 0
+                    if is_string_expr(node.left) == 1 {
+                        is_str_cmp = 1
+                    }
+                    if is_string_expr(node.right) == 1 {
+                        is_str_cmp = 1
+                    }
+                    
+                    label_true = next_label(state, "L_cmp_true")
+                    label_end = next_label(state, "L_cmp_end")
+
+                    if node.val_str == "has" {
+                        # String containment via strstr
+                        emit(state, "    push ebx")
+                        emit(state, "    push eax")
+                        emit(state, "    call _strstr")
+                        emit(state, "    add esp, 8")
+                        emit(state, "    cmp eax, 0")
+                        emit(state, "    jne " + label_true)
+                    } else {
+                        if is_str_cmp == 1 {
+                            emit(state, "    push ebx")
+                            emit(state, "    push eax")
+                            emit(state, "    call _strcmp")
+                            emit(state, "    add esp, 8")
+                            emit(state, "    cmp eax, 0")
+                        } else {
+                            emit(state, "    cmp eax, ebx")
+                        }
+
+                        if node.val_str == "==" {
+                            emit(state, "    je " + label_true)
+                        }
+                        if node.val_str == "!=" {
+                            emit(state, "    jne " + label_true)
+                        }
+                        if node.val_str == "<" {
+                            emit(state, "    jl " + label_true)
+                        }
+                        if node.val_str == "<=" {
+                            emit(state, "    jle " + label_true)
+                        }
+                        if node.val_str == ">" {
+                            emit(state, "    jg " + label_true)
+                        }
+                        if node.val_str == ">=" {
+                            emit(state, "    jge " + label_true)
+                        }
+                    }
+
+                    emit(state, "    push 0")
+                    emit(state, "    jmp " + label_end)
+                    emit(state, label_true + ":")
+                    emit(state, "    push 1")
+                    emit(state, label_end + ":")
+                } else {
+                    # Arithmetic operators
+                    if node.val_str == "+" {
+                        if is_string_expr(node.left) == 1 {
+                            emit(state, "    push ebx")
+                            emit(state, "    push eax")
+                            emit(state, "    call _concat_strings")
+                            emit(state, "    add esp, 8")
+                        } else {
+                            if is_string_expr(node.right) == 1 {
+                                emit(state, "    push ebx")
+                                emit(state, "    push eax")
+                                emit(state, "    call _concat_strings")
+                                emit(state, "    add esp, 8")
+                            } else {
+                                emit(state, "    add eax, ebx")
+                            }
+                        }
+                    }
+                    if node.val_str == "-" {
+                        emit(state, "    sub eax, ebx")
+                    }
+                    if node.val_str == "*" {
+                        emit(state, "    imul eax, ebx")
+                    }
+                    if node.val_str == "/" {
+                        emit(state, "    cdq")
+                        emit(state, "    idiv ebx")
+                    }
+                    if node.val_str == "%" {
+                        emit(state, "    cdq")
+                        emit(state, "    idiv ebx")
+                        emit(state, "    mov eax, edx")
+                    }
+                    if node.val_str == "&" {
+                        emit(state, "    and eax, ebx")
+                    }
+                    if node.val_str == ">>" {
+                        emit(state, "    mov ecx, ebx")
+                        emit(state, "    sar eax, cl")
+                    }
+                    if node.val_str == "<<" {
+                        emit(state, "    mov ecx, ebx")
+                        emit(state, "    shl eax, cl")
+                    }
+                    emit(state, "    push eax")
+                }
+            }
+        }
+    }
+    if node.kind == "Compare" {
         compile_expr(state, node.left)
         compile_expr(state, node.right)
         emit(state, "    pop ebx")
         emit(state, "    pop eax")
-        if node.val_str == "+" {
-            emit(state, "    add eax, ebx")
+
+        is_str_cmp = 0
+        if is_string_expr(node.left) == 1 { is_str_cmp = 1 }
+        if is_string_expr(node.right) == 1 { is_str_cmp = 1 }
+
+        label_true = next_label(state, "L_cmp_true")
+        label_end = next_label(state, "L_cmp_end")
+
+        if node.val_str == "has" {
+            emit(state, "    push ebx")
+            emit(state, "    push eax")
+            emit(state, "    call _strstr")
+            emit(state, "    add esp, 8")
+            emit(state, "    cmp eax, 0")
+            emit(state, "    jne " + label_true)
+        } else {
+            if is_str_cmp == 1 {
+                emit(state, "    push ebx")
+                emit(state, "    push eax")
+                emit(state, "    call _strcmp")
+                emit(state, "    add esp, 8")
+                emit(state, "    cmp eax, 0")
+            } else {
+                emit(state, "    cmp eax, ebx")
+            }
+
+            if node.val_str == "==" { emit(state, "    je " + label_true) }
+            if node.val_str == "!=" { emit(state, "    jne " + label_true) }
+            if node.val_str == "<" { emit(state, "    jl " + label_true) }
+            if node.val_str == "<=" { emit(state, "    jle " + label_true) }
+            if node.val_str == ">" { emit(state, "    jg " + label_true) }
+            if node.val_str == ">=" { emit(state, "    jge " + label_true) }
         }
-        if node.val_str == "-" {
-            emit(state, "    sub eax, ebx")
-        }
-        if node.val_str == "*" {
-            emit(state, "    imul eax, ebx")
-        }
-        if node.val_str == "/" {
-            emit(state, "    cdq")
-            emit(state, "    idiv ebx")
-        }
-        if node.val_str == "%" {
-            emit(state, "    cdq")
-            emit(state, "    idiv ebx")
-            emit(state, "    mov eax, edx")
-        }
-        if node.val_str == "and" {
-            emit(state, "    and eax, ebx")
-        }
-        if node.val_str == "or" {
-            emit(state, "    or eax, ebx")
-        }
-        emit(state, "    push eax")
+
+        emit(state, "    push 0")
+        emit(state, "    jmp " + label_end)
+        emit(state, label_true + ":")
+        emit(state, "    push 1")
+        emit(state, label_end + ":")
     }
     if node.kind == "UnaryOp" {
         compile_expr(state, node.left)
@@ -189,76 +410,289 @@ def compile_expr(state: CodegenState, node: AstNode) {
         }
         emit(state, "    push eax")
     }
-    if node.kind == "Compare" {
+    if node.kind == "DataFieldAccess" {
         compile_expr(state, node.left)
-        compile_expr(state, node.right)
-        emit(state, "    pop ebx")
         emit(state, "    pop eax")
-        emit(state, "    cmp eax, ebx")
-
-        mut label_true = next_label(state, "L_cmp_true")
-        mut label_end = next_label(state, "L_cmp_end")
-
-        if node.val_str == "==" {
-            emit(state, "    je " + label_true)
+        offset = get_prop_offset(state, node.val_str)
+        emit(state, "    mov eax, [eax + " + str(offset) + "]")
+        emit(state, "    push eax")
+    }
+    if node.kind == "ListLiteral" {
+        emit(state, "    push 12")
+        emit(state, "    call _malloc")
+        emit(state, "    add esp, 4")
+        emit(state, "    push eax")
+        
+        cap = len(node.args)
+        if cap < 4 {
+            cap = 4
         }
-        if node.val_str == "!=" {
-            emit(state, "    jne " + label_true)
+        emit(state, "    push " + str(cap * 4))
+        emit(state, "    call _malloc")
+        emit(state, "    add esp, 4")
+        emit(state, "    pop ebx")
+        
+        emit(state, "    mov dword ptr [ebx], " + str(len(node.args)))
+        emit(state, "    mov dword ptr [ebx+4], " + str(cap))
+        emit(state, "    mov [ebx+8], eax")
+        
+        idx_list = 0
+        while idx_list < len(node.args) {
+            emit(state, "    push ebx")
+            emit(state, "    push eax")
+            compile_expr(state, node.args[idx_list])
+            emit(state, "    pop ecx")
+            emit(state, "    pop eax")
+            emit(state, "    pop ebx")
+            emit(state, "    mov [eax + " + str(idx_list * 4) + "], ecx")
+            idx_list = idx_list + 1
         }
-        if node.val_str == "<" {
-            emit(state, "    jl " + label_true)
+        emit(state, "    push ebx")
+    }
+    if node.kind == "ArrayIndex" {
+        is_str = 0
+        if is_string_expr(node.left) == 1 {
+            is_str = 1
         }
-        if node.val_str == "<=" {
-            emit(state, "    jle " + label_true)
+        # Override: list-of-strings fields store string POINTERS in data array
+        if node.left.kind == "DataFieldAccess" {
+            if node.left.val_str == "struct_names" { is_str = 0 }
+            if node.left.val_str == "prop_names" { is_str = 0 }
+            if node.left.val_str == "local_var_names" { is_str = 0 }
         }
-        if node.val_str == ">" {
-            emit(state, "    jg " + label_true)
+        
+        compile_expr(state, node.right)
+        compile_expr(state, node.left)
+        emit(state, "    pop edx")
+        emit(state, "    pop ecx")
+        
+        if is_str == 1 {
+            emit(state, "    push edx")
+            emit(state, "    push ecx")
+            emit(state, "    push 2")
+            emit(state, "    call _malloc")
+            emit(state, "    add esp, 4")
+            emit(state, "    pop ecx")
+            emit(state, "    pop edx")
+            emit(state, "    movzx ebx, byte ptr [edx + ecx]")
+            emit(state, "    mov byte ptr [eax], bl")
+            emit(state, "    mov byte ptr [eax + 1], 0")
+            emit(state, "    push eax")
+        } else {
+            emit(state, "    mov edx, [edx + 8]")
+            emit(state, "    mov eax, [edx + ecx * 4]")
+            emit(state, "    push eax")
         }
-        if node.val_str == ">=" {
-            emit(state, "    jge " + label_true)
+    }
+    if node.kind == "Slice" {
+        # String slice: s[start:end]
+        is_str = 0
+        if is_string_expr(node.left) == 1 { is_str = 1 }
+        if is_str == 1 {
+            if node.right.kind != "" and node.cond.kind != "" {
+                compile_expr(state, node.left)
+                compile_expr(state, node.right)
+                compile_expr(state, node.cond)
+                emit(state, "    pop ecx")
+                emit(state, "    pop ebx")
+                emit(state, "    pop edx")
+                emit(state, "    sub ecx, ebx")
+                emit(state, "    inc ecx")
+                emit(state, "    push ecx")
+                emit(state, "    call _malloc")
+                emit(state, "    add esp, 4")
+                emit(state, "    push eax")
+                emit(state, "    add edx, ebx")
+                emit(state, "    push edx")
+                emit(state, "    push eax")
+                emit(state, "    call _strcpy")
+                emit(state, "    add esp, 8")
+                emit(state, "    pop eax")
+                emit(state, "    push eax")
+            } else {
+                emit(state, "    push 0")
+            }
+        } else {
+            emit(state, "    push 0")
         }
-
-        emit(state, "    push 0")
-        emit(state, "    jmp " + label_end)
-        emit(state, label_true + ":")
-        emit(state, "    push 1")
-        emit(state, label_end + ":")
+    }
+    if node.kind == "StrConvert" {
+        compile_expr(state, node.left)
+        emit(state, "    pop ebx")
+        emit(state, "    push 16")
+        emit(state, "    call _malloc")
+        emit(state, "    add esp, 4")
+        emit(state, "    push eax")
+        emit(state, "    push ebx")
+        emit(state, "    push offset fmt_int_pure")
+        emit(state, "    push eax")
+        emit(state, "    call _sprintf")
+        emit(state, "    add esp, 12")
+        emit(state, "    pop eax")
+        emit(state, "    push eax")
+    }
+    if node.kind == "Len" {
+        compile_expr(state, node.left)
+        use_strlen = 0
+        if is_string_expr(node.left) == 1 {
+            use_strlen = 1
+        }
+        # Override: list-type fields should use list length, not strlen
+        if node.left.kind == "DataFieldAccess" {
+            if node.left.val_str == "struct_names" { use_strlen = 0 }
+            if node.left.val_str == "prop_names" { use_strlen = 0 }
+            if node.left.val_str == "local_var_names" { use_strlen = 0 }
+        }
+        if use_strlen == 1 {
+            emit(state, "    call _strlen")
+            emit(state, "    add esp, 4")
+            emit(state, "    push eax")
+        } else {
+            emit(state, "    pop eax")
+            emit(state, "    mov eax, [eax]")
+            emit(state, "    push eax")
+        }
+    }
+    if node.kind == "MethodCall" {
+        if node.val_str == "append" {
+            compile_expr(state, node.args[0])
+            compile_expr(state, node.left)
+            emit(state, "    pop ebx")
+            emit(state, "    pop ecx")
+            emit(state, "    mov eax, [ebx]")
+            emit(state, "    mov edx, [ebx+4]")
+            emit(state, "    cmp eax, edx")
+            no_realloc = next_label(state, "L_no_realloc")
+            emit(state, "    jl " + no_realloc)
+            emit(state, "    shl edx, 1")
+            emit(state, "    mov [ebx+4], edx")
+            emit(state, "    push ebx")
+            emit(state, "    push ecx")
+            emit(state, "    shl edx, 2")
+            emit(state, "    push edx")
+            emit(state, "    push dword ptr [ebx+8]")
+            emit(state, "    call _realloc")
+            emit(state, "    add esp, 8")
+            emit(state, "    pop ecx")
+            emit(state, "    pop ebx")
+            emit(state, "    mov [ebx+8], eax")
+            emit(state, no_realloc + ":")
+            emit(state, "    mov eax, [ebx]")
+            emit(state, "    mov edx, [ebx+8]")
+            emit(state, "    mov [edx + eax*4], ecx")
+            emit(state, "    add eax, 1")
+            emit(state, "    mov [ebx], eax")
+            emit(state, "    push 0")
+        }
+        if node.val_str == "pop" {
+            compile_expr(state, node.left)
+            emit(state, "    pop ebx")
+            emit(state, "    mov eax, [ebx]")
+            emit(state, "    sub eax, 1")
+            emit(state, "    mov [ebx], eax")
+            emit(state, "    mov edx, [ebx+8]")
+            emit(state, "    mov ecx, [edx + eax*4]")
+            emit(state, "    push ecx")
+        }
     }
     if node.kind == "Call" {
-        # Push args in reverse order
-        mut arg_count = len(node.args)
-        mut i = arg_count - 1
-        while i >= 0 {
-            compile_expr(state, node.args[i])
-            i = i - 1
+        if node.val_str == "len" {
+            compile_expr(state, node.args[0])
+            use_strlen = 0
+            if is_string_expr(node.args[0]) == 1 {
+                use_strlen = 1
+            }
+            # Override: list-type fields should use list length
+            if node.args[0].kind == "DataFieldAccess" {
+                if node.args[0].val_str == "struct_names" { use_strlen = 0 }
+                if node.args[0].val_str == "prop_names" { use_strlen = 0 }
+                if node.args[0].val_str == "local_var_names" { use_strlen = 0 }
+            }
+            if use_strlen == 1 {
+                emit(state, "    call _strlen")
+                emit(state, "    add esp, 4")
+                emit(state, "    push eax")
+            } else {
+                emit(state, "    pop eax")
+                emit(state, "    push dword ptr [eax]")
+            }
+            return 1
         }
-        emit(state, "    call _" + node.val_str)
-        if arg_count > 0 {
-            emit(state, "    add esp, " + str(arg_count * 4))
+        
+        is_struct = 0
+        struct_size = 0
+        idx = 0
+        while idx < len(state.struct_names) {
+            if state.struct_names[idx] == node.val_str {
+                is_struct = 1
+                struct_size = state.struct_sizes[idx]
+            }
+            idx = idx + 1
         }
-        emit(state, "    push eax")
+        
+        if is_struct == 1 {
+            emit(state, "    push " + str(struct_size))
+            emit(state, "    call _malloc")
+            emit(state, "    add esp, 4")
+            emit(state, "    push eax")
+        } else {
+            # Push args in reverse order
+            arg_count = len(node.args)
+            idx_arg = arg_count - 1
+            while idx_arg >= 0 {
+                compile_expr(state, node.args[idx_arg])
+                idx_arg = idx_arg - 1
+            }
+            emit(state, "    call _" + node.val_str)
+            if arg_count > 0 {
+                emit(state, "    add esp, " + str(arg_count * 4))
+            }
+            emit(state, "    push eax")
+        }
     }
 }
 
 # --- Statement compilation ---
 
 def compile_stmt(state: CodegenState, node: AstNode) {
+    print("Entering compile_stmt with node kind: " + node.kind)
     if node.kind == "Assignment" {
         compile_expr(state, node.left)
         emit(state, "    pop eax")
-        mut offset = find_var_offset(state, node.val_str)
+        offset = find_var_offset(state, node.val_str)
         emit(state, "    mov [ebp - " + str(offset) + "], eax")
+    }
+    if node.kind == "DataFieldAssign" {
+        compile_expr(state, node.right)
+        compile_expr(state, node.left)
+        emit(state, "    pop eax")
+        emit(state, "    pop ebx")
+        prop_off = get_prop_offset(state, node.val_str)
+        emit(state, "    mov [eax + " + str(prop_off) + "], ebx")
+    }
+    if node.kind == "ArrayIndexAssign" {
+        compile_expr(state, node.cond)
+        compile_expr(state, node.right)
+        compile_expr(state, node.left)
+        emit(state, "    pop edx")
+        emit(state, "    pop ecx")
+        emit(state, "    pop eax")
+        emit(state, "    mov edx, [edx + 8]")
+        emit(state, "    mov [edx + ecx * 4], eax")
     }
     if node.kind == "Print" {
         compile_expr(state, node.left)
-        # Default to integer printing
-        if node.left.kind == "String" {
+        # Default to integer printing unless string
+        if is_string_expr(node.left) == 1 {
             emit(state, "    push offset fmt_str")
         } else {
             emit(state, "    push offset fmt_int")
         }
         emit(state, "    call _printf")
         emit(state, "    add esp, 8")
+        emit(state, "    push 0")
+        emit(state, "    call _fflush")
+        emit(state, "    add esp, 4")
     }
     if node.kind == "Return" {
         compile_expr(state, node.left)
@@ -268,33 +702,41 @@ def compile_stmt(state: CodegenState, node: AstNode) {
         emit(state, "    ret")
     }
     if node.kind == "IfElse" {
-        mut else_label = next_label(state, "L_else")
-        mut end_label = next_label(state, "L_end")
-
+        print("    IfElse: generating labels")
+        else_label = "L_else_" + str(state.label_count)
+        state.label_count = state.label_count + 1
+        end_label = "L_end_" + str(state.label_count)
+        state.label_count = state.label_count + 1
+        
+        print("    IfElse: compiling condition")
         compile_expr(state, node.cond)
+        print("    IfElse: condition compiled")
         emit(state, "    pop eax")
         emit(state, "    cmp eax, 0")
         emit(state, "    je " + else_label)
-
-        mut i = 0
+        
+        print("    IfElse: compiling if_body")
+        i = 0
         while i < len(node.body) {
             compile_stmt(state, node.body[i])
             i = i + 1
         }
         emit(state, "    jmp " + end_label)
-
+        
+        print("    IfElse: compiling else_body")
         emit(state, else_label + ":")
         i = 0
         while i < len(node.else_body) {
             compile_stmt(state, node.else_body[i])
             i = i + 1
         }
-
+        
         emit(state, end_label + ":")
+        print("    IfElse: finished")
     }
     if node.kind == "While" {
-        mut start_label = next_label(state, "L_loop")
-        mut end_label = next_label(state, "L_loop_end")
+        start_label = next_label(state, "L_loop")
+        end_label = next_label(state, "L_loop_end")
         state.loop_start_labels.append(start_label)
         state.loop_end_labels.append(end_label)
 
@@ -304,7 +746,7 @@ def compile_stmt(state: CodegenState, node: AstNode) {
         emit(state, "    cmp eax, 0")
         emit(state, "    je " + end_label)
 
-        mut i = 0
+        i = 0
         while i < len(node.body) {
             compile_stmt(state, node.body[i])
             i = i + 1
@@ -319,12 +761,12 @@ def compile_stmt(state: CodegenState, node: AstNode) {
         # var = start
         compile_expr(state, node.left)
         emit(state, "    pop eax")
-        mut offset = find_var_offset(state, node.val_str)
+        offset = find_var_offset(state, node.val_str)
         emit(state, "    mov [ebp - " + str(offset) + "], eax")
 
-        mut loop_label = next_label(state, "L_for")
-        mut end_label = next_label(state, "L_for_end")
-        mut cont_label = next_label(state, "L_for_cont")
+        loop_label = next_label(state, "L_for")
+        end_label = next_label(state, "L_for_end")
+        cont_label = next_label(state, "L_for_cont")
         state.loop_start_labels.append(cont_label)
         state.loop_end_labels.append(end_label)
 
@@ -342,7 +784,7 @@ def compile_stmt(state: CodegenState, node: AstNode) {
             emit(state, "    jg " + end_label)
         }
 
-        mut i = 0
+        i = 0
         while i < len(node.body) {
             compile_stmt(state, node.body[i])
             i = i + 1
@@ -367,42 +809,50 @@ def compile_stmt(state: CodegenState, node: AstNode) {
     }
     if node.kind == "Break" {
         if len(state.loop_end_labels) > 0 {
-            mut lbl = state.loop_end_labels[len(state.loop_end_labels) - 1]
+            lbl = state.loop_end_labels[len(state.loop_end_labels) - 1]
             emit(state, "    jmp " + lbl)
         }
     }
     if node.kind == "Continue" {
         if len(state.loop_start_labels) > 0 {
-            mut lbl = state.loop_start_labels[len(state.loop_start_labels) - 1]
+            lbl = state.loop_start_labels[len(state.loop_start_labels) - 1]
             emit(state, "    jmp " + lbl)
         }
     }
+    
+    # Catch ExpressionStatements
+    if node.kind == "Call" or node.kind == "MethodCall" {
+        compile_expr(state, node)
+        emit(state, "    add esp, 4")
+    }
+
+    print("Exiting compile_stmt")
 }
 
 # --- Function compilation ---
 
 def compile_function(state: CodegenState, node: AstNode) {
     # Save old vars
-    mut old_var_names = state.local_var_names
-    mut old_vars = state.local_vars
-    mut old_offset = state.local_offset
+    old_var_names = state.local_var_names
+    old_vars = state.local_vars
+    old_offset = state.local_offset
 
     state.local_var_names = []
     state.local_vars = []
     state.local_offset = 0
 
     # Register params as arguments (negative offset)
-    mut p = 0
+    p = 0
     while p < len(node.params) {
-        mut param_name = node.params[p]
-        mut arg_offset = 0 - (8 + p * 4)
+        param_name = node.params[p]
+        arg_offset = 0 - (8 + p * 4)
         state.local_var_names.append(param_name)
         state.local_vars.append(arg_offset)
         p = p + 1
     }
 
     # Scan body for local vars
-    mut s = 0
+    s = 0
     while s < len(node.body) {
         scan_vars(state, node.body[s])
         s = s + 1
@@ -433,8 +883,8 @@ def compile_function(state: CodegenState, node: AstNode) {
 
 # --- Main entry point ---
 
-def generate_assembly(ast: list) -> string {
-    mut state = new_codegen()
+def generate_assembly(ast: list) -> list {
+    state = new_codegen()
 
     # Headers
     emit(state, ".intel_syntax noprefix")
@@ -443,32 +893,64 @@ def generate_assembly(ast: list) -> string {
     emit(state, ".extern _malloc")
     emit(state, ".extern _free")
     emit(state, ".extern _puts")
+    emit(state, ".extern _fopen")
+    emit(state, ".extern _fread")
+    emit(state, ".extern _fputs")
+    emit(state, ".extern _fclose")
+    emit(state, ".extern _strlen")
+    emit(state, ".extern _strcpy")
+    emit(state, ".extern _strcat")
+    emit(state, ".extern _realloc")
+    emit(state, ".extern _sprintf")
+    emit(state, ".extern _strcmp")
+    emit(state, ".extern _fflush")
 
     # Format strings
     emit_data(state, "fmt_int: .asciz \"%d\\n\"")
+    emit_data(state, "fmt_int_pure: .asciz \"%d\"")
     emit_data(state, "fmt_str: .asciz \"%s\\n\"")
 
     emit(state, ".text")
 
     # Separate functions from top-level code
-    mut functions = []
-    mut top_level = []
-    mut i = 0
+    functions = []
+    top_level = []
+    i = 0
     while i < len(ast) {
-        mut node = ast[i]
+        node = ast[i]
+        print("generate_assembly: node kind=" + node.kind + " val_str=" + node.val_str)
         if node.kind == "Function" {
             functions.append(node)
         } else {
-            top_level.append(node)
+            if node.kind == "Data" {
+                print("  REGISTERING STRUCT: " + node.val_str)
+                # Debug: try appending to a local list first
+                test_list = []
+                test_list.append(node.val_str)
+                print("  test_list after append: " + str(len(test_list)))
+                state.struct_names.append(node.val_str)
+                print("  struct_names after append: " + str(len(state.struct_names)))
+                size = len(node.params) * 4
+                if size == 0 {
+                    size = 4
+                }
+                state.struct_sizes.append(size)
+                print("  struct_sizes after append: " + str(len(state.struct_sizes)))
+            } else {
+                top_level.append(node)
+            }
         }
         i = i + 1
     }
+    
+    print("Registered structs count: " + str(len(state.struct_names)))
 
     # Compile functions first
-    i = 0
-    while i < len(functions) {
-        compile_function(state, functions[i])
-        i = i + 1
+    i_f = 0
+    while i_f < len(functions) {
+        print("Compiling function: " + functions[i_f].val_str)
+        compile_function(state, functions[i_f])
+        i_f = i_f + 1
     }
 
     # Compile main entry
@@ -490,33 +972,61 @@ def generate_assembly(ast: list) -> string {
 
     i = 0
     while i < len(top_level) {
+        print("Compiling top level stmt index: " + str(i))
         compile_stmt(state, top_level[i])
         i = i + 1
     }
-
+    
+    print("Top level compiled.")
     emit(state, "    mov esp, ebp")
     emit(state, "    pop ebp")
     emit(state, "    mov eax, 0")
     emit(state, "    ret")
 
+    emit(state, "_concat_strings:")
+    emit(state, "    push ebp")
+    emit(state, "    mov ebp, esp")
+    emit(state, "    push dword ptr [ebp+8]")
+    emit(state, "    call _strlen")
+    emit(state, "    add esp, 4")
+    emit(state, "    mov ebx, eax")
+    emit(state, "    push dword ptr [ebp+12]")
+    emit(state, "    call _strlen")
+    emit(state, "    add esp, 4")
+    emit(state, "    add ebx, eax")
+    emit(state, "    add ebx, 1")
+    emit(state, "    push ebx")
+    emit(state, "    call _malloc")
+    emit(state, "    add esp, 4")
+    emit(state, "    push eax")
+    emit(state, "    push dword ptr [ebp+8]")
+    emit(state, "    push eax")
+    emit(state, "    call _strcpy")
+    emit(state, "    add esp, 8")
+    emit(state, "    pop eax")
+    emit(state, "    push eax")
+    emit(state, "    push dword ptr [ebp+12]")
+    emit(state, "    push eax")
+    emit(state, "    call _strcat")
+    emit(state, "    add esp, 8")
+    emit(state, "    pop eax")
+    emit(state, "    pop ebp")
+    emit(state, "    ret")
+
     # Append data section
-    emit(state, ".data")
+    final_asm = []
+    final_asm.append(".data")
     i = 0
     while i < len(state.data_lines) {
-        emit(state, state.data_lines[i])
+        final_asm.append(state.data_lines[i])
         i = i + 1
     }
 
-    # Join all lines with newlines
-    mut result = ""
     i = 0
     while i < len(state.asm_lines) {
-        if i > 0 {
-            result = result + "\n"
-        }
-        result = result + state.asm_lines[i]
+        final_asm.append(state.asm_lines[i])
         i = i + 1
     }
 
-    return result
+    return final_asm
 }

@@ -39,7 +39,6 @@ def match_keyword(word: string) -> string {
     if word == "break" { return "BREAK" }
     if word == "continue" { return "CONTINUE" }
     if word == "return" { return "RETURN" }
-    if word == "mut" { return "MUT" }
     if word == "const" { return "CONST" }
     if word == "class" { return "CLASS" }
     if word == "data" { return "DATA" }
@@ -61,6 +60,8 @@ def match_keyword(word: string) -> string {
     if word == "and" { return "AND" }
     if word == "or" { return "OR" }
     if word == "not" { return "NOT" }
+    if word == "has" { return "HAS" }
+    if word == "elif" { return "ELIF" }
     if word == "true" { return "TRUE" }
     if word == "false" { return "FALSE" }
     if word == "int" { return "TYPE_INT" }
@@ -71,12 +72,12 @@ def match_keyword(word: string) -> string {
 }
 
 def tokenize(src: string) -> list {
-    mut tokens = []
-    mut i = 0
-    mut length = len(src)
+    tokens = []
+    i = 0
+    length = len(src)
 
     while i < length {
-        mut ch = src[i]
+        ch = src[i]
 
         if is_whitespace(ch) == 1 {
             i = i + 1
@@ -91,17 +92,17 @@ def tokenize(src: string) -> list {
         }
 
         if is_digit(ch) == 1 {
-            mut start = i
+            start = i
             while i < length and is_digit(src[i]) == 1 {
                 i = i + 1
             }
-            mut num_str = ""
-            mut j = start
+            num_str = ""
+            j = start
             while j < i {
                 num_str = num_str + src[j]
                 j = j + 1
             }
-            mut tok = Token()
+            tok = Token()
             tok.kind = "NUMBER"
             tok.val = num_str
             tokens.append(tok)
@@ -109,18 +110,18 @@ def tokenize(src: string) -> list {
         }
 
         if is_alpha(ch) == 1 {
-            mut start = i
+            start = i
             while i < length and (is_alpha(src[i]) == 1 or is_digit(src[i]) == 1) {
                 i = i + 1
             }
-            mut ident_str = ""
-            mut j = start
+            ident_str = ""
+            j = start
             while j < i {
                 ident_str = ident_str + src[j]
                 j = j + 1
             }
-            mut kind = match_keyword(ident_str)
-            mut tok = Token()
+            kind = match_keyword(ident_str)
+            tok = Token()
             tok.kind = kind
             tok.val = ident_str
             tokens.append(tok)
@@ -128,9 +129,9 @@ def tokenize(src: string) -> list {
         }
 
         if ch == "\"" {
-            mut start = i
+            start = i
             i = i + 1
-            mut str_val = "\""
+            str_val = "\""
             while i < length and src[i] != "\"" {
                 if src[i] == "\\" and i + 1 < length {
                     str_val = str_val + "\\"
@@ -145,18 +146,18 @@ def tokenize(src: string) -> list {
                 str_val = str_val + "\""
                 i = i + 1
             }
-            mut tok = Token()
+            tok = Token()
             tok.kind = "STRING"
             tok.val = str_val
             tokens.append(tok)
             continue
         }
 
-        mut tok = Token()
-        mut matched = 1
+        tok = Token()
+        matched = 1
 
         if i + 1 < length {
-            mut two_char = src[i] + src[i+1]
+            two_char = src[i] + src[i+1]
             if two_char == "==" {
                 tok.kind = "EQEQ"
                 tok.val = two_char
@@ -187,6 +188,18 @@ def tokenize(src: string) -> list {
                 i = i + 2
                 matched = 2
             }
+            if two_char == ">>" {
+                tok.kind = "GTGT"
+                tok.val = two_char
+                i = i + 2
+                matched = 2
+            }
+            if two_char == "<<" {
+                tok.kind = "LTLT"
+                tok.val = two_char
+                i = i + 2
+                matched = 2
+            }
         }
 
         if matched == 1 {
@@ -197,6 +210,7 @@ def tokenize(src: string) -> list {
             if ch == "/" { tok.kind = "SLASH" }
             if ch == "%" { tok.kind = "PERCENT" }
             if ch == "=" { tok.kind = "EQUALS" }
+            if ch == "&" { tok.kind = "AMPERSAND" }
             if ch == "<" { tok.kind = "LT" }
             if ch == ">" { tok.kind = "GT" }
             if ch == "(" { tok.kind = "LPAREN" }

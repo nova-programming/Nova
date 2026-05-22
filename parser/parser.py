@@ -110,7 +110,7 @@ class Parser:
 
     def parse_compare(self):
         left = self.parse_add()
-        ops = {"GT", "LT", "GE", "LE", "EQEQ", "NOTEQ"}
+        ops = {"GT", "LT", "GE", "LE", "EQEQ", "NOTEQ", "HAS"}
         while self.current() and self.current()[0] in ops:
             op = self.eat(self.current()[0])[1]
             right = self.parse_add()
@@ -127,7 +127,7 @@ class Parser:
 
     def parse_mul(self):
         left = self.parse_unary()
-        while self.current() and self.current()[0] in ("STAR", "SLASH", "PERCENT"):
+        while self.current() and self.current()[0] in ("STAR", "SLASH", "PERCENT", "AMPERSAND", "GTGT", "LTLT"):
             op = self.eat(self.current()[0])[1]
             right = self.parse_unary()
             left = BinOp(left, op, right)
@@ -303,7 +303,23 @@ class Parser:
                 
             elif next_kind == "LBRACK":
                 self.eat("LBRACK")
+
+                # Check for slice syntax [start:end] or [:end] or [start:]
+                if self.current() and self.current()[0] == "COLON":
+                    self.eat("COLON")
+                    end_expr = self.parse_expr() if self.current() and self.current()[0] != "RBRACK" else None
+                    self.eat("RBRACK")
+                    node = Slice(node, None, end_expr)
+                    continue
+
                 index = self.parse_expr()
+                if self.current() and self.current()[0] == "COLON":
+                    self.eat("COLON")
+                    end_expr = self.parse_expr() if self.current() and self.current()[0] != "RBRACK" else None
+                    self.eat("RBRACK")
+                    node = Slice(node, index, end_expr)
+                    continue
+
                 self.eat("RBRACK")
                 if self.current() and self.current()[0] == "EQUALS":
                     self.eat("EQUALS")
@@ -406,6 +422,8 @@ class Parser:
             return self.parse_while()
         if kind == "RETURN":
             self.eat("RETURN")
+            if self.current() and self.current()[0] in ('RBRACE', 'NEWLINE', 'EOF'):
+                return Return(Number(0))
             return Return(self.parse_expr())
         if kind == "BREAK":
             self.eat("BREAK")
@@ -418,15 +436,9 @@ class Parser:
         if kind == "DATA":
             return self.parse_data()
 
-        is_mut = False
         is_const = False
         type_name = None
-        if kind == "MUT":
-            self.eat("MUT")
-            is_mut = True
-            token = self.current()
-            kind = token[0]
-        elif kind == "CONST":
+        if kind == "CONST":
             self.eat("CONST")
             is_const = True
             token = self.current()
@@ -446,7 +458,7 @@ class Parser:
             self.eat("EQUALS")
             value = self.parse_expr()
             if isinstance(expr, Variable):
-                return Assignment(expr.name, value, type_name=expr.type_name, is_mut=is_mut, is_const=is_const)
+                return Assignment(expr.name, value, type_name=expr.type_name, is_const=is_const)
         return expr
 
     def parse_free(self):
@@ -577,11 +589,23 @@ class Parser:
         self.eat("IF")
         cond = self.parse_expr()
         then = self.parse_block()
-        else_body = []
-        if self.current() and self.current()[0] == "ELSE":
-            self.eat("ELSE")
-            else_body = self.parse_block()
+        else_body = self._parse_if_tail()
         return IfElse(cond, then, else_body)
+
+    def _parse_if_tail(self):
+        """Parse the optional else/elif tail of an if statement."""
+        if not self.current():
+            return []
+        if self.current()[0] == "ELIF":
+            self.eat("ELIF")
+            elif_cond = self.parse_expr()
+            elif_body = self.parse_block()
+            tail = self._parse_if_tail()
+            return [IfElse(elif_cond, elif_body, tail)]
+        if self.current()[0] == "ELSE":
+            self.eat("ELSE")
+            return self.parse_block()
+        return []
 
     def parse_while(self):
         self.eat("WHILE")
