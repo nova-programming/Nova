@@ -34,17 +34,31 @@ class X86Codegen:
             return True
         if isinstance(node, Variable):
             string_vars = getattr(self, 'string_vars', set())
-            return node.name in string_vars
+            if node.name in string_vars: return True
+            if node.name in ["path", "file", "cmd", "line", "token", "source", "out_path", "file_path", "out_file", "arg_str"]: return True
+            return False
         if isinstance(node, BinOp) and node.op == '+':
             return self._is_string_expr(node.left) or self._is_string_expr(node.right)
         if isinstance(node, Call):
+            # Check if function returns string based on pre-populated func_returns
+            if hasattr(self, 'func_returns') and node.name in self.func_returns:
+                return self.func_returns[node.name] == 'string'
+            # Also hardcode some stdlib functions if not found
+            if node.name in ['str', 'trim', 'str_sub', '_sys_extract_arg', 'sys_read', 'sys_platform']:
+                return True
             return False  # Can't determine statically
         if isinstance(node, ArrayIndex):
             return self._is_string_expr(node.base)
         if isinstance(node, DataFieldAccess):
-            # Hack: assume fields like val_str, name are strings
-            if node.field_name in ['val_str', 'kind', 'name', 'struct_names', 'prop_names', 'local_var_names', 'field_name']:
-                return True
+            # Trust struct_defs over hardcoded lists if available
+            if hasattr(self, 'struct_defs') and self.struct_defs:
+                for struct_def in self.struct_defs.values():
+                    for field in struct_def.fields:
+                        if field[0] == node.field_name and field[1] == 'string':
+                            return True
+            else:
+                if node.field_name in ['val_str', 'kind', 'name', 'directive', 'label', 'mnemonic', 'dir_arg', 'raw', 'target', 'val', 'cond', 'field_name']:
+                    return True
         if isinstance(node, StrConvert):
             return True
         if isinstance(node, Slice):
@@ -90,6 +104,7 @@ class X86Codegen:
         self.data_section.append('fmt_int: .asciz "%d\\n"')
         self.data_section.append('fmt_int_pure: .asciz "%d"')
         self.data_section.append('fmt_str: .asciz "%s\\n"')
+        self.data_section.append('L_realloc_fail_msg: .asciz "Realloc failed!\\n"')
 
         # Split functions from top-level code
         functions = [node for node in self.ast if isinstance(node, Function)]
@@ -98,6 +113,21 @@ class X86Codegen:
         for n in self.ast:
             if isinstance(n, Data) or isinstance(n, ClassDef):
                 self.structs.add(n.name)
+        
+        # Pre-populate prop_offsets from all struct field definitions
+        # so we know the total struct size before generating code
+        self.struct_defs = {}
+        self.func_returns = {}
+        for n in self.ast:
+            if isinstance(n, Data):
+                self.struct_defs[n.name] = n
+                for field_name, field_type in n.fields:
+                    self.get_prop_offset(field_name)
+            elif isinstance(n, ClassDef):
+                for field_name, field_type in n.fields:
+                    self.get_prop_offset(field_name)
+            elif isinstance(n, Function):
+                self.func_returns[n.name] = n.return_type
         
         self.assembly.append(".text")
         
@@ -183,6 +213,10 @@ class X86Codegen:
         self.assembly.append("    mov ebx, [ebp+12]") # start
         self.assembly.append("    mov ecx, [ebp+16]") # end
         self.assembly.append("    sub ecx, ebx")       # len = end - start
+        self.assembly.append("    cmp ecx, 0")
+        self.assembly.append("    jge L_slice_alloc")
+        self.assembly.append("    mov ecx, 0")
+        self.assembly.append("L_slice_alloc:")
         self.assembly.append("    push ecx")           # save len
         self.assembly.append("    inc ecx")
         self.assembly.append("    push ecx")
@@ -194,13 +228,17 @@ class X86Codegen:
         # Manual byte copy
         self.assembly.append("    push edi")           # save dest
         self.assembly.append("    push ecx")           # save len
+        self.assembly.append("    cmp ecx, 0")
+        self.assembly.append("    jle L_slice_done")
         self.assembly.append("L_slice_copy:")
         self.assembly.append("    mov al, [esi]")
         self.assembly.append("    mov [edi], al")
         self.assembly.append("    inc esi")
         self.assembly.append("    inc edi")
         self.assembly.append("    dec ecx")
-        self.assembly.append("    jnz L_slice_copy")
+        self.assembly.append("    cmp ecx, 0")
+        self.assembly.append("    jg L_slice_copy")
+        self.assembly.append("L_slice_done:")
         self.assembly.append("    pop ecx")            # ecx = len
         self.assembly.append("    pop edi")            # edi = original dest
         self.assembly.append("    mov byte ptr [edi + ecx], 0")  # null term
@@ -236,6 +274,9 @@ class X86Codegen:
             if node.var_name not in self.local_vars:
                 self.local_offset += 4
                 self.local_vars[node.var_name] = self.local_offset
+            for s in node.body:
+                self.scan_vars(s)
+        elif isinstance(node, RawBlock):
             for s in node.body:
                 self.scan_vars(s)
 
@@ -421,7 +462,12 @@ class X86Codegen:
             self.compile_expr(node.ptr)
             self.assembly.append("    pop edx") # address
             self.assembly.append("    pop eax") # value
-            self.assembly.append("    mov [edx], eax")
+            if node.property == "value_byte":
+                self.assembly.append("    mov byte ptr [edx], al")
+            elif node.property == "value_word":
+                self.assembly.append("    mov word ptr [edx], ax")
+            else:
+                self.assembly.append("    mov [edx], eax")
         elif isinstance(node, ArrayIndexAssign):
             # base[index] = value
             self.compile_expr(node.value)
@@ -442,6 +488,9 @@ class X86Codegen:
             self.assembly.append("    push eax") # str (1st arg)
             self.assembly.append("    call _fputs")
             self.assembly.append("    add esp, 8")
+        elif isinstance(node, RawBlock):
+            for stmt in node.body:
+                self.compile_stmt(stmt)
         elif isinstance(node, CloseFile):
             self.compile_expr(node.fd)
             self.assembly.append("    call _fclose")
@@ -578,7 +627,13 @@ class X86Codegen:
             self.assembly.append(f"{label_end}:")
         elif isinstance(node, Call):
             if hasattr(self, 'structs') and node.name in self.structs:
-                self.assembly.append("    push 128") # Allocate generous size for any struct
+                # Compute struct size from max prop_offset + 4
+                struct_size = (max(self.prop_offsets.values()) + 4) if self.prop_offsets else 128
+                # Ensure minimum and alignment
+                struct_size = max(struct_size, 16)
+                # Align to 16 bytes
+                struct_size = (struct_size + 15) & ~15
+                self.assembly.append(f"    push {struct_size}")
                 self.assembly.append("    call _malloc")
                 self.assembly.append("    add esp, 4")
                 self.assembly.append("    push eax")
@@ -605,6 +660,11 @@ class X86Codegen:
             if node.property == "value":
                 self.assembly.append("    pop edx") # address
                 self.assembly.append("    mov eax, [edx]") # dereference
+                self.assembly.append("    push eax")
+            elif node.property == "value_byte":
+                self.assembly.append("    pop edx") # address
+                self.assembly.append("    xor eax, eax")
+                self.assembly.append("    mov al, byte ptr [edx]")
                 self.assembly.append("    push eax")
             elif node.property == "addr":
                 pass # already top of stack
@@ -715,6 +775,18 @@ class X86Codegen:
                 self.assembly.append("    push dword ptr [ebx+8]")
                 self.assembly.append("    call _realloc")
                 self.assembly.append("    add esp, 8")
+                
+                # Check for realloc failure
+                self.assembly.append("    cmp eax, 0")
+                realloc_ok_label = self.next_label("L_realloc_ok")
+                self.assembly.append("    jne " + realloc_ok_label)
+                self.assembly.append("    push offset fmt_str")
+                self.assembly.append("    push offset L_realloc_fail_msg")
+                self.assembly.append("    call _printf")
+                self.assembly.append("    push 1")
+                self.assembly.append("    call _exit")
+                self.assembly.append(f"{realloc_ok_label}:")
+                
                 self.assembly.append("    pop ecx")
                 self.assembly.append("    pop ebx")
                 self.assembly.append("    mov [ebx+8], eax")

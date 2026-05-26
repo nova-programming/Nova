@@ -1,0 +1,184 @@
+# ============================================================
+# Code Generator: Statement Compilation
+# ============================================================
+
+def compile_stmt(state: CodegenState, node: AstNode) {
+    if node.kind == "Assignment" {
+        if is_string_expr(state, node.left) == 1 {
+            found_str = 0
+            k = 0
+            while k < len(state.string_vars) {
+                if state.string_vars[k] == node.val_str {
+                    found_str = 1
+                }
+                k = k + 1
+            }
+            if found_str == 0 {
+                state.string_vars.append(node.val_str)
+            }
+        }
+        compile_expr(state, node.left)
+        emit(state, "    pop eax")
+        offset = find_var_offset(state, node.val_str)
+        emit(state, "    mov [ebp - " + str(offset) + "], eax")
+    }
+    if node.kind == "DataFieldAssign" {
+        compile_expr(state, node.right)
+        compile_expr(state, node.left)
+        emit(state, "    pop eax")
+        emit(state, "    pop ebx")
+        prop_off = get_prop_offset(state, node.val_str)
+        emit(state, "    mov [eax + " + str(prop_off) + "], ebx")
+    }
+    if node.kind == "ArrayIndexAssign" {
+        compile_expr(state, node.cond)
+        compile_expr(state, node.right)
+        compile_expr(state, node.left)
+        emit(state, "    pop edx")
+        emit(state, "    pop ecx")
+        emit(state, "    pop eax")
+        emit(state, "    mov edx, [edx + 8]")
+        emit(state, "    mov [edx + ecx * 4], eax")
+    }
+    if node.kind == "Print" {
+        compile_expr(state, node.left)
+        if is_string_expr(state, node.left) == 1 {
+            emit(state, "    push offset fmt_str")
+        } else {
+            emit(state, "    push offset fmt_int")
+        }
+        emit(state, "    call _printf")
+        emit(state, "    add esp, 8")
+        emit(state, "    push 0")
+        emit(state, "    call _fflush")
+        emit(state, "    add esp, 4")
+    }
+    if node.kind == "Return" {
+        compile_expr(state, node.left)
+        emit(state, "    pop eax")
+        emit(state, "    mov esp, ebp")
+        emit(state, "    pop ebp")
+        emit(state, "    ret")
+    }
+    if node.kind == "IfElse" {
+        else_label = "L_else_" + str(state.label_count)
+        state.label_count = state.label_count + 1
+        end_label = "L_end_" + str(state.label_count)
+        state.label_count = state.label_count + 1
+        
+        compile_expr(state, node.cond)
+        emit(state, "    pop eax")
+        emit(state, "    cmp eax, 0")
+        emit(state, "    je " + else_label)
+        
+        i = 0
+        while i < len(node.body) {
+            compile_stmt(state, node.body[i])
+            i = i + 1
+        }
+        emit(state, "    jmp " + end_label)
+        
+        emit(state, else_label + ":")
+        i = 0
+        while i < len(node.else_body) {
+            compile_stmt(state, node.else_body[i])
+            i = i + 1
+        }
+        
+        emit(state, end_label + ":")
+    }
+    if node.kind == "While" {
+        start_label = next_label(state, "L_loop")
+        end_label = next_label(state, "L_loop_end")
+        state.loop_start_labels.append(start_label)
+        state.loop_end_labels.append(end_label)
+
+        emit(state, start_label + ":")
+        compile_expr(state, node.cond)
+        emit(state, "    pop eax")
+        emit(state, "    cmp eax, 0")
+        emit(state, "    je " + end_label)
+
+        i = 0
+        while i < len(node.body) {
+            compile_stmt(state, node.body[i])
+            i = i + 1
+        }
+
+        emit(state, "    jmp " + start_label)
+        emit(state, end_label + ":")
+        state.loop_start_labels.pop()
+        state.loop_end_labels.pop()
+    }
+    if node.kind == "ForLoop" {
+        compile_expr(state, node.left)
+        emit(state, "    pop eax")
+        offset = find_var_offset(state, node.val_str)
+        emit(state, "    mov [ebp - " + str(offset) + "], eax")
+
+        loop_label = next_label(state, "L_for")
+        end_label = next_label(state, "L_for_end")
+        cont_label = next_label(state, "L_for_cont")
+        state.loop_start_labels.append(cont_label)
+        state.loop_end_labels.append(end_label)
+
+        emit(state, loop_label + ":")
+        emit(state, "    mov eax, [ebp - " + str(offset) + "]")
+        emit(state, "    push eax")
+        compile_expr(state, node.right)
+        emit(state, "    pop ebx")
+        emit(state, "    pop eax")
+        emit(state, "    cmp eax, ebx")
+        if node.val_int == 1 {
+            emit(state, "    jl " + end_label)
+        } else {
+            emit(state, "    jg " + end_label)
+        }
+
+        i = 0
+        while i < len(node.body) {
+            compile_stmt(state, node.body[i])
+            i = i + 1
+        }
+
+        emit(state, cont_label + ":")
+        emit(state, "    mov eax, [ebp - " + str(offset) + "]")
+        compile_expr(state, node.cond)
+        emit(state, "    pop ebx")
+        if node.val_int == 1 {
+            emit(state, "    sub eax, ebx")
+        } else {
+            emit(state, "    add eax, ebx")
+        }
+        emit(state, "    mov [ebp - " + str(offset) + "], eax")
+
+        emit(state, "    jmp " + loop_label)
+        emit(state, end_label + ":")
+        state.loop_start_labels.pop()
+        state.loop_end_labels.pop()
+    }
+    if node.kind == "Break" {
+        if len(state.loop_end_labels) > 0 {
+            lbl = state.loop_end_labels[len(state.loop_end_labels) - 1]
+            emit(state, "    jmp " + lbl)
+        }
+    }
+    if node.kind == "Continue" {
+        if len(state.loop_start_labels) > 0 {
+            lbl = state.loop_start_labels[len(state.loop_start_labels) - 1]
+            emit(state, "    jmp " + lbl)
+        }
+    }
+    if node.kind == "RawBlock" {
+        i = 0
+        while i < len(node.body) {
+            compile_stmt(state, node.body[i])
+            i = i + 1
+        }
+    }
+    
+    if node.kind == "Call" or node.kind == "MethodCall" {
+        compile_expr(state, node)
+        emit(state, "    add esp, 4")
+    }
+}

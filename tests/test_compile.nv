@@ -1,0 +1,5 @@
+import os_win
+import compiler
+
+compile_to_file("build_test.nv", "build_test_new.s")
+print("compile done")

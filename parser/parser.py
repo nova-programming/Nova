@@ -286,7 +286,7 @@ class Parser:
                     continue
                 
                 # Pointer property vs Data field
-                pointer_properties = ["value", "addr", "isValid", "isNull", "bytes"]
+                pointer_properties = ["value", "addr", "isValid", "isNull", "bytes", "value_byte", "value_word", "value_dword", "value_qword"]
                 if prop in pointer_properties:
                     if self.current() and self.current()[0] == "EQUALS":
                         self.eat("EQUALS")

@@ -1,0 +1,11 @@
+import lexer
+import os_win
+
+def run_test() {
+    src = "hello world"
+    print("start")
+    tokens = tokenize(src)
+    print("end")
+}
+
+run_test()

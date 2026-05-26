@@ -1,0 +1,52 @@
+def str_sub(str_val: string, start: int, end: int) -> string {
+    result = ""
+    i = start
+    while i < end {
+        result = result + str_val[i]
+        i = i + 1
+    }
+    return result
+}
+
+def trim(str_val: string) -> string {
+    start = 0
+    while start < len(str_val) {
+        if str_val[start] != " " and str_val[start] != "\t" { break }
+        start = start + 1
+    }
+    end = len(str_val)
+    while end > start {
+        if str_val[end - 1] != " " and str_val[end - 1] != "\t" and str_val[end - 1] != "\r" { break }
+        end = end - 1
+    }
+    if start >= end { return "" }
+    return str_sub(str_val, start, end)
+}
+
+def parse_operand(op_str: string) {
+    info = 0
+    op_str = trim(op_str)
+    if len(op_str) >= 9 and str_sub(op_str, 0, 9) == "byte ptr " {
+        op_str = trim(str_sub(op_str, 9, len(op_str)))
+    }
+    if len(op_str) >= 5 and str_sub(op_str, 0, 5) == "byte " {
+        op_str = trim(str_sub(op_str, 5, len(op_str)))
+    }
+    if len(op_str) >= 10 and str_sub(op_str, 0, 10) == "dword ptr " {
+        op_str = trim(str_sub(op_str, 10, len(op_str)))
+    }
+    if len(op_str) >= 9 and str_sub(op_str, 0, 9) == "word ptr " {
+        op_str = trim(str_sub(op_str, 9, len(op_str)))
+    }
+}
+
+line = "[eax + ecx * 4]"
+start_time = 0
+
+i = 0
+while i < 100 {
+    parse_operand(line)
+    i = i + 1
+}
+
+print("done\n")

@@ -1,0 +1,10 @@
+import lexer
+import os_win
+
+def run_test() {
+    src = "def main() {\r\n    print(\"Hello from native\")\r\n}\r\n"
+    print("start")
+    tokens = tokenize(src)
+    print("end")
+}
+run_test()

@@ -159,11 +159,11 @@ x = 43       # OK
 
 ### `alloc(size)`
 **Use:** Allocates raw bytes. **Only inside `@raw`.**
-**Logic:** Evaluates an `ALLOC` opcode. The VM shifts its `heap_ptr` across the simulated 1MB `bytearray` heap, returning the integer pointer address and tracking the allocation size.
+**Logic:** Evaluates an `ALLOC` opcode. The VM now backs the heap with a native `ctypes` buffer, returning an integer pointer address and tracking the allocation size against that native heap region.
 
 ### `free(ptr)`
 **Use:** Deallocates raw bytes. **Only inside `@raw`.**
-**Logic:** Erases the pointer from the active allocations tracker in the VM, simulating a native memory free. (In a true native compiler, maps directly to OS `free()`).
+**Logic:** Erases the pointer from the active allocations tracker in the VM. The current runtime models deallocation over the native heap buffer rather than delegating to a host language object model.
 
 ### `data`
 **Use:** Defines raw C-style structs.
@@ -194,7 +194,7 @@ print("flag: " + str(true)) # "flag: true"
 
 ### `open(path, mode)`, `read(fd)`, `write(fd, content)`, `close(fd)`
 **Use:** Standard File I/O operations.
-**Logic:** Evaluates to `OPEN_FILE`, `READ_FILE`, `WRITE_FILE`, and `CLOSE_FILE` opcodes. The VM maintains a map of open file descriptors (integer handles) to actual Python file objects natively.
+**Logic:** Evaluates to `OPEN_FILE`, `READ_FILE`, `WRITE_FILE`, and `CLOSE_FILE` opcodes. The VM maintains a map of open file descriptors (integer handles) to native OS handles rather than Python file objects.
 
 ---
 
@@ -285,15 +285,29 @@ Nova supports two execution modes:
 
 ### `stdlib/codegen.nv`
 **Use:** x86-32 assembly code generator written in Nova.
-**Logic:** Imports `parser.nv`. Walks the AST and emits Intel-syntax x86 assembly using a `CodegenState` struct that tracks assembly lines, data section entries, string literals, label counters, local variable offsets, and loop label stacks. Implements:
+**Logic:** Imports `parser.nv`. Walks the AST and emits Intel-syntax x86 assembly using a `CodegenState` struct that tracks assembly lines, data section entries, string literals, label counters, local variable offsets, loop label stacks, per-struct field offset tables (`struct_names`, `struct_field_names`, `struct_field_offsets`), and variable-to-struct-type mappings (`var_struct_types`). Implements:
 - Stack-based function calling convention (`push ebp` / `mov ebp, esp`)
 - Variable scanning for local stack allocation
 - Loop label stacks for `break`/`continue` support
 - Comparison operators via conditional jumps
+- Per-struct field offset resolution for `DataFieldAccess`/`DataFieldAssign`
+- Variable struct type tracking via constructor calls and array-index assignment
 - Format string selection (`fmt_int` vs `fmt_str`) for `print`
 - String concatenation via `_concat_strings` runtime helper
 - String slicing via `_slice_string` runtime helper
 
 ### `stdlib/compiler.nv`
 **Use:** Compiler entry point that orchestrates the full pipeline.
-**Logic:** Imports `lexer.nv`, `parser.nv`, and `codegen.nv`. Exposes `compile_file(path)` which reads a `.nv` source file, tokenizes → parses → generates assembly, and `compile_to_file(input, output)` which writes the assembly to a `.s` file ready for GCC.
+**Logic:** Imports `lexer.nv`, `parser.nv`, `codegen.nv`, `assembler.nv`, `linker.nv`, and the platform runtime facades. Exposes `compile_file(path)` which reads a `.nv` source file, tokenizes → parses → generates assembly → assembles → links, returning a `CompilePackage` struct with both the assembly lines and linked binary image. `compile_to_file(input, output)` writes the assembly to `.s` and the linked binary to `.s.bin`.
+
+### `stdlib/assembler.nv`
+**Use:** x86 instruction encoder and assembler written in Nova.
+**Logic:** Parses Intel-syntax assembly lines into `AsmLine` structs, then runs a two-pass assembly: `pass1_collect_labels` to calculate label offsets and encode instructions, and `resolve_fixups` to patch jump targets. Encodes a wide range of x86 instructions (mov, push, pop, add, sub, imul, idiv, cmp, je, jmp, call, ret, etc.) with ModRM/SIB byte encoding for memory addressing modes.
+
+### `stdlib/linker.nv`
+**Use:** Binary linker that packages code and data sections into a structured image.
+**Logic:** Takes the two-section output from `assemble()` (code bytes and data bytes) and produces a linked binary image with an `NVL3` header containing section offsets, sizes, and entry point metadata.
+
+### `stdlib/os_win.nv` / `stdlib/os_linux.nv`
+**Use:** OS-specific syscall façade for the self-hosted compiler's I/O operations.
+**Logic:** Provides `sys_open`, `sys_read`, `sys_write`, `sys_write_raw`, `sys_close` functions that abstract OS-level file I/O. The self-hosted compiler imports the appropriate facade instead of using built-in `open`/`read`/`close` directly, enabling cross-platform compilation.

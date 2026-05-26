@@ -1,0 +1,14 @@
+import assembler
+
+asm_lines = []
+i = 0
+while i < 10000 {
+    asm_lines.append("nop")
+    i = i + 1
+}
+asm_lines.append("_start:")
+asm_lines.append("mov eax, 42")
+asm_lines.append("ret")
+
+result = assembler.assemble(asm_lines)
+print("Assembled " + str(len(asm_lines)) + " lines into " + str(len(result)) + " code bytes\n")

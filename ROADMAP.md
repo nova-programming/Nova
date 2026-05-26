@@ -1,6 +1,6 @@
 # Nova Future Roadmap: The Path to "True" Self-Hosting
 
-Nova has achieved a self-hosting fixed point, meaning the native compiler can compile its own source code and generate an identical compiler. While this is a monumental milestone, the compiler still relies on a few external crutches (like `gcc`, Python, and the C Standard Library). 
+Nova is partway through the self-hosting journey. The Nova-written compiler pipeline can currently lex, parse, assemble, and link Nova source into a structured binary image, but the toolchain still depends on the Python host compiler, GCC for native executable output, and host-backed runtime services.
 
 To make Nova **truly independent and robust**, we must systematically eliminate these dependencies. The roadmap below breaks down the five major phases required to achieve True Self-Hosting.
 
@@ -8,7 +8,7 @@ To make Nova **truly independent and robust**, we must systematically eliminate 
 
 ## ✅ Completed Milestones
 
-The following features have been implemented in both the Python host compiler and the self-hosted Nova compiler:
+The following language features are implemented in both the Python host compiler and the self-hosted Nova compiler:
 
 | Feature | Description |
 |---------|-------------|
@@ -21,64 +21,38 @@ The following features have been implemented in both the Python host compiler an
 | String slicing `s[i:j]` | Substring extraction in VM and native codegen |
 | Native `_slice_string` | x86 assembly runtime helper for string slicing |
 | Native `_concat_strings` | x86 assembly runtime helper for string concatenation |
+| Self-hosted assembler | Nova assembler emits machine-code byte streams |
+| Structured linker image | Nova linker packages code/data/metadata into a binary image |
+| Syscall façade modules | `stdlib/os_win.nv` and `stdlib/os_linux.nv` exist for runtime abstraction |
+| Dynamic struct sizing | `Data` struct field allocations computed dynamically based on the exact max offset footprint of the program |
+
+| Native Class & OOP Support | Vtables and dynamic method dispatch in native codegen, plus dunder methods (`__init__`, `__str__`, etc.) |
+| Advanced Built-in Types | Native dynamic string concatenation, comparison, and list (array) resizing |
+| Boolean Operators | Complex boolean operations (`and`, `or`, `not`) with short-circuit evaluation in native assembly |
+| Native PE Linker | Custom linker emits valid Windows PE executables (`.exe`) directly from byte streams without GCC |
+| OS Subsystem Independence | PE linker handles Import Address Tables (IAT) for MSVCRT dynamic linkage directly |
 
 ---
 
-## Phase 1: Full Feature Parity in Native Codegen
+## Phase 1: Raw Syscall Integration (C-Free)
 
-The self-hosted codegen (`stdlib/codegen.nv`) currently relies on hardcoded struct sizes for bootstrapping and lacks dynamic string, list, and class implementations. We must port the advanced Python `codegen_x86.py` logic directly into `stdlib/codegen.nv`.
-
-**Action Plan:**
-1. **Dynamic Data Struct Sizing:** 
-   - Parse `Data` declarations during the compilation pass to dynamically calculate the sizes of structs instead of relying on hardcoded heap allocations.
-   - Maintain a symbol table for structs and their field byte-offsets to allow dynamic field access.
-2. **Native Class & OOP Support:** 
-   - Implement vtables or dynamic method dispatch in the native codegen to support classes.
-   - Port `__init__` constructor wrapping and dunder method (`__str__`, `__len__`, etc.) logic from the Python compiler into `codegen.nv`.
-3. **Advanced Built-in Types:** 
-   - Write native assembly routines for dynamic string concatenation (`+`) and comparison (`==`).
-   - Re-implement native dynamic array (list) scaling, allowing lists to grow gracefully when they exceed their initial capacity instead of crashing.
-4. **Boolean Operators:** 
-   - Fully support complex boolean operations (`and`, `or`, `not`) with short-circuit evaluation in the native assembly logic.
-
----
-
-## Phase 2: Native Assembler & Linker (Dropping GCC)
-
-Currently, Nova outputs `.s` assembly text and invokes `gcc` to assemble it and link it into an `.exe`. We need to write an Assembler & Linker natively in Nova that emits executable binaries directly (e.g., PE files for Windows or ELF files for Linux).
-
-**Action Plan:**
-1. **Instruction Encoding (Assembler):**
-   - Write a module (`stdlib/assembler.nv`) that translates x86 text instructions (like `mov eax, 1` or `push ebx`) into their raw hexadecimal opcode counterparts (machine code).
-   - Resolve internal jump labels to relative memory addresses during an assembler pass.
-2. **Binary Header Generation (Linker):**
-   - Study the PE (Portable Executable) format for Windows and the ELF (Executable and Linkable Format) for Linux.
-   - Write a linker module (`stdlib/linker.nv`) that wraps the machine code inside the appropriate binary headers (DOS stub, PE headers, Section headers, etc.).
-3. **Standalone Executable Output:**
-   - Integrate the Assembler and Linker into `stdlib/compiler.nv`.
-   - Instead of writing a `.s` file and invoking a shell command for GCC, write raw binary bytes to `output.exe` directly.
-
----
-
-## Phase 3: Raw Syscall Integration (C-Free)
-
-Nova still relies on the C Standard Library (imported via `extern _printf`, `_malloc`, `_fopen`, etc.) to interface with the operating system. We need to bypass the C runtime entirely by issuing OS-level syscalls directly via assembly.
+Nova currently relies on MSVCRT (`printf`, `fopen`, `malloc`) for its runtime via dynamic linking. The next step is to replace those host-backed helpers with direct Win32/Linux syscalls where practical.
 
 **Action Plan:**
 1. **Syscall Abstraction Layer:**
-   - Identify the core Syscall numbers for Windows (e.g., `NtWriteFile`, `NtAllocateVirtualMemory`) and Linux (e.g., `sys_write`, `sys_mmap`).
-   - Create a platform-specific OS interface file (e.g., `stdlib/os_win.nv` or `stdlib/os_linux.nv`).
+   - Replace the façade internals with direct syscall-backed implementations for Windows and Linux.
+   - Keep the platform split in `stdlib/os_win.nv` and `stdlib/os_linux.nv`.
 2. **Native Memory Management (`malloc`/`free`):**
-   - Replace C's `malloc` and `free`. Write a custom memory allocator in Nova that requests bulk memory pages from the OS using raw syscalls and sub-allocates them to the application.
+   - Replace the remaining host-managed allocation paths with a syscall-backed allocator that can request pages from the OS and sub-allocate them in Nova.
 3. **Native I/O (`printf`, `fopen`):**
-   - Replace `printf` by formatting strings in memory natively and passing the resulting string buffer directly to the OS `sys_write` / `WriteFile` syscall.
-   - Replace `fopen`/`read`/`write`/`close` with their direct OS file handler syscall equivalents.
+   - Keep formatting and file operations fully in Nova while routing output through direct OS write/open/read/close syscalls.
+   - Remove remaining host file-object dependencies from the runtime layer.
 
 ---
 
-## Phase 4: Self-Hosted Virtual Machine
+## Phase 2: Self-Hosted Virtual Machine
 
-Right now, running `nova dev file.nv` uses the Python VM. To unify the toolchain, we need to write the bytecode interpreter natively in Nova so the entire ecosystem (VM + Compiler + CLI) exists within a single native binary.
+The VM is still Python-based today. To unify the toolchain, the bytecode interpreter must be rewritten natively in Nova so the entire ecosystem (VM + Compiler + CLI) exists within a single native binary.
 
 **Action Plan:**
 1. **Bytecode Definition:**
@@ -94,9 +68,9 @@ Right now, running `nova dev file.nv` uses the Python VM. To unify the toolchain
 
 ---
 
-## Phase 5: 64-bit x86_64 Support
+## Phase 3: 64-bit x86_64 Support
 
-Nova currently generates 32-bit x86 assembly. Modern operating systems and architectures are strictly 64-bit, meaning Nova must eventually adopt x86_64 machine code.
+Nova still targets 32-bit x86 assembly in the self-hosted pipeline. The final roadmap step is to move the compiler, runtime helpers, and linker path to x86_64.
 
 **Action Plan:**
 1. **64-bit Registers & Pointers:**

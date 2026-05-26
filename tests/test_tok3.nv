@@ -1,0 +1,57 @@
+import os_win
+import assembler_parse
+
+def run_test() {
+    print("step 1: creating AsmLine")
+    line = AsmLine()
+    print("step 2: AsmLine created")
+    
+    raw = ".intel_syntax noprefix"
+    line.raw = raw
+    print("step 3: raw set")
+    
+    trimmed = trim(raw)
+    print("step 4: trimmed = " + trimmed)
+    
+    tl = len(trimmed)
+    print("step 5: len = " + str(tl))
+    
+    if tl == 0 {
+        line.kind = "empty"
+        print("step 6: empty")
+    } else {
+        ch = trimmed[0]
+        print("step 6: first char = " + ch)
+        
+        if ch == "." {
+            print("step 7: directive branch")
+            line.kind = "directive"
+            print("step 8: kind set to directive")
+            
+            space_idx = -1
+            i = 0
+            while i < tl {
+                if trimmed[i] == " " or trimmed[i] == "\t" {
+                    space_idx = i
+                    break
+                }
+                i = i + 1
+            }
+            print("step 9: space_idx = " + str(space_idx))
+            
+            if space_idx >= 0 {
+                line.directive = str_sub(trimmed, 0, space_idx)
+                print("step 10: directive = " + line.directive)
+                line.dir_arg = trim(str_sub(trimmed, space_idx + 1, tl))
+                print("step 11: dir_arg = " + line.dir_arg)
+            } else {
+                line.directive = trimmed
+                line.dir_arg = ""
+                print("step 10b: no space")
+            }
+        }
+    }
+    
+    print("DONE")
+}
+run_test()

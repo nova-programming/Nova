@@ -44,7 +44,6 @@ def match_keyword(word: string) -> string {
     if word == "data" { return "DATA" }
     if word == "import" { return "IMPORT" }
     if word == "as" { return "AS" }
-    if word == "raw" { return "RAW" }
     if word == "export" { return "EXPORT" }
     if word == "alloc" { return "ALLOC" }
     if word == "free" { return "FREE" }
@@ -78,6 +77,19 @@ def tokenize(src: string) -> list {
 
     while i < length {
         ch = src[i]
+
+        if ch == "@" {
+            if i + 3 < length {
+                if src[i + 1] == "r" and src[i + 2] == "a" and src[i + 3] == "w" {
+                    tok = Token()
+                    tok.kind = "RAW"
+                    tok.val = "@raw"
+                    tokens.append(tok)
+                    i = i + 4
+                    continue
+                }
+            }
+        }
 
         if is_whitespace(ch) == 1 {
             i = i + 1
@@ -228,6 +240,11 @@ def tokenize(src: string) -> list {
         
         tokens.append(tok)
     }
-
+    
+    tok = Token()
+    tok.kind = "EOF"
+    tok.val = ""
+    tokens.append(tok)
+    
     return tokens
 }

@@ -1,3 +1,4 @@
+import os_win
 import lexer
 import parser
 import codegen
@@ -20,15 +21,15 @@ def resolve_imports(ast: list, visited: list) -> list {
             module_name = node.val_str
             if contains(visited, module_name) == 0 {
                 visited.append(module_name)
-                fd = open(module_name + ".nv", "r")
+                fd = sys_open(module_name + ".nv", "r")
                 if fd == 0 {
-                    fd = open("stdlib/" + module_name + ".nv", "r")
+                    fd = sys_open("stdlib/" + module_name + ".nv", "r")
                 }
                 if fd == 0 {
                     print("Import Error: Could not resolve module " + module_name)
                 } else {
-                    source = read(fd)
-                    close(fd)
+                    source = sys_read(fd)
+                    sys_close(fd)
                     print("Tokenizing... " + module_name)
                     tokens = tokenize(source)
                     imported_ast = parse(tokens)
@@ -51,9 +52,9 @@ def resolve_imports(ast: list, visited: list) -> list {
 def compile_file(path: string) -> list {
     print("Reading file: " + path)
     # Read the source file
-    fd = open(path, "r")
-    source = read(fd)
-    close(fd)
+    fd = sys_open(path, "r")
+    source = sys_read(fd)
+    sys_close(fd)
 
     print("Tokenizing...")
     # Step 1: Tokenize
@@ -78,16 +79,13 @@ def compile_file(path: string) -> list {
 
 def compile_to_file(input_path: string, output_path: string) {
     asm = compile_file(input_path)
-    fd = open(output_path, "w")
+    fd = sys_open(output_path, "w")
     i = 0
     while i < len(asm) {
-        write(fd, asm[i])
-        write(fd, "\n")
+        sys_write(fd, asm[i])
+        sys_write(fd, "\n")
         i = i + 1
     }
-    close(fd)
+    sys_close(fd)
     print("Compiled: " + input_path + " -> " + output_path)
 }
-
-# ===== DRIVER =====
-compile_to_file("stdlib/compiler.nv", "stdlib/compiler_stage2.s")

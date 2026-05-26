@@ -1,0 +1,10 @@
+def main() {
+    a = 0
+    @raw {
+        a = alloc(10)
+        a.value_byte = 65
+        a = a + 1
+        a.value_byte = 0
+    }
+    print(a)
+}

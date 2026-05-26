@@ -1,0 +1,19 @@
+# ============================================================
+# Memory byte access utility functions
+# ============================================================
+
+def sys_read_byte(ptr: int) -> int {
+    @raw {
+        mov eax, [ebp + 8]
+        movzx eax, byte ptr [eax]
+        return eax
+    }
+}
+
+def sys_write_byte(ptr: int, b: int) {
+    @raw {
+        mov eax, [ebp + 8]
+        mov ecx, [ebp + 12]
+        mov byte ptr [eax], cl
+    }
+}

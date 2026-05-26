@@ -1,0 +1,197 @@
+# ============================================================
+# Assembler: Passes and Fixup Resolution
+# ============================================================
+
+# --- Directive Handlers ---
+
+def emit_asciz(state, arg: string) {
+    trimmed = trim(arg)
+    if len(trimmed) >= 2 and trimmed[0] == "\"" {
+        str_content = str_sub(trimmed, 1, len(trimmed) - 1)
+        bytes_list = process_string_escapes(str_content)
+        j = 0
+        while j < len(bytes_list) {
+            state.data_bytes.append(bytes_list[j])
+            j = j + 1
+        }
+        state.data_bytes.append(0)
+    }
+}
+
+def process_string_escapes(s: string) -> list {
+    result = []
+    i = 0
+    while i < len(s) {
+        if s[i] == "\\" and i + 1 < len(s) {
+            next = s[i + 1]
+            if next == "n" { result.append(10) }
+            else {
+                if next == "t" { result.append(9) }
+                else {
+                    if next == "r" { result.append(13) }
+                    else {
+                        if next == "0" { result.append(0) }
+                        else {
+                            if next == "\\" { result.append(92) }
+                            else {
+                                if next == "\"" { result.append(34) }
+                                else {
+                                    if next == "b" { result.append(8) }
+                                    else {
+                                        if next == "a" { result.append(7) }
+                                        else {
+                                            if next == "f" { result.append(12) }
+                                            else {
+                                                if next == "v" { result.append(11) }
+                                                else { result.append(ord(next)) }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            i = i + 2
+        } else {
+            result.append(ord(s[i]))
+            i = i + 1
+        }
+    }
+    return result
+}
+
+# --- Label / Directive Processing ---
+
+def process_label(state, label_name) {
+    print("process_label: " + label_name)
+    sec_off = 0
+    if state.section == 0 {
+        sec_off = len(state.code)
+    } else {
+        sec_off = len(state.data_bytes)
+    }
+    found = 0
+    j = 0
+    while j < len(state.labels) {
+        if state.labels[j].name == label_name {
+            state.labels[j].offset = sec_off
+            state.labels[j].defined = 1
+            state.labels[j].section = state.section
+            found = 1
+            break
+        }
+        j = j + 1
+    }
+    if found == 0 {
+        lbl = LabelEntry()
+        lbl.name = label_name
+        lbl.offset = sec_off
+        lbl.defined = 1
+        lbl.section = state.section
+        state.labels.append(lbl)
+    }
+}
+
+def process_directive(state, line) {
+    print("process_directive: " + line.directive)
+    if line.directive == ".text" { state.section = 0 }
+    if line.directive == ".data" { state.section = 1 }
+    if line.directive == ".asciz" { emit_asciz(state, line.dir_arg) }
+    if line.directive == ".extern" {
+        sym_name = line.dir_arg
+        found = 0
+        j = 0
+        while j < len(state.labels) {
+            if state.labels[j].name == sym_name {
+                found = 1
+                break
+            }
+            j = j + 1
+        }
+        if found == 0 {
+            lbl = LabelEntry()
+            lbl.name = sym_name
+            lbl.offset = 0
+            lbl.defined = 0
+            state.labels.append(lbl)
+        }
+    }
+    if line.directive == ".global" {
+        state.globals.append(line.dir_arg)
+    }
+}
+
+def pass1_collect_labels(state) {
+    sys_flush()
+    print("Pass 1 start: " + str(len(state.lines)) + " lines")
+    i = 0
+    while i < len(state.lines) {
+        line = state.lines[i]
+        if i == 8500 { print("reached 8500") }
+        if i == 8520 { print("reached 8520") }
+        if i == 8540 { print("reached 8540") }
+        if i == 8560 { print("reached 8560") }
+        if i == 8580 { print("reached 8580") }
+        if i == 8600 { print("reached 8600") }
+        if line.kind == "label" {
+            process_label(state, line.label)
+        }
+        if line.kind == "label_directive" {
+            process_label(state, line.label)
+            process_directive(state, line)
+        }
+        if line.kind == "label_instruction" {
+            process_label(state, line.label)
+            emit_instruction(state, line)
+        }
+
+        if line.kind == "directive" {
+            process_directive(state, line)
+        }
+
+        if line.kind == "instruction" {
+            emit_instruction(state, line)
+        }
+
+        i = i + 1
+    }
+}
+
+# --- Fixup Resolution ---
+
+def resolve_label(state, name: string) -> int {
+    i = 0
+    while i < len(state.labels) {
+        if state.labels[i].name == name and state.labels[i].defined == 1 {
+            return state.labels[i].offset
+        }
+        i = i + 1
+    }
+    return 0
+}
+
+def resolve_fixups(state) {
+    i = 0
+    while i < len(state.fixups) {
+        fixup = state.fixups[i]
+        if fixup.size == 5 {
+            i = i + 1
+            continue
+        }
+        target_off = resolve_label(state, fixup.target)
+        if target_off >= 0 {
+            if fixup.size == 4 {
+                rel = target_off - (fixup.offset + 4)
+                state.code[fixup.offset] = byte_extract(rel, 0)
+                state.code[fixup.offset + 1] = byte_extract(rel, 8)
+                state.code[fixup.offset + 2] = byte_extract(rel, 16)
+                state.code[fixup.offset + 3] = byte_extract(rel, 24)
+            } else {
+                state.code[fixup.offset] = byte_mask(target_off)
+            }
+        }
+        i = i + 1
+    }
+}

@@ -1,8 +1,8 @@
 # Nova Programming Language
 
-A language that bridges high-level Pythonic simplicity with low-level C-like control. Nova empowers developers by removing cryptic syntax (like `*` or `&` for pointers), integrating high-level Automatic Reference Counting (ARC) alongside manual memory management blocks, and compiling down to a custom high-performance Virtual Machine.
+A language that bridges high-level Pythonic simplicity with low-level C-like control. Nova removes cryptic pointer syntax, integrates high-level Automatic Reference Counting (ARC) alongside manual memory management blocks, and runs on a custom high-performance Virtual Machine.
 
-**Nova is now self-hosting** — a compiler written entirely in Nova (`stdlib/compiler.nv`) can lex, parse, and compile Nova source code into x86 assembly, which GCC assembles into native executables. No Python, C, or any third-party dependency is needed at runtime.
+Nova has a **fully functional self-hosted compiler pipeline**! `stdlib/compiler.nv` is written entirely in Nova and can successfully lex, parse, generate x86 assembly, and link itself directly into a native executable (.exe) from scratch! No external GCC or MSVC dependency is required for the native build path.
 
 ## Installation
 
@@ -26,9 +26,10 @@ python main.py build program.nv
 python main.py run program.nv
 
 # Self-hosted compilation pipeline (Nova compiling Nova)
-python main.py dev stdlib/compiler.nv    # Compiles test_input.nv -> test_output.s
-gcc test_output.s -o program.exe         # Assemble with GCC
-./program.exe                            # Run native binary
+python main.py dev stdlib/compiler.nv    # Emits assembly plus a structured image artifact
+
+# Native build path (self-hosted native compiler)
+python main.py build program.nv          # Compiles directly to native x86 executable
 ```
 
 ## Example (High-Level and Low-Level Combined)
@@ -145,7 +146,7 @@ print(s[0:5])                # "hello"
 - ✅ Static Type Checker (compile-time type validation)
 - ✅ String mutation and indexing
 - ✅ Dynamic Arrays/Lists (`append`, `pop`, `insert`, `clear`)
-- ✅ **Self-Hosted Native Compiler** (Nova → x86 assembly → native binary)
+- ✅ **Self-Hosted Compiler Pipeline** (Nova → x86 assembly → 32-bit Native PE Executable)
 - ✅ **Dev/Build CLI modes** for fast iteration vs native compilation
 
 ## Architecture Details
@@ -162,11 +163,15 @@ nova/
 ├── lexer/         # Tokenizer (regex + escape processing)
 ├── modules/       # Module resolver for .nv file imports
 ├── parser/        # Recursive Descent Parser
-├── stdlib/        # Standard library (.nv modules + self-hosted compiler)
-│   ├── compiler.nv   # Self-hosted compiler entry point (imports lexer/parser/codegen)
+├── stdlib/        # Standard library (.nv modules + self-hosted compiler/runtime)
+│   ├── compiler.nv   # Self-hosted compiler entry point (imports lexer/parser/codegen/assembler/linker)
 │   ├── lexer.nv      # Self-hosted tokenizer (character-by-character tokenization)
 │   ├── parser.nv     # Self-hosted recursive-descent parser (tokens → AST)
 │   ├── codegen.nv    # Self-hosted x86 code generator (AST → assembly)
+│   ├── assembler.nv  # Self-hosted assembler (assembly text → byte stream)
+│   ├── linker.nv     # Self-hosted linker (byte stream → structured image)
+│   ├── os_win.nv     # Windows runtime facade
+│   ├── os_linux.nv   # Linux runtime facade
 │   └── math_utils.nv # Math utility functions
 ├── vm/            # Custom Bytecode Compiler & Virtual Machine
 ├── main.py        # Entry point (dev / build / run)
@@ -176,20 +181,20 @@ nova/
 ## Self-Hosted Compiler Pipeline
 
 ```
-┌─────────────┐     ┌──────────────────┐     ┌───────────┐     ┌──────────┐
-│ program.nv  │────▶│ stdlib/compiler.nv│────▶│ program   │────▶│ Native   │
-│ (Nova source)│     │ (runs in Nova VM)│     │    .s     │     │ Binary   │
-└─────────────┘     └──────────────────┘     │(x86 asm)  │     │  .exe    │
-                                              └─────┬─────┘     └──────────┘
-                                                    │ GCC            ▲
-                                                    └────────────────┘
+┌─────────────┐     ┌──────────────────┐     ┌──────────────┐     ┌──────────────────┐
+│ program.nv  │────▶│ stdlib/compiler.nv│────▶│ x86 assembly │────▶│ native .exe    │
+│ (Nova source)│     │ (runs in Nova VM)│     │   output     │     │ executable     │
+└─────────────┘     └──────────────────┘     └──────────────┘     └──────────────────┘
 ```
 
-The self-hosted compiler is split across 4 modular Nova files:
+The self-hosted compiler/runtime is split across these modular Nova files:
 - **`lexer.nv`:** Character-by-character tokenizer with keyword matching and escape handling
 - **`parser.nv`:** Recursive descent parser producing an in-memory AST (expressions, statements, functions, loops)
 - **`codegen.nv`:** x86-32 assembly emitter with stack-based calling convention, loop labels, and break/continue
-- **`compiler.nv`:** Entry point that imports and orchestrates lexer → parser → codegen pipeline
+- **`assembler.nv`:** Converts assembly text into machine-code byte streams
+- **`linker.nv`:** Packages code/data/metadata and MSVCRT thunks into a fully valid Windows PE Executable (`.exe`)
+- **`compiler.nv`:** Entry point that imports and orchestrates lexer → parser → codegen → assembler → linker
+- **`os_win.nv` / `os_linux.nv`:** Runtime facades for file I/O and memory helpers
 
 ## License
 
