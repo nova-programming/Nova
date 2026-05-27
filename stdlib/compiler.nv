@@ -28,13 +28,13 @@ def resolve_imports(ast: list, visited: list) -> list {
                     fd = sys_open("stdlib/" + module_name + ".nv", "r")
                 }
                 if fd == 0 {
-                    print("Import Error: Could not resolve module " + module_name)
+                    print("Import Error: Could not resolve module '" + module_name + "'")
                 } else {
                     source = sys_read(fd)
                     sys_close(fd)
                     print("Tokenizing... " + module_name)
                     tokens = tokenize(source)
-                    imported_ast = parse(tokens)
+                    imported_ast = parse(tokens, module_name + ".nv")
                     resolved_ast = resolve_imports(imported_ast, visited)
                     j = 0
                     while j < len(resolved_ast) {
@@ -64,7 +64,7 @@ def compile_file(path: string) -> list {
 
     print("Parsing...")
     # Step 2: Parse into AST
-    ast = parse(tokens)
+    ast = parse(tokens, path)
     
     print("Resolving imports...")
     # Step 2.5: Resolve Imports

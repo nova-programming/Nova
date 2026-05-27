@@ -477,6 +477,13 @@ def parse_operand(op_str: string) -> OperandInfo {
     }
 
     first = op_str[0]
+    if first == "'" {
+        info.kind = "imm"
+        if len(op_str) >= 3 {
+            info.imm_val = ord(op_str[1])
+        }
+        return info
+    }
     if (first >= "0" and first <= "9") or first == "-" {
         info.kind = "imm"
         info.imm_val = atoi(op_str)

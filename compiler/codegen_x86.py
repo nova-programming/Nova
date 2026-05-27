@@ -295,7 +295,7 @@ class X86Codegen:
         r("    mov ebp, esp")
         r("    push dword ptr [ebp + 12]")
         r("    push dword ptr [ebp + 8]")
-        r("    push 0")
+        r("    push 8")
         r("    call _GetProcessHeap@0")
         r("    push eax")
         r("    call _HeapReAlloc@16")
@@ -669,6 +669,10 @@ class X86Codegen:
         r("_fopen:")
         r("    push ebp")
         r("    mov ebp, esp")
+        r("    mov eax, [ebp + 12]")
+        r("    mov al, byte ptr [eax]")
+        r("    cmp al, 'w'")
+        r("    je L_fopen_write")
         r("    push 0")
         r("    push 128")
         r("    push 3")
@@ -677,6 +681,17 @@ class X86Codegen:
         r("    push -2147483648")
         r("    push dword ptr [ebp + 8]")
         r("    call _CreateFileA@28")
+        r("    jmp L_fopen_end")
+        r("L_fopen_write:")
+        r("    push 0")
+        r("    push 128")
+        r("    push 2")
+        r("    push 0")
+        r("    push 0")
+        r("    push 1073741824")
+        r("    push dword ptr [ebp + 8]")
+        r("    call _CreateFileA@28")
+        r("L_fopen_end:")
         r("    cmp eax, -1")
         r("    jne L_fopen_ok")
         r("    xor eax, eax")
@@ -847,6 +862,7 @@ class X86Codegen:
                 self.scan_vars(s)
 
     def compile_function(self, fn):
+        print("Compiling function:", fn.name)
         self.assembly.append(f"_{fn.name}:")
         self.assembly.append("    push ebp")
         self.assembly.append("    mov ebp, esp")
@@ -886,6 +902,9 @@ class X86Codegen:
         self.string_vars = old_string_vars
 
     def compile_stmt(self, node):
+        if hasattr(node, 'line') and node.line > 0:
+            self.assembly.append(f"    # line {node.line}")
+            
         if isinstance(node, Assignment):
             self.compile_expr(node.value)
             self.assembly.append("    pop eax")
@@ -1235,7 +1254,7 @@ class X86Codegen:
             elif node.property == "addr":
                 pass # already top of stack
             else:
-                raise Exception(f"Property {node.property} not supported in native codegen")
+                raise Exception(f"[line {getattr(node, 'line', '?')}] Property {node.property} not supported in native codegen")
         elif isinstance(node, ArrayIndex):
             # base[index] - need to distinguish string vs list indexing
             base_type = getattr(node.base, 'inferred_type', 'any')
@@ -1397,9 +1416,9 @@ class X86Codegen:
                     self.assembly.append("    add esp, 12")
                     self.assembly.append("    push eax")
                 else:
-                    raise Exception("Slice with omitted start/end not supported in native codegen yet")
+                    raise Exception(f"[line {getattr(node, 'line', '?')}] Slice with omitted start/end not supported in native codegen yet")
             else:
-                raise Exception("List slicing not supported in native codegen yet")
+                raise Exception(f"[line {getattr(node, 'line', '?')}] List slicing not supported in native codegen yet")
         elif isinstance(node, StrConvert):
             self.compile_expr(node.target)
             self.assembly.append("    pop ebx") # int to convert
@@ -1415,4 +1434,4 @@ class X86Codegen:
             self.assembly.append("    pop eax") # restore buffer pointer
             self.assembly.append("    push eax")
         else:
-            raise Exception(f"Native codegen unhandled node: {type(node)}")
+            raise Exception(f"[line {getattr(node, 'line', '?')}] Native codegen unhandled node: {type(node)}")

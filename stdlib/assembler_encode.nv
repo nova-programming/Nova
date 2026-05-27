@@ -36,6 +36,23 @@ def append_imm32(state, val: int) {
 
 def encode_modrm_mem(state, mem: OperandInfo, reg_field: int) {
     if mem.mem_base >= 0 {
+        if mem.mem_base == 4 {
+            if mem.mem_disp == 0 {
+                state.code.append(build_modrm(0, reg_field, 4))
+                state.code.append(build_sib(0, 4, 4))
+                return
+            }
+            if mem.mem_disp >= -128 and mem.mem_disp <= 127 {
+                state.code.append(build_modrm(1, reg_field, 4))
+                state.code.append(build_sib(0, 4, 4))
+                state.code.append(byte_mask(mem.mem_disp))
+                return
+            }
+            state.code.append(build_modrm(2, reg_field, 4))
+            state.code.append(build_sib(0, 4, 4))
+            append_imm32(state, mem.mem_disp)
+            return
+        }
         if mem.mem_base == 5 and mem.mem_disp == 0 and len(mem.label) == 0 {
             state.code.append(build_modrm(1, reg_field, 5))
             state.code.append(0)
@@ -61,7 +78,6 @@ def encode_modrm_mem(state, mem: OperandInfo, reg_field: int) {
         append_imm32(state, mem.mem_disp)
     }
 }
-
 def encode_modrm_sib_reg(state, mem: OperandInfo, reg_field: int) {
     if mem.mem_disp == 0 and mem.mem_base != 5 {
         state.code.append(build_modrm(0, reg_field, 4))
@@ -88,14 +104,23 @@ def encode_modrm_mem_reg(state, mem: OperandInfo, reg_field: int) {
         }
         if mem.mem_disp == 0 and mem.mem_base != 5 {
             state.code.append(build_modrm(0, reg_field, mem.mem_base))
+            if mem.mem_base == 4 {
+                state.code.append(36)
+            }
             return
         }
         if mem.mem_disp >= -128 and mem.mem_disp <= 127 {
             state.code.append(build_modrm(1, reg_field, mem.mem_base))
+            if mem.mem_base == 4 {
+                state.code.append(36)
+            }
             state.code.append(byte_mask(mem.mem_disp))
             return
         }
         state.code.append(build_modrm(2, reg_field, mem.mem_base))
+        if mem.mem_base == 4 {
+            state.code.append(36)
+        }
         append_imm32(state, mem.mem_disp)
         return
     }
@@ -368,6 +393,70 @@ def encode_add(state, ops: list) {
     }
 }
 
+def encode_rep(state, ops: list) {
+    op = ops[0]
+    if op == "stosb" {
+        state.code.append(243)
+        state.code.append(170)
+    }
+}
+def encode_repnz(state, ops: list) {
+    op = ops[0]
+    if op == "scasb" {
+        state.code.append(242)
+        state.code.append(174)
+    }
+}
+def encode_jns(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(15)
+    state.code.append(137)
+    append_label_ref(state, op.label, 4)
+}
+def encode_jz(state, ops: list) {
+    encode_je(state, ops)
+}
+def encode_jnz(state, ops: list) {
+    encode_jne(state, ops)
+}
+def encode_not(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(247)
+    state.code.append(build_modrm(3, 2, op.reg))
+}
+def encode_div(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(247)
+    state.code.append(build_modrm(3, 6, op.reg))
+}
+def encode_movsx(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+    state.code.append(15)
+    state.code.append(190)
+    if op2.kind == "reg8" {
+        state.code.append(build_modrm(3, op1.reg, op2.reg))
+        return
+    }
+    if op2.kind == "mem" {
+        encode_modrm_mem(state, op2, op1.reg)
+        return
+    }
+}
+def encode_test(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+    if op1.kind == "reg" and op2.kind == "reg" {
+        state.code.append(133)
+        state.code.append(build_modrm(3, op2.reg, op1.reg))
+        return
+    }
+    if op1.kind == "reg8" and op2.kind == "reg8" {
+        state.code.append(132)
+        state.code.append(build_modrm(3, op2.reg, op1.reg))
+        return
+    }
+}
 def encode_sub(state, ops: list) {
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
@@ -381,8 +470,25 @@ def encode_sub(state, ops: list) {
         encode_alu_imm(state, 5, ops)
         return
     }
+    if op1.kind == "reg" and op2.kind == "mem" {
+        state.code.append(43)
+        if op2.mem_index >= 0 {
+            encode_modrm_sib_reg(state, op2, op1.reg)
+        } else {
+            encode_modrm_mem(state, op2, op1.reg)
+        }
+        return
+    }
+    if op1.kind == "reg8" and op2.kind == "mem" {
+        state.code.append(42)
+        if op2.mem_index >= 0 {
+            encode_modrm_sib_reg(state, op2, op1.reg)
+        } else {
+            encode_modrm_mem(state, op2, op1.reg)
+        }
+        return
+    }
 }
-
 def encode_cmp(state, ops: list) {
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
@@ -394,6 +500,36 @@ def encode_cmp(state, ops: list) {
     }
     if op1.kind == "reg" and op2.kind == "imm" {
         encode_alu_imm(state, 7, ops)
+        return
+    }
+    if op1.kind == "reg8" and op2.kind == "imm" {
+        if op1.reg == 0 {
+            state.code.append(60)
+            state.code.append(byte_mask(op2.imm_val))
+        } else {
+            state.code.append(128)
+            state.code.append(build_modrm(3, 7, op1.reg))
+            state.code.append(byte_mask(op2.imm_val))
+        }
+        return
+    }
+    if op1.kind == "reg8" and op2.kind == "mem" {
+        state.code.append(58)
+        if op2.mem_index >= 0 {
+            encode_modrm_sib_reg(state, op2, op1.reg)
+        } else {
+            encode_modrm_mem(state, op2, op1.reg)
+        }
+        return
+    }
+    if op1.kind == "mem" and op2.kind == "imm" and str_contains(ops[0], "byte ptr") == 1 {
+        state.code.append(128)
+        if op1.mem_index >= 0 {
+            encode_modrm_sib_reg(state, op1, 7)
+        } else {
+            encode_modrm_mem(state, op1, 7)
+        }
+        state.code.append(byte_mask(op2.imm_val))
         return
     }
 }
@@ -532,6 +668,42 @@ def encode_setne(state, ops: list) {
 # --- Instruction Dispatching ---
 
 def emit_instruction(state, line: AsmLine) {
+    if line.mnemonic == "div" {
+        encode_div(state, line.operands)
+        return
+    }
+    if line.mnemonic == "jns" {
+        encode_jns(state, line.operands)
+        return
+    }
+    if line.mnemonic == "jz" {
+        encode_jz(state, line.operands)
+        return
+    }
+    if line.mnemonic == "jnz" {
+        encode_jnz(state, line.operands)
+        return
+    }
+    if line.mnemonic == "movsx" {
+        encode_movsx(state, line.operands)
+        return
+    }
+    if line.mnemonic == "not" {
+        encode_not(state, line.operands)
+        return
+    }
+    if line.mnemonic == "rep" {
+        encode_rep(state, line.operands)
+        return
+    }
+    if line.mnemonic == "repnz" {
+        encode_repnz(state, line.operands)
+        return
+    }
+    if line.mnemonic == "test" {
+        encode_test(state, line.operands)
+        return
+    }
     if line.mnemonic == "ret" {
         state.code.append(195)
         return

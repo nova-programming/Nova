@@ -35,15 +35,27 @@ def process_escapes(s):
 
 def tokenize(code):
     tokens = []
+    line_num = 1
+    last_pos = 0
     for match in TOKEN_REGEX.finditer(code):
         kind = match.lastgroup
         value = match.group()
+        pos = match.start()
 
-        if kind in {"SKIP", "COMMENT", "NEWLINE"}:
+        # Count newlines between last_pos and current pos for accurate line tracking
+        line_num += code.count('\n', last_pos, pos)
+        last_pos = pos
+
+        if kind in {"SKIP", "COMMENT"}:
+            continue
+        
+        if kind == "NEWLINE":
+            line_num += 1
+            last_pos = pos + len(value)
             continue
         
         elif kind == "MISMATCH":
-            raise SyntaxError(f"Unexpected character: {value!r}")
+            raise SyntaxError(f"Unexpected character: {value!r} at line {line_num}")
         
         # Process escape sequences in string literals
         if kind == "STRING":
@@ -53,6 +65,6 @@ def tokenize(code):
             inner = process_escapes(inner)
             value = '"' + inner + '"'
         
-        tokens.append((kind, value))
+        tokens.append((kind, value, line_num))
     
     return tokens
