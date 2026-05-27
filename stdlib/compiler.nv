@@ -2,6 +2,8 @@ import os_win
 import lexer
 import parser
 import codegen
+import assembler
+import linker
 
 def contains(lst: list, item: string) -> int {
     i = 0
@@ -86,6 +88,18 @@ def compile_to_file(input_path: string, output_path: string) {
         sys_write(fd, "\n")
         i = i + 1
     }
+    sys_close(fd)
+    print("Compiled: " + input_path + " -> " + output_path)
+}
+
+def compile_to_exe(input_path: string, output_path: string) {
+    asm = compile_file(input_path)
+    print("Assembling...")
+    assembled = assemble(asm)
+    print("Linking...")
+    exe_bytes = link(assembled)
+    fd = sys_open(output_path, "wb")
+    sys_write_raw(fd, exe_bytes)
     sys_close(fd)
     print("Compiled: " + input_path + " -> " + output_path)
 }

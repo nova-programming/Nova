@@ -24,19 +24,24 @@ def assemble(asm_lines: list) -> list {
     state.org = 0
     state.externs = []
     state.globals = []
+    state.code_count = 0
+    state.data_count = 0
 
     # Pass 0: Parse all lines
+    print("pass0 lines=" + str(len(asm_lines)))
     i = 0
     while i < len(asm_lines) {
-        if i % 5000 == 0 { print("parse_line i=" + str(i)) }
         pl = parse_line(asm_lines[i])
         state.lines.append(pl)
         i = i + 1
     }
-    print("Pass 0 done")
+    sys_flush()
+    # pass0 done
 
-    # Pass 1: Collect labels and encode instructions
-    pass1_collect_labels(state)
+    # Encode: collect labels and encode instructions in one pass
+    pass2_encode(state)
+    
+    # Resolve fixups
     resolve_fixups(state)
 
     result = []

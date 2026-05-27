@@ -1,25 +1,32 @@
 # Nova Native Compiler Internals (`stdlib/compiler.nv` & `nova_main.nv`)
 
-The compilation orchestration logic represents the overarching entry point of the entire self-hosting bootstrap pipeline. It takes the independent components (tokenizer, parser, codegen, linker) and ties them into a cohesive toolchain.
+The compilation pipeline orchestrates tokenizer → parser → codegen → GCC linking.
 
-## Current Python Driver (`main.py`)
-Historically, `main.py` parses command line arguments and either directs them to `vm.py` (for interpretation) or `codegen_x86.py` (for compilation via `gcc`). This allows Nova code to be tested while the native tools are still being built.
+## Entry Points
 
-## Native Compiler Driver (`nova_main.nv`)
-The ultimate goal of Nova is self-dependency. The native `nova.exe` CLI executable replaces `main.py`.
+- **`nova_main.nv`**: CLI entry point for the self-hosted native compiler. Parses `build` command, reads the `.nv` source, calls `compile_to_file()`, then invokes `gcc` via `sys_system()`.
+- **`stdlib/compiler.nv`**: Core library exposing `compile_file(path)` and `compile_to_file(input, output)`. Orchestrates: read file → tokenize → parse → resolve imports → generate assembly.
+- **`stdlib/compiler_driver.nv`**: Minimal standalone CLI driver for the compiler (used for testing).
 
-1. **Initialization:**
-   It invokes `os.sys_get_args()` from `os_win.nv` to natively parse Windows command-line arguments.
-2. **File I/O:**
-   It uses `os.read_file()` to load the target `.nv` source code into a string buffer in memory.
-3. **Lexical Analysis:**
-   The source string is passed to `tokenizer.tokenize()`, creating a list of tokens.
-4. **Syntax Analysis:**
-   The tokens are passed to `parser.init_parser()` and `parser.parse()`, generating the AST (Abstract Syntax Tree).
-5. **Code Generation:**
-   The AST is fed to `codegen.generate_assembly()`. At present, this outputs NASM-compatible assembly strings, which are then passed to `gcc` via a `system()` shell call.
-6. **Self-Hosting (Future):**
-   Once `linker.nv` is fully integrated with `codegen.nv`, `codegen` will emit raw binary byte lists directly into `linker.link()`, bypassing NASM and GCC entirely.
+## Pipeline
+
+1. **Read source**: `sys_open(path, "r")` → `sys_read(fd)` → buffer
+2. **Tokenize**: `tokenize(source)` → list of `Token` structs
+3. **Parse**: `parse(tokens)` → AST (list of `AstNode`)
+4. **Resolve imports**: `resolve_imports(ast, visited)` — recursively loads and tokenizes/parses imported `.nv` files
+5. **Generate assembly**: `generate_assembly(ast)` → list of assembly lines
+6. **Write output**: Assembly lines written to `.s` file via `sys_write()`
+7. **Link**: `sys_system("gcc " + out_file + " -o " + exe_file)` produces native `.exe`
 
 ## Modularity
-Because all the logic resides natively inside Nova (`tokenizer.nv`, `parser.nv`, `codegen.nv`), any future improvements to the compiler (e.g., adding classes, enums, type-check passes) can be written purely in Nova itself, achieving a self-sustaining ecosystem without needing Python.
+
+The compiler is split into modular `.nv` files:
+- `lexer.nv` — tokenizer
+- `parser.nv` — recursive-descent parser
+- `codegen.nv`, `codegen_expr.nv`, `codegen_stmt.nv` — x86-32 assembly generation
+- `assembler.nv` (+ submodules) — x86 instruction encoder (not yet in default path)
+- `linker.nv` — PE executable generator (not yet in default path)
+- `compiler.nv` — pipeline orchestration
+- `os_win.nv` — platform runtime facade
+
+All compiler improvements can be written purely in Nova, maintaining a self-sustaining ecosystem.

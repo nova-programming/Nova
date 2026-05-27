@@ -1,6 +1,0 @@
-import os_win
-import compiler
-
-print("BEFORE")
-compile_to_file("build_test.nv", "build_test_out.s")
-print("AFTER")

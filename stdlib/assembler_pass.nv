@@ -1,6 +1,7 @@
 # ============================================================
 # Assembler: Passes and Fixup Resolution
 # ============================================================
+import os_win
 
 # --- Directive Handlers ---
 
@@ -65,7 +66,6 @@ def process_string_escapes(s: string) -> list {
 # --- Label / Directive Processing ---
 
 def process_label(state, label_name) {
-    print("process_label: " + label_name)
     sec_off = 0
     if state.section == 0 {
         sec_off = len(state.code)
@@ -95,10 +95,13 @@ def process_label(state, label_name) {
 }
 
 def process_directive(state, line) {
-    print("process_directive: " + line.directive)
     if line.directive == ".text" { state.section = 0 }
     if line.directive == ".data" { state.section = 1 }
     if line.directive == ".asciz" { emit_asciz(state, line.dir_arg) }
+    if line.directive == ".byte" {
+        b = atoi(line.dir_arg)
+        state.data_bytes.append(b)
+    }
     if line.directive == ".extern" {
         sym_name = line.dir_arg
         found = 0
@@ -123,18 +126,10 @@ def process_directive(state, line) {
     }
 }
 
-def pass1_collect_labels(state) {
-    sys_flush()
-    print("Pass 1 start: " + str(len(state.lines)) + " lines")
+def pass2_encode(state) {
     i = 0
     while i < len(state.lines) {
         line = state.lines[i]
-        if i == 8500 { print("reached 8500") }
-        if i == 8520 { print("reached 8520") }
-        if i == 8540 { print("reached 8540") }
-        if i == 8560 { print("reached 8560") }
-        if i == 8580 { print("reached 8580") }
-        if i == 8600 { print("reached 8600") }
         if line.kind == "label" {
             process_label(state, line.label)
         }
@@ -146,15 +141,15 @@ def pass1_collect_labels(state) {
             process_label(state, line.label)
             emit_instruction(state, line)
         }
-
         if line.kind == "directive" {
             process_directive(state, line)
         }
-
         if line.kind == "instruction" {
             emit_instruction(state, line)
         }
-
+        if line.kind == "label" {
+            process_label(state, line.label)
+        }
         i = i + 1
     }
 }

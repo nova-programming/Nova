@@ -224,9 +224,39 @@ def compile_expr(state: CodegenState, node: AstNode) {
     }
     if node.kind == "DataFieldAccess" {
         compile_expr(state, node.left)
-        emit(state, "    pop eax")
-        offset = get_prop_offset(state, node.val_str)
-        emit(state, "    mov eax, [eax + " + str(offset) + "]")
+        emit(state, "    pop edx")
+        if node.val_str == "value_byte" {
+            emit(state, "    xor eax, eax")
+            emit(state, "    mov al, byte ptr [edx]")
+        } else {
+            if node.val_str == "value_word" {
+                emit(state, "    xor eax, eax")
+                emit(state, "    mov ax, word ptr [edx]")
+            } else {
+                if node.val_str == "value_dword" or node.val_str == "value" {
+                    emit(state, "    mov eax, [edx]")
+                } else {
+                    if node.val_str == "addr" {
+                        emit(state, "    mov eax, edx")
+                    } else {
+                        if node.val_str == "isValid" {
+                            emit(state, "    xor eax, eax")
+                            emit(state, "    cmp edx, 0")
+                            emit(state, "    setne al")
+                        } else {
+                            if node.val_str == "isNull" {
+                                emit(state, "    xor eax, eax")
+                                emit(state, "    cmp edx, 0")
+                                emit(state, "    sete al")
+                            } else {
+                                offset = get_prop_offset(state, node.val_str)
+                                emit(state, "    mov eax, [edx + " + str(offset) + "]")
+                            }
+                        }
+                    }
+                }
+            }
+        }
         emit(state, "    push eax")
     }
     if node.kind == "Alloc" {
@@ -290,16 +320,9 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    pop ecx")
         
         if is_str == 1 {
-            emit(state, "    push edx")
-            emit(state, "    push ecx")
-            emit(state, "    push 2")
-            emit(state, "    call _malloc")
-            emit(state, "    add esp, 4")
-            emit(state, "    pop ecx")
-            emit(state, "    pop edx")
-            emit(state, "    movzx ebx, byte ptr [edx + ecx]")
-            emit(state, "    mov byte ptr [eax], bl")
-            emit(state, "    mov byte ptr [eax + 1], 0")
+            emit(state, "    movzx eax, byte ptr [edx + ecx]")
+            emit(state, "    shl eax, 1")
+            emit(state, "    add eax, offset char_strings")
             emit(state, "    push eax")
         } else {
             emit(state, "    mov edx, [edx + 8]")
@@ -312,24 +335,11 @@ def compile_expr(state: CodegenState, node: AstNode) {
         if is_string_expr(state, node.left) == 1 { is_str = 1 }
         if is_str == 1 {
             if node.right.kind != "" and node.cond.kind != "" {
-                compile_expr(state, node.left)
-                compile_expr(state, node.right)
                 compile_expr(state, node.cond)
-                emit(state, "    pop ecx")
-                emit(state, "    pop ebx")
-                emit(state, "    pop edx")
-                emit(state, "    sub ecx, ebx")
-                emit(state, "    inc ecx")
-                emit(state, "    push ecx")
-                emit(state, "    call _malloc")
-                emit(state, "    add esp, 4")
-                emit(state, "    push eax")
-                emit(state, "    add edx, ebx")
-                emit(state, "    push edx")
-                emit(state, "    push eax")
-                emit(state, "    call _strcpy")
-                emit(state, "    add esp, 8")
-                emit(state, "    pop eax")
+                compile_expr(state, node.right)
+                compile_expr(state, node.left)
+                emit(state, "    call _slice_string")
+                emit(state, "    add esp, 12")
                 emit(state, "    push eax")
             } else {
                 emit(state, "    push 0")
@@ -363,6 +373,9 @@ def compile_expr(state: CodegenState, node: AstNode) {
             if node.left.val_str == "struct_names" { use_strlen = 0 }
             if node.left.val_str == "prop_names" { use_strlen = 0 }
             if node.left.val_str == "local_var_names" { use_strlen = 0 }
+        }
+        if node.left.kind == "ArrayIndex" {
+            use_strlen = 1
         }
         if use_strlen == 1 {
             emit(state, "    call _strlen")
@@ -428,6 +441,9 @@ def compile_expr(state: CodegenState, node: AstNode) {
                 if node.args[0].val_str == "struct_names" { use_strlen = 0 }
                 if node.args[0].val_str == "prop_names" { use_strlen = 0 }
                 if node.args[0].val_str == "local_var_names" { use_strlen = 0 }
+            }
+            if node.args[0].kind == "ArrayIndex" {
+                use_strlen = 1
             }
             if use_strlen == 1 {
                 emit(state, "    call _strlen")

@@ -169,6 +169,8 @@ data AssemblerState {
     org: int
     externs: list
     globals: list
+    code_count: int
+    data_count: int
 }
 
 data OperandInfo {
@@ -353,11 +355,15 @@ def parse_operand(op_str: string) -> OperandInfo {
     info.imm_val = 0
     op_str = trim(op_str)
 
-    if len(op_str) >= 10 and str_sub(op_str, 0, 10) == "dword ptr " {
-        op_str = str_sub(op_str, 10, len(op_str))
+    if len(op_str) >= 10 {
+        if str_sub(op_str, 0, 10) == "dword ptr " {
+            op_str = str_sub(op_str, 10, len(op_str))
+        }
     }
-    if len(op_str) >= 9 and str_sub(op_str, 0, 9) == "byte ptr " {
-        op_str = str_sub(op_str, 9, len(op_str))
+    if len(op_str) >= 9 {
+        if str_sub(op_str, 0, 9) == "byte ptr " {
+            op_str = str_sub(op_str, 9, len(op_str))
+        }
     }
 
     if is_32bit_reg(op_str) == 1 or op_str == "al" or op_str == "cl" or op_str == "bl" {
@@ -404,6 +410,16 @@ def parse_operand(op_str: string) -> OperandInfo {
                 if scale_str == "2" { info.mem_scale = 1 }
                 if scale_str == "4" { info.mem_scale = 2 }
                 if scale_str == "8" { info.mem_scale = 3 }
+            } else {
+                index_str = trim(str_sub(content, 0, star_idx))
+                scale_str = trim(str_sub(content, star_idx + 1, len(content)))
+                info.mem_index = reg_code(index_str)
+                info.mem_base = 5
+                info.mem_disp = 0
+                if scale_str == "1" { info.mem_scale = 0 }
+                if scale_str == "2" { info.mem_scale = 1 }
+                if scale_str == "4" { info.mem_scale = 2 }
+                if scale_str == "8" { info.mem_scale = 3 }
             }
         } else {
             has_plus = 0
@@ -435,7 +451,16 @@ def parse_operand(op_str: string) -> OperandInfo {
                     base_str = trim(str_sub(content, 0, sep_idx))
                     disp_str = trim(str_sub(content, sep_idx, len(content)))
                     info.mem_base = reg_code(base_str)
-                    info.mem_disp = atoi(disp_str)
+                    sign = disp_str[0]
+                    rest = trim(str_sub(disp_str, 1, len(disp_str)))
+                    idx_reg = reg_code(rest)
+                    if idx_reg >= 0 {
+                        info.mem_index = idx_reg
+                        info.mem_scale = 0
+                        info.mem_disp = 0
+                    } else {
+                        info.mem_disp = atoi(disp_str)
+                    }
                 }
             } else {
                 maybe_reg = reg_code(content)

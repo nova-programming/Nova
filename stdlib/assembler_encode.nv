@@ -2,6 +2,13 @@
 # Assembler: Instruction Encoding
 # ============================================================
 
+# --- Code Emission Helper ---
+
+def emit_code(state, val: int) {
+    state.code[state.code_count] = val
+    state.code_count = state.code_count + 1
+}
+
 # --- ModR/M / SIB ---
 
 def build_modrm(mod: int, reg: int, rm: int) -> int {
@@ -212,14 +219,22 @@ def encode_mov(state, ops: list) {
 
     if op1.kind == "mem" and op2.kind == "imm" and str_contains(ops[0], "dword ptr") == 1 {
         state.code.append(199)
-        encode_modrm_mem(state, op1, 0)
+        if op1.mem_index >= 0 {
+            encode_modrm_sib_reg(state, op1, 0)
+        } else {
+            encode_modrm_mem(state, op1, 0)
+        }
         append_imm32(state, op2.imm_val)
         return
     }
 
     if op1.kind == "mem" and op2.kind == "imm" and str_contains(ops[0], "byte ptr") == 1 {
         state.code.append(198)
-        encode_modrm_mem(state, op1, 0)
+        if op1.mem_index >= 0 {
+            encode_modrm_sib_reg(state, op1, 0)
+        } else {
+            encode_modrm_mem(state, op1, 0)
+        }
         state.code.append(byte_mask(op2.imm_val))
         return
     }
@@ -458,6 +473,62 @@ def encode_or(state, ops: list) {
     state.code.append(build_modrm(3, op2.reg, op1.reg))
 }
 
+# --- LEA ---
+
+def encode_lea(state, ops: list) {
+    # lea r32, m: opcode 0x8D
+    op_dst = parse_operand(ops[0])
+    op_src = parse_operand(ops[1])
+    state.code.append(141)
+    if op_src.mem_index >= 0 and op_src.mem_base >= 0 {
+        encode_modrm_sib_reg(state, op_src, op_dst.reg)
+    } else {
+        if op_src.mem_base >= 0 {
+            encode_modrm_mem_reg(state, op_src, op_dst.reg)
+        } else {
+            state.code.append(build_modrm(0, op_dst.reg, 5))
+            if len(op_src.label) > 0 {
+                append_label_ref(state, op_src.label, 4)
+            } else {
+                append_imm32(state, op_src.mem_disp)
+            }
+        }
+    }
+}
+
+# --- XOR ---
+
+def encode_xor(state, ops: list) {
+    # xor r32, r/m32: opcode 0x33
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+    state.code.append(51)
+    if op2.reg >= 0 {
+        state.code.append(build_modrm(3, op2.reg, op1.reg))
+    } else {
+        state.code.append(build_modrm(3, op2.reg, op1.reg))
+    }
+}
+
+# --- SAR ---
+
+def encode_sar(state, ops: list) {
+    # sar r32, cl: opcode 0xD3, modrm reg=7
+    op1 = parse_operand(ops[0])
+    state.code.append(211)
+    state.code.append(build_modrm(3, 7, op1.reg))
+}
+
+# --- SETNE ---
+
+def encode_setne(state, ops: list) {
+    # setne r8: opcode 0x0F 0x95
+    op1 = parse_operand(ops[0])
+    state.code.append(15)
+    state.code.append(149)
+    state.code.append(build_modrm(3, 0, op1.reg))
+}
+
 # --- Instruction Dispatching ---
 
 def emit_instruction(state, line: AsmLine) {
@@ -563,6 +634,22 @@ def emit_instruction(state, line: AsmLine) {
     }
     if line.mnemonic == "or" {
         encode_or(state, line.operands)
+        return
+    }
+    if line.mnemonic == "lea" {
+        encode_lea(state, line.operands)
+        return
+    }
+    if line.mnemonic == "xor" {
+        encode_xor(state, line.operands)
+        return
+    }
+    if line.mnemonic == "sar" {
+        encode_sar(state, line.operands)
+        return
+    }
+    if line.mnemonic == "setne" {
+        encode_setne(state, line.operands)
         return
     }
 }

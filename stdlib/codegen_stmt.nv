@@ -4,7 +4,14 @@
 
 def compile_stmt(state: CodegenState, node: AstNode) {
     if node.kind == "Assignment" {
+        is_str_val = 0
         if is_string_expr(state, node.left) == 1 {
+            is_str_val = 1
+        }
+        if node.left.kind == "ArrayIndex" {
+            is_str_val = 1
+        }
+        if is_str_val == 1 {
             found_str = 0
             k = 0
             while k < len(state.string_vars) {
@@ -25,10 +32,22 @@ def compile_stmt(state: CodegenState, node: AstNode) {
     if node.kind == "DataFieldAssign" {
         compile_expr(state, node.right)
         compile_expr(state, node.left)
+        emit(state, "    pop edx")
         emit(state, "    pop eax")
-        emit(state, "    pop ebx")
-        prop_off = get_prop_offset(state, node.val_str)
-        emit(state, "    mov [eax + " + str(prop_off) + "], ebx")
+        if node.val_str == "value_byte" {
+            emit(state, "    mov byte ptr [edx], al")
+        } else {
+            if node.val_str == "value_word" {
+                emit(state, "    mov word ptr [edx], ax")
+            } else {
+                if node.val_str == "value_dword" or node.val_str == "value" {
+                    emit(state, "    mov [edx], eax")
+                } else {
+                    prop_off = get_prop_offset(state, node.val_str)
+                    emit(state, "    mov [edx + " + str(prop_off) + "], eax")
+                }
+            }
+        }
     }
     if node.kind == "ArrayIndexAssign" {
         compile_expr(state, node.cond)

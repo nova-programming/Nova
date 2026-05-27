@@ -69,6 +69,13 @@ def compile_native(file_path):
     tokens = tokenize(source)
     ast = Parser(tokens).parse()
     
+    # Collect module names before expansion
+    from ast.nodes import Import
+    module_names = set()
+    for node in ast:
+        if isinstance(node, Import):
+            module_names.add(node.module)
+
     ast = expand_imports(ast, base_dir)
 
     try:
@@ -78,7 +85,7 @@ def compile_native(file_path):
         sys.exit(1)
 
     from compiler.codegen_x86 import X86Codegen
-    codegen = X86Codegen(ast)
+    codegen = X86Codegen(ast, module_names=module_names)
     asm_code = codegen.generate()
 
     asm_file = file_path.rsplit(".", 1)[0] + ".s"
@@ -90,7 +97,7 @@ def compile_native(file_path):
     print(f"Generated assembly: {asm_file}")
     
     import subprocess
-    cmd = ["gcc", asm_file, "-o", exe_file]
+    cmd = ["gcc", asm_file, "-o", exe_file, "-lkernel32"]
     print(f"Running command: {' '.join(cmd)}")
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0:

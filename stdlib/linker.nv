@@ -235,9 +235,8 @@ def link(sections: list) -> list {
     file_align = 512      # 0x200
     image_base = 4194304  # 0x400000
     
-    # 1. Collect imports (undefined labels)
-    msvcrt_names = []
-    kernel32_names = []
+    # 1. Collect imports (undefined labels) - all routed to kernel32.dll
+    dll_names = []
     i = 0
     while i < len(labels) {
         if labels[i].defined == 0 {
@@ -245,26 +244,14 @@ def link(sections: list) -> list {
             if len(actual_name) > 0 and actual_name[0] == "_" {
                 actual_name = str_sub(actual_name, 1, len(actual_name))
             }
-            if actual_name == "GetCommandLineA" {
-                kernel32_names.append(actual_name)
-            } else {
-                msvcrt_names.append(actual_name)
-            }
+            dll_names.append(actual_name)
         }
         i = i + 1
     }
     
-    import_names = []
-    i = 0
-    while i < len(msvcrt_names) {
-        import_names.append(msvcrt_names[i])
-        i = i + 1
-    }
-    i = 0
-    while i < len(kernel32_names) {
-        import_names.append(kernel32_names[i])
-        i = i + 1
-    }
+    import_names = dll_names
+    num_dlls = 0
+    if len(dll_names) > 0 { num_dlls = 1 }
     
     # 2. Layout RVAs
     headers_size = 512
@@ -272,64 +259,29 @@ def link(sections: list) -> list {
     
     # Generate jump thunks for imports and append to code section
     num_imports = len(import_names)
-    idata_rva = 0 # Will calculate later, but we need it for thunks!
-    
-    # Wait, the jump thunk uses the absolute virtual address of the IAT entry.
-    
-    # We can calculate idata_rva right now:
     text_size_with_thunks = len(code) + (num_imports * 6)
     data_rva = text_rva + align_up(text_size_with_thunks, section_align)
     idata_rva = data_rva + align_up(len(data_sec), section_align)
     
-    num_dlls = 0
-    if len(msvcrt_names) > 0 { num_dlls = num_dlls + 1 }
-    if len(kernel32_names) > 0 { num_dlls = num_dlls + 1 }
+    dll_name_len = 13 # "kernel32.dll"
     
     descriptors_size = (num_dlls + 1) * 20
-    
-    ilt_msvcrt_size = 0
-    if len(msvcrt_names) > 0 { ilt_msvcrt_size = (len(msvcrt_names) + 1) * 4 }
-    
-    ilt_kernel32_size = 0
-    if len(kernel32_names) > 0 { ilt_kernel32_size = (len(kernel32_names) + 1) * 4 }
-    
-    ilt_total_size = ilt_msvcrt_size + ilt_kernel32_size
+    ilt_total_size = (len(dll_names) + 1) * 4
     
     ilt_rva = idata_rva + descriptors_size
     iat_rva = ilt_rva + ilt_total_size
     dll_names_rva = iat_rva + ilt_total_size
-    
-    dll_msvcrt_len = 11
-    dll_kernel32_len = 13
-    
-    dll_msvcrt_rva = 0
-    dll_kernel32_rva = 0
-    curr_dll_rva = dll_names_rva
-    
-    if len(msvcrt_names) > 0 {
-        dll_msvcrt_rva = curr_dll_rva
-        curr_dll_rva = curr_dll_rva + dll_msvcrt_len
-    }
-    if len(kernel32_names) > 0 {
-        dll_kernel32_rva = curr_dll_rva
-        curr_dll_rva = curr_dll_rva + dll_kernel32_len
-    }
-    
-    hint_name_table_rva = curr_dll_rva
+    dll_name_rva = dll_names_rva
+    hint_name_table_rva = dll_name_rva + dll_name_len
     
     iat_offsets = []
     i = 0
-    while i < len(msvcrt_names) {
+    while i < len(dll_names) {
         iat_offsets.append(i * 4)
         i = i + 1
     }
-    i = 0
-    while i < len(kernel32_names) {
-        iat_offsets.append(ilt_msvcrt_size + (i * 4))
-        i = i + 1
-    }
     
-    # Now we can generate jump thunks
+    # Generate jump thunks
     i = 0
     while i < len(labels) {
         if labels[i].defined == 0 {
@@ -353,48 +305,36 @@ def link(sections: list) -> list {
             
             # Thunk is FF 25 [AbsAddr]
             thunk_offset = len(code)
-            code.append(255) # FF
-            code.append(37)  # 25
+            code.append(255)
+            code.append(37)
             append_u32(code, entry_abs_addr)
             
-            # Update label to point to the thunk!
             labels[i].defined = 1
-            labels[i].section = 0 # .text
+            labels[i].section = 0
             labels[i].offset = thunk_offset
         }
         i = i + 1
     }
     
-    # Now resolve fixups!
     apply_relocs(code, fixups, labels, text_rva, data_rva, image_base)
     
-    # Build .idata section bytes
+    # Build .idata section
     idata = []
     
-    if len(msvcrt_names) > 0 {
-        append_u32(idata, ilt_rva)
+    if len(dll_names) > 0 {
+        append_u32(idata, ilt_rva)   # ILT
         append_u32(idata, 0)
         append_u32(idata, 0)
-        append_u32(idata, dll_msvcrt_rva)
+        append_u32(idata, dll_name_rva)
         append_u32(idata, iat_rva)
     }
-    if len(kernel32_names) > 0 {
-        append_u32(idata, ilt_rva + ilt_msvcrt_size)
-        append_u32(idata, 0)
-        append_u32(idata, 0)
-        append_u32(idata, dll_kernel32_rva)
-        append_u32(idata, iat_rva + ilt_msvcrt_size)
-    }
     
-    # Null Import Descriptor
     j = 0
     while j < 5 {
         append_u32(idata, 0)
         j = j + 1
     }
     
-    # Build Hint/Name Table and record their RVAs
-    # We will build Hint/Name bytes first to know RVAs
     hint_name_bytes = []
     hint_rvas = []
     i = 0
@@ -402,12 +342,9 @@ def link(sections: list) -> list {
         name = import_names[i]
         curr_rva = hint_name_table_rva + len(hint_name_bytes)
         hint_rvas.append(curr_rva)
-        
-        append_u16(hint_name_bytes, 0) # Hint = 0
+        append_u16(hint_name_bytes, 0)
         append_string_bytes(hint_name_bytes, name)
-        hint_name_bytes.append(0) # Null terminator
-        
-        # Pad to even length
+        hint_name_bytes.append(0)
         if len(hint_name_bytes) % 2 != 0 {
             hint_name_bytes.append(0)
         }
@@ -416,43 +353,26 @@ def link(sections: list) -> list {
     
     # Write ILT
     j = 0
-    while j < len(msvcrt_names) {
+    while j < len(dll_names) {
         append_u32(idata, hint_rvas[j])
         j = j + 1
     }
-    if len(msvcrt_names) > 0 { append_u32(idata, 0) }
-    j = 0
-    while j < len(kernel32_names) {
-        append_u32(idata, hint_rvas[len(msvcrt_names) + j])
-        j = j + 1
-    }
-    if len(kernel32_names) > 0 { append_u32(idata, 0) }
+    if len(dll_names) > 0 { append_u32(idata, 0) }
     
-    # Write IAT (Exact copy of ILT initially)
+    # Write IAT
     j = 0
-    while j < len(msvcrt_names) {
+    while j < len(dll_names) {
         append_u32(idata, hint_rvas[j])
         j = j + 1
     }
-    if len(msvcrt_names) > 0 { append_u32(idata, 0) }
-    j = 0
-    while j < len(kernel32_names) {
-        append_u32(idata, hint_rvas[len(msvcrt_names) + j])
-        j = j + 1
-    }
-    if len(kernel32_names) > 0 { append_u32(idata, 0) }
+    if len(dll_names) > 0 { append_u32(idata, 0) }
     
-    # Write DLL Names
-    if len(msvcrt_names) > 0 {
-        append_string_bytes(idata, "msvcrt.dll")
-        idata.append(0)
-    }
-    if len(kernel32_names) > 0 {
+    # Write DLL name
+    if len(dll_names) > 0 {
         append_string_bytes(idata, "kernel32.dll")
         idata.append(0)
     }
     
-    # Write Hint/Name bytes
     append_bytes(idata, hint_name_bytes)
     
     # 3. Build PE Headers
@@ -580,7 +500,7 @@ def link(sections: list) -> list {
     append_u32(image, 0)
     append_u16(image, 0)
     append_u16(image, 0)
-    append_u32(image, 1073741888) # 0x40000040 (Read+Initialized)
+    append_u32(image, 3221225536) # 0xC0000040 (Read+Write+Initialized)
     
     # Write sections to file
     pad_to(image, align_up(headers_size, file_align))

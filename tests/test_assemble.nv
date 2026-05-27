@@ -1,9 +1,0 @@
-import assembler
-
-lines = []
-lines.append(".data")
-lines.append("fmt_int:")
-lines.append(".asciz \"%d\\n\"")
-
-result = assemble(lines)
-print("result length: " + str(len(result)))
