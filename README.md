@@ -34,7 +34,9 @@ The compiler pipeline within a single invocation:
 .nv source → lexer.nv → parser.nv → codegen.nv → .s assembly → GCC → .exe
 ```
 
-Additional standard library modules exist for future GCC-free compilation:
+Additional standard library modules:
+- `types.nv` — Type system abstraction (scalar, struct, list, func types)
+- `type_checker.nv` — Static type inference and enforcement
 - `assembler.nv` — x86-32 instruction encoder (assembles .s text into byte streams)
 - `linker.nv` — Windows PE executable generator (packages bytes into .exe directly)
 - `memory.nv` — Raw memory byte access utilities
@@ -60,6 +62,8 @@ nova/
 │   ├── assembler_parse.nv# Assembly line/operand parsing (Nova)
 │   ├── assembler_encode.nv# Instruction encoding (Nova)
 │   ├── assembler_pass.nv # Pass1 + fixup resolution (Nova)
+│   ├── types.nv          # Type system abstraction (Nova)
+│   ├── type_checker.nv   # Static type inference (Nova)
 │   ├── linker.nv         # Native PE linker (Nova, work-in-progress)
 │   ├── memory.nv         # Raw memory byte access (Nova)
 │   ├── os_win.nv         # Windows syscall/runtime facade (Nova)
@@ -73,6 +77,11 @@ nova/
 
 ## Language Features
 
+- **Static type inference** — full type checking with `int`, `float`, `bool`, `string`, `byte`, `void`, `list[T]`, struct types
+- **Array bounds checking** — runtime bounds checks on all list/array access, safe termination on out-of-bounds
+- **List type unification** — `[1, 2, 3]` infers `list[int]`; heterogenous lists rejected at compile time
+- **Compile-time constant folding** — `1 + 2 * 3` evaluates to `7` at compile time, emits single `push 7`
+- **Capacity-based list allocation** — `append` doubles capacity exponentially, no realloc on every insertion
 - Variables and expressions (inferred typing)
 - Mutable by default; `const` for immutability
 - Functions with typed parameters and return types
@@ -88,7 +97,7 @@ nova/
 - Data structures (`data` blocks)
 - FFI to C libraries
 - Module import system (circular-import-safe)
-- Self-hosted lexer, parser, codegen
+- Self-hosted lexer, parser, codegen, type checker
 
 ## License
 

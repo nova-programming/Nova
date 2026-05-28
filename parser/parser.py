@@ -7,6 +7,27 @@ class Parser:
         self.pos = 0
         self.in_raw = False
 
+    def parse_type_annotation(self):
+        token = self.current()
+        if not token:
+            return ""
+            
+        type_name = ""
+        if token[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING", "TYPE_BYTE", "TYPE_VOID"):
+            type_name = self.eat(token[0])[1]
+        elif token[0] == "IDENT":
+            type_name = self.eat("IDENT")[1]
+        else:
+            return ""
+            
+        if self.current() and self.current()[0] == "LBRACKET":
+            self.eat("LBRACKET")
+            inner_type = self.parse_type_annotation()
+            self.eat("RBRACKET")
+            return f"{type_name}[{inner_type}]"
+            
+        return type_name
+
     def parse_data(self):
         """Parse data structure definition"""
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
@@ -130,6 +151,10 @@ class Parser:
         while self.current() and self.current()[0] in ("PLUS", "MINUS"):
             op = self.eat(self.current()[0])[1]
             right = self.parse_mul()
+            if isinstance(left, Number) and isinstance(right, Number):
+                if op == "+": left = Number(left.value + right.value, line=line)
+                elif op == "-": left = Number(left.value - right.value, line=line)
+                continue
             left = BinOp(left, op, right, line=line)
         return left
 
@@ -139,6 +164,14 @@ class Parser:
         while self.current() and self.current()[0] in ("STAR", "SLASH", "PERCENT", "AMPERSAND", "GTGT", "LTLT"):
             op = self.eat(self.current()[0])[1]
             right = self.parse_unary()
+            if isinstance(left, Number) and isinstance(right, Number):
+                if op == "*": left = Number(left.value * right.value, line=line)
+                elif op == "/" and right.value != 0: left = Number(int(left.value / right.value), line=line)
+                elif op == "%" and right.value != 0: left = Number(left.value % right.value, line=line)
+                elif op == "&": left = Number(left.value & right.value, line=line)
+                elif op == ">>": left = Number(left.value >> right.value, line=line)
+                elif op == "<<": left = Number(left.value << right.value, line=line)
+                continue
             left = BinOp(left, op, right, line=line)
         return left
 
@@ -375,14 +408,10 @@ class Parser:
                 methods.append(self.parse_function())
             else:
                 field_name = self.eat("IDENT")[1]
-                field_type = None
-
+                field_type = ""
                 if self.current() and self.current()[0] == "COLON":
                     self.eat("COLON")
-                    if self.current()[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
-                        field_type = self.eat(self.current()[0])[1]
-                    else:
-                        field_type = self.eat("IDENT")[1]
+                    field_type = self.parse_type_annotation()
 
                 # Default assignments in class body not yet supported, just taking names
                 if self.current() and self.current()[0] == "EQUALS":
@@ -464,10 +493,7 @@ class Parser:
 
         if isinstance(expr, Variable) and self.current() and self.current()[0] == "COLON":
             self.eat("COLON")
-            if self.current()[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
-                type_name = self.eat(self.current()[0])[1]
-            else:
-                type_name = self.eat("IDENT")[1]
+            type_name = self.parse_type_annotation()
             expr.type_name = type_name
 
         if self.current() and self.current()[0] == "EQUALS":
@@ -495,35 +521,26 @@ class Parser:
         params = []
         if self.current() and self.current()[0] != "RPAREN":
             param_name = self.eat("IDENT")[1]
-            param_type = None
+            param_type = ""
             if self.current() and self.current()[0] == "COLON":
                 self.eat("COLON")
-                if self.current()[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
-                    param_type = self.eat(self.current()[0])[1]
-                else:
-                    param_type = self.eat("IDENT")[1]
+                param_type = self.parse_type_annotation()
             params.append((param_name, param_type))
 
             while self.current() and self.current()[0] == "COMMA":
                 self.eat("COMMA")
                 param_name = self.eat("IDENT")[1]
-                param_type = None
+                param_type = ""
                 if self.current() and self.current()[0] == "COLON":
                     self.eat("COLON")
-                    if self.current()[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
-                        param_type = self.eat(self.current()[0])[1]
-                    else:
-                        param_type = self.eat("IDENT")[1]
+                    param_type = self.parse_type_annotation()
                 params.append((param_name, param_type))
         self.eat("RPAREN")
 
-        return_type = None
+        return_type = ""
         if self.current() and self.current()[0] == "ARROW":
             self.eat("ARROW")
-            if self.current()[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
-                return_type = self.eat(self.current()[0])[1]
-            else:
-                return_type = self.eat("IDENT")[1]
+            return_type = self.parse_type_annotation()
 
         self.eat("LBRACE")
         body = []
@@ -648,4 +665,3 @@ class Parser:
             if stmt:
                 program.append(stmt)
         return program
-

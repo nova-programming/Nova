@@ -18,6 +18,9 @@ data AstNode {
     args: list
     methods: list
     param_types: list
+    name: string
+    return_type: string
+    inferred_type: any
 }
 
 data ParserState {
@@ -363,12 +366,20 @@ def parse_mul(state: ParserState) -> AstNode {
         if tok.kind == "STAR" or tok.kind == "SLASH" or tok.kind == "PERCENT" or tok.kind == "AMPERSAND" or tok.kind == "GTGT" or tok.kind == "LTLT" {
             eat_tok(state, tok.kind)
             right = parse_unary(state)
-            node = AstNode()
-            node.kind = "BinOp"
-            node.val_str = tok.val
-            node.left = left
-            node.right = right
-            left = node
+            
+            if left.kind == "Number" and right.kind == "Number" {
+                if tok.val == "*" { left.val_int = left.val_int * right.val_int }
+                if tok.val == "/" and right.val_int != 0 { left.val_int = left.val_int / right.val_int }
+                if tok.val == "%" and right.val_int != 0 { left.val_int = left.val_int % right.val_int }
+                # Note: Bitwise operators omitted from simple constant folding for now due to language limitations on operators
+            } else {
+                node = AstNode()
+                node.kind = "BinOp"
+                node.val_str = tok.val
+                node.left = left
+                node.right = right
+                left = node
+            }
         } else {
             loop = 0
         }
@@ -384,12 +395,21 @@ def parse_add(state: ParserState) -> AstNode {
         if tok.kind == "PLUS" or tok.kind == "MINUS" {
             eat_tok(state, tok.kind)
             right = parse_mul(state)
-            node = AstNode()
-            node.kind = "BinOp"
-            node.val_str = tok.val
-            node.left = left
-            node.right = right
-            left = node
+            
+            if left.kind == "Number" and right.kind == "Number" {
+                if tok.val == "+" {
+                    left.val_int = left.val_int + right.val_int
+                } else {
+                    left.val_int = left.val_int - right.val_int
+                }
+            } else {
+                node = AstNode()
+                node.kind = "BinOp"
+                node.val_str = tok.val
+                node.left = left
+                node.right = right
+                left = node
+            }
         } else {
             loop = 0
         }
@@ -441,6 +461,28 @@ def parse_logic(state: ParserState) -> AstNode {
 
 def parse_expr(state: ParserState) -> AstNode {
     return parse_logic(state)
+}
+
+def parse_type_annotation(state: ParserState) -> string {
+    tok = current_tok(state)
+    type_name = ""
+    
+    k = tok.kind
+    if k == "TYPE_INT" or k == "TYPE_FLOAT" or k == "TYPE_BOOL" or k == "TYPE_STRING" or k == "TYPE_BYTE" or k == "TYPE_VOID" or k == "IDENT" {
+        type_name = tok.val
+        eat_tok(state, k)
+    } else {
+        return ""
+    }
+    
+    tok = current_tok(state)
+    if tok.kind == "LBRACKET" {
+        eat_tok(state, "LBRACKET")
+        inner_type = parse_type_annotation(state)
+        eat_tok(state, "RBRACKET")
+        return type_name + "[" + inner_type + "]"
+    }
+    return type_name
 }
 
 # ---------------- STATEMENTS ----------------
@@ -602,52 +644,37 @@ def parse_statement(state: ParserState) -> AstNode {
         eat_tok(state, "DEF")
         name = eat_tok(state, "IDENT").val
         eat_tok(state, "LPAREN")
-        params = []
+        param_names = []
         param_types = []
-        check = current_tok(state)
-        if check.kind != "RPAREN" {
-            param_tok = current_tok(state)
-            if param_tok.kind == "SELF" {
-                eat_tok(state, "SELF")
-                params.append("self")
-            } else {
-                params.append(eat_tok(state, "IDENT").val)
-            }
-            check = current_tok(state)
-            if check.kind == "COLON" {
+        if current_tok(state).kind != "RPAREN" {
+            # First param
+            param_names.append(eat_tok(state, "IDENT").val)
+            
+            p_type = ""
+            if current_tok(state).kind == "COLON" {
                 eat_tok(state, "COLON")
-                type_tok = eat_tok(state, current_tok(state).kind)
-                param_types.append(type_tok.val)
-            } else {
-                param_types.append("")
+                p_type = parse_type_annotation(state)
             }
-            check = current_tok(state)
-            while check.kind == "COMMA" {
+            param_types.append(p_type)
+
+            while current_tok(state).kind == "COMMA" {
                 eat_tok(state, "COMMA")
-                param_tok = current_tok(state)
-                if param_tok.kind == "SELF" {
-                    eat_tok(state, "SELF")
-                    params.append("self")
-                } else {
-                    params.append(eat_tok(state, "IDENT").val)
-                }
-                check = current_tok(state)
-                if check.kind == "COLON" {
+                param_names.append(eat_tok(state, "IDENT").val)
+                p_type = ""
+                if current_tok(state).kind == "COLON" {
                     eat_tok(state, "COLON")
-                    type_tok = eat_tok(state, current_tok(state).kind)
-                    param_types.append(type_tok.val)
-                } else {
-                    param_types.append("")
+                    p_type = parse_type_annotation(state)
                 }
-                check = current_tok(state)
+                param_types.append(p_type)
             }
         }
         eat_tok(state, "RPAREN")
         
-        check_arrow = current_tok(state)
-        if check_arrow.kind == "ARROW" {
+        return_type = ""
+        ret_tok = current_tok(state)
+        if ret_tok.kind == "ARROW" {
             eat_tok(state, "ARROW")
-            eat_tok(state, current_tok(state).kind)
+            return_type = parse_type_annotation(state)
         }
         
         body = parse_block(state)
@@ -655,8 +682,9 @@ def parse_statement(state: ParserState) -> AstNode {
         node.line = stmt_line
         node.kind = "Function"
         node.val_str = name
-        node.params = params
+        node.params = param_names
         node.param_types = param_types
+        node.return_type = return_type
         node.body = body
         return node
     }
@@ -665,17 +693,19 @@ def parse_statement(state: ParserState) -> AstNode {
         eat_tok(state, "DATA")
         name = eat_tok(state, "IDENT").val
         fields = []
+        field_types = []
         eat_tok(state, "LBRACE")
         check = current_tok(state)
         while check.kind != "RBRACE" and check.kind != "EOF" {
             field_name = eat_tok(state, "IDENT").val
             check_type = current_tok(state)
+            field_type = ""
             if check_type.kind == "COLON" {
                 eat_tok(state, "COLON")
-                type_tok = current_tok(state)
-                eat_tok(state, type_tok.kind)
+                field_type = parse_type_annotation(state)
             }
             fields.append(field_name)
+            field_types.append(field_type)
             check = current_tok(state)
         }
         eat_tok(state, "RBRACE")
@@ -684,6 +714,7 @@ def parse_statement(state: ParserState) -> AstNode {
         node.kind = "Data"
         node.val_str = name
         node.params = fields
+        node.param_types = field_types
         return node
     }
 
@@ -691,6 +722,7 @@ def parse_statement(state: ParserState) -> AstNode {
         eat_tok(state, "CLASS")
         name = eat_tok(state, "IDENT").val
         fields = []
+        field_types = []
         methods = []
         eat_tok(state, "LBRACE")
         check = current_tok(state)
@@ -702,49 +734,33 @@ def parse_statement(state: ParserState) -> AstNode {
                 eat_tok(state, "LPAREN")
                 mparams = []
                 mparam_types = []
-                cp = current_tok(state)
-                if cp.kind != "RPAREN" {
-                    param_tok = current_tok(state)
-                    if param_tok.kind == "SELF" {
-                        eat_tok(state, "SELF")
-                        mparams.append("self")
-                    } else {
-                        mparams.append(eat_tok(state, "IDENT").val)
-                    }
-                    cp = current_tok(state)
-                    if cp.kind == "COLON" {
+                if current_tok(state).kind != "RPAREN" {
+                    mparams.append(eat_tok(state, "IDENT").val)
+                    
+                    p_type = ""
+                    if current_tok(state).kind == "COLON" {
                         eat_tok(state, "COLON")
-                        type_tok = eat_tok(state, current_tok(state).kind)
-                        mparam_types.append(type_tok.val)
-                    } else {
-                        mparam_types.append("")
+                        p_type = parse_type_annotation(state)
                     }
-                    cp = current_tok(state)
-                    while cp.kind == "COMMA" {
+                    mparam_types.append(p_type)
+
+                    while current_tok(state).kind == "COMMA" {
                         eat_tok(state, "COMMA")
-                        param_tok = current_tok(state)
-                        if param_tok.kind == "SELF" {
-                            eat_tok(state, "SELF")
-                            mparams.append("self")
-                        } else {
-                            mparams.append(eat_tok(state, "IDENT").val)
-                        }
-                        cp = current_tok(state)
-                        if cp.kind == "COLON" {
+                        mparams.append(eat_tok(state, "IDENT").val)
+                        p_type = ""
+                        if current_tok(state).kind == "COLON" {
                             eat_tok(state, "COLON")
-                            type_tok = eat_tok(state, current_tok(state).kind)
-                            mparam_types.append(type_tok.val)
-                        } else {
-                            mparam_types.append("")
+                            p_type = parse_type_annotation(state)
                         }
-                        cp = current_tok(state)
+                        mparam_types.append(p_type)
                     }
                 }
                 eat_tok(state, "RPAREN")
-                check_arrow = current_tok(state)
-                if check_arrow.kind == "ARROW" {
+                mreturn_type = ""
+                ret_tok = current_tok(state)
+                if ret_tok.kind == "ARROW" {
                     eat_tok(state, "ARROW")
-                    eat_tok(state, current_tok(state).kind)
+                    mreturn_type = parse_type_annotation(state)
                 }
                 mbody = parse_block(state)
                 mnode = AstNode()
@@ -752,17 +768,20 @@ def parse_statement(state: ParserState) -> AstNode {
                 mnode.val_str = mname
                 mnode.params = mparams
                 mnode.param_types = mparam_types
+                mnode.return_type = mreturn_type
                 mnode.body = mbody
                 methods.append(mnode)
             } else {
                 # Parse field
                 field_name = eat_tok(state, "IDENT").val
                 check_type = current_tok(state)
+                field_type = ""
                 if check_type.kind == "COLON" {
                     eat_tok(state, "COLON")
-                    eat_tok(state, current_tok(state).kind)
+                    field_type = parse_type_annotation(state)
                 }
                 fields.append(field_name)
+                field_types.append(field_type)
             }
             check = current_tok(state)
         }
@@ -772,6 +791,7 @@ def parse_statement(state: ParserState) -> AstNode {
         node.kind = "ClassDef"
         node.val_str = name
         node.params = fields
+        node.param_types = field_types
         node.methods = methods
         return node
     }
@@ -803,7 +823,7 @@ def parse_statement(state: ParserState) -> AstNode {
             check = current_tok(state)
             if check.kind == "AS" {
                 eat_tok(state, "AS")
-                node.right = eat_tok(state, "IDENT")
+                node.name = eat_tok(state, "IDENT").val
             }
         }
         return node
@@ -855,13 +875,12 @@ def parse(tokens: list, filename: string) -> list {
     loop = 1
     while loop == 1 {
         tok = current_tok(state)
-        if tok.kind == "EOF" {
-            loop = 0
-        } else {
-            stmt = parse_statement(state)
-            if stmt.kind != "NONE" {
-                program.append(stmt)
-            }
+        if current_tok(state).kind == "EOF" {
+            break
+        }
+        stmt = parse_statement(state)
+        if stmt.kind != "NONE" {
+            program.append(stmt)
         }
     }
     

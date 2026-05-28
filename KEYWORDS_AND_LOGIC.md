@@ -66,8 +66,11 @@ Enters unsafe low-level mode enabling `alloc`/`free` and pointer `.value_byte` a
 ### `alloc(size)` / `free(ptr)`
 Raw memory allocation/deallocation. Only inside `@raw`. Native: calls `_malloc`/`_free` via FFI.
 
+### Type annotations (`: int`, `: string`, `: list[int]`, etc.)
+Variables, function parameters, and return types support annotation syntax. The type checker resolves `int`, `float`, `bool`, `string`, `byte`, `void`, `list[T]`, and user-defined struct types.
+
 ### `data`
-Defines raw C-style structs with typed fields. Native codegen resolves field offsets via `get_prop_offset()`.
+Defines raw C-style structs with typed fields. Native codegen resolves field offsets via `get_prop_offset()`. Fields can use `: type` annotations. Struct types are registered for type inference.
 
 ### `.value_byte`
 Byte-level pointer dereference for raw memory access inside `@raw` blocks.
@@ -77,7 +80,16 @@ Byte-level pointer dereference for raw memory access inside `@raw` blocks.
 ## Built-In Functions
 
 ### `len(var)`
-Returns logical element count. For strings: `_strlen`. For lists: struct `length` field. For objects: `__len__` dunder.
+Returns logical element count. For strings: `_strlen`. For lists: struct `length` field. For objects: `__len__` dunder. Type checker returns `int`.
+
+### Array bounds checking
+All list element reads (`arr[i]`) and writes (`arr[i] = x`) include runtime bounds checks: `cmp ecx, 0; jl _out_of_bounds; cmp ecx, [length]; jge _out_of_bounds`. Bounds violation calls `ExitProcess(1)` with "Index Out Of Bounds" message.
+
+### Constant folding (`parser.nv`/`parser.py`)
+During parsing, `+`, `-`, `*`, `/`, `%`, `&`, `<<`, `>>` on two literal `Number` nodes are evaluated immediately. `1 + 2 * 3` collapses to `7` at compile time — zero runtime instructions emitted.
+
+### List type unification
+`[1, 2, 3]` infers as `list[int]`. `[1, "hello"]` raises `StaticTypeError` at compile time. Array index assignments are checked against the element type.
 
 ### `str(var)`
 Converts value to string. Native: emits format-string selection and `sprintf` call.

@@ -9,9 +9,9 @@ Platform-specific HAL for Windows native compilation via MinGW GCC. Provides OS-
 - **`sys_read(fd)`**: Reads entire file content into a buffer, returns as Nova string
 - **`sys_write(fd, content)`**: Writes string to file descriptor
 - **`sys_close(fd)`**: Closes file descriptor
-- **`sys_system(cmd)`**: Executes shell command via `_system()`
-- **`sys_flush()`**: Flushes stdout via `_fflush()`
-- **`sys_exit(code)`**: Terminates process via `_exit()`
+- **`sys_system(cmd)`**: Executes shell command via `WinExec` (kernel32)
+- **`sys_flush()`**: Flushes stdout via `FlushFileBuffers` (kernel32)
+- **`sys_exit(code)`**: Terminates process via `ExitProcess` (kernel32)
 - **`sys_platform()`**: Returns `"windows"`
 
 ## Implementation Details

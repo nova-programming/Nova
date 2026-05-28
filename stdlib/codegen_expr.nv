@@ -62,12 +62,11 @@ def compile_expr(state: CodegenState, node: AstNode) {
                 
                 if is_cmp == 1 {
                     is_str_cmp = 0
-                    if is_string_expr(state, node.left) == 1 {
-                        is_str_cmp = 1
-                    }
-                    if is_string_expr(state, node.right) == 1 {
-                        is_str_cmp = 1
-                    }
+                    left_str = is_string_expr(state, node.left)
+                    right_str = is_string_expr(state, node.right)
+                    if left_str == 1 or right_str == 1 { is_str_cmp = 1 }
+                    if left_str == 1 and node.right.kind == "Number" and node.right.val_int == 0 { is_str_cmp = 0 }
+                    if right_str == 1 and node.left.kind == "Number" and node.left.val_int == 0 { is_str_cmp = 0 }
                     
                     label_true = next_label(state, "L_cmp_true")
                     label_end = next_label(state, "L_cmp_end")
@@ -171,8 +170,11 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    pop eax")
 
         is_str_cmp = 0
-        if is_string_expr(state, node.left) == 1 { is_str_cmp = 1 }
-        if is_string_expr(state, node.right) == 1 { is_str_cmp = 1 }
+        left_str = is_string_expr(state, node.left)
+        right_str = is_string_expr(state, node.right)
+        if left_str == 1 or right_str == 1 { is_str_cmp = 1 }
+        if left_str == 1 and node.right.kind == "Number" and node.right.val_int == 0 { is_str_cmp = 0 }
+        if right_str == 1 and node.left.kind == "Number" and node.left.val_int == 0 { is_str_cmp = 0 }
 
         label_true = next_label(state, "L_cmp_true")
         label_end = next_label(state, "L_cmp_end")
@@ -325,6 +327,10 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    add eax, offset char_strings")
             emit(state, "    push eax")
         } else {
+            emit(state, "    cmp ecx, 0")
+            emit(state, "    jl _out_of_bounds")
+            emit(state, "    cmp ecx, [edx]")
+            emit(state, "    jge _out_of_bounds")
             emit(state, "    mov edx, [edx + 8]")
             emit(state, "    mov eax, [edx + ecx * 4]")
             emit(state, "    push eax")

@@ -1,0 +1,5 @@
+import os_win
+print("Start")
+args = sys_get_args()
+print("Len: " + str(len(args)))
+sys_flush()

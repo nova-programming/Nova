@@ -82,8 +82,8 @@ def _sys_extract_arg(start_ptr: int, length: int) -> string {
             i = i + 1
         }
         dst.value_byte = 0
-        return buf
     }
+    return buf
 }
 
 def sys_get_args() -> list {

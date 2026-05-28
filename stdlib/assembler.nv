@@ -36,7 +36,6 @@ def assemble(asm_lines: list) -> list {
         i = i + 1
     }
     sys_flush()
-    # pass0 done
 
     # Encode: collect labels and encode instructions in one pass
     pass2_encode(state)

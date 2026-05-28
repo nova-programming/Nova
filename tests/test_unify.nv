@@ -1,0 +1,61 @@
+import os_win
+
+data MyType {
+    kind: string
+    name: string
+    element_type: MyType
+    params: list
+    ret: MyType
+    fields: list
+}
+
+def make_scalar(name: string) -> MyType {
+    t = MyType()
+    t.kind = "scalar"
+    t.name = name
+    return t
+}
+
+def types_equal(t1: MyType, t2: MyType) -> int {
+    print("TE1")
+    sys_flush()
+    if t1.kind == "scalar" {
+        print("TE2")
+        sys_flush()
+        if t1.name != 0 {
+            print("TE3")
+            sys_flush()
+        }
+        print("TE4")
+        sys_flush()
+    }
+    print("TE5")
+    sys_flush()
+    return 0
+}
+
+def test_unify() {
+    print("A")
+    sys_flush()
+    t1 = make_scalar("int")
+    print("B")
+    sys_flush()
+    t2 = make_scalar("int")
+    print("C")
+    sys_flush()
+    if t1.kind == "scalar" {
+        print("CK")
+        sys_flush()
+    }
+    print("CN")
+    sys_flush()
+    print(t1.name)
+    sys_flush()
+    print("E")
+    sys_flush()
+    eq = types_equal(t1, t2)
+    print("EQ=" + str(eq))
+    sys_flush()
+}
+
+test_unify()

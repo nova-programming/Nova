@@ -304,6 +304,14 @@ def emit_win32_runtime(state) {
     emit(state, "    pop ebp")
     emit(state, "    ret")
     emit(state, "")
+    emit(state, "_out_of_bounds:")
+    emit(state, "    push offset fmt_str")
+    emit(state, "    push offset L_out_of_bounds_msg")
+    emit(state, "    call _printf")
+    emit(state, "    add esp, 8")
+    emit(state, "    push 1")
+    emit(state, "    call ExitProcess")
+    emit(state, "")
     emit(state, "_realloc:")
     emit(state, "    push ebp")
     emit(state, "    mov ebp, esp")
@@ -876,6 +884,7 @@ def generate_assembly(ast: list) -> list {
     emit_data(state, "fmt_int: .asciz \"%d\\n\"")
     emit_data(state, "fmt_int_pure: .asciz \"%d\"")
     emit_data(state, "fmt_str: .asciz \"%s\\n\"")
+    emit_data(state, "L_out_of_bounds_msg: .asciz \"Index Out Of Bounds\\n\"")
 
     emit_data(state, "char_strings:")
     char_idx = 0

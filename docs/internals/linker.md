@@ -10,7 +10,7 @@ The linker manually builds:
 3. **Section Headers** — `.text` (code), `.data` (static data), `.idata` (imports)
 4. **`.text`** — assembled machine code bytes
 5. **`.data`** — string literals and static data
-6. **`.idata`** — Import Address Table for FFI to `msvcrt.dll` / `kernel32.dll`
+6. **`.idata`** — Import Address Table for FFI to `kernel32.dll` (no C runtime dependencies)
 
 ## Label Resolution
 
@@ -20,4 +20,4 @@ Two-pass assembly:
 
 ## Imports
 
-Generates thunks and IAT entries for external functions (`_printf`, `_malloc`, `_GetCommandLineA`, etc.), mapping them to their parent DLLs and constructing `IMAGE_IMPORT_DESCRIPTOR` structures.
+Generates thunks and IAT entries for external functions (`GetProcessHeap`, `HeapAlloc`, `WriteFile`, `CreateFileA`, `ReadFile`, `GetCommandLineA`, `ExitProcess`, `WinExec`, `SetFilePointer`, `FlushFileBuffers`, `CloseHandle`, `GetStdHandle`), mapping them to `kernel32.dll` and constructing `IMAGE_IMPORT_DESCRIPTOR` structures.

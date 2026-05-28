@@ -1,0 +1,20 @@
+import os_win
+
+data MyChecker {
+    env_stack: list
+    structs: list
+    functions: list
+    current_ret: int
+}
+
+def push_env(tc: MyChecker) {
+    tc.env_stack = []
+    tc.structs = []
+}
+
+def main() -> int {
+    tc = MyChecker()
+    push_env(tc)
+    print("ok")
+    return 0
+}

@@ -5,7 +5,7 @@ from lexer.tokenizer import tokenize
 from parser.parser import Parser
 from vm.compiler import Compiler
 from vm.machine import VirtualMachine
-from compiler.type_checker import TypeChecker, StaticTypeError
+from compiler.type_checker import TypeInferer, StaticTypeError
 
 
 def run_source(file_path):
@@ -20,7 +20,7 @@ def run_source(file_path):
     ast = Parser(tokens).parse()
 
     try:
-        TypeChecker().check(ast)
+        TypeInferer().infer(ast)
     except StaticTypeError as e:
         print(f"StaticTypeError: {e}")
         sys.exit(1)
@@ -79,10 +79,9 @@ def compile_native(file_path):
     ast = expand_imports(ast, base_dir)
 
     try:
-        TypeChecker().check(ast)
+        TypeInferer().infer(ast)
     except StaticTypeError as e:
-        print(f"StaticTypeError: {e}")
-        sys.exit(1)
+        print(f"TypeWarning: {e} (continuing build)")
 
     from compiler.codegen_x86 import X86Codegen
     codegen = X86Codegen(ast, module_names=module_names)

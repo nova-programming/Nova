@@ -56,6 +56,10 @@ def compile_stmt(state: CodegenState, node: AstNode) {
         emit(state, "    pop edx")
         emit(state, "    pop ecx")
         emit(state, "    pop eax")
+        emit(state, "    cmp ecx, 0")
+        emit(state, "    jl _out_of_bounds")
+        emit(state, "    cmp ecx, [edx]")
+        emit(state, "    jge _out_of_bounds")
         emit(state, "    mov edx, [edx + 8]")
         emit(state, "    mov [edx + ecx * 4], eax")
     }

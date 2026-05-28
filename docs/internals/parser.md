@@ -22,3 +22,9 @@ Every AST element is an `AstNode` with a `kind` string tag. Common properties:
 2. **Statements (`parse_stmt`)**: Dispatches on token kind — `def` → function, `if` → if/elif/else, `while` → loop, `for` → range-loop, `@raw` → raw block, `return` → return, otherwise → expression + optional assignment
 3. **Expressions**: Precedence-climbing via `parse_primary → parse_unary → parse_mul → parse_add → parse_compare → parse_logic → parse_expr`
 4. **Primary**: Handles literals, variables, parenthesized expressions, list literals, and suffix chains (`.field`, `[index]`, `(args)`)
+
+### Constant Folding
+In `parse_add` and `parse_mul`, when both operands are `Number` nodes, the operation is evaluated immediately. `1 + 2 * 3` collapses to `7` at parse time — no `BinOp` node created, no runtime instructions emitted.
+
+### Type Annotation Parsing
+`parse_type_annotation()` handles `int`, `float`, `bool`, `string`, `byte`, `void`, user-defined identifiers, and generic `list[T]` syntax (e.g., `list[int]`). Used for variable declarations, parameter types, return types, and struct fields.

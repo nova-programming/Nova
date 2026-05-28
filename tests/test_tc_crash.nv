@@ -1,0 +1,11 @@
+import os_win
+import types
+import type_checker
+
+def main() -> int {
+    tc = TypeChecker()
+    tc_init(tc)
+    tc_check(tc, [])
+    print("ok")
+    return 0
+}

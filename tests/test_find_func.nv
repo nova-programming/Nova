@@ -1,0 +1,8 @@
+import types
+
+def main() -> int {
+    t = create_struct_type("hello")
+    s = type_to_string(t)
+    print(s)
+    return 0
+}

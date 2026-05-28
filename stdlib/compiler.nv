@@ -1,6 +1,8 @@
 import os_win
 import lexer
 import parser
+import types
+import type_checker
 import codegen
 import assembler
 import linker
@@ -70,6 +72,15 @@ def compile_file(path: string) -> list {
     # Step 2.5: Resolve Imports
     visited = []
     ast = resolve_imports(ast, visited)
+
+    # Step 2.6: Type checking
+    print("DEBUG: About to create TypeChecker")
+    tc = TypeChecker()
+    print("DEBUG: About to init TypeChecker")
+    tc_init(tc)
+    print("DEBUG: About to type-check AST")
+    tc_check(tc, ast)
+    print("DEBUG: Type checking done")
 
     print("Generating assembly...")
     # Step 3: Generate x86 assembly

@@ -43,3 +43,23 @@ Uses x86 cdecl stack calling convention. All expressions push results onto the s
 Generated at the end of the `.text` section:
 - `_concat_strings(base, append)` — allocates new buffer, copies both strings, null-terminates
 - `_slice_string(base, start, end)` — allocates `end-start+1` bytes, byte-copies substring, null-terminates
+- `_out_of_bounds` — bounds violation handler: prints "Index Out Of Bounds", calls `ExitProcess(1)`. Jump target for all bounds-check failures.
+
+## Bounds Checking
+
+Array reads (`ArrayIndex`) and writes (`ArrayIndexAssign`) emit bounds-checking assembly:
+```asm
+cmp ecx, 0
+jl _out_of_bounds       ; negative index
+cmp ecx, [edx]          ; compare with list length
+jge _out_of_bounds      ; index >= length
+```
+
+String byte access (`movzx eax, byte ptr [edx+ecx]`) is unchecked — the `char_strings` lookup table prevents OOB on reads.
+
+## Type System Integration
+
+Expression codegen reads `node.inferred_type` (set by `type_checker.nv`'s `tc_check` pass) to:
+- Select string vs integer comparison in `Compare` nodes
+- Select string vs list indexing in `ArrayIndex` nodes
+- Select format string (`%s` vs `%d`) for `print`

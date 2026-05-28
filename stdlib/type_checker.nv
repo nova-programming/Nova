@@ -1,0 +1,444 @@
+import os_win
+import lexer
+import parser
+import types
+
+data TypeChecker {
+    env_stack: list
+    structs: list
+    functions: list
+    current_ret: Type
+}
+
+data NamedFunc {
+    name: string
+    typ: Type
+}
+
+data EnvVar {
+    name: string
+    typ: Type
+}
+
+data EnvFrame {
+    vars: list
+}
+
+def tc_init(tc: TypeChecker) {
+    tc.env_stack = []
+    tc.structs = []
+    tc.functions = []
+    tc.current_ret = 0
+    
+    # sys_alloc(size: int) -> any
+    sys_alloc_t = create_func_type([create_scalar_type("int")], create_any_type())
+    tc_add_func(tc, "sys_alloc", sys_alloc_t)
+    
+    # sys_free(ptr: any) -> void
+    sys_free_t = create_func_type([create_any_type()], create_scalar_type("void"))
+    tc_add_func(tc, "sys_free", sys_free_t)
+    
+    # sys_exit(code: int) -> void
+    sys_exit_t = create_func_type([create_scalar_type("int")], create_scalar_type("void"))
+    tc_add_func(tc, "sys_exit", sys_exit_t)
+
+    # alloc(size: int) -> any
+    alloc_t = create_func_type([create_scalar_type("int")], create_any_type())
+    tc_add_func(tc, "alloc", alloc_t)
+    
+    # len(target: any) -> int
+    len_t = create_func_type([create_any_type()], create_scalar_type("int"))
+    tc_add_func(tc, "len", len_t)
+    
+    # print(val: any) -> void
+    print_t = create_func_type([create_any_type()], create_scalar_type("void"))
+    tc_add_func(tc, "print", print_t)
+}
+
+def tc_add_func(tc: TypeChecker, name: string, typ: Type) {
+    nf = NamedFunc()
+    nf.name = name
+    nf.typ = typ
+    tc.functions.append(nf)
+}
+
+def tc_find_func(tc: TypeChecker, name: string) -> Type {
+    i = 0
+    while i < len(tc.functions) {
+        nf = tc.functions[i]
+        if str_eq(nf.name, name) == 1 { return nf.typ }
+        i = i + 1
+    }
+    return 0
+}
+
+def tc_add_struct(tc: TypeChecker, typ: Type) {
+    tc.structs.append(typ)
+}
+
+def tc_find_struct(tc: TypeChecker, name: string) -> Type {
+    i = 0
+    while i < len(tc.structs) {
+        t = tc.structs[i]
+        if str_eq(t.name, name) == 1 { return t }
+        i = i + 1
+    }
+    return 0
+}
+
+def tc_push_env(tc: TypeChecker) {
+    frame = EnvFrame()
+    frame.vars = []
+    tc.env_stack.append(frame)
+}
+
+def tc_pop_env(tc: TypeChecker) {
+    if len(tc.env_stack) > 0 {
+        new_stack = []
+        i = 0
+        while i < len(tc.env_stack) - 1 {
+            new_stack.append(tc.env_stack[i])
+            i = i + 1
+        }
+        tc.env_stack = new_stack
+    }
+}
+
+def tc_set_var(tc: TypeChecker, name: string, typ: Type) {
+    if len(tc.env_stack) == 0 { return 0 }
+    frame = tc.env_stack[len(tc.env_stack) - 1]
+    
+    i = 0
+    while i < len(frame.vars) {
+        v = frame.vars[i]
+        if str_eq(v.name, name) == 1 {
+            v.typ = typ
+            return 0
+        }
+        i = i + 1
+    }
+    
+    v = EnvVar()
+    v.name = name
+    v.typ = typ
+    frame.vars.append(v)
+}
+
+def tc_get_var(tc: TypeChecker, name: string) -> Type {
+    i = len(tc.env_stack) - 1
+    while i >= 0 {
+        frame = tc.env_stack[i]
+        j = 0
+        while j < len(frame.vars) {
+            v = frame.vars[j]
+            if str_eq(v.name, name) == 1 { return v.typ }
+            j = j + 1
+        }
+        i = i - 1
+    }
+    return 0
+}
+
+def tc_unify(tc: TypeChecker, t1: Type, t2: Type, node: AstNode) {
+    if t1 == 0 or t2 == 0 { return 0 }
+    if t1.kind == "any" or t2.kind == "any" { return 0 }
+    if t1.kind == "dyn" or t2.kind == "dyn" { return 0 }
+    eq = types_equal(t1, t2)
+    if eq == 0 {
+        print("TypeWarning [" + str(node.line) + "]: Type mismatch. Expected " + type_to_string(t1) + ", got " + type_to_string(t2))
+        return 0
+    }
+    return 0
+}
+
+def tc_visit(tc: TypeChecker, node: AstNode) -> Type {
+    if node == 0 { return 0 }
+    if node.kind == "NONE" { return 0 }
+    
+    t = tc_visit_real(tc, node)
+    node.inferred_type = t
+    return t
+}
+
+def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
+    if node == 0 { return create_any_type() }
+    k = node.kind
+    if str_eq(k, "Number") == 1 { return create_scalar_type("int") }
+    if str_eq(k, "String") == 1 { return create_scalar_type("string") }
+    if str_eq(k, "Boolean") == 1 { return create_scalar_type("bool") }
+    
+    if str_eq(k, "Variable") == 1 {
+        t = tc_get_var(tc, node.val_str)
+        if t == 0 {
+            t = create_any_type()
+            tc_set_var(tc, node.val_str, t)
+        }
+        return t
+    }
+    
+    if str_eq(k, "BinOp") == 1 {
+        t1 = tc_visit(tc, node.left)
+        t2 = tc_visit(tc, node.right)
+        tc_unify(tc, t1, t2, node)
+        
+        if str_eq(node.val_str, "+") == 1 {
+            if t1 != 0 and t1.kind == "scalar" and str_eq(t1.name, "string") == 1 {
+                return t1
+            }
+            if t2 != 0 and t2.kind == "scalar" and str_eq(t2.name, "string") == 1 {
+                return t2
+            }
+        }
+        return t1
+    }
+    
+    if str_eq(k, "Compare") == 1 {
+        t1 = tc_visit(tc, node.left)
+        t2 = tc_visit(tc, node.right)
+        tc_unify(tc, t1, t2, node)
+        return create_scalar_type("int")
+    }
+    
+    if str_eq(k, "Assignment") == 1 {
+        t = tc_visit(tc, node.left)
+        existing = tc_get_var(tc, node.val_str)
+        if existing == 0 {
+            tc_set_var(tc, node.val_str, t)
+        } else {
+            tc_unify(tc, existing, t, node)
+        }
+        return 0
+    }
+    
+    if str_eq(k, "Function") == 1 {
+        tc_push_env(tc)
+        prev_ret = tc.current_ret
+        
+        func_type = tc_find_func(tc, node.val_str)
+        if func_type != 0 {
+            tc.current_ret = func_type.ret
+            i = 0
+            while i < len(node.params) {
+                tc_set_var(tc, node.params[i], func_type.params[i])
+                i = i + 1
+            }
+        }
+        
+        bi = 0
+        while bi < len(node.body) {
+            tc_visit(tc, node.body[bi])
+            bi = bi + 1
+        }
+        
+        tc.current_ret = prev_ret
+        tc_pop_env(tc)
+        
+        if func_type != 0 { return func_type }
+        return create_any_type()
+    }
+    
+    if str_eq(k, "Return") == 1 {
+        if node != 0 and node.left != 0 {
+            t = tc_visit(tc, node.left)
+        } else {
+            t = create_any_type()
+        }
+        return t
+    }
+    
+    if str_eq(k, "Call") == 1 {
+        if tc_find_struct(tc, node.val_str) != 0 {
+            i = 0
+            while i < len(node.args) {
+                tc_visit(tc, node.args[i])
+                i = i + 1
+            }
+            return tc_find_struct(tc, node.val_str)
+        }
+        func_type = tc_find_func(tc, node.val_str)
+        if func_type != 0 {
+            if len(node.args) != len(func_type.params) {
+                print("TypeWarning [" + str(node.line) + "]: Function " + node.val_str + " expects " + str(len(func_type.params)) + " args, got " + str(len(node.args)))
+            }
+            i = 0
+            while i < len(node.args) {
+                arg_t = tc_visit(tc, node.args[i])
+                tc_unify(tc, func_type.params[i], arg_t, node.args[i])
+                i = i + 1
+            }
+            return func_type.ret
+        }
+        i = 0
+        while i < len(node.args) {
+            tc_visit(tc, node.args[i])
+            i = i + 1
+        }
+        return create_any_type()
+    }
+    
+    if str_eq(k, "IfElse") == 1 {
+        tc_visit(tc, node.cond)
+        
+        tc_push_env(tc)
+        i = 0
+        while i < len(node.body) {
+            tc_visit(tc, node.body[i])
+            i = i + 1
+        }
+        tc_pop_env(tc)
+        
+        tc_push_env(tc)
+        i = 0
+        while i < len(node.else_body) {
+            tc_visit(tc, node.else_body[i])
+            i = i + 1
+        }
+        tc_pop_env(tc)
+        
+        return create_any_type()
+    }
+    
+    if str_eq(k, "While") == 1 {
+        tc_visit(tc, node.cond)
+        i = 0
+        while i < len(node.body) {
+            tc_visit(tc, node.body[i])
+            i = i + 1
+        }
+        return create_any_type()
+    }
+    
+    if str_eq(k, "MethodCall") == 1 {
+        tc_visit(tc, node.left)
+        i = 0
+        while i < len(node.args) {
+            tc_visit(tc, node.args[i])
+            i = i + 1
+        }
+        return create_any_type()
+    }
+
+    if str_eq(k, "DataFieldAccess") == 1 {
+        inst_t = tc_visit(tc, node.left)
+        return create_any_type()
+    }
+
+    if str_eq(k, "DataFieldAssign") == 1 {
+        inst_t = tc_visit(tc, node.left)
+        tc_visit(tc, node.right)
+        return create_any_type()
+    }
+
+    if str_eq(k, "ArrayIndex") == 1 {
+        base_t = tc_visit(tc, node.left)
+        tc_visit(tc, node.right)
+        if base_t != 0 and base_t.kind == "list" {
+            return base_t.element_type
+        }
+        return create_any_type()
+    }
+
+    if str_eq(k, "ArrayIndexAssign") == 1 {
+        base_t = tc_visit(tc, node.left)
+        right_t = tc_visit(tc, node.right)
+        tc_visit(tc, node.cond)
+        if base_t != 0 and base_t.kind == "list" {
+            tc_unify(tc, base_t.element_type, right_t, node)
+        }
+        return create_any_type()
+    }
+
+    if str_eq(k, "ListLiteral") == 1 {
+        elem_t = create_any_type()
+        i = 0
+        while i < len(node.args) {
+            t = tc_visit(tc, node.args[i])
+            if elem_t.kind == "any" { 
+                elem_t = t 
+            } else {
+                tc_unify(tc, elem_t, t, node.args[i])
+            }
+            i = i + 1
+        }
+        return create_list_type(elem_t)
+    }
+
+    if str_eq(k, "RawBlock") == 1 {
+        i = 0
+        while i < len(node.body) {
+            tc_visit(tc, node.body[i])
+            i = i + 1
+        }
+        return create_any_type()
+    }
+
+    if str_eq(k, "ForLoop") == 1 {
+        tc_push_env(tc)
+        tc_set_var(tc, node.val_str, create_scalar_type("int"))
+        i = 0
+        while i < len(node.body) {
+            tc_visit(tc, node.body[i])
+            i = i + 1
+        }
+        tc_pop_env(tc)
+        return create_any_type()
+    }
+
+    # Default fallback
+    if node.left != 0 { tc_visit(tc, node.left) }
+    if node.right != 0 { tc_visit(tc, node.right) }
+    if node.cond != 0 { tc_visit(tc, node.cond) }
+    
+    # Check body for nodes like ForLoop
+    if node.body != 0 {
+        i = 0
+        while i < len(node.body) {
+            tc_visit(tc, node.body[i])
+            i = i + 1
+        }
+    }
+    
+    return create_any_type()
+}
+
+def tc_check(tc: TypeChecker, ast: list) {
+    tc_push_env(tc)
+    
+    # Pass 1: Collect structs
+    i = 0
+    while i < len(ast) {
+        stmt = ast[i]
+        if stmt.kind == "Data" or stmt.kind == "ClassDef" {
+            t = create_struct_type(stmt.val_str)
+            tc_add_struct(tc, t)
+        }
+        i = i + 1
+    }
+    
+    # Pass 1.1: Collect functions
+    i = 0
+    while i < len(ast) {
+        stmt = ast[i]
+        if stmt.kind == "Function" {
+            params = []
+            j = 0
+            while j < len(stmt.param_types) {
+                params.append(resolve_type_annotation(stmt.param_types[j]))
+                j = j + 1
+            }
+            ret_type = resolve_type_annotation(stmt.return_type)
+            func_type = create_func_type(params, ret_type)
+            tc_add_func(tc, stmt.val_str, func_type)
+        }
+        i = i + 1
+    }
+    
+    # Pass 2: Infer everything
+    i = 0
+    while i < len(ast) {
+        stmt = ast[i]
+        tc_visit(tc, stmt)
+        i = i + 1
+    }
+    tc_pop_env(tc)
+}

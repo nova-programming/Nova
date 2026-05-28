@@ -15,10 +15,43 @@ class X86Codegen:
         self.loop_labels = [] # stack of (start_label, end_label)
         self.prop_offsets = {}
         self.structs = set()
+        
+        self._pre_scan_props(self.ast)
+
+    def _pre_scan_props(self, nodes):
+        for node in nodes:
+            if isinstance(node, DataFieldAccess) or isinstance(node, DataFieldAssign):
+                self.get_prop_offset(node.field_name)
+            elif isinstance(node, PointerProperty) or isinstance(node, PointerAssign):
+                if node.property not in ["value", "value_byte", "addr", "isValid", "isNull", "bytes", "line", "kind", "name"]:
+                    self.get_prop_offset(node.property)
+            
+            # Recurse into children based on standard node fields
+            if hasattr(node, 'body') and isinstance(node.body, list):
+                self._pre_scan_props(node.body)
+            if hasattr(node, 'if_body') and isinstance(node.if_body, list):
+                self._pre_scan_props(node.if_body)
+            if hasattr(node, 'else_body') and isinstance(node.else_body, list):
+                self._pre_scan_props(node.else_body)
+            if hasattr(node, 'methods') and isinstance(node.methods, list):
+                self._pre_scan_props(node.methods)
+            if hasattr(node, 'left'):
+                self._pre_scan_props([node.left])
+            if hasattr(node, 'right'):
+                self._pre_scan_props([node.right])
+            if hasattr(node, 'condition'):
+                self._pre_scan_props([node.condition])
+            if hasattr(node, 'value'):
+                self._pre_scan_props([node.value])
+            if hasattr(node, 'args') and isinstance(node.args, list):
+                self._pre_scan_props(node.args)
+            if hasattr(node, 'elements') and isinstance(node.elements, list):
+                self._pre_scan_props(node.elements)
 
     def get_prop_offset(self, name):
         if name not in self.prop_offsets:
             self.prop_offsets[name] = len(self.prop_offsets) * 4
+            print(f"  REG: {name} -> offset {self.prop_offsets[name]}")
         return self.prop_offsets[name]
 
     def next_label(self, prefix="L"):
@@ -105,6 +138,7 @@ class X86Codegen:
         self.data_section.append('fmt_int_pure: .asciz "%d"')
         self.data_section.append('fmt_str: .asciz "%s\\n"')
         self.data_section.append('L_realloc_fail_msg: .asciz "Realloc failed!\\n"')
+        self.data_section.append('L_out_of_bounds_msg: .asciz "Index Out Of Bounds\\n"')
         
         self.data_section.append("char_strings:")
         for i in range(256):
@@ -133,6 +167,7 @@ class X86Codegen:
                     self.get_prop_offset(field_name)
             elif isinstance(n, Function):
                 self.func_returns[n.name] = n.return_type
+        
         
         self.assembly.append(".text")
         
@@ -272,7 +307,7 @@ class X86Codegen:
         r("    push ebp")
         r("    mov ebp, esp")
         r("    push dword ptr [ebp + 8]")
-        r("    push 0")
+        r("    push 8") # HEAP_ZERO_MEMORY
         r("    call _GetProcessHeap@0")
         r("    push eax")
         r("    call _HeapAlloc@12")
@@ -289,6 +324,14 @@ class X86Codegen:
         r("    call _HeapFree@12")
         r("    pop ebp")
         r("    ret")
+        r("")
+        r("_out_of_bounds:")
+        r("    push offset fmt_str")
+        r("    push offset L_out_of_bounds_msg")
+        r("    call _printf")
+        r("    add esp, 8")
+        r("    push 1")
+        r("    call _ExitProcess@4")
         r("")
         r("_realloc:")
         r("    push ebp")
@@ -1061,6 +1104,11 @@ class X86Codegen:
             self.assembly.append("    pop edx") # base (list struct pointer)
             self.assembly.append("    pop ecx") # index
             self.assembly.append("    pop eax") # value
+            # Bounds checking
+            self.assembly.append("    cmp ecx, 0")
+            self.assembly.append("    jl _out_of_bounds")
+            self.assembly.append("    cmp ecx, [edx]")
+            self.assembly.append("    jge _out_of_bounds")
             # List: data pointer is at [edx + 8]
             self.assembly.append("    mov edx, [edx + 8]")
             self.assembly.append("    mov [edx + ecx * 4], eax")
@@ -1164,10 +1212,16 @@ class X86Codegen:
             # Determine if this is a string comparison based on type info
             left_type = getattr(node.left, 'inferred_type', 'any')
             right_type = getattr(node.right, 'inferred_type', 'any')
-            is_str_cmp = self._is_string_expr(node.left) or self._is_string_expr(node.right)
-            # Also treat 'any' comparisons involving string literals as string
-            if not is_str_cmp and (left_type == 'string' or right_type == 'string'):
-                is_str_cmp = True
+            left_is_str = self._is_string_expr(node.left) or left_type == 'string'
+            right_is_str = self._is_string_expr(node.right) or right_type == 'string'
+            is_str_cmp = False
+            if left_is_str or right_is_str:
+                left_is_zero = isinstance(node.left, Number) and node.left.value == 0
+                right_is_zero = isinstance(node.right, Number) and node.right.value == 0
+                if (left_is_str and right_is_zero) or (right_is_str and left_is_zero):
+                    is_str_cmp = False
+                else:
+                    is_str_cmp = True
             
             label_true = self.next_label("L_cmp_true")
             label_end = self.next_label("L_cmp_end")
@@ -1275,9 +1329,14 @@ class X86Codegen:
                 self.assembly.append("    add eax, offset char_strings")
                 self.assembly.append("    push eax")
             else:
+                # List access bounds checking
+                self.assembly.append("    cmp ecx, 0")
+                self.assembly.append("    jl _out_of_bounds")
+                self.assembly.append("    cmp ecx, [edx]")
+                self.assembly.append("    jge _out_of_bounds")
                 # List access: data pointer is at [base + 8]
-                self.assembly.append("    mov edx, [edx + 8]")
-                self.assembly.append("    mov eax, [edx + ecx * 4]")
+                self.assembly.append("    mov eax, [edx + 8]")
+                self.assembly.append("    mov eax, [eax + ecx*4]")
                 self.assembly.append("    push eax")
         elif isinstance(node, OpenFile):
             self.compile_expr(node.mode)
@@ -1346,8 +1405,8 @@ class X86Codegen:
                 self.assembly.append(f"    jl {no_realloc_label}")
                 self.assembly.append("    shl edx, 1")
                 self.assembly.append("    mov [ebx+4], edx")
-                self.assembly.append("    push ebx")
                 self.assembly.append("    push ecx")
+                self.assembly.append("    push ebx")
                 self.assembly.append("    shl edx, 2")
                 self.assembly.append("    push edx")
                 self.assembly.append("    push dword ptr [ebx+8]")
@@ -1365,8 +1424,8 @@ class X86Codegen:
                 self.assembly.append("    call _exit")
                 self.assembly.append(f"{realloc_ok_label}:")
                 
-                self.assembly.append("    pop ecx")
                 self.assembly.append("    pop ebx")
+                self.assembly.append("    pop ecx")
                 self.assembly.append("    mov [ebx+8], eax")
                 self.assembly.append(f"{no_realloc_label}:")
                 self.assembly.append("    mov eax, [ebx]")
