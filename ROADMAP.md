@@ -34,7 +34,7 @@ The assembler (`assembler.nv` + submodules) and linker (`linker.nv`) are fully i
 | Self-hosted assembler + linker integration | ✅ (in-process `assemble()` + `link()` in `build` path) |
 | `_realloc` no `HEAP_REALLOC_IN_PLACE_ONLY` | ✅ (flag 0, allows heap block movement) |
 | Self-hosted GCC-free pipeline | ✅ (fully integrated in `build` command) |
-| Struct-aware `get_prop_offset` | ⏳ (flat namespace — fields from different data blocks may collide) |
+| Struct-aware `get_prop_offset` | ✅ (per-struct field tables via `struct_fields`, resolves from `inferred_type`) |
 | Class dunder methods in native codegen | ✅ (`__init__`, `__str__`, `__len__`, `__eq__`, `__add__`, `__sub__`, `__mul__`) |
 | Raw memory (`@raw`, `alloc`/`free`) | ✅ |
 | String slice + concat runtime helpers | ✅ (`_slice_string`, `_concat_strings`) |

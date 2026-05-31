@@ -251,7 +251,11 @@ def compile_expr(state: CodegenState, node: AstNode) {
                                 emit(state, "    cmp edx, 0")
                                 emit(state, "    sete al")
                             } else {
-                                offset = get_prop_offset(state, node.val_str)
+                                struct_name = ""
+                                if node.left.inferred_type != 0 and node.left.inferred_type.kind == "struct" {
+                                    struct_name = node.left.inferred_type.name
+                                }
+                                offset = get_prop_offset(state, struct_name, node.val_str)
                                 emit(state, "    mov eax, [edx + " + str(offset) + "]")
                             }
                         }
@@ -312,7 +316,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
         }
         if node.left.kind == "DataFieldAccess" {
             if node.left.val_str == "struct_names" { is_str = 0 }
-            if node.left.val_str == "prop_names" { is_str = 0 }
+            if node.left.val_str == "struct_fields" { is_str = 0 }
             if node.left.val_str == "local_var_names" { is_str = 0 }
         }
         
@@ -320,39 +324,32 @@ def compile_expr(state: CodegenState, node: AstNode) {
         compile_expr(state, node.left)
         emit(state, "    pop edx")
         emit(state, "    pop ecx")
-        
-        if is_str == 1 {
-            emit(state, "    movzx eax, byte ptr [edx + ecx]")
-            emit(state, "    shl eax, 1")
-            emit(state, "    add eax, offset char_strings")
-            emit(state, "    push eax")
+        if use_strlen == 1 {
+            emit(state, "    call _strlen")
+            emit(state, "    add esp, 4")
         } else {
-            emit(state, "    cmp ecx, 0")
-            emit(state, "    jl _out_of_bounds")
-            emit(state, "    cmp ecx, [edx]")
-            emit(state, "    jge _out_of_bounds")
-            emit(state, "    mov edx, [edx + 8]")
-            emit(state, "    mov eax, [edx + ecx * 4]")
-            emit(state, "    push eax")
+            emit(state, "    push dword ptr [eax]")
         }
+        return
     }
     if node.kind == "Slice" {
-        is_str = 0
-        if is_string_expr(state, node.left) == 1 { is_str = 1 }
-        if is_str == 1 {
-            if node.right.kind != "" and node.cond.kind != "" {
-                compile_expr(state, node.cond)
-                compile_expr(state, node.right)
-                compile_expr(state, node.left)
-                emit(state, "    call _slice_string")
-                emit(state, "    add esp, 12")
-                emit(state, "    push eax")
-            } else {
-                emit(state, "    push 0")
-            }
+        if node.right.kind != "" and node.cond.kind != "" {
+            compile_expr(state, node.cond)
+            compile_expr(state, node.right)
+            compile_expr(state, node.left)
+            emit(state, "    pop eax")
+            emit(state, "    pop ebx")
+            emit(state, "    pop ecx")
+            emit(state, "    push ecx")
+            emit(state, "    push ebx")
+            emit(state, "    push eax")
+            emit(state, "    call _slice_string")
+            emit(state, "    add esp, 12")
         } else {
             emit(state, "    push 0")
         }
+        emit(state, "    push eax")
+        return
     }
     if node.kind == "StrConvert" {
         compile_expr(state, node.left)
@@ -368,16 +365,12 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    add esp, 12")
         emit(state, "    pop eax")
         emit(state, "    push eax")
+        return
     }
     if node.kind == "Len" {
-        compile_expr(state, node.left)
-        use_strlen = 0
-        if is_string_expr(state, node.left) == 1 {
-            use_strlen = 1
-        }
         if node.left.kind == "DataFieldAccess" {
             if node.left.val_str == "struct_names" { use_strlen = 0 }
-            if node.left.val_str == "prop_names" { use_strlen = 0 }
+            if node.left.val_str == "struct_fields" { use_strlen = 0 }
             if node.left.val_str == "local_var_names" { use_strlen = 0 }
         }
         if node.left.kind == "ArrayIndex" {
@@ -444,9 +437,9 @@ def compile_expr(state: CodegenState, node: AstNode) {
                 use_strlen = 1
             }
             if node.args[0].kind == "DataFieldAccess" {
-                if node.args[0].val_str == "struct_names" { use_strlen = 0 }
-                if node.args[0].val_str == "prop_names" { use_strlen = 0 }
-                if node.args[0].val_str == "local_var_names" { use_strlen = 0 }
+            if node.args[0].val_str == "struct_names" { use_strlen = 0 }
+            if node.args[0].val_str == "struct_fields" { use_strlen = 0 }
+            if node.args[0].val_str == "local_var_names" { use_strlen = 0 }
             }
             if node.args[0].kind == "ArrayIndex" {
                 use_strlen = 1
