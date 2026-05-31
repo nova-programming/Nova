@@ -246,6 +246,16 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return t
     }
     
+    if str_eq(k, "Print") == 1 {
+        tc_visit(tc, node.left)
+        return create_any_type()
+    }
+    
+    if str_eq(k, "PrintD") == 1 {
+        tc_visit(tc, node.left)
+        return create_any_type()
+    }
+    
     if str_eq(k, "Call") == 1 {
         if tc_find_struct(tc, node.val_str) != 0 {
             i = 0

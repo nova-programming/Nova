@@ -34,9 +34,12 @@ The assembler (`assembler.nv` + submodules) and linker (`linker.nv`) are already
 | List type unification | ✅ |
 | Compile-time constant folding | ✅ |
 | Capacity-based list alloc | ✅ |
+| Self-hosted assembler `dl` register encoding | ✅ (fix for `str()` output) |
+| `_realloc` no `HEAP_REALLOC_IN_PLACE_ONLY` | ✅ (flag 0, allows heap block movement) |
 | Self-hosted assembler | ⏳ (not integrated into default path) |
 | Self-hosted PE linker | ⏳ (not integrated into default path) |
 | Self-hosted GCC-free pipeline | ⏳ (assembler+linker not integrated) |
+| Struct-aware `get_prop_offset` | ⏳ (blocker for adding fields to structs) |
 | Class dunder methods in native codegen | ✅ (`__init__`, `__str__`, `__len__`, `__eq__`, `__add__`, `__sub__`, `__mul__`) |
 | Raw memory (`@raw`, `alloc`/`free`) | ✅ |
 | String slice + concat runtime helpers | ✅ (`_slice_string`, `_concat_strings`) |

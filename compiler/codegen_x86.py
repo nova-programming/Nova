@@ -2,8 +2,9 @@ import os
 from ast.nodes import *
 
 class X86Codegen:
-    def __init__(self, ast_nodes, module_names=None):
+    def __init__(self, ast_nodes, module_names=None, debug_mode=0):
         self.ast = ast_nodes
+        self.debug_mode = debug_mode
         self.module_names = module_names or []
         self.assembly = []
         self.data_section = []
@@ -14,45 +15,21 @@ class X86Codegen:
         self.local_offset = 0
         self.loop_labels = [] # stack of (start_label, end_label)
         self.prop_offsets = {}
-        self.structs = set()
-        
-        self._pre_scan_props(self.ast)
-
-    def _pre_scan_props(self, nodes):
-        for node in nodes:
-            if isinstance(node, DataFieldAccess) or isinstance(node, DataFieldAssign):
-                self.get_prop_offset(node.field_name)
-            elif isinstance(node, PointerProperty) or isinstance(node, PointerAssign):
-                if node.property not in ["value", "value_byte", "addr", "isValid", "isNull", "bytes", "line", "kind", "name"]:
-                    self.get_prop_offset(node.property)
-            
-            # Recurse into children based on standard node fields
-            if hasattr(node, 'body') and isinstance(node.body, list):
-                self._pre_scan_props(node.body)
-            if hasattr(node, 'if_body') and isinstance(node.if_body, list):
-                self._pre_scan_props(node.if_body)
-            if hasattr(node, 'else_body') and isinstance(node.else_body, list):
-                self._pre_scan_props(node.else_body)
-            if hasattr(node, 'methods') and isinstance(node.methods, list):
-                self._pre_scan_props(node.methods)
-            if hasattr(node, 'left'):
-                self._pre_scan_props([node.left])
-            if hasattr(node, 'right'):
-                self._pre_scan_props([node.right])
-            if hasattr(node, 'condition'):
-                self._pre_scan_props([node.condition])
-            if hasattr(node, 'value'):
-                self._pre_scan_props([node.value])
-            if hasattr(node, 'args') and isinstance(node.args, list):
-                self._pre_scan_props(node.args)
-            if hasattr(node, 'elements') and isinstance(node.elements, list):
-                self._pre_scan_props(node.elements)
+        self.struct_defs = {}
 
     def get_prop_offset(self, name):
         if name not in self.prop_offsets:
             self.prop_offsets[name] = len(self.prop_offsets) * 4
             print(f"  REG: {name} -> offset {self.prop_offsets[name]}")
         return self.prop_offsets[name]
+
+    def get_struct_prop_offset(self, struct_name, field_name):
+        if struct_name in self.struct_defs:
+            d = self.struct_defs[struct_name]
+            for i, (fname, ftype) in enumerate(d.fields):
+                if fname == field_name:
+                    return i * 4
+        return self.get_prop_offset(field_name)
 
     def next_label(self, prefix="L"):
         self.label_count += 1
@@ -149,13 +126,8 @@ class X86Codegen:
         functions = [node for node in self.ast if isinstance(node, Function)]
         top_level = [node for node in self.ast if not isinstance(node, Function) and not isinstance(node, Import) and not isinstance(node, ClassDef) and not isinstance(node, Data)]
         
-        for n in self.ast:
-            if isinstance(n, Data) or isinstance(n, ClassDef):
-                self.structs.add(n.name)
-        
-        # Pre-populate prop_offsets from all struct field definitions
+        # Pre-populate struct_defs from all struct field definitions
         # so we know the total struct size before generating code
-        self.struct_defs = {}
         self.func_returns = {}
         for n in self.ast:
             if isinstance(n, Data):
@@ -338,7 +310,7 @@ class X86Codegen:
         r("    mov ebp, esp")
         r("    push dword ptr [ebp + 12]")
         r("    push dword ptr [ebp + 8]")
-        r("    push 8")
+        r("    push 0")
         r("    call _GetProcessHeap@0")
         r("    push eax")
         r("    call _HeapReAlloc@16")
@@ -978,6 +950,20 @@ class X86Codegen:
             self.assembly.append("    push 0")
             self.assembly.append("    call _fflush")
             self.assembly.append("    add esp, 4")
+        elif isinstance(node, PrintD):
+            if self.debug_mode == 1:
+                self.compile_expr(node.value)
+                if self._is_string_expr(node.value):
+                    self.assembly.append("    push offset fmt_str")
+                    self.assembly.append("    call _printf")
+                    self.assembly.append("    add esp, 8")
+                else:
+                    self.assembly.append("    push offset fmt_int")
+                    self.assembly.append("    call _printf")
+                    self.assembly.append("    add esp, 8")
+                self.assembly.append("    push 0")
+                self.assembly.append("    call _fflush")
+                self.assembly.append("    add esp, 4")
         elif isinstance(node, Return):
             self.compile_expr(node.value)
             self.assembly.append("    pop eax")
@@ -1265,12 +1251,10 @@ class X86Codegen:
             self.assembly.append("    push 1")
             self.assembly.append(f"{label_end}:")
         elif isinstance(node, Call):
-            if hasattr(self, 'structs') and node.name in self.structs:
+            if node.name in self.struct_defs:
                 # Compute struct size from max prop_offset + 4
                 struct_size = (max(self.prop_offsets.values()) + 4) if self.prop_offsets else 128
-                # Ensure minimum and alignment
                 struct_size = max(struct_size, 16)
-                # Align to 16 bytes
                 struct_size = (struct_size + 15) & ~15
                 self.assembly.append(f"    push {struct_size}")
                 self.assembly.append("    call _malloc")

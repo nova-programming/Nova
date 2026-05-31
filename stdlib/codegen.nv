@@ -224,7 +224,7 @@ def scan_vars(state: CodegenState, node: AstNode) {
 
 # --- Function compilation ---
 
-def compile_function(state: CodegenState, node: AstNode) {
+def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     old_var_names = state.local_var_names
     old_vars = state.local_vars
     old_offset = state.local_offset
@@ -264,7 +264,7 @@ def compile_function(state: CodegenState, node: AstNode) {
 
     s = 0
     while s < len(node.body) {
-        compile_stmt(state, node.body[s])
+        compile_stmt(state, node.body[s], debug_mode)
         s = s + 1
     }
 
@@ -317,7 +317,7 @@ def emit_win32_runtime(state) {
     emit(state, "    mov ebp, esp")
     emit(state, "    push dword ptr [ebp + 12]")
     emit(state, "    push dword ptr [ebp + 8]")
-    emit(state, "    push 8")
+    emit(state, "    push 0")
     emit(state, "    call GetProcessHeap")
     emit(state, "    push eax")
     emit(state, "    call HeapReAlloc")
@@ -862,7 +862,7 @@ def emit_win32_runtime(state) {
 
 # --- Main entry point ---
 
-def generate_assembly(ast: list) -> list {
+def generate_assembly(ast: list, debug_mode: int) -> list {
     state = new_codegen()
 
     emit(state, ".intel_syntax noprefix")
@@ -928,7 +928,7 @@ def generate_assembly(ast: list) -> list {
 
     i_f = 0
     while i_f < len(functions) {
-        compile_function(state, functions[i_f])
+        compile_function(state, functions[i_f], debug_mode)
         i_f = i_f + 1
     }
 
@@ -950,7 +950,7 @@ def generate_assembly(ast: list) -> list {
 
     i = 0
     while i < len(top_level) {
-        compile_stmt(state, top_level[i])
+        compile_stmt(state, top_level[i], debug_mode)
         i = i + 1
     }
     

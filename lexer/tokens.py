@@ -13,6 +13,7 @@ TOKEN_SPEC = [
 
     # Keywords
     ("CLASS",    r"class\b"),
+    ("PRINTD",   r"printd\b"),
     ("PRINT",    r"print\b"),
     ("DEF",      r"def\b"),
     ("DATA",     r"data\b"),

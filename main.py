@@ -58,7 +58,7 @@ def expand_imports(ast, base_dir, resolver=None, visited=None):
     return expanded_ast
 
 
-def compile_native(file_path):
+def compile_native(file_path, debug_mode=0):
     """Compile a Nova program to a native executable (build mode)."""
     file_path = os.path.abspath(file_path)
     base_dir = os.path.dirname(file_path)
@@ -84,7 +84,7 @@ def compile_native(file_path):
         print(f"TypeWarning: {e} (continuing build)")
 
     from compiler.codegen_x86 import X86Codegen
-    codegen = X86Codegen(ast, module_names=module_names)
+    codegen = X86Codegen(ast, module_names=module_names, debug_mode=debug_mode)
     asm_code = codegen.generate()
 
     asm_file = file_path.rsplit(".", 1)[0] + ".s"
@@ -125,12 +125,21 @@ def main():
         return
 
     command = sys.argv[1]
-    file_path = sys.argv[2]
+    debug_mode = 0
+    file_path = None
+    for arg in sys.argv[2:]:
+        if arg in ("-d", "--debug"):
+            debug_mode = 1
+        else:
+            file_path = arg
+    if file_path is None:
+        print_usage()
+        return
 
     if command in ("dev", "run"):
         run_source(file_path)
     elif command == "build":
-        compile_native(file_path)
+        compile_native(file_path, debug_mode)
     else:
         print(f"Unknown command: {command}")
         print_usage()

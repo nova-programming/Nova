@@ -235,6 +235,16 @@ def encode_mov(state, ops: list) {
         return
     }
 
+    if op1.kind == "reg8" and op2.kind == "mem" {
+        state.code.append(138)
+        if op2.mem_index >= 0 {
+            encode_modrm_sib_reg(state, op2, op1.reg)
+        } else {
+            encode_modrm_mem(state, op2, op1.reg)
+        }
+        return
+    }
+
     if op1.kind == "reg" and op2.kind == "reg8" {
         state.code.append(15)
         state.code.append(182)
@@ -264,9 +274,13 @@ def encode_mov(state, ops: list) {
         return
     }
 
-    if op1.kind == "mem" and op2.kind == "reg8" and str_contains(ops[0], "byte ptr") == 1 {
+    if op1.kind == "mem" and op2.kind == "reg8" {
         state.code.append(136)
-        encode_modrm_mem(state, op1, op2.reg)
+        if op1.mem_index >= 0 {
+            encode_modrm_sib_reg(state, op1, op2.reg)
+        } else {
+            encode_modrm_mem(state, op1, op2.reg)
+        }
         return
     }
 
@@ -389,6 +403,12 @@ def encode_add(state, ops: list) {
     }
     if op1.kind == "reg" and op2.kind == "imm" {
         encode_alu_imm(state, 0, ops)
+        return
+    }
+    if op1.kind == "reg8" and op2.kind == "imm" {
+        state.code.append(128)
+        state.code.append(build_modrm(3, 0, op1.reg))
+        state.code.append(byte_mask(op2.imm_val))
         return
     }
 }

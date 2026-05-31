@@ -441,6 +441,12 @@ class Parser:
             return self.parse_for()
         if kind == "DEF":
             return self.parse_function()
+        if kind == "PRINTD":
+            self.eat("PRINTD")
+            self.eat("LPAREN")
+            value = self.parse_expr()
+            self.eat("RPAREN")
+            return PrintD(value, line=line)
         if kind == "PRINT":
             self.eat("PRINT")
             self.eat("LPAREN")

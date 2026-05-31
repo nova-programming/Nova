@@ -13,11 +13,21 @@ cmd = args[1]
 print("cmd is " + cmd)
 sys_flush()
 if cmd == "build" {
-    if len(args) < 3 {
-        print("Usage: nova build <file.nv>")
+    file_path = ""
+    debug_mode = 0
+    i = 2
+    while i < len(args) {
+        if args[i] == "-d" or args[i] == "--debug" {
+            debug_mode = 1
+        } else {
+            file_path = args[i]
+        }
+        i = i + 1
+    }
+    if len(file_path) == 0 {
+        print("Usage: nova build [-d] <file.nv>")
         sys_exit(1)
     }
-    file_path = args[2]
     print("file is " + file_path)
     sys_flush()
     out_len = len(file_path)
@@ -26,7 +36,7 @@ if cmd == "build" {
     out_file = file_path[0 : out_len - 3] + ".exe"
     print("out_file is " + out_file)
     sys_flush()
-    compile_to_exe(file_path, out_file)
+    compile_to_exe(file_path, out_file, debug_mode)
     print("Generated executable: " + out_file)
 } else {
     print("Unknown command: " + cmd)

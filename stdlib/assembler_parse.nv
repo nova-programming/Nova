@@ -119,6 +119,7 @@ def reg_code(name: string) -> int {
     if name == "al" { return 0 }
     if name == "cl" { return 1 }
     if name == "bl" { return 3 }
+    if name == "dl" { return 2 }
     return -1
 }
 
@@ -366,10 +367,10 @@ def parse_operand(op_str: string) -> OperandInfo {
         }
     }
 
-    if is_32bit_reg(op_str) == 1 or op_str == "al" or op_str == "cl" or op_str == "bl" {
+    if is_32bit_reg(op_str) == 1 or op_str == "al" or op_str == "cl" or op_str == "bl" or op_str == "dl" {
         info.kind = "reg"
         info.reg = reg_code(op_str)
-        if op_str == "al" or op_str == "cl" or op_str == "bl" {
+        if op_str == "al" or op_str == "cl" or op_str == "bl" or op_str == "dl" {
             info.kind = "reg8"
         }
         return info

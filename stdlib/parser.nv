@@ -532,6 +532,18 @@ def parse_statement(state: ParserState) -> AstNode {
     tok = current_tok(state)
     stmt_line = tok.line
     
+    if tok.kind == "PRINTD" {
+        eat_tok(state, "PRINTD")
+        eat_tok(state, "LPAREN")
+        expr = parse_expr(state)
+        eat_tok(state, "RPAREN")
+        node = AstNode()
+        node.line = stmt_line
+        node.kind = "PrintD"
+        node.left = expr
+        return node
+    }
+
     if tok.kind == "PRINT" {
         eat_tok(state, "PRINT")
         eat_tok(state, "LPAREN")

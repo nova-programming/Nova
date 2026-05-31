@@ -72,6 +72,13 @@ class Print:
     def __repr__(self):
         return f"Print({self.value})"
 
+class PrintD:
+    def __init__(self, value, line=0):
+        self.line = line
+        self.value = value
+    def __repr__(self):
+        return f"PrintD({self.value})"
+
 class Function:
     def __init__(self, name, params, body, return_type=None, line=0):
         self.line = line

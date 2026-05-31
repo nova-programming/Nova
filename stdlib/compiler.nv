@@ -53,7 +53,7 @@ def resolve_imports(ast: list, visited: list) -> list {
     return expanded
 }
 
-def compile_file(path: string) -> list {
+def compile_file(path: string, debug_mode: int) -> list {
     print("Reading file: " + path)
     # Read the source file
     fd = sys_open(path, "r")
@@ -84,14 +84,14 @@ def compile_file(path: string) -> list {
 
     print("Generating assembly...")
     # Step 3: Generate x86 assembly
-    asm = generate_assembly(ast)
+    asm = generate_assembly(ast, debug_mode)
 
     print("Compilation finished.")
     return asm
 }
 
-def compile_to_file(input_path: string, output_path: string) {
-    asm = compile_file(input_path)
+def compile_to_file(input_path: string, output_path: string, debug_mode: int) {
+    asm = compile_file(input_path, debug_mode)
     fd = sys_open(output_path, "w")
     i = 0
     while i < len(asm) {
@@ -103,8 +103,8 @@ def compile_to_file(input_path: string, output_path: string) {
     print("Compiled: " + input_path + " -> " + output_path)
 }
 
-def compile_to_exe(input_path: string, output_path: string) {
-    asm = compile_file(input_path)
+def compile_to_exe(input_path: string, output_path: string, debug_mode: int) {
+    asm = compile_file(input_path, debug_mode)
     print("Assembling...")
     assembled = assemble(asm)
     print("Linking...")

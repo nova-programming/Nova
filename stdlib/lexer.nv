@@ -52,6 +52,7 @@ def match_keyword(word: string) -> string {
     if word == "len" { return "LEN" }
     if word == "str" { return "STR" }
     if word == "self" { return "SELF" }
+    if word == "printd" { return "PRINTD" }
     if word == "print" { return "PRINT" }
     if word == "open" { return "OPEN" }
     if word == "read" { return "READ" }

@@ -245,6 +245,10 @@ class TypeInferer:
             self.visit(arg)
         return AnyType()
 
+    def visit_PrintD(self, node):
+        self.visit(node.value)
+        return AnyType()
+
     def visit_Print(self, node):
         self.visit(node.value)
         return AnyType()
