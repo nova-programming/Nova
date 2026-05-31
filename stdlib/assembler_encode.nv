@@ -2,13 +2,6 @@
 # Assembler: Instruction Encoding
 # ============================================================
 
-# --- Code Emission Helper ---
-
-def emit_code(state, val: int) {
-    state.code[state.code_count] = val
-    state.code_count = state.code_count + 1
-}
-
 # --- ModR/M / SIB ---
 
 def build_modrm(mod: int, reg: int, rm: int) -> int {
@@ -178,15 +171,6 @@ def append_label_ref(state, name: string, size: int) {
 }
 
 # --- ALU helpers ---
-
-def base_op_reg(base_op: int) -> int {
-    if base_op == 1 or base_op == 3 { return 0 }
-    if base_op == 41 or base_op == 43 { return 5 }
-    if base_op == 57 or base_op == 59 { return 7 }
-    if base_op == 33 or base_op == 35 { return 4 }
-    if base_op == 9 or base_op == 11 { return 1 }
-    return 0
-}
 
 def encode_alu_imm(state, reg_field: int, ops: list) {
     op1 = parse_operand(ops[0])

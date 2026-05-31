@@ -74,13 +74,9 @@ def compile_file(path: string, debug_mode: int) -> list {
     ast = resolve_imports(ast, visited)
 
     # Step 2.6: Type checking
-    print("DEBUG: About to create TypeChecker")
     tc = TypeChecker()
-    print("DEBUG: About to init TypeChecker")
     tc_init(tc)
-    print("DEBUG: About to type-check AST")
     tc_check(tc, ast)
-    print("DEBUG: Type checking done")
 
     print("Generating assembly...")
     # Step 3: Generate x86 assembly
@@ -143,7 +139,6 @@ def assemble_link_file(asm_path: string, output_path: string) {
         asm_lines.append(str_sub(content, start, i))
     }
     
-    print(str(len(asm_lines)))
     assembled = assemble(asm_lines)
     print("Linking...")
     exe_bytes = link(assembled)

@@ -6,23 +6,19 @@ The self-hosted compiler pipeline is **fully functional** and bootstraps success
 
 | Stage | Description | Status |
 |-------|-------------|--------|
-| Python compiler | `main.py` compiles `nova_main.nv` → x86 assembly | ✅ |
-| Bootstrap 1 | `nova_main.exe` compiles `nova_main.nv` → working executable | ✅ |
-| Bootstrap 2 | Nova-compiled exe recompiles itself identically | ✅ |
-| GCC dependency | Assembly is linked via `gcc` call from within the Nova binary | ⏳ |
-| GCC-free pipeline | `assemble_link_file` in `compiler.nv` uses `assemble()` + `link()` directly | ✅ |
-| GCC-free bootstrap | `main.py` delegates non-self builds to `nova.exe assemble-link` (GCC-free) | ✅ |
+| Python bootstrap | `main.py` compiles `nova_main.nv` → `nova_main.exe` (via GCC) | ✅ |
+| Self-hosted build | `nova_main.exe build hello.nv` → in-process assemble+link → `.exe` | ✅ |
+| Self-hosted bootstrap | `nova_main.exe build nova_main.nv` produces working compiler | ✅ |
+| GCC-free (Nova path) | `nova build` uses `assemble()` + `link()` — zero GCC involved | ✅ |
+| GCC-free (Python path) | `main.py build` delegates non-self builds to Nova binary | ✅ |
 
 ## Near-Term Goals
 
-### GCC-Free Pipeline (Phase 1)
+### GCC-Free Pipeline (Phase 1) — ✅ Complete
 
-The assembler (`assembler.nv` + submodules) and linker (`linker.nv`) are now integrated via `assemble_link_file()` in `stdlib/compiler.nv`. The `nova assemble-link` command in `nova_main.nv` reads assembly text, assembles it to bytecode, and links a PE executable — all in-process without GCC. `main.py` also auto-delegates non-self builds to this path. Remaining goals:
+The assembler (`assembler.nv` + submodules) and linker (`linker.nv`) are fully integrated. The `build` command uses `compile_to_exe()` which calls `assemble()` + `link()` in-process — no `.s` file written, no GCC invoked. The Python fallback (`main.py`) delegates non-self builds to the Nova binary's `assemble-link` command. The runtime uses kernel32-only APIs (`HeapAlloc`/`HeapFree`/`WriteFile`/etc.) with zero MSVCRT dependency.
 
-1. **Default pipeline integration**: The `build` command still generates `.s` assembly and invokes GCC. Goal is to replace the `.s` write + GCC step with in-process assemble+link.
-2. **Native memory allocator**: Replace MSVCRT `malloc`/`free` dependencies with a syscall-backed allocator in `stdlib/os_win.nv`
-
-### Language Completeness
+### Language Completeness & Remaining Work
 
 | Feature | Status |
 |---------|--------|
@@ -35,13 +31,10 @@ The assembler (`assembler.nv` + submodules) and linker (`linker.nv`) are now int
 | List type unification | ✅ |
 | Compile-time constant folding | ✅ |
 | Capacity-based list alloc | ✅ |
-| Self-hosted assembler `dl` register encoding | ✅ (fix for `str()` output) |
+| Self-hosted assembler + linker integration | ✅ (in-process `assemble()` + `link()` in `build` path) |
 | `_realloc` no `HEAP_REALLOC_IN_PLACE_ONLY` | ✅ (flag 0, allows heap block movement) |
-| Self-hosted assembler `and reg, imm` encoding | ✅ (fix for `AluImm` op 4) |
-| Self-hosted PE linker heap expansion | ✅ (16MB reserve) |
-| Self-hosted PE linker `@N` stdcall stripping | ✅ (strips `@N` decorations for Win32 APIs) |
-| Self-hosted GCC-free pipeline | ✅ (`nova assemble-link` command, `main.py` auto‑fallback) |
-| Struct-aware `get_prop_offset` | ⏳ (blocker for adding fields to structs) |
+| Self-hosted GCC-free pipeline | ✅ (fully integrated in `build` command) |
+| Struct-aware `get_prop_offset` | ⏳ (flat namespace — fields from different data blocks may collide) |
 | Class dunder methods in native codegen | ✅ (`__init__`, `__str__`, `__len__`, `__eq__`, `__add__`, `__sub__`, `__mul__`) |
 | Raw memory (`@raw`, `alloc`/`free`) | ✅ |
 | String slice + concat runtime helpers | ✅ (`_slice_string`, `_concat_strings`) |
