@@ -73,6 +73,16 @@ def _sys_extract_arg(start_ptr: int, length: int) -> string {
     @raw {
         buf = alloc(length + 1)
         src = start_ptr
+        if src.value_byte == 34 {
+            src = src + 1
+            length = length - 1
+            if length > 0 {
+                last_ptr = src + length - 1
+                if last_ptr.value_byte == 34 {
+                    length = length - 1
+                }
+            }
+        }
         dst = buf
         i = 0
         while i < length {

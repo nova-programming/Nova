@@ -20,3 +20,7 @@ Uses `@raw` blocks for inline assembly to:
 - Call Windows API functions via FFI thunks
 - Dereference `GetCommandLineA()` result byte-by-byte via `.value_byte`
 - Perform raw memory allocation and byte copying for argument extraction
+
+### Argument Quote Stripping
+
+`_sys_extract_arg()` detects and strips surrounding double quote (`"`) characters from argument strings before returning them. This allows `fopen` to receive clean, unwrapped file paths when the command line contains quoted paths (e.g., `nova build "C:\path\to\file.nv"`).

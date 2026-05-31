@@ -244,6 +244,20 @@ def link(sections: list) -> list {
             if len(actual_name) > 0 and actual_name[0] == "_" {
                 actual_name = str_sub(actual_name, 1, len(actual_name))
             }
+            # Strip @N stdcall decoration
+            at_idx = -1
+            k = 0
+            while k < len(actual_name) {
+                if actual_name[k] == "@" {
+                    at_idx = k
+                    break
+                }
+                k = k + 1
+            }
+            if at_idx >= 0 {
+                actual_name = str_sub(actual_name, 0, at_idx)
+            }
+            
             dll_names.append(actual_name)
         }
         i = i + 1
@@ -288,6 +302,20 @@ def link(sections: list) -> list {
             actual_name = labels[i].name
             if len(actual_name) > 0 and actual_name[0] == "_" {
                 actual_name = str_sub(actual_name, 1, len(actual_name))
+            }
+            
+            # Strip @N stdcall decoration
+            at_idx = -1
+            k = 0
+            while k < len(actual_name) {
+                if actual_name[k] == "@" {
+                    at_idx = k
+                    break
+                }
+                k = k + 1
+            }
+            if at_idx >= 0 {
+                actual_name = str_sub(actual_name, 0, at_idx)
             }
             
             idx = 0
@@ -445,7 +473,7 @@ def link(sections: list) -> list {
     append_u16(image, 0) # DllCharacteristics = 0 (No ASLR)
     append_u32(image, 1048576) # StackReserve
     append_u32(image, 4096)    # StackCommit
-    append_u32(image, 1048576) # HeapReserve
+    append_u32(image, 16777216) # HeapReserve
     append_u32(image, 4096)    # HeapCommit
     append_u32(image, 0)       # LoaderFlags
     append_u32(image, 16)      # NumberOfRvaAndSizes

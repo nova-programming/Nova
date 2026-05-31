@@ -18,6 +18,9 @@ python main.py build program.nv
 
 # Run in the Python bytecode VM (fast iteration)
 python main.py dev program.nv
+
+# Assemble .s file and link directly (GCC-free, uses self-hosted assembler+linker)
+nova_main.exe assemble-link input.s output.exe
 ```
 
 ## Self-Hosted Bootstrap Chain
@@ -25,20 +28,21 @@ python main.py dev program.nv
 The compiler is written in Nova and bootstraps in three stages:
 
 1. **Stage 0** — Python compiler (`main.py`) compiles `nova_main.nv` → `nova_main.s` → GCC → `nova_main.exe`
-2. **Stage 1** — `nova_main.exe` (self-hosted compiler) compiles `nova_main.nv` → `nova_main.s` → GCC → `nova_main.exe`
+2. **Stage 1** — `nova_main.exe` (self-hosted compiler) compiles `nova_main.nv` → `nova_main.s` → GCC `nova_main.exe`. Non-self builds use the GCC-free `assemble-link` path: `.s` → `assembler.nv` → `linker.nv` → `.exe` (no external toolchain).
 3. **Stage 2** — The Nova-compiled executable can now recompile itself, proving the bootstrap is self-sustaining
 
 The compiler pipeline within a single invocation:
 
 ```
-.nv source → lexer.nv → parser.nv → codegen.nv → .s assembly → GCC → .exe
+.nv source → lexer.nv → parser.nv → codegen.nv → .s assembly → [GCC → .exe]
+                                                   → [assembler.nv → linker.nv → .exe]
 ```
 
 Additional standard library modules:
 - `types.nv` — Type system abstraction (scalar, struct, list, func types)
 - `type_checker.nv` — Static type inference and enforcement
-- `assembler.nv` — x86-32 instruction encoder (assembles .s text into byte streams)
-- `linker.nv` — Windows PE executable generator (packages bytes into .exe directly)
+- `assembler.nv` — x86-32 instruction encoder (assembles .s text into byte streams, integrated)
+- `linker.nv` — Windows PE executable generator (packages bytes into .exe directly, integrated)
 - `memory.nv` — Raw memory byte access utilities
 
 ## Project Structure
@@ -58,13 +62,13 @@ nova/
 │   ├── codegen_stmt.nv   # Statement codegen (Nova)
 │   ├── compiler.nv       # Pipeline orchestrator (Nova)
 │   ├── compiler_driver.nv# CLI driver for compiler (Nova)
-│   ├── assembler.nv      # x86 assembler (Nova, work-in-progress)
+│   ├── assembler.nv      # x86 assembler (Nova, integrated via assemble_link_file)
 │   ├── assembler_parse.nv# Assembly line/operand parsing (Nova)
 │   ├── assembler_encode.nv# Instruction encoding (Nova)
 │   ├── assembler_pass.nv # Pass1 + fixup resolution (Nova)
 │   ├── types.nv          # Type system abstraction (Nova)
 │   ├── type_checker.nv   # Static type inference (Nova)
-│   ├── linker.nv         # Native PE linker (Nova, work-in-progress)
+│   ├── linker.nv         # Native PE linker (Nova, integrated via assemble_link_file)
 │   ├── memory.nv         # Raw memory byte access (Nova)
 │   ├── os_win.nv         # Windows syscall/runtime facade (Nova)
 │   ├── os_linux.nv       # Linux syscall/runtime facade (Nova)

@@ -96,7 +96,25 @@ def compile_native(file_path, debug_mode=0):
     print(f"Generated assembly: {asm_file}")
     
     import subprocess
-    cmd = ["gcc", asm_file, "-o", exe_file, "-lkernel32"]
+    nova_exe = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nova_main.exe")
+    nova_self = os.path.basename(exe_file) == "nova_main.exe"
+    
+    if os.path.exists(nova_exe) and not nova_self:
+        asm_rel = os.path.relpath(asm_file)
+        exe_rel = os.path.relpath(exe_file)
+        cmd = [nova_exe, "assemble-link", asm_rel, exe_rel]
+        print(f"Running: {' '.join(cmd)}")
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0:
+            if res.stdout:
+                print(res.stdout)
+            print(f"Successfully compiled native executable: {exe_file}")
+            return
+        print(f"Nova assembler failed (code {res.returncode}), falling back to GCC")
+        if res.stderr:
+            print(res.stderr)
+    
+    cmd = ["gcc", asm_file, "-o", exe_file, "-lkernel32", "-Wl,--heap=16777216"]
     print(f"Running command: {' '.join(cmd)}")
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0:

@@ -38,6 +38,16 @@ if cmd == "build" {
     sys_flush()
     compile_to_exe(file_path, out_file, debug_mode)
     print("Generated executable: " + out_file)
+} elif cmd == "assemble-link" {
+    if len(args) < 4 {
+        print("Usage: nova assemble-link <input.s> <output.exe>")
+        sys_exit(1)
+    }
+    asm_path = args[2]
+    out_path = args[3]
+    print("asm is " + asm_path)
+    print("out is " + out_path)
+    assemble_link_file(asm_path, out_path)
 } else {
     print("Unknown command: " + cmd)
     print("Usage: nova build <file.nv>")

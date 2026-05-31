@@ -618,8 +618,15 @@ def encode_movzx(state, ops: list) {
 def encode_and(state, ops: list) {
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
-    state.code.append(33)
-    state.code.append(build_modrm(3, op2.reg, op1.reg))
+    if op1.kind == "reg" and op2.kind == "reg" {
+        state.code.append(33)
+        state.code.append(build_modrm(3, op2.reg, op1.reg))
+        return
+    }
+    if op1.kind == "reg" and op2.kind == "imm" {
+        encode_alu_imm(state, 4, ops)
+        return
+    }
 }
 
 def encode_or(state, ops: list) {
