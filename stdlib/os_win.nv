@@ -100,11 +100,6 @@ def sys_get_args() -> list {
     args = []
     cmdline = 0
     ptr = 0
-    in_quotes = 0
-    start_ptr = 0
-    arg_len = 0
-    b = 0
-    arg_str = ""
     @raw {
         cmdline = GetCommandLineA()
         ptr = cmdline

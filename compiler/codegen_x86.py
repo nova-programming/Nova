@@ -50,6 +50,8 @@ class X86Codegen:
             return True
         # Check inferred_type from the type checker
         inferred = getattr(node, 'inferred_type', None)
+        if hasattr(inferred, 'name') and getattr(inferred, 'name') == 'string':
+            return True
         if inferred == 'string':
             return True
         if isinstance(node, Variable):
@@ -118,6 +120,7 @@ class X86Codegen:
         self.assembly.append(".extern _FlushFileBuffers@4")
         self.assembly.append(".extern _ExitProcess@4")
         self.assembly.append(".extern _WinExec@8")
+        self.assembly.append(".extern _GetCommandLineA@0")
         
         # We also need format strings for printing
         self.data_section.append('fmt_int: .asciz "%d\\n"')

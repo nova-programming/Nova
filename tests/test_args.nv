@@ -1,10 +1,7 @@
 import os_win
 
-def main() {
-    print("Testing sys_get_args...")
-    args = sys_get_args()
-    print("Args len: " + str(len(args)))
-    sys_flush()
-}
-
-main()
+print("Testing sys_get_args...\n")
+sys_flush()
+args = sys_get_args()
+print("Args len: " + str(len(args)) + "\n")
+sys_flush()

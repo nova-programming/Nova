@@ -192,6 +192,21 @@ def is_float_expr(state: CodegenState, node: AstNode) -> int {
     if node.kind == "Number" and node.is_float == 1 {
         return 1
     }
+    if node.kind == "Variable" {
+        if node.inferred_type != 0 and node.inferred_type.kind == "scalar" and node.inferred_type.name == "float" {
+            return 1
+        }
+    }
+    if node.kind == "BinOp" {
+        if is_float_expr(state, node.left) == 1 or is_float_expr(state, node.right) == 1 {
+            return 1
+        }
+    }
+    if node.kind == "UnaryOp" {
+        if is_float_expr(state, node.left) == 1 {
+            return 1
+        }
+    }
     return 0
 }
 
@@ -340,7 +355,7 @@ def emit_win32_runtime(state) {
     emit(state, "    mov ebp, esp")
     emit(state, "    push dword ptr [ebp + 12]")
     emit(state, "    push dword ptr [ebp + 8]")
-    emit(state, "    push 0")
+    emit(state, "    push 8")
     emit(state, "    call GetProcessHeap")
     emit(state, "    push eax")
     emit(state, "    call HeapReAlloc")
@@ -577,6 +592,8 @@ def emit_win32_runtime(state) {
     emit(state, "    je L_printf_str")
     emit(state, "    cmp byte ptr [esi + 1], 'd'")
     emit(state, "    je L_printf_int")
+    emit(state, "    cmp byte ptr [esi + 1], 'f'")
+    emit(state, "    je L_printf_float")
     emit(state, "L_printf_raw:")
     emit(state, "    push dword ptr [ebp + 8]")
     emit(state, "    call L_write_stdout")
@@ -609,6 +626,20 @@ def emit_win32_runtime(state) {
     emit(state, "    call L_write_char")
     emit(state, "    add esp, 4")
     emit(state, "L_printf_end_int:")
+    emit(state, "    pop esi")
+    emit(state, "    pop ebp")
+    emit(state, "    ret")
+    emit(state, "L_printf_float:")
+    emit(state, "    push dword ptr [ebp + 12]")
+    emit(state, "    call L_write_float")
+    emit(state, "    add esp, 4")
+    emit(state, "    mov esi, [ebp + 8]")
+    emit(state, "    cmp byte ptr [esi + 2], 10")
+    emit(state, "    jne L_printf_end_float")
+    emit(state, "    push 10")
+    emit(state, "    call L_write_char")
+    emit(state, "    add esp, 4")
+    emit(state, "L_printf_end_float:")
     emit(state, "    pop esi")
     emit(state, "    pop ebp")
     emit(state, "    ret")
@@ -701,6 +732,103 @@ def emit_win32_runtime(state) {
     emit(state, "L_write_int_done:")
     emit(state, "    mov byte ptr [edi], 0")
     emit(state, "    lea eax, [esp + 8]")
+    emit(state, "    push eax")
+    emit(state, "    call L_write_stdout")
+    emit(state, "    add esp, 4")
+    emit(state, "    pop edi")
+    emit(state, "    pop ebx")
+    emit(state, "    mov esp, ebp")
+    emit(state, "    pop ebp")
+    emit(state, "    ret")
+    emit(state, "")
+    # float writer
+    emit(state, "L_write_float:")
+    emit(state, "    push ebp")
+    emit(state, "    mov ebp, esp")
+    emit(state, "    sub esp, 64")
+    emit(state, "    push ebx")
+    emit(state, "    push edi")
+    emit(state, "    lea edi, [ebp - 40]")
+    emit(state, "    fld dword ptr [ebp + 8]")
+    emit(state, "    ftst")
+    emit(state, "    fnstsw ax")
+    emit(state, "    sahf")
+    emit(state, "    jnz L_wf_not_zero")
+    emit(state, "    mov byte ptr [edi], '0'")
+    emit(state, "    inc edi")
+    emit(state, "    jmp L_wf_write_str")
+    emit(state, "L_wf_not_zero:")
+    emit(state, "    jae L_wf_pos")
+    emit(state, "    mov byte ptr [edi], '-'")
+    emit(state, "    inc edi")
+    emit(state, "    fchs")
+    emit(state, "L_wf_pos:")
+    emit(state, "    fnstcw [ebp - 42]")
+    emit(state, "    movzx eax, word ptr [ebp - 42]")
+    emit(state, "    or eax, 3072")
+    emit(state, "    mov [ebp - 48], eax")
+    emit(state, "    fldcw [ebp - 48]")
+    emit(state, "    fist dword ptr [ebp - 52]")
+    emit(state, "    fldcw [ebp - 42]")
+    emit(state, "    mov eax, [ebp - 52]")
+    emit(state, "    test eax, eax")
+    emit(state, "    jnz L_wf_int_start")
+    emit(state, "    mov byte ptr [edi], '0'")
+    emit(state, "    inc edi")
+    emit(state, "    jmp L_wf_dot")
+    emit(state, "L_wf_int_start:")
+    emit(state, "    xor ecx, ecx")
+    emit(state, "L_wf_int_loop1:")
+    emit(state, "    xor edx, edx")
+    emit(state, "    mov ebx, 10")
+    emit(state, "    div ebx")
+    emit(state, "    push edx")
+    emit(state, "    inc ecx")
+    emit(state, "    test eax, eax")
+    emit(state, "    jnz L_wf_int_loop1")
+    emit(state, "L_wf_int_loop2:")
+    emit(state, "    pop edx")
+    emit(state, "    add dl, '0'")
+    emit(state, "    mov [edi], dl")
+    emit(state, "    inc edi")
+    emit(state, "    dec ecx")
+    emit(state, "    jnz L_wf_int_loop2")
+    emit(state, "L_wf_dot:")
+    emit(state, "    mov byte ptr [edi], '.'")
+    emit(state, "    inc edi")
+    emit(state, "    fld dword ptr [ebp + 8]")
+    emit(state, "    fild dword ptr [ebp - 52]")
+    emit(state, "    fsubp st(1), st(0)")
+    emit(state, "    mov ecx, 6")
+    emit(state, "L_wf_frac_loop:")
+    emit(state, "    push 10")
+    emit(state, "    fild dword ptr [esp]")
+    emit(state, "    add esp, 4")
+    emit(state, "    fmulp st(1), st(0)")
+    emit(state, "    fnstcw [ebp - 42]")
+    emit(state, "    movzx eax, word ptr [ebp - 42]")
+    emit(state, "    or eax, 3072")
+    emit(state, "    mov [ebp - 48], eax")
+    emit(state, "    fldcw [ebp - 48]")
+    emit(state, "    fist dword ptr [ebp - 52]")
+    emit(state, "    fldcw [ebp - 42]")
+    emit(state, "    mov al, [ebp - 52]")
+    emit(state, "    add al, '0'")
+    emit(state, "    mov [edi], al")
+    emit(state, "    inc edi")
+    emit(state, "    fild dword ptr [ebp - 52]")
+    emit(state, "    fsubp st(1), st(0)")
+    emit(state, "    ftst")
+    emit(state, "    fnstsw ax")
+    emit(state, "    sahf")
+    emit(state, "    jz L_wf_frac_done")
+    emit(state, "    dec ecx")
+    emit(state, "    jnz L_wf_frac_loop")
+    emit(state, "L_wf_frac_done:")
+    emit(state, "    fstp st(0)")
+    emit(state, "L_wf_write_str:")
+    emit(state, "    mov byte ptr [edi], 0")
+    emit(state, "    lea eax, [ebp - 40]")
     emit(state, "    push eax")
     emit(state, "    call L_write_stdout")
     emit(state, "    add esp, 4")
@@ -903,6 +1031,7 @@ def generate_assembly(ast: list, debug_mode: int) -> list {
     emit(state, ".extern FlushFileBuffers")
     emit(state, ".extern ExitProcess")
     emit(state, ".extern WinExec")
+    emit(state, ".extern GetCommandLineA")
 
     emit_data(state, "fmt_int: .asciz \"%d\\n\"")
     emit_data(state, "fmt_int_pure: .asciz \"%d\"")
@@ -1067,16 +1196,15 @@ def generate_assembly(ast: list, debug_mode: int) -> list {
     emit_win32_runtime(state)
 
     final_asm = []
+    i = 0
+    while i < len(state.asm_lines) {
+        final_asm.append(state.asm_lines[i])
+        i = i + 1
+    }
     final_asm.append(".data")
     i = 0
     while i < len(state.data_lines) {
         final_asm.append(state.data_lines[i])
-        i = i + 1
-    }
-
-    i = 0
-    while i < len(state.asm_lines) {
-        final_asm.append(state.asm_lines[i])
         i = i + 1
     }
 

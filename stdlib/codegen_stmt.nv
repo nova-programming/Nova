@@ -104,7 +104,11 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         if is_string_expr(state, node.left) == 1 {
             emit(state, "    push offset fmt_str")
         } else {
-            emit(state, "    push offset fmt_int")
+            if is_float_expr(state, node.left) == 1 {
+                emit(state, "    push offset fmt_float")
+            } else {
+                emit(state, "    push offset fmt_int")
+            }
         }
         emit(state, "    call _printf")
         emit(state, "    add esp, 8")

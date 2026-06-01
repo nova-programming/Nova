@@ -185,7 +185,7 @@ def apply_relocs(code: list, fixups: list, labels: list, text_rva: int, data_rva
         
         j = 0
         while j < len(labels) {
-            if labels[j].name == fixup.target and labels[j].defined == 1 {
+            if str_eq(labels[j].name, fixup.target) == 1 and labels[j].defined == 1 {
                 lbl_idx = j
                 break
             }
@@ -218,6 +218,25 @@ def apply_relocs(code: list, fixups: list, labels: list, text_rva: int, data_rva
                 code[fixup.offset + 2] = byte_extract(abs_addr, 16)
                 code[fixup.offset + 3] = byte_extract(abs_addr, 24)
             }
+        } else {
+            print("UNRESOLVED fixup: [" + fixup.target + "] len=" + str(len(fixup.target)) + " at offset " + str(fixup.offset))
+            sys_flush()
+            # Dump matching or similar labels
+            dump_j = 0
+            found_any = 0
+            while dump_j < len(labels) {
+                eq_result = str_eq(labels[dump_j].name, fixup.target)
+                if eq_result == 1 or str_contains(labels[dump_j].name, "GetCommand") == 1 or str_contains(labels[dump_j].name, "CommandLine") == 1 {
+                    print("  label[" + str(dump_j) + "]=[" + labels[dump_j].name + "] len=" + str(len(labels[dump_j].name)) + " def=" + str(labels[dump_j].defined) + " eq=" + str(eq_result))
+                    found_any = 1
+                }
+                dump_j = dump_j + 1
+            }
+            if found_any == 0 {
+                print("  NO matching labels found!")
+            }
+            print("  total labels: " + str(len(labels)))
+            sys_flush()
         }
         i = i + 1
     }
@@ -241,14 +260,14 @@ def link(sections: list) -> list {
     while i < len(labels) {
         if labels[i].defined == 0 {
             actual_name = labels[i].name
-            if len(actual_name) > 0 and actual_name[0] == "_" {
+            if len(actual_name) > 0 and char_code(actual_name[0]) == 95 {
                 actual_name = str_sub(actual_name, 1, len(actual_name))
             }
             # Strip @N stdcall decoration
             at_idx = -1
             k = 0
             while k < len(actual_name) {
-                if actual_name[k] == "@" {
+                if char_code(actual_name[k]) == 64 {
                     at_idx = k
                     break
                 }
@@ -300,7 +319,7 @@ def link(sections: list) -> list {
     while i < len(labels) {
         if labels[i].defined == 0 {
             actual_name = labels[i].name
-            if len(actual_name) > 0 and actual_name[0] == "_" {
+            if len(actual_name) > 0 and char_code(actual_name[0]) == 95 {
                 actual_name = str_sub(actual_name, 1, len(actual_name))
             }
             
@@ -308,7 +327,7 @@ def link(sections: list) -> list {
             at_idx = -1
             k = 0
             while k < len(actual_name) {
-                if actual_name[k] == "@" {
+                if char_code(actual_name[k]) == 64 {
                     at_idx = k
                     break
                 }
@@ -321,7 +340,7 @@ def link(sections: list) -> list {
             idx = 0
             j = 0
             while j < len(import_names) {
-                if import_names[j] == actual_name {
+                if str_eq(import_names[j], actual_name) == 1 {
                     idx = j
                     break
                 }
@@ -442,7 +461,7 @@ def link(sections: list) -> list {
     main_rva = text_rva
     i = 0
     while i < len(labels) {
-        if labels[i].name == "_main" {
+        if str_eq(labels[i].name, "_main") == 1 {
             main_rva = text_rva + labels[i].offset
         }
         i = i + 1

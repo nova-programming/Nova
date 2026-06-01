@@ -129,12 +129,13 @@ def assemble_link_file(asm_path: string, output_path: string) {
     asm_lines = []
     start = 0
     i = 0
-    while i < len(content) {
+    content_len = len(content)
+    while i < content_len {
         if content[i] == "\n" or content[i] == "\r" {
             if i > start {
                 asm_lines.append(str_sub(content, start, i))
             }
-            if content[i] == "\r" and i + 1 < len(content) and content[i + 1] == "\n" {
+            if content[i] == "\r" and i + 1 < content_len and content[i + 1] == "\n" {
                 i = i + 1
             }
             start = i + 1

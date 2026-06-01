@@ -114,7 +114,7 @@ def compile_native(file_path, debug_mode=0):
         if res.stderr:
             print(res.stderr)
     
-    cmd = ["gcc", asm_file, "-o", exe_file, "-lkernel32", "-Wl,--heap=16777216"]
+    cmd = ["gcc", asm_file, "-o", exe_file, "-lkernel32", "-Wl,--heap=67108864"]
     print(f"Running command: {' '.join(cmd)}")
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0:

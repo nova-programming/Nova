@@ -185,6 +185,12 @@ def encode_alu_imm(state, reg_field: int, ops: list) {
     op2 = parse_operand(ops[1])
 
     if op1.kind == "reg" {
+        if op2.kind == "offset" {
+            state.code.append(129)
+            state.code.append(build_modrm(3, reg_field, op1.reg))
+            append_label_ref(state, op2.label, 5)
+            return
+        }
         if op2.imm_val >= -128 and op2.imm_val <= 127 {
             state.code.append(131)
             state.code.append(build_modrm(3, reg_field, op1.reg))
@@ -206,6 +212,12 @@ def encode_mov(state, ops: list) {
     if op1.kind == "reg" and op2.kind == "imm" {
         state.code.append(184 + op1.reg)
         append_imm32(state, op2.imm_val)
+        return
+    }
+
+    if op1.kind == "reg" and op2.kind == "offset" {
+        state.code.append(184 + op1.reg)
+        append_label_ref(state, op2.label, 5)
         return
     }
 
@@ -404,6 +416,10 @@ def encode_add(state, ops: list) {
         encode_alu_imm(state, 0, ops)
         return
     }
+    if op1.kind == "reg" and op2.kind == "offset" {
+        encode_alu_imm(state, 0, ops)
+        return
+    }
     if op1.kind == "reg8" and op2.kind == "imm" {
         state.code.append(128)
         state.code.append(build_modrm(3, 0, op1.reg))
@@ -489,6 +505,10 @@ def encode_sub(state, ops: list) {
         encode_alu_imm(state, 5, ops)
         return
     }
+    if op1.kind == "reg" and op2.kind == "offset" {
+        encode_alu_imm(state, 5, ops)
+        return
+    }
     if op1.kind == "reg" and op2.kind == "mem" {
         state.code.append(43)
         if op2.mem_index >= 0 {
@@ -536,6 +556,10 @@ def encode_cmp(state, ops: list) {
         return
     }
     if op1.kind == "reg" and op2.kind == "imm" {
+        encode_alu_imm(state, 7, ops)
+        return
+    }
+    if op1.kind == "reg" and op2.kind == "offset" {
         encode_alu_imm(state, 7, ops)
         return
     }
@@ -683,12 +707,20 @@ def encode_and(state, ops: list) {
         encode_alu_imm(state, 4, ops)
         return
     }
+    if op1.kind == "reg" and op2.kind == "offset" {
+        encode_alu_imm(state, 4, ops)
+        return
+    }
 }
 
 def encode_or(state, ops: list) {
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
     if op1.kind == "reg" and op2.kind == "imm" {
+        encode_alu_imm(state, 1, ops)
+        return
+    }
+    if op1.kind == "reg" and op2.kind == "offset" {
         encode_alu_imm(state, 1, ops)
         return
     }

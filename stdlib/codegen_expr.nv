@@ -1,10 +1,288 @@
 # ============================================================
+# Code Generator: Expression Compi
+def float_str_to_hex(s: string) -> int {
+    sign = 0
+    i = 0
+    if s[0].value_byte == 45 {
+        sign = 1
+        i = 1
+    }
+    
+    int_part = 0
+    loop1 = 1
+    while loop1 == 1 {
+        if i >= len(s) {
+            loop1 = 0
+        } else {
+            if s[i].value_byte == 46 {
+                loop1 = 0
+            } else {
+                if s[i].value_byte >= 48 {
+                    if s[i].value_byte <= 57 {
+                        int_part = int_part * 10 + (s[i].value_byte - 48)
+                    }
+                }
+                i = i + 1
+            }
+        }
+    }
+    
+    frac_part = 0
+    frac_div = 1
+    if i < len(s) {
+        if s[i].value_byte == 46 {
+            i = i + 1
+            frac_divisor = 10
+            loop2 = 1
+            while loop2 == 1 {
+                if i >= len(s) {
+                    loop2 = 0
+                } else {
+                    frac_part = frac_part * 10 + (s[i].value_byte - 48)
+                    frac_div = frac_div * 10
+                    i = i + 1
+                }
+            }
+        }
+    }
+    
+    if int_part == 0 {
+        if frac_part == 0 {
+            if sign == 1 {
+                # Nova treats 2147483648 as -2147483648 internally if signed, but it works
+                # We can also return 0x80000000 by returning 2147483648
+                # But to avoid overflow warnings, we can just return it
+                return 2147483648
+            }
+            return 0
+        }
+    }
+    
+    exp = 0
+    mantissa = 0
+    
+    if int_part > 0 {
+        temp = int_part
+        loop3 = 1
+        while loop3 == 1 {
+            if temp > 1 {
+                temp = temp / 2
+                exp = exp + 1
+            } else {
+                loop3 = 0
+            }
+        }
+        
+        bits_needed = 23
+        if exp > 0 {
+            mask = 1
+            k = 0
+            loop4 = 1
+            while loop4 == 1 {
+                if k < exp {
+                    mask = mask * 2
+                    k = k + 1
+                } else {
+                    loop4 = 0
+                }
+            }
+            mask = mask - 1
+            
+            # int_part % (mask + 1)
+            mask_plus = mask + 1
+            int_rem = int_part - ((int_part / mask_plus) * mask_plus)
+            
+            if exp <= 23 {
+                shift_val = 1
+                k2 = 0
+                diff = 23 - exp
+                loop5 = 1
+                while loop5 == 1 {
+                    if k2 < diff {
+                        shift_val = shift_val * 2
+                        k2 = k2 + 1
+                    } else {
+                        loop5 = 0
+                    }
+                }
+                mantissa = int_rem * shift_val
+                bits_needed = 23 - exp
+            } else {
+                shift_val = 1
+                k3 = 0
+                diff = exp - 23
+                loop6 = 1
+                while loop6 == 1 {
+                    if k3 < diff {
+                        shift_val = shift_val * 2
+                        k3 = k3 + 1
+                    } else {
+                        loop6 = 0
+                    }
+                }
+                mantissa = int_rem / shift_val
+                bits_needed = 0
+            }
+        }
+        
+        rem = frac_part
+        j = 0
+        loop7 = 1
+        while loop7 == 1 {
+            if j < bits_needed {
+                rem = rem * 2
+                bit = rem / frac_div
+                if bit == 1 {
+                    rem = rem - frac_div
+                }
+                
+                shift_val = 1
+                k4 = 0
+                diff2 = bits_needed - 1 - j
+                loop8 = 1
+                while loop8 == 1 {
+                    if k4 < diff2 {
+                        shift_val = shift_val * 2
+                        k4 = k4 + 1
+                    } else {
+                        loop8 = 0
+                    }
+                }
+                mantissa = mantissa + (bit * shift_val)
+                j = j + 1
+            } else {
+                loop7 = 0
+            }
+        }
+        
+        # rounding
+        rem = rem * 2
+        bit2 = rem / frac_div
+        if bit2 == 1 {
+            mantissa = mantissa + 1
+            limit = 1
+            k5 = 0
+            loop9 = 1
+            while loop9 == 1 {
+                if k5 < 23 {
+                    limit = limit * 2
+                    k5 = k5 + 1
+                } else {
+                    loop9 = 0
+                }
+            }
+            if mantissa >= limit {
+                mantissa = 0
+                exp = exp + 1
+            }
+        }
+        
+    } else {
+        rem = frac_part
+        loop10 = 1
+        while loop10 == 1 {
+            rem = rem * 2
+            exp = exp - 1
+            bit3 = rem / frac_div
+            if bit3 == 1 {
+                rem = rem - frac_div
+                loop10 = 0
+            }
+        }
+        
+        j2 = 0
+        loop11 = 1
+        while loop11 == 1 {
+            if j2 < 23 {
+                rem = rem * 2
+                bit4 = rem / frac_div
+                if bit4 == 1 {
+                    rem = rem - frac_div
+                }
+                
+                shift_val2 = 1
+                k6 = 0
+                diff3 = 22 - j2
+                loop12 = 1
+                while loop12 == 1 {
+                    if k6 < diff3 {
+                        shift_val2 = shift_val2 * 2
+                        k6 = k6 + 1
+                    } else {
+                        loop12 = 0
+                    }
+                }
+                mantissa = mantissa + (bit4 * shift_val2)
+                j2 = j2 + 1
+            } else {
+                loop11 = 0
+            }
+        }
+        
+        # rounding
+        rem = rem * 2
+        bit5 = rem / frac_div
+        if bit5 == 1 {
+            mantissa = mantissa + 1
+            limit2 = 1
+            k7 = 0
+            loop13 = 1
+            while loop13 == 1 {
+                if k7 < 23 {
+                    limit2 = limit2 * 2
+                    k7 = k7 + 1
+                } else {
+                    loop13 = 0
+                }
+            }
+            if mantissa >= limit2 {
+                mantissa = 0
+                exp = exp + 1
+            }
+        }
+    }
+    
+    biased_exp = exp + 127
+    if biased_exp <= 0 {
+        biased_exp = 0
+    }
+    if biased_exp >= 255 {
+        biased_exp = 255
+        mantissa = 0
+    }
+    
+    sign_val = 0
+    if sign == 1 {
+        sign_val = 2147483648
+    }
+    exp_val = biased_exp
+    k8 = 0
+    loop14 = 1
+    while loop14 == 1 {
+        if k8 < 23 {
+            exp_val = exp_val * 2
+            k8 = k8 + 1
+        } else {
+            loop14 = 0
+        }
+    }
+    
+    result = sign_val + exp_val + mantissa
+    return result
+}
+
+# ============================================================
 # Code Generator: Expression Compilation
 # ============================================================
 
 def compile_expr(state: CodegenState, node: AstNode) {
     if node.kind == "Number" {
-        emit(state, "    push " + str(node.val_int))
+        if is_float_expr(state, node) == 1 {
+            f_hex = float_str_to_hex(node.val_str)
+            emit(state, "    push " + str(f_hex))
+        } else {
+            emit(state, "    push " + str(node.val_int))
+        }
     }
     if node.kind == "String" {
         label = add_string_literal(state, node.val_str)
@@ -48,17 +326,91 @@ def compile_expr(state: CodegenState, node: AstNode) {
             } else {
                 compile_expr(state, node.left)
                 compile_expr(state, node.right)
-                emit(state, "    pop ebx")
-                emit(state, "    pop eax")
                 
-                is_cmp = 0
-                if node.val_str == "==" { is_cmp = 1 }
-                if node.val_str == "!=" { is_cmp = 1 }
-                if node.val_str == "<" { is_cmp = 1 }
-                if node.val_str == "<=" { is_cmp = 1 }
-                if node.val_str == ">" { is_cmp = 1 }
-                if node.val_str == ">=" { is_cmp = 1 }
-                if node.val_str == "has" { is_cmp = 1 }
+                is_float_op = 0
+                if is_float_expr(state, node.left) == 1 { is_float_op = 1 }
+                if is_float_expr(state, node.right) == 1 { is_float_op = 1 }
+                
+                if is_float_op == 1 {
+                    is_cmp2 = 0
+                    if node.val_str == "==" { is_cmp2 = 1 }
+                    if node.val_str == "!=" { is_cmp2 = 1 }
+                    if node.val_str == "<" { is_cmp2 = 1 }
+                    if node.val_str == "<=" { is_cmp2 = 1 }
+                    if node.val_str == ">" { is_cmp2 = 1 }
+                    if node.val_str == ">=" { is_cmp2 = 1 }
+                    
+                    if is_cmp2 == 1 {
+                        emit(state, "    fld dword ptr [esp]")
+                        emit(state, "    fld dword ptr [esp + 4]")
+                        emit(state, "    add esp, 8")
+                        emit(state, "    fucomip st(0), st(1)")
+                        emit(state, "    fstp st(0)")
+                        emit(state, "    pushf")
+                        emit(state, "    pop eax")
+                        
+                        label_true2 = next_label(state, "L_fcmp_true")
+                        label_end2 = next_label(state, "L_fcmp_end")
+                        
+                        if node.val_str == "==" {
+                            emit(state, "    and eax, 64")
+                            emit(state, "    cmp eax, 0")
+                            emit(state, "    jne " + label_true2)
+                        }
+                        if node.val_str == "!=" {
+                            emit(state, "    and eax, 64")
+                            emit(state, "    cmp eax, 0")
+                            emit(state, "    je " + label_true2)
+                        }
+                        if node.val_str == "<" {
+                            emit(state, "    and eax, 1")
+                            emit(state, "    cmp eax, 1")
+                            emit(state, "    je " + label_true2)
+                        }
+                        if node.val_str == ">" {
+                            emit(state, "    and eax, 65")
+                            emit(state, "    cmp eax, 0")
+                            emit(state, "    je " + label_true2)
+                        }
+                        if node.val_str == "<=" {
+                            emit(state, "    and eax, 65")
+                            emit(state, "    cmp eax, 0")
+                            emit(state, "    jne " + label_true2)
+                        }
+                        if node.val_str == ">=" {
+                            emit(state, "    and eax, 1")
+                            emit(state, "    cmp eax, 0")
+                            emit(state, "    je " + label_true2)
+                        }
+                        
+                        emit(state, "    push 0")
+                        emit(state, "    jmp " + label_end2)
+                        emit(state, label_true2 + ":")
+                        emit(state, "    push 1")
+                        emit(state, label_end2 + ":")
+                    } else {
+                        emit(state, "    fld dword ptr [esp + 4]")
+                        emit(state, "    fld dword ptr [esp]")
+                        if node.val_str == "+" { emit(state, "    faddp st(1), st(0)") }
+                        if node.val_str == "-" { emit(state, "    fsubp st(1), st(0)") }
+                        if node.val_str == "*" { emit(state, "    fmulp st(1), st(0)") }
+                        if node.val_str == "/" { emit(state, "    fdivp st(1), st(0)") }
+                        emit(state, "    add esp, 8")
+                        emit(state, "    sub esp, 4")
+                        emit(state, "    fstp dword ptr [esp]")
+                    }
+                } else {
+                    emit(state, "    pop ebx")
+                    emit(state, "    pop eax")
+                    
+                    is_cmp = 0
+                    if node.val_str == "==" { is_cmp = 1 }
+                    if node.val_str == "!=" { is_cmp = 1 }
+                    if node.val_str == "<" { is_cmp = 1 }
+                    if node.val_str == "<=" { is_cmp = 1 }
+                    if node.val_str == ">" { is_cmp = 1 }
+                    if node.val_str == ">=" { is_cmp = 1 }
+                    if node.val_str == "has" { is_cmp = 1 }
                 
                 if is_cmp == 1 {
                     is_str_cmp = 0
@@ -160,16 +512,71 @@ def compile_expr(state: CodegenState, node: AstNode) {
                     }
                     emit(state, "    push eax")
                 }
+                }
             }
         }
     }
     if node.kind == "Compare" {
         compile_expr(state, node.left)
         compile_expr(state, node.right)
-        emit(state, "    pop ebx")
-        emit(state, "    pop eax")
+        
+        is_float_op = 0
+        if is_float_expr(state, node.left) == 1 { is_float_op = 1 }
+        if is_float_expr(state, node.right) == 1 { is_float_op = 1 }
+        
+        if is_float_op == 1 {
+            emit(state, "    fld dword ptr [esp]")
+            emit(state, "    fld dword ptr [esp + 4]")
+            emit(state, "    add esp, 8")
+            emit(state, "    fucomip st(0), st(1)")
+            emit(state, "    fstp st(0)")
+            emit(state, "    pushf")
+            emit(state, "    pop eax")
+            
+            label_true2 = next_label(state, "L_fcmp_true")
+            label_end2 = next_label(state, "L_fcmp_end")
+            
+            if node.val_str == "==" {
+                emit(state, "    and eax, 64")
+                emit(state, "    cmp eax, 0")
+                emit(state, "    jne " + label_true2)
+            }
+            if node.val_str == "!=" {
+                emit(state, "    and eax, 64")
+                emit(state, "    cmp eax, 0")
+                emit(state, "    je " + label_true2)
+            }
+            if node.val_str == "<" {
+                emit(state, "    and eax, 1")
+                emit(state, "    cmp eax, 1")
+                emit(state, "    je " + label_true2)
+            }
+            if node.val_str == ">" {
+                emit(state, "    and eax, 65")
+                emit(state, "    cmp eax, 0")
+                emit(state, "    je " + label_true2)
+            }
+            if node.val_str == "<=" {
+                emit(state, "    and eax, 65")
+                emit(state, "    cmp eax, 0")
+                emit(state, "    jne " + label_true2)
+            }
+            if node.val_str == ">=" {
+                emit(state, "    and eax, 1")
+                emit(state, "    cmp eax, 0")
+                emit(state, "    je " + label_true2)
+            }
+            
+            emit(state, "    push 0")
+            emit(state, "    jmp " + label_end2)
+            emit(state, label_true2 + ":")
+            emit(state, "    push 1")
+            emit(state, label_end2 + ":")
+        } else {
+            emit(state, "    pop ebx")
+            emit(state, "    pop eax")
 
-        is_str_cmp = 0
+            is_str_cmp = 0
         left_str = is_string_expr(state, node.left)
         right_str = is_string_expr(state, node.right)
         if left_str == 1 or right_str == 1 { is_str_cmp = 1 }
@@ -210,6 +617,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, label_true + ":")
         emit(state, "    push 1")
         emit(state, label_end + ":")
+        }
     }
     if node.kind == "UnaryOp" {
         compile_expr(state, node.left)
@@ -339,12 +747,20 @@ def compile_expr(state: CodegenState, node: AstNode) {
     if node.kind == "StrConvert" {
         compile_expr(state, node.left)
         emit(state, "    pop ebx")
-        emit(state, "    push 16")
+        if is_float_expr(state, node.left) == 1 {
+            emit(state, "    push 32")
+        } else {
+            emit(state, "    push 16")
+        }
         emit(state, "    call _malloc")
         emit(state, "    add esp, 4")
         emit(state, "    push eax")
         emit(state, "    push ebx")
-        emit(state, "    push offset fmt_int_pure")
+        if is_float_expr(state, node.left) == 1 {
+            emit(state, "    push offset fmt_float_pure")
+        } else {
+            emit(state, "    push offset fmt_int_pure")
+        }
         emit(state, "    push eax")
         emit(state, "    call _sprintf")
         emit(state, "    add esp, 12")
@@ -447,6 +863,31 @@ def compile_expr(state: CodegenState, node: AstNode) {
             compile_expr(state, node.args[0])
             emit(state, "    call _malloc")
             emit(state, "    add esp, 4")
+            emit(state, "    push eax")
+            return
+        }
+        
+        if node.val_str == "str" {
+            compile_expr(state, node.args[0])
+            emit(state, "    pop ebx")
+            if is_float_expr(state, node.args[0]) == 1 {
+                emit(state, "    push 32")
+            } else {
+                emit(state, "    push 16")
+            }
+            emit(state, "    call _malloc")
+            emit(state, "    add esp, 4")
+            emit(state, "    push eax")
+            emit(state, "    push ebx")
+            if is_float_expr(state, node.args[0]) == 1 {
+                emit(state, "    push offset fmt_float_pure")
+            } else {
+                emit(state, "    push offset fmt_int_pure")
+            }
+            emit(state, "    push eax")
+            emit(state, "    call _sprintf")
+            emit(state, "    add esp, 12")
+            emit(state, "    pop eax")
             emit(state, "    push eax")
             return
         }
