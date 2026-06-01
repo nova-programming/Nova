@@ -30,7 +30,8 @@ def resolve_imports(ast: list, visited: list) -> list {
                     fd = sys_open("stdlib/" + module_name + ".nv", "r")
                 }
                 if fd == 0 {
-                    print("Import Error: Could not resolve module '" + module_name + "'")
+                    print("ERROR [Import]: Could not resolve module '" + module_name + "'")
+                    print("  -> make sure the file '" + module_name + ".nv' exists in the current directory or stdlib/")
                 } else {
                     source = sys_read(fd)
                     sys_close(fd)

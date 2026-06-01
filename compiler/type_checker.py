@@ -2,9 +2,12 @@ from ast.nodes import *
 from compiler.types import *
 
 class StaticTypeError(Exception):
-    def __init__(self, message, line=None):
-        prefix = f"[line {line}] " if line else ""
-        super().__init__(f"{prefix}{message}")
+    def __init__(self, message, line=None, suggestion=""):
+        prefix = f"[line {line}]" if line else ""
+        if suggestion:
+            super().__init__(f"{prefix} {message}\n  -> {suggestion}")
+        else:
+            super().__init__(f"{prefix} {message}")
 
 class TypeInferer:
     def __init__(self):
@@ -51,7 +54,11 @@ class TypeInferer:
             return t1
                 
         line = node.line if node and hasattr(node, 'line') else '?'
-        raise StaticTypeError(f"Type mismatch: cannot unify {t1} ({type(t1)}) and {t2} ({type(t2)})", line)
+        raise StaticTypeError(
+            f"Type mismatch: cannot use {t1} where {t2} is expected",
+            line,
+            f"try converting the value with int() or str(), or use a variable of type {t2}"
+        )
 
     def visit(self, node):
         if node is None:
@@ -128,7 +135,8 @@ class TypeInferer:
         val_t = self.visit(node.value)
 
         if node.name in self.const_vars and not node.is_const:
-            raise StaticTypeError(f"Cannot reassign const variable '{node.name}'", node.line)
+            raise StaticTypeError(f"Cannot reassign const variable '{node.name}'", node.line,
+                "remove the 'const' keyword from the declaration or use a different variable name")
         if node.is_const:
             self.const_vars.add(node.name)
 
@@ -180,7 +188,8 @@ class TypeInferer:
         if node.name in self.functions:
             func_type = self.functions[node.name]
             if len(node.args) != len(func_type.params):
-                raise StaticTypeError(f"Function {node.name} expects {len(func_type.params)} args, got {len(node.args)}", node.line)
+                raise StaticTypeError(f"Function {node.name} expects {len(func_type.params)} args, got {len(node.args)}", node.line,
+                    f"add or remove arguments to match the function signature — expected {len(func_type.params)}, got {len(node.args)}")
             
             for arg, param_type in zip(node.args, func_type.params):
                 arg_t = self.visit(arg)
@@ -301,19 +310,22 @@ class TypeInferer:
 
     def visit_Alloc(self, node):
         if not self.in_raw:
-            raise StaticTypeError("alloc() is only available inside @raw blocks", node.line)
+            raise StaticTypeError("alloc() is only available inside @raw blocks", node.line,
+                "wrap this code in @raw { ... } to use low-level memory functions")
         self.visit(node.size)
         return AnyType()
 
     def visit_Free(self, node):
         if not self.in_raw:
-            raise StaticTypeError("free() is only available inside @raw blocks", node.line)
+            raise StaticTypeError("free() is only available inside @raw blocks", node.line,
+                "wrap this code in @raw { ... } to use low-level memory functions")
         self.visit(node.ptr)
         return AnyType()
 
     def visit_PointerProperty(self, node):
         if not self.in_raw:
-            raise StaticTypeError("Pointer operations are only available inside @raw blocks", node.line)
+            raise StaticTypeError("Pointer operations are only available inside @raw blocks", node.line,
+                "wrap this code in @raw { ... } to use pointer operations")
         self.visit(node.ptr)
         return AnyType()
 

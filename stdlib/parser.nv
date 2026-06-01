@@ -3,6 +3,7 @@
 # ============================================================
 
 import lexer
+import errors
 
 data AstNode {
     kind: string
@@ -47,7 +48,7 @@ def eat_tok(state: ParserState, expected_kind: string) -> Token {
         state.pos = state.pos + 1
         return tok
     }
-    print("Error [" + state.filename + ":" + str(tok.line) + "]: expected " + expected_kind + " but got " + tok.kind)
+    errors.err("Syntax", state.filename, tok.line, "expected " + expected_kind + " but got " + tok.kind, "check the syntax around this token — did you forget a closing brace, parenthesis, or keyword?")
     return tok
 }
 
@@ -215,7 +216,7 @@ def parse_primary(state: ParserState) -> AstNode {
                                                                         eat_tok(state, "RBRACE")
                                                                         node.kind = "NONE"
                                                                     } else {
-                                                                        print("Error [" + state.filename + ":" + str(tok.line) + "]: unexpected token: " + tok.kind)
+                                                                        errors.err("Syntax", state.filename, tok.line, "unexpected token: " + tok.kind, "this token does not belong here — check for misplaced operators, missing expressions, or extra punctuation")
                                                                         state.pos = state.pos + 1
                                                                     }
                                                                 }

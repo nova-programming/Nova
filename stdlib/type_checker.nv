@@ -2,6 +2,7 @@ import os_win
 import lexer
 import parser
 import types
+import errors
 
 data TypeChecker {
     env_stack: list
@@ -145,7 +146,7 @@ def tc_unify(tc: TypeChecker, t1: Type, t2: Type, node: AstNode) {
     if t1.kind == "dyn" or t2.kind == "dyn" { return 0 }
     eq = types_equal(t1, t2)
     if eq == 0 {
-        print("TypeWarning [" + str(node.line) + "]: Type mismatch. Expected " + type_to_string(t1) + ", got " + type_to_string(t2))
+        errors.warn("Type", "", node.line, "expected " + type_to_string(t1) + " but got " + type_to_string(t2), "change the value type or explicitly convert with int() or str()")
         return 0
     }
     return 0
@@ -271,7 +272,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         func_type = tc_find_func(tc, node.val_str)
         if func_type != 0 {
             if len(node.args) != len(func_type.params) {
-                print("TypeWarning [" + str(node.line) + "]: Function " + node.val_str + " expects " + str(len(func_type.params)) + " args, got " + str(len(node.args)))
+                errors.warn("Args", "", node.line, "function " + node.val_str + " expects " + str(len(func_type.params)) + " args but got " + str(len(node.args)), "add or remove arguments to match the declaration")
             }
             i = 0
             while i < len(node.args) {

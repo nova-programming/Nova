@@ -188,6 +188,13 @@ def is_string_expr(state: CodegenState, node: AstNode) -> int {
     return 0
 }
 
+def is_float_expr(state: CodegenState, node: AstNode) -> int {
+    if node.kind == "Number" and node.is_float == 1 {
+        return 1
+    }
+    return 0
+}
+
 # --- Variable scanning ---
 
 def scan_vars(state: CodegenState, node: AstNode) {
@@ -900,6 +907,10 @@ def generate_assembly(ast: list, debug_mode: int) -> list {
     emit_data(state, "fmt_int: .asciz \"%d\\n\"")
     emit_data(state, "fmt_int_pure: .asciz \"%d\"")
     emit_data(state, "fmt_str: .asciz \"%s\\n\"")
+    emit_data(state, "fmt_float: .asciz \"%f\\n\"")
+    emit_data(state, "fmt_float_pure: .asciz \"%f\"")
+    emit_data(state, "debug_prefix: .asciz \"debug - [line \"")
+    emit_data(state, "debug_suffix: .asciz \"]: \"")
     emit_data(state, "L_out_of_bounds_msg: .asciz \"Index Out Of Bounds\\n\"")
 
     emit_data(state, "char_strings:")

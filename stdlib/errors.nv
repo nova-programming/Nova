@@ -1,0 +1,17 @@
+def err(err_type: string, filename: string, line: int, msg: string, suggestion: string) {
+    if filename != "" {
+        print("ERROR [" + filename + ":" + str(line) + "] (" + err_type + "): " + msg)
+    } else {
+        print("ERROR [line " + str(line) + "] (" + err_type + "): " + msg)
+    }
+    print("  -> " + suggestion)
+}
+
+def warn(err_type: string, filename: string, line: int, msg: string, suggestion: string) {
+    if filename != "" {
+        print("WARNING [" + filename + ":" + str(line) + "] (" + err_type + "): " + msg)
+    } else {
+        print("WARNING [line " + str(line) + "] (" + err_type + "): " + msg)
+    }
+    print("  -> " + suggestion)
+}

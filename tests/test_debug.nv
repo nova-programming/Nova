@@ -1,0 +1,5 @@
+printd(42)
+x = 3.14
+printd(x)
+printd("hello world")
+print("done")

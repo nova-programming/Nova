@@ -69,14 +69,31 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
     }
     if node.kind == "PrintD" {
         if debug_mode == 1 {
+            emit(state, "    push offset debug_prefix")
+            emit(state, "    call L_write_stdout")
+            emit(state, "    add esp, 4")
+            emit(state, "    push " + str(node.line))
+            emit(state, "    call L_write_int")
+            emit(state, "    add esp, 4")
+            emit(state, "    push offset debug_suffix")
+            emit(state, "    call L_write_stdout")
+            emit(state, "    add esp, 4")
             compile_expr(state, node.left)
             if is_string_expr(state, node.left) == 1 {
-                emit(state, "    push offset fmt_str")
+                emit(state, "    call L_write_stdout")
+                emit(state, "    add esp, 4")
             } else {
-                emit(state, "    push offset fmt_int")
+                if is_float_expr(state, node.left) == 1 {
+                    emit(state, "    push offset fmt_float_pure")
+                } else {
+                    emit(state, "    push offset fmt_int_pure")
+                }
+                emit(state, "    call _printf")
+                emit(state, "    add esp, 8")
             }
-            emit(state, "    call _printf")
-            emit(state, "    add esp, 8")
+            emit(state, "    push 10")
+            emit(state, "    call L_write_char")
+            emit(state, "    add esp, 4")
             emit(state, "    push 0")
             emit(state, "    call _fflush")
             emit(state, "    add esp, 4")

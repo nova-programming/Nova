@@ -22,7 +22,7 @@ def run_source(file_path):
     try:
         TypeInferer().infer(ast)
     except StaticTypeError as e:
-        print(f"StaticTypeError: {e}")
+        print(f"TypeError: {e}")
         sys.exit(1)
 
     compiler = Compiler(base_dir=base_dir)
