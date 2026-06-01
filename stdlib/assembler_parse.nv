@@ -366,6 +366,19 @@ def parse_operand(op_str: string) -> OperandInfo {
             op_str = str_sub(op_str, 9, len(op_str))
         }
     }
+    if len(op_str) >= 9 {
+        if str_sub(op_str, 0, 9) == "word ptr " {
+            op_str = str_sub(op_str, 9, len(op_str))
+        }
+    }
+
+    if len(op_str) >= 4 and str_sub(op_str, 0, 3) == "st(" and op_str[len(op_str) - 1] == ")" {
+        inner = str_sub(op_str, 3, len(op_str) - 1)
+        info.kind = "st"
+        info.reg = atoi(inner)
+        if info.reg < 0 or info.reg > 7 { info.reg = 0 }
+        return info
+    }
 
     if is_32bit_reg(op_str) == 1 or op_str == "al" or op_str == "cl" or op_str == "bl" or op_str == "dl" {
         info.kind = "reg"

@@ -199,6 +199,43 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         state.loop_start_labels.pop()
         state.loop_end_labels.pop()
     }
+    if node.kind == "ForIn" {
+        compile_expr(state, node.left)
+        emit(state, "    sub esp, 4")
+        emit(state, "    mov dword ptr [esp], 0")
+        
+        loop_label = next_label(state, "L_forin")
+        end_label = next_label(state, "L_forin_end")
+        state.loop_start_labels.append(loop_label)
+        state.loop_end_labels.append(end_label)
+        
+        emit(state, loop_label + ":")
+        emit(state, "    mov eax, [esp + 4]")
+        emit(state, "    mov eax, [eax]")
+        emit(state, "    cmp dword ptr [esp], eax")
+        emit(state, "    jge " + end_label)
+        
+        emit(state, "    mov ecx, [esp]")
+        emit(state, "    mov eax, [esp + 4]")
+        emit(state, "    mov eax, [eax + 8]")
+        emit(state, "    mov eax, [eax + ecx*4]")
+        
+        var_off = find_var_offset(state, node.val_str)
+        emit(state, "    mov [ebp - " + str(var_off) + "], eax")
+        
+        i = 0
+        while i < len(node.body) {
+            compile_stmt(state, node.body[i], debug_mode)
+            i = i + 1
+        }
+        
+        emit(state, "    inc dword ptr [esp]")
+        emit(state, "    jmp " + loop_label)
+        emit(state, end_label + ":")
+        emit(state, "    add esp, 8")
+        state.loop_start_labels.pop()
+        state.loop_end_labels.pop()
+    }
     if node.kind == "Break" {
         if len(state.loop_end_labels) > 0 {
             lbl = state.loop_end_labels[len(state.loop_end_labels) - 1]

@@ -69,10 +69,18 @@ class Parser:
         return DataInstance(data_name, line=line)
 
     def parse_for(self):
-        """Parse for loop: for i = 0 to 10 { body }"""
+        """Parse for loop: for i = 0 to 10 { body } or for i in items { body }"""
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("FOR")
         var_name = self.eat("IDENT")[1]
+        
+        if self.current() and self.current()[0] == "IN":
+            self.eat("IN")
+            collection = self.parse_expr()
+            body = self.parse_block()
+            from ast.nodes import ForIn
+            return ForIn(var_name, collection, body, line=line)
+            
         self.eat("EQUALS")
         start = self.parse_expr()
         
@@ -196,6 +204,9 @@ class Parser:
         if kind == "NUMBER":
             self.eat("NUMBER")
             node = Number(int(value), line=line)
+        elif kind == "FLOAT":
+            self.eat("FLOAT")
+            node = Number(float(value), line=line)
         
         elif kind == "STRING":
             self.eat("STRING")

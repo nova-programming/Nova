@@ -8,38 +8,31 @@
 - **COMPLETED: Milestone E (Runtime Fix — `str()` output & `_realloc` flag).**
 - **COMPLETED: Milestone F (Stable `printd` re-add with parameter passing, flat-namespace population from struct definitions).**
 - **COMPLETED: Milestone G (Compiler Heap Expansion & Stdlib Improvements).**
+- **COMPLETED: Milestone H (Self-Hosted Bootstrap Successful — Fix massive string access malloc leak and implement BinOp short-circuiting).**
+- **COMPLETED: Milestone I (Float literal and runtime float support — Python codegen hex->decimal, Nova assembler `jae` handler).**
 
 ## What Was Accomplished
 
-### Milestone G: Compiler Heap Expansion & Stdlib Improvements
-1. **Self-Hosted Bootstrap Heap Expansion**:
-   - The self-hosted build failed during linking due to `HeapReAlloc` failing on Windows. The compiler internal `List` memory usage exceeded the default 1MB heap reserve.
-   - Fixed by bumping `HeapReserve` to `16777216` (16MB).
-   - Applied to both `main.py` (via GCC `-Wl,--heap=16777216`) and `stdlib/linker.nv` (via `append_u32(image, 16777216)`).
-   - `nova_main.exe` now builds itself effortlessly.
-2. **Assembler Pass Fix (`assembler_pass.nv`)**:
-   - Changed `resolve_label` to return `-1` instead of `0` when a label is undefined, allowing `target_off >= 0` checks to properly skip undefined external symbols.
-3. **Assembler Encode Fix (`assembler_encode.nv`)**:
-   - Added support for `encode_and` to accept `reg, imm` operands, utilizing `encode_alu_imm` with ALU OP 4.
-4. **Linker Stdcall Stripping (`linker.nv`)**:
-   - Added logic to strip `@N` stdcall decorations from `actual_name` before adding to `dll_names` and when resolving `import_names` for jump thunks, ensuring external Win32 APIs link properly.
-5. **OS Win Arg Quoting Fix (`os_win.nv`)**:
-   - Modified `_sys_extract_arg` to detect and strip surrounding double quotes (`"`) from argument strings to safely pass unwrapped paths to `fopen`.
+### Milestone I: Float Literal Support via Python Codegen + Nova Assembler Fixes
+1. **Fixed Nova assembler `jae` instruction** (`stdlib/assembler_encode.nv:387`): Added `encode_jae` (opcode `0F 83` rel32) and registered it in `emit_instruction`. Previously missing; JAE instructions in `L_write_float` were silently dropped, causing the sign check to always write `-`.
+2. **Hex constants fixed in Python codegen** (`compiler/codegen_x86.py:1314`): Changed `push 0x{bits:08X}` to `push {bits}` (decimal) because the Nova assembler's lexer only recognizes decimal digits in NUMBER tokens — it was parsing `0x4048F5C3` as `push 0` with a trailing identifier.
+3. **Or immediate fixed**: Changed `or eax, 0x0C00` to `or eax, 3072` (decimal) for the same reason.
 
-## Full Verification Chain
-```powershell
-python main.py build nova_main.nv
-# → nova_main.exe (Gen 1 via GCC) ✅
-.\nova_main.exe build nova_main.nv
-# → Self-hosted bootstrap (Gen 2): pass0 lines=70335, success. ✅
-.\nova_main.exe build tests\hello.nv
-# → tests\hello.exe compiles ✅
-.\tests\hello.exe
-# → Hello from Nova! ✅
-```
+### Milestone H: Fix Bootstrap String Alloc Leak and BinOp Short-Circuiting
+1. **String Character Access optimization (`s[i]`)**:
+   - Both the Python codegen (`compiler/codegen_x86.py`) and Nova codegen (`stdlib/codegen_expr.nv`) were leaking memory by using `_malloc(2)` to dynamically allocate a 2-byte null-terminated string for *every* single character access.
+   - Refactored `s[i]` access (inside `ArrayIndex`) in both compilers to instead use the static 256-byte table `char_strings:` generated in the `.data` section.
+   - `shl eax, 1` followed by `add eax, offset char_strings` is used instead, entirely avoiding `malloc` overhead and drastically speeding up processing without leaks.
+2. **Boolean Short-Circuiting**:
+   - `and` / `or` BinOps in Python codegen (`codegen_x86.py`) were eagerly evaluating both sides.
+   - Modified Python codegen BinOp handling to include short-circuit jumps for `and` and `or` operators, making it parity with Nova's existing `and` / `or` implementation and completely bypassing bounds-checks or out-of-bounds reads if the first condition fails.
+3. **Self-Hosted Bootstrap Verification**:
+   - Executed Gen1 compilation: `python main.py build nova_main.nv` → `nova_main.exe`
+   - Bootstrapped Gen2: `.\nova_main.exe build nova_main.nv` → successfully processed 70k lines and generated `nova_main.exe` without running out of memory.
+   - Verified Gen2: `.\nova_main.exe build tests\hello.nv` and ran it (`Hello from Nova!`).
 
 ## State
-- **Status: STABLE & BOOTSTRAPPED**. The self-hosted compiler can compile itself with the expanded heap and all pending stdlib features applied.
+- **Status: STABLE & FULLY BOOTSTRAPPED**. The self-hosted compiler can now compile itself flawlessly. The custom integrated assembler and linker completely replace GCC on the Nova side, producing `.exe` directly.
 
 ## Handover Command
 ```powershell

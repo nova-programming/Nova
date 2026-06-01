@@ -28,6 +28,10 @@ def append_imm32(state, val: int) {
 # --- ModR/M Encoding ---
 
 def encode_modrm_mem(state, mem: OperandInfo, reg_field: int) {
+    if mem.mem_index >= 0 {
+        encode_modrm_sib_reg(state, mem, reg_field)
+        return
+    }
     if mem.mem_base >= 0 {
         if mem.mem_base == 4 {
             if mem.mem_disp == 0 {
@@ -89,6 +93,10 @@ def encode_modrm_sib_reg(state, mem: OperandInfo, reg_field: int) {
 }
 
 def encode_modrm_mem_reg(state, mem: OperandInfo, reg_field: int) {
+    if mem.mem_index >= 0 {
+        encode_modrm_sib_reg(state, mem, reg_field)
+        return
+    }
     if mem.mem_base >= 0 {
         if mem.mem_base == 5 and mem.mem_disp == 0 {
             state.code.append(build_modrm(1, reg_field, 5))
@@ -376,6 +384,13 @@ def encode_jge(state, ops: list) {
     append_label_ref(state, op.label, 4)
 }
 
+def encode_jae(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(15)
+    state.code.append(131)
+    append_label_ref(state, op.label, 4)
+}
+
 def encode_add(state, ops: list) {
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
@@ -502,6 +517,24 @@ def encode_cmp(state, ops: list) {
         state.code.append(build_modrm(3, op2.reg, op1.reg))
         return
     }
+    if op1.kind == "mem" and op2.kind == "reg" {
+        state.code.append(57)
+        if op1.mem_index >= 0 {
+            encode_modrm_sib_reg(state, op1, op2.reg)
+        } else {
+            encode_modrm_mem(state, op1, op2.reg)
+        }
+        return
+    }
+    if op1.kind == "reg" and op2.kind == "mem" {
+        state.code.append(59)
+        if op2.mem_index >= 0 {
+            encode_modrm_sib_reg(state, op2, op1.reg)
+        } else {
+            encode_modrm_mem(state, op2, op1.reg)
+        }
+        return
+    }
     if op1.kind == "reg" and op2.kind == "imm" {
         encode_alu_imm(state, 7, ops)
         return
@@ -536,6 +569,16 @@ def encode_cmp(state, ops: list) {
         state.code.append(byte_mask(op2.imm_val))
         return
     }
+    if op1.kind == "mem" and op2.kind == "imm" and str_contains(ops[0], "dword ptr") == 1 {
+        state.code.append(129)
+        if op1.mem_index >= 0 {
+            encode_modrm_sib_reg(state, op1, 7)
+        } else {
+            encode_modrm_mem(state, op1, 7)
+        }
+        append_imm32(state, op2.imm_val)
+        return
+    }
 }
 
 def encode_imul(state, ops: list) {
@@ -560,12 +603,36 @@ def encode_neg(state, ops: list) {
 
 def encode_inc(state, ops: list) {
     op = parse_operand(ops[0])
-    state.code.append(64 + op.reg)
+    if op.kind == "reg" {
+        state.code.append(64 + op.reg)
+        return
+    }
+    if op.kind == "mem" and str_contains(ops[0], "dword ptr") == 1 {
+        state.code.append(255)
+        if op.mem_index >= 0 {
+            encode_modrm_sib_reg(state, op, 0)
+        } else {
+            encode_modrm_mem(state, op, 0)
+        }
+        return
+    }
 }
 
 def encode_dec(state, ops: list) {
     op = parse_operand(ops[0])
-    state.code.append(72 + op.reg)
+    if op.kind == "reg" {
+        state.code.append(72 + op.reg)
+        return
+    }
+    if op.kind == "mem" and str_contains(ops[0], "dword ptr") == 1 {
+        state.code.append(255)
+        if op.mem_index >= 0 {
+            encode_modrm_sib_reg(state, op, 1)
+        } else {
+            encode_modrm_mem(state, op, 1)
+        }
+        return
+    }
 }
 
 def encode_shl(state, ops: list) {
@@ -586,8 +653,13 @@ def encode_sete(state, ops: list) {
 def encode_movzx(state, ops: list) {
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
-    state.code.append(15)
-    state.code.append(182)
+    if str_contains(ops[1], "word ptr") == 1 {
+        state.code.append(15)
+        state.code.append(183)
+    } else {
+        state.code.append(15)
+        state.code.append(182)
+    }
 
     if op2.kind == "reg8" {
         state.code.append(build_modrm(3, op1.reg, op2.reg))
@@ -616,6 +688,10 @@ def encode_and(state, ops: list) {
 def encode_or(state, ops: list) {
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
+    if op1.kind == "reg" and op2.kind == "imm" {
+        encode_alu_imm(state, 1, ops)
+        return
+    }
     state.code.append(9)
     state.code.append(build_modrm(3, op2.reg, op1.reg))
 }
@@ -674,6 +750,130 @@ def encode_setne(state, ops: list) {
     state.code.append(15)
     state.code.append(149)
     state.code.append(build_modrm(3, 0, op1.reg))
+}
+
+# --- x87 FPU ---
+
+def encode_fld(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    if op1.kind == "mem" {
+        state.code.append(217)
+        encode_modrm_mem(state, op1, 0)
+    }
+}
+def encode_fstp(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    if op1.kind == "mem" {
+        state.code.append(217)
+        encode_modrm_mem(state, op1, 3)
+        return
+    }
+    if op1.kind == "st" {
+        state.code.append(221)
+        state.code.append(216 + op1.reg)
+        return
+    }
+}
+def encode_fild(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    if op1.kind == "mem" {
+        state.code.append(219)
+        encode_modrm_mem(state, op1, 0)
+    }
+}
+def encode_fistp(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    if op1.kind == "mem" {
+        state.code.append(219)
+        encode_modrm_mem(state, op1, 3)
+    }
+}
+def encode_fist(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    if op1.kind == "mem" {
+        state.code.append(219)
+        encode_modrm_mem(state, op1, 2)
+    }
+}
+def encode_fst(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    if op1.kind == "mem" {
+        state.code.append(217)
+        encode_modrm_mem(state, op1, 2)
+    }
+}
+def encode_fnstcw(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    if op1.kind == "mem" {
+        state.code.append(217)
+        encode_modrm_mem(state, op1, 7)
+    }
+}
+def encode_fldcw(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    if op1.kind == "mem" {
+        state.code.append(217)
+        encode_modrm_mem(state, op1, 5)
+    }
+}
+def encode_fchs(state) {
+    state.code.append(217)
+    state.code.append(224)
+}
+def encode_ftst(state) {
+    state.code.append(217)
+    state.code.append(228)
+}
+def encode_fldz(state) {
+    state.code.append(217)
+    state.code.append(238)
+}
+def encode_fstsw_ax(state) {
+    state.code.append(223)
+    state.code.append(224)
+}
+def encode_sahf(state) {
+    state.code.append(158)
+}
+def encode_faddp(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+    if op1.kind == "st" and op2.kind == "st" and op1.reg == 1 and op2.reg == 0 {
+        state.code.append(222)
+        state.code.append(193)
+    }
+}
+def encode_fsubp(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+    if op1.kind == "st" and op2.kind == "st" and op1.reg == 1 and op2.reg == 0 {
+        state.code.append(222)
+        state.code.append(233)
+    }
+}
+def encode_fmulp(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+    if op1.kind == "st" and op2.kind == "st" and op1.reg == 1 and op2.reg == 0 {
+        state.code.append(222)
+        state.code.append(201)
+    }
+}
+def encode_fdivp(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+    if op1.kind == "st" and op2.kind == "st" and op1.reg == 1 and op2.reg == 0 {
+        state.code.append(222)
+        state.code.append(249)
+    }
+}
+def encode_fucomip(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+    if op1.kind == "st" and op2.kind == "st" and op1.reg == 0 and op2.reg == 1 {
+        state.code.append(223)
+        state.code.append(233)
+    }
 }
 
 # --- Instruction Dispatching ---
@@ -763,6 +963,10 @@ def emit_instruction(state, line: AsmLine) {
         encode_jge(state, line.operands)
         return
     }
+    if line.mnemonic == "jae" {
+        encode_jae(state, line.operands)
+        return
+    }
     if line.mnemonic == "mov" {
         encode_mov(state, line.operands)
         return
@@ -833,6 +1037,78 @@ def emit_instruction(state, line: AsmLine) {
     }
     if line.mnemonic == "setne" {
         encode_setne(state, line.operands)
+        return
+    }
+    if line.mnemonic == "fld" {
+        encode_fld(state, line.operands)
+        return
+    }
+    if line.mnemonic == "fstp" {
+        encode_fstp(state, line.operands)
+        return
+    }
+    if line.mnemonic == "fild" {
+        encode_fild(state, line.operands)
+        return
+    }
+    if line.mnemonic == "fistp" {
+        encode_fistp(state, line.operands)
+        return
+    }
+    if line.mnemonic == "fist" {
+        encode_fist(state, line.operands)
+        return
+    }
+    if line.mnemonic == "fst" {
+        encode_fst(state, line.operands)
+        return
+    }
+    if line.mnemonic == "fnstcw" {
+        encode_fnstcw(state, line.operands)
+        return
+    }
+    if line.mnemonic == "fldcw" {
+        encode_fldcw(state, line.operands)
+        return
+    }
+    if line.mnemonic == "fchs" {
+        encode_fchs(state)
+        return
+    }
+    if line.mnemonic == "ftst" {
+        encode_ftst(state)
+        return
+    }
+    if line.mnemonic == "fldz" {
+        encode_fldz(state)
+        return
+    }
+    if line.mnemonic == "fstsw" or line.mnemonic == "fnstsw" {
+        encode_fstsw_ax(state)
+        return
+    }
+    if line.mnemonic == "sahf" {
+        encode_sahf(state)
+        return
+    }
+    if line.mnemonic == "faddp" {
+        encode_faddp(state, line.operands)
+        return
+    }
+    if line.mnemonic == "fsubp" {
+        encode_fsubp(state, line.operands)
+        return
+    }
+    if line.mnemonic == "fmulp" {
+        encode_fmulp(state, line.operands)
+        return
+    }
+    if line.mnemonic == "fdivp" {
+        encode_fdivp(state, line.operands)
+        return
+    }
+    if line.mnemonic == "fucomip" {
+        encode_fucomip(state, line.operands)
         return
     }
 }

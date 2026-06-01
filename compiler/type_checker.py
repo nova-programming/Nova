@@ -234,6 +234,19 @@ class TypeInferer:
         self.pop_env()
         return AnyType()
 
+    def visit_ForIn(self, node):
+        self.push_env()
+        coll_t = self.visit(node.collection)
+        var_t = AnyType()
+        if isinstance(coll_t, ListType):
+            var_t = coll_t.element_type
+        self.set_var_type(node.var_name, var_t)
+        
+        for stmt in node.body:
+            self.visit(stmt)
+        self.pop_env()
+        return AnyType()
+
     def visit_ClassDef(self, node):
         for method in node.methods:
             self.visit(method)

@@ -9,6 +9,7 @@ data AstNode {
     val_int: int
     val_str: string
     line: int
+    is_float: int
     left: AstNode
     right: AstNode
     cond: AstNode
@@ -60,7 +61,20 @@ def parse_primary(state: ParserState) -> AstNode {
     if tok.kind == "NUMBER" {
         eat_tok(state, "NUMBER")
         node.kind = "Number"
-        node.val_int = atoi(tok.val)
+        has_dot = 0
+        ci = 0
+        while ci < len(tok.val) {
+            if tok.val[ci] == "." { has_dot = 1 }
+            ci = ci + 1
+        }
+        if has_dot == 1 {
+            node.is_float = 1
+            node.val_str = tok.val
+            node.val_int = 0
+        } else {
+            node.is_float = 0
+            node.val_int = atoi(tok.val)
+        }
     } else {
         if tok.kind == "STRING" {
             eat_tok(state, "STRING")
@@ -367,7 +381,7 @@ def parse_mul(state: ParserState) -> AstNode {
             eat_tok(state, tok.kind)
             right = parse_unary(state)
             
-            if left.kind == "Number" and right.kind == "Number" {
+            if left.kind == "Number" and right.kind == "Number" and left.is_float == 0 and right.is_float == 0 {
                 if tok.val == "*" { left.val_int = left.val_int * right.val_int }
                 if tok.val == "/" and right.val_int != 0 { left.val_int = left.val_int / right.val_int }
                 if tok.val == "%" and right.val_int != 0 { left.val_int = left.val_int % right.val_int }
@@ -396,7 +410,7 @@ def parse_add(state: ParserState) -> AstNode {
             eat_tok(state, tok.kind)
             right = parse_mul(state)
             
-            if left.kind == "Number" and right.kind == "Number" {
+            if left.kind == "Number" and right.kind == "Number" and left.is_float == 0 and right.is_float == 0 {
                 if tok.val == "+" {
                     left.val_int = left.val_int + right.val_int
                 } else {
@@ -585,6 +599,19 @@ def parse_statement(state: ParserState) -> AstNode {
     if tok.kind == "FOR" {
         eat_tok(state, "FOR")
         var_name = eat_tok(state, "IDENT").val
+        next_tok = current_tok(state)
+        if next_tok.kind == "IN" {
+            eat_tok(state, "IN")
+            collection = parse_expr(state)
+            body = parse_block(state)
+            node = AstNode()
+            node.line = stmt_line
+            node.kind = "ForIn"
+            node.val_str = var_name
+            node.left = collection
+            node.body = body
+            return node
+        }
         eat_tok(state, "EQUALS")
         start_expr = parse_expr(state)
         is_downto = 0

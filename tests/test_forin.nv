@@ -1,0 +1,5 @@
+items = [10, 20, 30]
+for x in items {
+    printd(x)
+}
+print("done")

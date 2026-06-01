@@ -221,6 +221,14 @@ def scan_vars(state: CodegenState, node: AstNode) {
             i = i + 1
         }
     }
+    if node.kind == "ForIn" {
+        register_var(state, node.val_str)
+        i = 0
+        while i < len(node.body) {
+            scan_vars(state, node.body[i])
+            i = i + 1
+        }
+    }
     if node.kind == "RawBlock" {
         i = 0
         while i < len(node.body) {

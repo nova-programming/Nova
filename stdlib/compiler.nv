@@ -55,31 +55,26 @@ def resolve_imports(ast: list, visited: list) -> list {
 
 def compile_file(path: string, debug_mode: int) -> list {
     print("Reading file: " + path)
-    # Read the source file
     fd = sys_open(path, "r")
     source = sys_read(fd)
     sys_close(fd)
 
     print("Tokenizing...")
-    # Step 1: Tokenize
     tokens = tokenize(source)
 
     print("Parsing...")
-    # Step 2: Parse into AST
     ast = parse(tokens, path)
     
     print("Resolving imports...")
-    # Step 2.5: Resolve Imports
     visited = []
     ast = resolve_imports(ast, visited)
 
-    # Step 2.6: Type checking
+    print("Type checking...")
     tc = TypeChecker()
     tc_init(tc)
     tc_check(tc, ast)
 
     print("Generating assembly...")
-    # Step 3: Generate x86 assembly
     asm = generate_assembly(ast, debug_mode)
 
     print("Compilation finished.")
@@ -101,6 +96,16 @@ def compile_to_file(input_path: string, output_path: string, debug_mode: int) {
 
 def compile_to_exe(input_path: string, output_path: string, debug_mode: int) {
     asm = compile_file(input_path, debug_mode)
+    
+    fd = sys_open(input_path + ".s", "w")
+    i = 0
+    while i < len(asm) {
+        sys_write(fd, asm[i])
+        sys_write(fd, "\n")
+        i = i + 1
+    }
+    sys_close(fd)
+
     print("Assembling...")
     assembled = assemble(asm)
     print("Linking...")

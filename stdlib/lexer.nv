@@ -62,6 +62,7 @@ def match_keyword(word: string) -> string {
     if word == "or" { return "OR" }
     if word == "not" { return "NOT" }
     if word == "has" { return "HAS" }
+    if word == "in" { return "IN" }
     if word == "elif" { return "ELIF" }
     if word == "true" { return "TRUE" }
     if word == "false" { return "FALSE" }
@@ -118,6 +119,12 @@ def tokenize(src: string) -> list {
             start = i
             while i < length and is_digit(src[i]) == 1 {
                 i = i + 1
+            }
+            if i < length and src[i] == "." and i + 1 < length and is_digit(src[i + 1]) == 1 {
+                i = i + 1
+                while i < length and is_digit(src[i]) == 1 {
+                    i = i + 1
+                }
             }
             num_str = ""
             j = start

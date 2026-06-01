@@ -163,7 +163,10 @@ def tc_visit(tc: TypeChecker, node: AstNode) -> Type {
 def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     if node == 0 { return create_any_type() }
     k = node.kind
-    if str_eq(k, "Number") == 1 { return create_scalar_type("int") }
+    if str_eq(k, "Number") == 1 {
+        if node.is_float == 1 { return create_scalar_type("float") }
+        return create_scalar_type("int")
+    }
     if str_eq(k, "String") == 1 { return create_scalar_type("string") }
     if str_eq(k, "Boolean") == 1 { return create_scalar_type("bool") }
     
@@ -385,6 +388,23 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     if str_eq(k, "ForLoop") == 1 {
         tc_push_env(tc)
         tc_set_var(tc, node.val_str, create_scalar_type("int"))
+        i = 0
+        while i < len(node.body) {
+            tc_visit(tc, node.body[i])
+            i = i + 1
+        }
+        tc_pop_env(tc)
+        return create_any_type()
+    }
+
+    if str_eq(k, "ForIn") == 1 {
+        tc_push_env(tc)
+        coll_t = tc_visit(tc, node.left)
+        loop_t = create_any_type()
+        if coll_t != 0 and coll_t.kind == "list" {
+            loop_t = coll_t.element_type
+        }
+        tc_set_var(tc, node.val_str, loop_t)
         i = 0
         while i < len(node.body) {
             tc_visit(tc, node.body[i])

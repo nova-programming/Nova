@@ -324,31 +324,16 @@ def compile_expr(state: CodegenState, node: AstNode) {
         compile_expr(state, node.left)
         emit(state, "    pop edx")
         emit(state, "    pop ecx")
-        if use_strlen == 1 {
-            emit(state, "    call _strlen")
-            emit(state, "    add esp, 4")
-        } else {
-            emit(state, "    push dword ptr [eax]")
-        }
-        return
-    }
-    if node.kind == "Slice" {
-        if node.right.kind != "" and node.cond.kind != "" {
-            compile_expr(state, node.cond)
-            compile_expr(state, node.right)
-            compile_expr(state, node.left)
-            emit(state, "    pop eax")
-            emit(state, "    pop ebx")
-            emit(state, "    pop ecx")
-            emit(state, "    push ecx")
-            emit(state, "    push ebx")
+        if is_str == 1 {
+            emit(state, "    movzx eax, byte ptr [edx + ecx]")
+            emit(state, "    shl eax, 1")
+            emit(state, "    add eax, offset char_strings")
             emit(state, "    push eax")
-            emit(state, "    call _slice_string")
-            emit(state, "    add esp, 12")
         } else {
-            emit(state, "    push 0")
+            emit(state, "    mov eax, [edx + 8]")
+            emit(state, "    mov eax, [eax + ecx*4]")
+            emit(state, "    push eax")
         }
-        emit(state, "    push eax")
         return
     }
     if node.kind == "StrConvert" {
@@ -368,6 +353,11 @@ def compile_expr(state: CodegenState, node: AstNode) {
         return
     }
     if node.kind == "Len" {
+        compile_expr(state, node.left)
+        use_strlen = 0
+        if is_string_expr(state, node.left) == 1 {
+            use_strlen = 1
+        }
         if node.left.kind == "DataFieldAccess" {
             if node.left.val_str == "struct_names" { use_strlen = 0 }
             if node.left.val_str == "struct_fields" { use_strlen = 0 }
@@ -382,8 +372,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    push eax")
         } else {
             emit(state, "    pop eax")
-            emit(state, "    mov eax, [eax]")
-            emit(state, "    push eax")
+            emit(state, "    push dword ptr [eax]")
         }
     }
     if node.kind == "MethodCall" {
@@ -417,7 +406,6 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    mov [ebx], eax")
             emit(state, "    push 0")
         }
-
         if node.val_str == "pop" {
             compile_expr(state, node.left)
             emit(state, "    pop ebx")

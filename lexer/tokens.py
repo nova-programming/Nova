@@ -29,6 +29,7 @@ TOKEN_SPEC = [
     ("ELSE",     r"else\b"),
     ("WHILE",    r"while\b"),
     ("FOR",      r"for\b"),
+    ("IN",       r"in\b"),
     ("TO",       r"to\b"),
     ("DOWNTO",   r"downto\b"),
     ("STEP",     r"step\b"),

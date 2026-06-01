@@ -384,15 +384,26 @@ class DataFieldAssign:
 
 class ForLoop:
     def __init__(self, var_name, start, end, step, body, is_downto=False, line=0):
-        self.line = line
         self.var_name = var_name
         self.start = start
         self.end = end
         self.step = step
         self.body = body
         self.is_downto = is_downto
+        self.line = line
+
     def __repr__(self):
-        return f"ForLoop('{self.var_name}', {self.start}, {self.end}, {self.step}, {self.body})"
+        return f"ForLoop({self.var_name}, {self.start}, {self.end}, {self.step}, {self.is_downto}, {self.body})"
+
+class ForIn:
+    def __init__(self, var_name, collection, body, line=0):
+        self.var_name = var_name
+        self.collection = collection
+        self.body = body
+        self.line = line
+        
+    def __repr__(self):
+        return f"ForIn({self.var_name}, {self.collection}, {self.body})"
 
 class ListLiteral:
     def __init__(self, elements, line=0):

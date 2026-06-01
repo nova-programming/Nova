@@ -1,0 +1,8 @@
+items = [10, 20, 30]
+i = 0
+while i < len(items) {
+    x = items[i]
+    print(str(x))
+    i = i + 1
+}
+print("ok")
