@@ -34,8 +34,7 @@ The compiler is written in Nova and bootstraps in three stages:
 The compiler pipeline within a single invocation:
 
 ```
-.nv source → lexer.nv → parser.nv → codegen.nv → .s assembly → [GCC → .exe]
-                                                   → [assembler.nv → linker.nv → .exe]
+.nv source → lexer.nv → parser.nv → type_checker.nv → codegen.nv → assembler.nv → linker.nv → .exe
 ```
 
 Additional standard library modules:
@@ -53,7 +52,6 @@ nova/
 ├── compiler/         # Type checker (Python)
 ├── lexer/            # Reference tokenizer (Python)
 ├── parser/           # Reference parser (Python)
-├── vm/               # Bytecode VM (Python)
 ├── stdlib/           # Self-hosted compiler written in Nova
 │   ├── lexer.nv          # Tokenizer (Nova)
 │   ├── parser.nv         # Recursive-descent parser (Nova)
@@ -75,7 +73,8 @@ nova/
 │   └── math_utils.nv     # Math utilities (Nova)
 ├── main.py           # Python bootstrap compiler entry point
 ├── nova_main.nv      # Self-hosted compiler entry point
-├── scratch/          # Development/debugging scripts
+├── modules/          # Standard library modules (Nova)
+├── docs/             # Documentation
 └── tests/            # Test programs
 ```
 
@@ -86,6 +85,9 @@ nova/
 - **List type unification** — `[1, 2, 3]` infers `list[int]`; heterogenous lists rejected at compile time
 - **Compile-time constant folding** — `1 + 2 * 3` evaluates to `7` at compile time, emits single `push 7`
 - **Capacity-based list allocation** — `append` doubles capacity exponentially, no realloc on every insertion
+- **Float literals + x87 runtime** — `x = 3.14; print(x)` uses IEEE 754 single precision, x87 FPU for arithmetic
+- **For-in loops `for i in items { ... }`** — iterate over list elements directly
+- **Boolean short-circuit** — `and`/`or` skip right operand evaluation when left determines the result
 - Variables and expressions (inferred typing)
 - Mutable by default; `const` for immutability
 - Functions with typed parameters and return types

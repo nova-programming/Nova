@@ -36,7 +36,8 @@ Uses x86 cdecl stack calling convention. All expressions push results onto the s
 - **Assignment**: Compile RHS → pop to `eax` → `mov [ebp - offset], eax`
 - **If/While**: Compile condition → pop → `cmp eax, 0` → conditional jump using `next_label()`
 - **Loop label stacks**: `while` pushes/ pops labels for `break` and `continue` resolution
-- **`print`**: Selects `fmt_int` or `fmt_str` based on type, pushes args → `call _printf`
+- **`print`**: Selects `fmt_int`, `fmt_str`, or `fmt_float` based on type, pushes args → `call _printf`
+- **ForIn loop** (`for i in items`): Pushes list pointer, iterates via index comparison with list length, accesses elements via `[eax + 8][ecx*4]`, cleans up stack after loop.
 
 ## Runtime Helpers
 
@@ -44,6 +45,7 @@ Generated at the end of the `.text` section:
 - `_concat_strings(base, append)` — allocates new buffer, copies both strings, null-terminates
 - `_slice_string(base, start, end)` — allocates `end-start+1` bytes, byte-copies substring, null-terminates
 - `_out_of_bounds` — bounds violation handler: prints "Index Out Of Bounds", calls `ExitProcess(1)`. Jump target for all bounds-check failures.
+- `L_write_float` — x87-based float-to-decimal conversion: extracts sign via `ftst`, processes integer part with `fist`, then iterates fraction digits via `fild`/`fmul`/`fist` loop. Uses `fnstcw`/`fldcw` to set truncation rounding mode.
 
 ## Bounds Checking
 
