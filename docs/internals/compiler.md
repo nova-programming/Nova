@@ -35,6 +35,7 @@ The compiler is split into modular `.nv` files:
 - `codegen.nv`, `codegen_expr.nv`, `codegen_stmt.nv` — x86-32 assembly generation (includes bounds checking)
 - `assembler.nv` (+ submodules) — x86 instruction encoder (integrated via `assemble_link_file`)
 - `linker.nv` — PE executable generator (integrated via `assemble_link_file`)
+- `errors.nv` — structured error/warning printer with fix suggestions
 - `compiler.nv` — pipeline orchestration
 - `os_win.nv` — platform runtime facade
 

@@ -37,6 +37,7 @@ Uses x86 cdecl stack calling convention. All expressions push results onto the s
 - **If/While**: Compile condition → pop → `cmp eax, 0` → conditional jump using `next_label()`
 - **Loop label stacks**: `while` pushes/ pops labels for `break` and `continue` resolution
 - **`print`**: Selects `fmt_int`, `fmt_str`, or `fmt_float` based on type, pushes args → `call _printf`
+- **`printd`** (debug print): Writes `debug - [line N]: ` prefix via `L_write_stdout`/`L_write_int`, then the value via `_printf` or `L_write_stdout`, then a newline. Only emits code at `debug_mode == 1`.
 - **ForIn loop** (`for i in items`): Pushes list pointer, iterates via index comparison with list length, accesses elements via `[eax + 8][ecx*4]`, cleans up stack after loop.
 
 ## Runtime Helpers
@@ -64,4 +65,7 @@ String byte access (`movzx eax, byte ptr [edx+ecx]`) is unchecked — the `char_
 Expression codegen reads `node.inferred_type` (set by `type_checker.nv`'s `tc_check` pass) to:
 - Select string vs integer comparison in `Compare` nodes
 - Select string vs list indexing in `ArrayIndex` nodes
-- Select format string (`%s` vs `%d`) for `print`
+- Select format string (`%s` vs `%d` vs `%f`) for `print` and `printd`
+- Detect float vs int via `is_float_expr()` for PrintD format selection
+
+The helper functions `is_string_expr()` and `is_float_expr()` provide type-aware branching in the codegen without requiring full type resolution at codegen time.

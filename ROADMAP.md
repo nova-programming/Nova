@@ -35,6 +35,8 @@ The assembler (`assembler.nv` + submodules) and linker (`linker.nv`) are fully i
 | Boolean short-circuit (`and`/`or`) | ✅ |
 | For-in loop over lists (`for i in items`) | ✅ |
 | Float literals + x87 runtime `print` | ✅ |
+| Debug print (`printd`) with line numbers | ✅ (`debug - [line N]: <value>`) |
+| Smart error messages with fix suggestions | ✅ (`errors.nv` module with `err()`/`warn()`) |
 | Self-hosted assembler + linker integration | ✅ (in-process `assemble()` + `link()` in `build` path) |
 | `_realloc` no `HEAP_REALLOC_IN_PLACE_ONLY` | ✅ (flag 0, allows heap block movement) |
 | Self-hosted GCC-free pipeline | ✅ (fully integrated in `build` command) |

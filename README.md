@@ -40,6 +40,7 @@ The compiler pipeline within a single invocation:
 Additional standard library modules:
 - `types.nv` — Type system abstraction (scalar, struct, list, func types)
 - `type_checker.nv` — Static type inference and enforcement
+- `errors.nv` — Structured error/warning printer with fix suggestions
 - `assembler.nv` — x86-32 instruction encoder (assembles .s text into byte streams, integrated)
 - `linker.nv` — Windows PE executable generator (packages bytes into .exe directly, integrated)
 - `memory.nv` — Raw memory byte access utilities
@@ -68,6 +69,7 @@ nova/
 │   ├── type_checker.nv   # Static type inference (Nova)
 │   ├── linker.nv         # Native PE linker (Nova, integrated via assemble_link_file)
 │   ├── memory.nv         # Raw memory byte access (Nova)
+│   ├── errors.nv         # Structured error/warning printer (Nova)
 │   ├── os_win.nv         # Windows syscall/runtime facade (Nova)
 │   ├── os_linux.nv       # Linux syscall/runtime facade (Nova)
 │   └── math_utils.nv     # Math utilities (Nova)
@@ -88,6 +90,8 @@ nova/
 - **Float literals + x87 runtime** — `x = 3.14; print(x)` uses IEEE 754 single precision, x87 FPU for arithmetic
 - **For-in loops `for i in items { ... }`** — iterate over list elements directly
 - **Boolean short-circuit** — `and`/`or` skip right operand evaluation when left determines the result
+- **Debug prints (`printd`)** — `printd(x)` outputs `debug - [line N]: <value>` with automatic line number, enabled via `--debug` flag
+- **Smart error messages** — compiler errors include error category, line number, and fix suggestions
 - Variables and expressions (inferred typing)
 - Mutable by default; `const` for immutability
 - Functions with typed parameters and return types
