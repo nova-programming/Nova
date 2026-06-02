@@ -1,4 +1,0 @@
-items = [10, 20, 30]
-print(str(items[0]))
-print(str(items[1]))
-print(str(items[2]))

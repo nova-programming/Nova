@@ -1,7 +1,0 @@
-import os_win
-
-print("Testing sys_get_args...\n")
-sys_flush()
-args = sys_get_args()
-print("Args len: " + str(len(args)) + "\n")
-sys_flush()

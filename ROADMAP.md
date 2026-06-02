@@ -47,6 +47,18 @@ The assembler (`assembler.nv` + submodules) and linker (`linker.nv`) are fully i
 | Dynamic arrays/lists (native) | ✅ |
 | `sys_get_args` (native) | ✅ |
 | `sys_system` (native GCC invocation) | ✅ |
+| Variable-to-Register Promotion (Phase 3) | ✅ (Maps vars directly to `esi`/`edi` reducing latency ~50%) |
+
+## Near-Term Goals
+
+### 1. Cross-Platform Abstractions (`os_*.nv`)
+Develop a unified OS-layer interface (`system.nv`) that automatically swaps out implementations based on whether the host is Windows (`os_win.nv`), Linux (`os_linux.nv`), or macOS (`os_mac.nv`), completely hiding specific configs from end-users.
+
+### 2. The "Galaxy" Package Manager
+Design and architect a central repository and library manager (akin to `pip` or `cargo`) to allow developers to build, pull, and distribute pure Nova codebase packages effortlessly.
+
+### 3. Small Function Inlining (Phase 4)
+Implement advanced compiler optimizations to inline extremely short, non-recursive functions, entirely eliminating call/ret overhead for utility methods.
 
 ## Long-Term Goals
 

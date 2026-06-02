@@ -26,8 +26,17 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         }
         compile_expr(state, node.left)
         emit(state, "    pop eax")
-        offset = find_var_offset(state, node.val_str)
-        emit(state, "    mov [ebp - " + str(offset) + "], eax")
+        reg = find_var_reg(state, node.val_str)
+        if reg != "" {
+            emit(state, "    mov " + reg + ", eax")
+        } else {
+            offset = find_var_offset(state, node.val_str)
+            if offset < 0 {
+                emit(state, "    mov [ebp + " + str(0 - offset) + "], eax")
+            } else {
+                emit(state, "    mov [ebp - " + str(offset) + "], eax")
+            }
+        }
     }
     if node.kind == "DataFieldAssign" {
         compile_expr(state, node.right)
@@ -119,6 +128,11 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
     if node.kind == "Return" {
         compile_expr(state, node.left)
         emit(state, "    pop eax")
+        r = len(state.used_regs) - 1
+        while r >= 0 {
+            emit(state, "    pop " + state.used_regs[r])
+            r = r - 1
+        }
         emit(state, "    mov esp, ebp")
         emit(state, "    pop ebp")
         emit(state, "    ret")

@@ -31,6 +31,65 @@ class X86Codegen:
                     return i * 4
         return self.get_prop_offset(field_name)
 
+    def is_leaf_expr(self, node):
+        if isinstance(node, Number): return True
+        if isinstance(node, Boolean): return True
+        if isinstance(node, Variable): return True
+        return False
+
+    def compile_leaf_to_reg(self, node, reg):
+        if isinstance(node, Number):
+            if isinstance(node.value, float):
+                import struct
+                bits = struct.unpack('<I', struct.pack('<f', node.value))[0]
+                self.assembly.append(f"    mov {reg}, {bits}")
+            else:
+                self.assembly.append(f"    mov {reg}, {node.value}")
+        elif isinstance(node, Boolean):
+            val = 1 if node.value else 0
+            self.assembly.append(f"    mov {reg}, {val}")
+        elif isinstance(node, Variable):
+            offset = self.local_vars[node.name]
+            if isinstance(offset, str):
+                self.assembly.append(f"    mov {reg}, {offset}")
+            elif offset < 0:
+                self.assembly.append(f"    mov {reg}, [ebp + {-offset}]")
+            else:
+                self.assembly.append(f"    mov {reg}, [ebp - {offset}]")
+
+    def peephole(self):
+        lines = self.assembly
+        result = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+
+            # Pattern: push eax / pop eax → nop
+            if (i + 1 < len(lines) and
+                stripped == "push eax" and
+                lines[i + 1].strip() == "pop eax"):
+                i += 2
+                continue
+
+            # Pattern: push eax / pop ebx → mov ebx, eax
+            if (i + 1 < len(lines) and
+                stripped == "push eax" and
+                lines[i + 1].strip() == "pop ebx"):
+                result.append("    mov ebx, eax")
+                i += 2
+                continue
+
+            # Pattern: xor eax, eax → mov eax, 0 (simpler)
+            if stripped == "xor eax, eax":
+                result.append("    mov eax, 0")
+                i += 1
+                continue
+
+            result.append(line)
+            i += 1
+        self.assembly = result
+
     def next_label(self, prefix="L"):
         self.label_count += 1
         return f"{prefix}_{self.label_count}"
@@ -279,6 +338,9 @@ class X86Codegen:
         
         # Win32 API runtime functions (replaces MSVCRT)
         self._emit_win32_runtime()
+        
+        # Peephole optimization
+        self.peephole()
         
         # Append data section
         self.assembly.append(".data")
@@ -985,8 +1047,13 @@ class X86Codegen:
         """Pre-scan statements for assignments to reserve stack space for local variables"""
         if isinstance(node, Assignment):
             if node.name not in self.local_vars:
-                self.local_offset += 4
-                self.local_vars[node.name] = self.local_offset
+                if hasattr(self, 'reg_pool') and self.reg_pool:
+                    reg = self.reg_pool.pop(0)
+                    self.local_vars[node.name] = reg
+                    self.used_regs.append(reg)
+                else:
+                    self.local_offset += 4
+                    self.local_vars[node.name] = self.local_offset
         elif isinstance(node, IfElse):
             for s in node.if_body:
                 self.scan_vars(s)
@@ -997,14 +1064,24 @@ class X86Codegen:
                 self.scan_vars(s)
         elif isinstance(node, ForLoop):
             if node.var_name not in self.local_vars:
-                self.local_offset += 4
-                self.local_vars[node.var_name] = self.local_offset
+                if hasattr(self, 'reg_pool') and self.reg_pool:
+                    reg = self.reg_pool.pop(0)
+                    self.local_vars[node.var_name] = reg
+                    self.used_regs.append(reg)
+                else:
+                    self.local_offset += 4
+                    self.local_vars[node.var_name] = self.local_offset
             for s in node.body:
                 self.scan_vars(s)
         elif isinstance(node, ForIn):
             if node.var_name not in self.local_vars:
-                self.local_offset += 4
-                self.local_vars[node.var_name] = self.local_offset
+                if hasattr(self, 'reg_pool') and self.reg_pool:
+                    reg = self.reg_pool.pop(0)
+                    self.local_vars[node.var_name] = reg
+                    self.used_regs.append(reg)
+                else:
+                    self.local_offset += 4
+                    self.local_vars[node.var_name] = self.local_offset
             for s in node.body:
                 self.scan_vars(s)
         elif isinstance(node, RawBlock):
@@ -1034,16 +1111,23 @@ class X86Codegen:
             
         # Scan function body for local variables
         self.local_offset = 0
+        self.reg_pool = ["esi", "edi"]
+        self.used_regs = []
         for stmt in fn.body:
             self.scan_vars(stmt)
             
         if self.local_offset > 0:
             self.assembly.append(f"    sub esp, {self.local_offset}")
             
+        for reg in self.used_regs:
+            self.assembly.append(f"    push {reg}")
+            
         for stmt in fn.body:
             self.compile_stmt(stmt)
             
         # Epilogue
+        for reg in reversed(self.used_regs):
+            self.assembly.append(f"    pop {reg}")
         self.assembly.append("    mov esp, ebp")
         self.assembly.append("    pop ebp")
         self.assembly.append("    ret")
@@ -1059,7 +1143,10 @@ class X86Codegen:
             self.compile_expr(node.value)
             self.assembly.append("    pop eax")
             offset = self.local_vars[node.name]
-            self.assembly.append(f"    mov [ebp - {offset}], eax")
+            if isinstance(offset, str):
+                self.assembly.append(f"    mov {offset}, eax")
+            else:
+                self.assembly.append(f"    mov [ebp - {offset}], eax")
             # Track if this variable holds a string
             if self._is_string_expr(node.value):
                 self.string_vars = getattr(self, 'string_vars', set())
@@ -1116,6 +1203,9 @@ class X86Codegen:
         elif isinstance(node, Return):
             self.compile_expr(node.value)
             self.assembly.append("    pop eax")
+            if hasattr(self, 'used_regs'):
+                for reg in reversed(self.used_regs):
+                    self.assembly.append(f"    pop {reg}")
             self.assembly.append("    mov esp, ebp")
             self.assembly.append("    pop ebp")
             self.assembly.append("    ret")
@@ -1170,7 +1260,10 @@ class X86Codegen:
             self.compile_expr(start_val)
             self.assembly.append("    pop eax")
             offset = self.local_vars[node.var_name]
-            self.assembly.append(f"    mov [ebp - {offset}], eax")
+            if isinstance(offset, str):
+                self.assembly.append(f"    mov {offset}, eax")
+            else:
+                self.assembly.append(f"    mov [ebp - {offset}], eax")
             
             loop_label = self.next_label("L_for")
             end_label = self.next_label("L_for_end")
@@ -1179,7 +1272,10 @@ class X86Codegen:
             
             self.assembly.append(f"{loop_label}:")
             # Load var
-            self.assembly.append(f"    mov eax, [ebp - {offset}]")
+            if isinstance(offset, str):
+                self.assembly.append(f"    mov eax, {offset}")
+            else:
+                self.assembly.append(f"    mov eax, [ebp - {offset}]")
             self.assembly.append("    push eax")
             # Evaluate end
             self.compile_expr(end_val)
@@ -1197,14 +1293,20 @@ class X86Codegen:
                 
             # Increment/Decrement step
             self.assembly.append(f"{continue_label}:")
-            self.assembly.append(f"    mov eax, [ebp - {offset}]")
+            if isinstance(offset, str):
+                self.assembly.append(f"    mov eax, {offset}")
+            else:
+                self.assembly.append(f"    mov eax, [ebp - {offset}]")
             self.compile_expr(step_val)
             self.assembly.append("    pop ebx")
             if node.is_downto:
                 self.assembly.append("    sub eax, ebx")
             else:
                 self.assembly.append("    add eax, ebx")
-            self.assembly.append(f"    mov [ebp - {offset}], eax")
+            if isinstance(offset, str):
+                self.assembly.append(f"    mov {offset}, eax")
+            else:
+                self.assembly.append(f"    mov [ebp - {offset}], eax")
             
             self.assembly.append(f"    jmp {loop_label}")
             self.assembly.append(f"{end_label}:")
@@ -1230,7 +1332,9 @@ class X86Codegen:
             self.assembly.append("    mov eax, [eax + ecx*4]")
             
             var_off = self.local_vars[node.var_name]
-            if var_off < 0:
+            if isinstance(var_off, str):
+                self.assembly.append(f"    mov {var_off}, eax")
+            elif var_off < 0:
                 self.assembly.append(f"    mov [ebp + {-var_off}], eax")
             else:
                 self.assembly.append(f"    mov [ebp - {var_off}], eax")
@@ -1352,7 +1456,9 @@ class X86Codegen:
             self.assembly.append(f"    push {val}")
         elif isinstance(node, Variable):
             offset = self.local_vars[node.name]
-            if offset < 0:
+            if isinstance(offset, str):
+                self.assembly.append(f"    mov eax, {offset}")
+            elif offset < 0:
                 # Argument: ebp - offset (offset is negative, e.g. -8)
                 self.assembly.append(f"    mov eax, [ebp + {-offset}]")
             else:
@@ -1394,10 +1500,13 @@ class X86Codegen:
                 self.assembly.append(f"{label_end}:")
                 return
 
-            self.compile_expr(node.left)
-            self.compile_expr(node.right)
+            left_leaf = self.is_leaf_expr(node.left)
+            right_leaf = self.is_leaf_expr(node.right)
+            all_leaf = left_leaf and right_leaf
             is_float_op = self._is_float_expr(node.left) or self._is_float_expr(node.right)
             if is_float_op:
+                self.compile_expr(node.left)
+                self.compile_expr(node.right)
                 self.assembly.append("    fld dword ptr [esp + 4]")
                 self.assembly.append("    fld dword ptr [esp]")
                 if node.op == "+":
@@ -1413,7 +1522,39 @@ class X86Codegen:
                 self.assembly.append("    add esp, 8")
                 self.assembly.append("    sub esp, 4")
                 self.assembly.append("    fstp dword ptr [esp]")
+            elif all_leaf and node.op == "+" and (self._is_string_expr(node.left) or self._is_string_expr(node.right)):
+                self.compile_expr(node.left)
+                self.compile_expr(node.right)
+                self.assembly.append("    pop ebx")
+                self.assembly.append("    pop eax")
+            elif all_leaf:
+                self.compile_leaf_to_reg(node.right, 'ebx')
+                self.compile_leaf_to_reg(node.left, 'eax')
+                if node.op == "+":
+                    self.assembly.append("    add eax, ebx")
+                elif node.op == "-":
+                    self.assembly.append("    sub eax, ebx")
+                elif node.op == "*":
+                    self.assembly.append("    imul eax, ebx")
+                elif node.op == "/":
+                    self.assembly.append("    cdq")
+                    self.assembly.append("    idiv ebx")
+                elif node.op == "%":
+                    self.assembly.append("    cdq")
+                    self.assembly.append("    idiv ebx")
+                    self.assembly.append("    mov eax, edx")
+                elif node.op == "&":
+                    self.assembly.append("    and eax, ebx")
+                elif node.op == "<<":
+                    self.assembly.append("    mov ecx, ebx")
+                    self.assembly.append("    shl eax, cl")
+                elif node.op == ">>":
+                    self.assembly.append("    mov ecx, ebx")
+                    self.assembly.append("    sar eax, cl")
+                self.assembly.append("    push eax")
             else:
+                self.compile_expr(node.left)
+                self.compile_expr(node.right)
                 self.assembly.append("    pop ebx")
                 self.assembly.append("    pop eax")
                 if node.op == "+":
@@ -1456,11 +1597,14 @@ class X86Codegen:
                 self.assembly.append("    movzx eax, al")
             self.assembly.append("    push eax")
         elif isinstance(node, Compare):
-            self.compile_expr(node.left)
-            self.compile_expr(node.right)
+            left_leaf = self.is_leaf_expr(node.left)
+            right_leaf = self.is_leaf_expr(node.right)
+            all_leaf = left_leaf and right_leaf
             is_float_cmp = self._is_float_expr(node.left) or self._is_float_expr(node.right)
             
             if is_float_cmp:
+                self.compile_expr(node.left)
+                self.compile_expr(node.right)
                 self.assembly.append("    fld dword ptr [esp]")
                 self.assembly.append("    fld dword ptr [esp + 4]")
                 self.assembly.append("    add esp, 8")
@@ -1468,7 +1612,12 @@ class X86Codegen:
                 self.assembly.append("    fstp st(0)")
                 self.assembly.append("    pushf")
                 self.assembly.append("    pop eax")
+            elif all_leaf:
+                self.compile_leaf_to_reg(node.right, 'ebx')
+                self.compile_leaf_to_reg(node.left, 'eax')
             else:
+                self.compile_expr(node.left)
+                self.compile_expr(node.right)
                 self.assembly.append("    pop ebx")
                 self.assembly.append("    pop eax")
             
@@ -1486,76 +1635,52 @@ class X86Codegen:
                 else:
                     is_str_cmp = True
             
-            label_true = self.next_label("L_cmp_true")
-            label_end = self.next_label("L_cmp_end")
-            
-            if node.op == "has":
-                self.assembly.append("    cmp eax, 0")
-                self.assembly.append(f"    jne {label_true}")
-            elif is_float_cmp:
+            if is_float_cmp:
                 # fucomip sets ZF=1 if equal, CF=1 if below; eax holds pushed flags
                 if node.op == "==":
                     self.assembly.append("    and eax, 64")
                     self.assembly.append("    cmp eax, 0")
-                    self.assembly.append(f"    jne {label_true}")
                 elif node.op == "!=":
                     self.assembly.append("    and eax, 64")
                     self.assembly.append("    cmp eax, 0")
-                    self.assembly.append(f"    je {label_true}")
                 elif node.op == "<":
                     self.assembly.append("    and eax, 1")
                     self.assembly.append("    cmp eax, 1")
-                    self.assembly.append(f"    je {label_true}")
                 elif node.op == ">":
                     self.assembly.append("    and eax, 65")
                     self.assembly.append("    cmp eax, 0")
-                    self.assembly.append(f"    je {label_true}")
                 elif node.op == "<=":
                     self.assembly.append("    and eax, 65")
                     self.assembly.append("    cmp eax, 0")
-                    self.assembly.append(f"    jne {label_true}")
                 elif node.op == ">=":
                     self.assembly.append("    and eax, 1")
                     self.assembly.append("    cmp eax, 0")
-                    self.assembly.append(f"    je {label_true}")
-            elif is_str_cmp:
-                self.assembly.append("    push ebx")
-                self.assembly.append("    push eax")
-                self.assembly.append("    call _strcmp")
-                self.assembly.append("    add esp, 8")
-                self.assembly.append("    cmp eax, 0")
-                if node.op == "==":
-                    self.assembly.append(f"    je {label_true}")
-                elif node.op == "!=":
-                    self.assembly.append(f"    jne {label_true}")
-                elif node.op == "<":
-                    self.assembly.append(f"    jl {label_true}")
-                elif node.op == "<=":
-                    self.assembly.append(f"    jle {label_true}")
-                elif node.op == ">":
-                    self.assembly.append(f"    jg {label_true}")
-                elif node.op == ">=":
-                    self.assembly.append(f"    jge {label_true}")
-            else:
-                self.assembly.append("    cmp eax, ebx")
-                if node.op == "==":
-                    self.assembly.append(f"    je {label_true}")
-                elif node.op == "!=":
-                    self.assembly.append(f"    jne {label_true}")
-                elif node.op == "<":
-                    self.assembly.append(f"    jl {label_true}")
-                elif node.op == "<=":
-                    self.assembly.append(f"    jle {label_true}")
-                elif node.op == ">":
-                    self.assembly.append(f"    jg {label_true}")
-                elif node.op == ">=":
-                    self.assembly.append(f"    jge {label_true}")
                 
-            self.assembly.append("    push 0")
-            self.assembly.append(f"    jmp {label_end}")
-            self.assembly.append(f"{label_true}:")
-            self.assembly.append("    push 1")
-            self.assembly.append(f"{label_end}:")
+                bool_jcc_map = {"==": "jne", "!=": "je", "<": "je", ">": "je", "<=": "jne", ">=": "je"}
+                jcc = bool_jcc_map[node.op]
+                label_true = self.next_label("L_cmp_true")
+                label_end = self.next_label("L_cmp_end")
+                self.assembly.append(f"    {jcc} {label_true}")
+                self.assembly.append("    push 0")
+                self.assembly.append(f"    jmp {label_end}")
+                self.assembly.append(f"{label_true}:")
+                self.assembly.append("    push 1")
+                self.assembly.append(f"{label_end}:")
+            else:
+                setcc_map = {"==": "sete", "!=": "setne", "<": "setl", "<=": "setle", ">": "setg", ">=": "setge"}
+                if node.op == "has":
+                    self.assembly.append("    cmp eax, 0")
+                elif is_str_cmp:
+                    self.assembly.append("    push ebx")
+                    self.assembly.append("    push eax")
+                    self.assembly.append("    call _strcmp")
+                    self.assembly.append("    add esp, 8")
+                    self.assembly.append("    cmp eax, 0")
+                else:
+                    self.assembly.append("    cmp eax, ebx")
+                self.assembly.append(f"    {setcc_map[node.op]} al")
+                self.assembly.append("    movzx eax, al")
+                self.assembly.append("    push eax")
         elif isinstance(node, Call):
             if node.name in self.struct_defs:
                 # Compute struct size from max prop_offset + 4

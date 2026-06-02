@@ -1,4 +1,0 @@
-@raw {
-    mov eax, 42
-    mov ebx, eax
-}

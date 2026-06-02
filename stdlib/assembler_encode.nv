@@ -667,10 +667,48 @@ def encode_shl(state, ops: list) {
     state.code.append(byte_mask(op2.imm_val))
 }
 
+
+
+# --- SETCC ---
 def encode_sete(state, ops: list) {
     op = parse_operand(ops[0])
     state.code.append(15)
     state.code.append(148)
+    state.code.append(build_modrm(3, 0, op.reg))
+}
+
+def encode_setne(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(15)
+    state.code.append(149)
+    state.code.append(build_modrm(3, 0, op.reg))
+}
+
+def encode_setl(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(15)
+    state.code.append(156)
+    state.code.append(build_modrm(3, 0, op.reg))
+}
+
+def encode_setge(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(15)
+    state.code.append(157)
+    state.code.append(build_modrm(3, 0, op.reg))
+}
+
+def encode_setle(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(15)
+    state.code.append(158)
+    state.code.append(build_modrm(3, 0, op.reg))
+}
+
+def encode_setg(state, ops: list) {
+    op = parse_operand(ops[0])
+    state.code.append(15)
+    state.code.append(159)
     state.code.append(build_modrm(3, 0, op.reg))
 }
 
@@ -774,15 +812,7 @@ def encode_sar(state, ops: list) {
     state.code.append(build_modrm(3, 7, op1.reg))
 }
 
-# --- SETNE ---
 
-def encode_setne(state, ops: list) {
-    # setne r8: opcode 0x0F 0x95
-    op1 = parse_operand(ops[0])
-    state.code.append(15)
-    state.code.append(149)
-    state.code.append(build_modrm(3, 0, op1.reg))
-}
 
 # --- x87 FPU ---
 
@@ -1077,6 +1107,23 @@ def emit_instruction(state, line: AsmLine) {
     }
     if line.mnemonic == "sete" {
         encode_sete(state, line.operands)
+        return
+    }
+
+    if line.mnemonic == "setl" {
+        encode_setl(state, line.operands)
+        return
+    }
+    if line.mnemonic == "setge" {
+        encode_setge(state, line.operands)
+        return
+    }
+    if line.mnemonic == "setle" {
+        encode_setle(state, line.operands)
+        return
+    }
+    if line.mnemonic == "setg" {
+        encode_setg(state, line.operands)
         return
     }
     if line.mnemonic == "movzx" {

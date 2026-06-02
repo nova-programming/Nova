@@ -1,6 +1,0 @@
-import os_win
-
-def main() -> int {
-    print("hello")
-    return 0
-}

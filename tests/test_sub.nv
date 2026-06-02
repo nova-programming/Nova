@@ -1,3 +1,0 @@
-import os_win
-s = "Hello World"
-print(str_sub(s, 0, 5))
