@@ -144,15 +144,21 @@ def main():
 
     command = sys.argv[1]
     debug_mode = 0
+    bench_mode = 0
     file_path = None
     for arg in sys.argv[2:]:
         if arg in ("-d", "--debug"):
             debug_mode = 1
+        elif arg in ("-b", "--bench"):
+            bench_mode = 1
         else:
             file_path = arg
     if file_path is None:
         print_usage()
         return
+
+    import time
+    start_time = time.time()
 
     if command in ("dev", "run"):
         run_source(file_path)
@@ -161,6 +167,9 @@ def main():
     else:
         print(f"Unknown command: {command}")
         print_usage()
+        
+    if bench_mode:
+        print(f"[Benchmark] Build completed in {int((time.time() - start_time) * 1000)} ms")
 
 
 if __name__ == "__main__":

@@ -1404,7 +1404,7 @@ class X86Codegen:
                     lines[l] = []
                 lines[l].append(stmt)
                 
-            asm_mnemonics = {"inc", "dec", "mov", "add", "sub", "cmp", "jmp", "je", "jne", "jl", "jle", "jg", "jge", "jz", "jnz", "push", "pop", "pushf", "popf", "call", "ret", "lea", "xor", "and", "or", "shl", "shr", "movzx", "movsx", "test", "neg", "idiv", "imul", "div", "not", "rep", "repnz", "cdq", "fld", "fstp", "fadd", "faddp", "fsub", "fsubp", "fmul", "fmulp", "fdiv", "fdivp", "fist", "fst", "fchs", "fucomip", "fcomip", "fild", "fistp", "lahf", "sahf", "nop", "hlt", "jns", "jae", "syscall", "fldcw", "fnstcw"}
+            asm_mnemonics = {"inc", "dec", "mov", "add", "sub", "cmp", "jmp", "je", "jne", "jl", "jle", "jg", "jge", "jz", "jnz", "push", "pop", "pushf", "popf", "call", "ret", "lea", "xor", "and", "or", "shl", "shr", "rol", "ror", "movzx", "movsx", "test", "neg", "idiv", "imul", "div", "not", "rep", "repnz", "cdq", "fld", "fstp", "fadd", "faddp", "fsub", "fsubp", "fmul", "fmulp", "fdiv", "fdivp", "fist", "fst", "fchs", "fucomip", "fcomip", "fild", "fistp", "lahf", "sahf", "nop", "hlt", "jns", "jae", "syscall", "fldcw", "fnstcw", "cld", "std", "stc", "clc", "cmc", "int3", "leave", "movsd"}
             
             for l, stmts in sorted(lines.items()):
                 first = stmts[0]
@@ -1414,7 +1414,7 @@ class X86Codegen:
                         if isinstance(n, Number): return str(n.value)
                         if type(n).__name__ == "BinOp": return f"{stringify(n.left)}{n.op}{stringify(n.right)}"
                         if type(n).__name__ == "Compare": return f"{stringify(n.left)}{n.op}{stringify(n.right)}"
-                        if type(n).__name__ == "ArrayIndex": return f"{stringify(n.base)}[{stringify(n.index)}]"
+                        if type(n).__name__ == "ArrayIndex": return f"{stringify(n.base)} [{stringify(n.index)}]"
                         if type(n).__name__ == "UnaryOp": return f"{n.op}{stringify(n.value)}"
                         if type(n).__name__ == "Call": return f"{n.name}({', '.join(stringify(a) for a in n.args)})"
                         if type(n).__name__ == "ListLiteral":

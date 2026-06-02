@@ -59,7 +59,7 @@ TOKEN_SPEC = [
     ("STR",         r"str\b"),
 
     # Identifiers
-    ("IDENT",    r"[a-zA-Z_][a-zA-Z0-9_]*"),
+    ("IDENT",    r"[a-zA-Z_@][a-zA-Z0-9_@]*"),
 
     # Comparison Operators
     ("EQEQ",     r"=="),

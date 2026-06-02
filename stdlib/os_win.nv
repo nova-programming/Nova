@@ -161,3 +161,7 @@ def sys_flush() {
         fflush(0)
     }
 }
+
+def sys_get_tick_count() -> int {
+    return GetTickCount@0()
+}

@@ -985,7 +985,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
 }
 
 def is_asm_mnemonic(state: CodegenState, name: string) -> int {
-    mnemonics = ["inc", "dec", "mov", "add", "sub", "cmp", "jmp", "je", "jne", "jl", "jle", "jg", "jge", "jz", "jnz", "push", "pop", "pushf", "popf", "call", "ret", "lea", "xor", "and", "or", "shl", "shr", "movzx", "movsx", "test", "neg", "idiv", "imul", "div", "not", "rep", "repnz", "cdq", "fld", "fstp", "fadd", "faddp", "fsub", "fsubp", "fmul", "fmulp", "fdiv", "fdivp", "fist", "fst", "fchs", "fucomip", "fcomip", "fild", "fistp", "lahf", "sahf", "nop", "hlt", "jns", "jae", "syscall", "fldcw", "fnstcw"]
+    mnemonics = ["inc", "dec", "mov", "add", "sub", "cmp", "jmp", "je", "jne", "jl", "jle", "jg", "jge", "jz", "jnz", "push", "pop", "pushf", "popf", "call", "ret", "lea", "xor", "and", "or", "shl", "shr", "rol", "ror", "movzx", "movsx", "test", "neg", "idiv", "imul", "div", "not", "rep", "repnz", "cdq", "fld", "fstp", "fadd", "faddp", "fsub", "fsubp", "fmul", "fmulp", "fdiv", "fdivp", "fist", "fst", "fchs", "fucomip", "fcomip", "fild", "fistp", "lahf", "sahf", "nop", "hlt", "jns", "jae", "syscall", "fldcw", "fnstcw", "cld", "std", "stc", "clc", "cmc", "int3", "leave", "movsd"]
     i = 0
     while i < len(mnemonics) {
         if mnemonics[i] == name { return 1 }
@@ -1010,7 +1010,7 @@ def node_to_asm(state: CodegenState, node: AstNode) -> string {
         return result
     }
     if node.kind == "String" { return node.val_str }
-    if node.kind == "ArrayIndex" { return node_to_asm(state, node.left) + "[" + node_to_asm(state, node.right) + "]" }
+    if node.kind == "ArrayIndex" { return node_to_asm(state, node.left) + " [" + node_to_asm(state, node.right) + "]" }
     if node.kind == "Compare" { return node_to_asm(state, node.left) + node.val_str + node_to_asm(state, node.right) }
     if node.kind == "Call" {
         result = node.val_str + "("

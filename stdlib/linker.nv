@@ -260,7 +260,7 @@ def link(sections: list) -> list {
     while i < len(labels) {
         if labels[i].defined == 0 {
             actual_name = labels[i].name
-            if len(actual_name) > 0 and char_code(actual_name[0]) == 95 {
+            while len(actual_name) > 0 and char_code(actual_name[0]) == 95 {
                 actual_name = str_sub(actual_name, 1, len(actual_name))
             }
             # Strip @N stdcall decoration

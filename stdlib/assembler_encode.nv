@@ -164,6 +164,23 @@ def append_label_ref(state, name: string, size: int) {
         i = i + 1
     }
     if found == 0 {
+        exists = 0
+        k = 0
+        while k < len(state.labels) {
+            if state.labels[k].name == name {
+                exists = 1
+                break
+            }
+            k = k + 1
+        }
+        if exists == 0 {
+            lbl = LabelEntry()
+            lbl.name = name
+            lbl.offset = 0
+            lbl.defined = 0
+            state.labels.append(lbl)
+        }
+        
         fixup = Fixup()
         fixup.offset = len(state.code)
         fixup.target = name
@@ -426,6 +443,34 @@ def encode_add(state, ops: list) {
         state.code.append(byte_mask(op2.imm_val))
         return
     }
+    if op1.kind == "reg" and op2.kind == "mem" {
+        state.code.append(3)
+        if op2.mem_index >= 0 {
+            encode_modrm_sib_reg(state, op2, op1.reg)
+        } else {
+            encode_modrm_mem_reg(state, op2, op1.reg)
+        }
+        return
+    }
+    if op1.kind == "mem" and op2.kind == "reg" {
+        state.code.append(1)
+        if op1.mem_index >= 0 {
+            encode_modrm_sib_reg(state, op1, op2.reg)
+        } else {
+            encode_modrm_mem_reg(state, op1, op2.reg)
+        }
+        return
+    }
+    if op1.kind == "mem" and op2.kind == "imm" and str_contains(ops[0], "dword ptr") == 1 {
+        state.code.append(129)
+        if op1.mem_index >= 0 {
+            encode_modrm_sib_reg(state, op1, 0)
+        } else {
+            encode_modrm_mem_reg(state, op1, 0)
+        }
+        append_imm32(state, op2.imm_val)
+        return
+    }
 }
 
 def encode_rep(state, ops: list) {
@@ -433,6 +478,10 @@ def encode_rep(state, ops: list) {
     if op == "stosb" {
         state.code.append(243)
         state.code.append(170)
+    }
+    if op == "movsd" {
+        state.code.append(243)
+        state.code.append(165)
     }
 }
 def encode_repnz(state, ops: list) {
@@ -659,6 +708,22 @@ def encode_dec(state, ops: list) {
     }
 }
 
+def encode_rol(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+    state.code.append(193)
+    state.code.append(build_modrm(3, 0, op1.reg))
+    state.code.append(byte_mask(op2.imm_val))
+}
+
+def encode_ror(state, ops: list) {
+    op1 = parse_operand(ops[0])
+    op2 = parse_operand(ops[1])
+    state.code.append(193)
+    state.code.append(build_modrm(3, 1, op1.reg))
+    state.code.append(byte_mask(op2.imm_val))
+}
+
 def encode_shl(state, ops: list) {
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
@@ -797,9 +862,9 @@ def encode_xor(state, ops: list) {
     op2 = parse_operand(ops[1])
     state.code.append(51)
     if op2.reg >= 0 {
-        state.code.append(build_modrm(3, op2.reg, op1.reg))
+        state.code.append(build_modrm(3, op1.reg, op2.reg))
     } else {
-        state.code.append(build_modrm(3, op2.reg, op1.reg))
+        encode_modrm_mem_reg(state, op2, op1.reg)
     }
 }
 
@@ -1101,6 +1166,14 @@ def emit_instruction(state, line: AsmLine) {
         encode_dec(state, line.operands)
         return
     }
+    if line.mnemonic == "rol" {
+        encode_rol(state, line.operands)
+        return
+    }
+    if line.mnemonic == "ror" {
+        encode_ror(state, line.operands)
+        return
+    }
     if line.mnemonic == "shl" {
         encode_shl(state, line.operands)
         return
@@ -1224,6 +1297,10 @@ def emit_instruction(state, line: AsmLine) {
     }
     if line.mnemonic == "fucomip" {
         encode_fucomip(state, line.operands)
+        return
+    }
+    if line.mnemonic == "cld" {
+        state.code.append(252)
         return
     }
 }

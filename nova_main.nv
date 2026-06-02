@@ -43,17 +43,20 @@ sys_flush()
 if cmd == "build" {
     file_path = ""
     debug_mode = 0
+    bench_mode = 0
     i = 2
     while i < len(args) {
         if args[i] == "-d" or args[i] == "--debug" {
             debug_mode = 1
+        } elif args[i] == "-b" or args[i] == "--bench" {
+            bench_mode = 1
         } else {
             file_path = args[i]
         }
         i = i + 1
     }
     if len(file_path) == 0 {
-        print("Usage: nova build [-d] <file.nv>")
+        print("Usage: nova build [-d] [-b] <file.nv>")
         sys_exit(1)
     }
     print("file is " + file_path)
@@ -64,7 +67,20 @@ if cmd == "build" {
     out_file = file_path[0 : out_len - 3] + ".exe"
     print("out_file is " + out_file)
     sys_flush()
+    
+    start_ticks = 0
+    if bench_mode == 1 {
+        start_ticks = os_win.sys_get_tick_count()
+    }
+    
     compile_to_exe(file_path, out_file, debug_mode)
+    
+    if bench_mode == 1 {
+        end_ticks = os_win.sys_get_tick_count()
+        diff = end_ticks - start_ticks
+        print("[Benchmark] Build completed in " + str(diff) + " ms")
+    }
+    
     print("Generated executable: " + out_file)
 } elif cmd == "assemble-link" {
     if len(args) < 4 {

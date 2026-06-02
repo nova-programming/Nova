@@ -1,0 +1,30 @@
+import math_utils
+
+def run_test() {
+    print("=== Nova ChaCha20 PRNG Test ===")
+    
+    chacha20_init(12345, 67890)
+    
+    # First block - consume all 16 words
+    print("Block 1:")
+    i = 0
+    while i < 16 {
+        r = random()
+        print("  [" + str(i) + "] = " + str(r))
+        i = i + 1
+    }
+    
+    # Second block should trigger new chacha20_block call
+    print("")
+    print("Block 2 (should be different):")
+    i = 0
+    while i < 16 {
+        r = random()
+        print("  [" + str(i) + "] = " + str(r))
+        i = i + 1
+    }
+    
+    print("")
+    print("=== Test Complete ===")
+}
+run_test()
