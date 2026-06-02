@@ -5,6 +5,7 @@
 data Token {
     kind: string
     val: string
+    line: int
 }
 
 def is_digit(ch: string) -> int {
@@ -44,7 +45,6 @@ def match_keyword(word: string) -> string {
     if word == "data" { return "DATA" }
     if word == "import" { return "IMPORT" }
     if word == "as" { return "AS" }
-    if word == "raw" { return "RAW" }
     if word == "export" { return "EXPORT" }
     if word == "alloc" { return "ALLOC" }
     if word == "free" { return "FREE" }
@@ -52,6 +52,7 @@ def match_keyword(word: string) -> string {
     if word == "len" { return "LEN" }
     if word == "str" { return "STR" }
     if word == "self" { return "SELF" }
+    if word == "printd" { return "PRINTD" }
     if word == "print" { return "PRINT" }
     if word == "open" { return "OPEN" }
     if word == "read" { return "READ" }
@@ -61,6 +62,7 @@ def match_keyword(word: string) -> string {
     if word == "or" { return "OR" }
     if word == "not" { return "NOT" }
     if word == "has" { return "HAS" }
+    if word == "in" { return "IN" }
     if word == "elif" { return "ELIF" }
     if word == "true" { return "TRUE" }
     if word == "false" { return "FALSE" }
@@ -75,17 +77,50 @@ def tokenize(src: string) -> list {
     tokens = []
     i = 0
     length = len(src)
+    line_num = 1
 
     while i < length {
         ch = src[i]
 
+        if ch == "@" {
+            if i + 6 < length {
+                if src[i + 1] == "e" and src[i + 2] == "x" and src[i + 3] == "p" and src[i + 4] == "o" and src[i + 5] == "r" and src[i + 6] == "t" {
+                    tok = Token()
+                    tok.kind = "EXPORT"
+                    tok.val = "@export"
+                    tok.line = line_num
+                    tokens.append(tok)
+                    i = i + 7
+                    continue
+                }
+            }
+            if i + 3 < length {
+                if src[i + 1] == "r" and src[i + 2] == "a" and src[i + 3] == "w" {
+                    tok = Token()
+                    tok.kind = "RAW"
+                    tok.val = "@raw"
+                    tok.line = line_num
+                    tokens.append(tok)
+                    i = i + 4
+                    continue
+                }
+            }
+        }
+
         if is_whitespace(ch) == 1 {
+            if ch == "\n" {
+                line_num = line_num + 1
+            }
             i = i + 1
             continue
         }
 
         if ch == "#" {
             while i < length and src[i] != "\n" {
+                i = i + 1
+            }
+            if i < length and src[i] == "\n" {
+                line_num = line_num + 1
                 i = i + 1
             }
             continue
@@ -96,6 +131,12 @@ def tokenize(src: string) -> list {
             while i < length and is_digit(src[i]) == 1 {
                 i = i + 1
             }
+            if i < length and src[i] == "." and i + 1 < length and is_digit(src[i + 1]) == 1 {
+                i = i + 1
+                while i < length and is_digit(src[i]) == 1 {
+                    i = i + 1
+                }
+            }
             num_str = ""
             j = start
             while j < i {
@@ -105,6 +146,7 @@ def tokenize(src: string) -> list {
             tok = Token()
             tok.kind = "NUMBER"
             tok.val = num_str
+            tok.line = line_num
             tokens.append(tok)
             continue
         }
@@ -124,6 +166,7 @@ def tokenize(src: string) -> list {
             tok = Token()
             tok.kind = kind
             tok.val = ident_str
+            tok.line = line_num
             tokens.append(tok)
             continue
         }
@@ -149,6 +192,7 @@ def tokenize(src: string) -> list {
             tok = Token()
             tok.kind = "STRING"
             tok.val = str_val
+            tok.line = line_num
             tokens.append(tok)
             continue
         }
@@ -226,8 +270,15 @@ def tokenize(src: string) -> list {
             i = i + 1
         }
         
+        tok.line = line_num
         tokens.append(tok)
     }
-
+    
+    tok = Token()
+    tok.kind = "EOF"
+    tok.val = ""
+    tok.line = line_num
+    tokens.append(tok)
+    
     return tokens
 }

@@ -1,0 +1,520 @@
+# ============================================================
+# Assembler: Line/Operand Parsing & Data Structures
+# ============================================================
+
+# --- Utility functions ---
+
+def str_sub(s: string, start: int, end: int) -> string {
+    return s[start:end]
+}
+
+def str_contains(haystack: string, needle: string) -> int {
+    if len(needle) == 0 { return 1 }
+    if len(needle) > len(haystack) { return 0 }
+    i = 0
+    while i <= len(haystack) - len(needle) {
+        found = 1
+        j = 0
+        while j < len(needle) {
+            if haystack[i + j] != needle[j] {
+                found = 0
+                break
+            }
+            j = j + 1
+        }
+        if found == 1 { return 1 }
+        i = i + 1
+    }
+    return 0
+}
+
+def byte_extract(val: int, shift: int) -> int {
+    remaining = val
+    i = 0
+    while i <= shift {
+        if i == shift {
+            r = remaining % 256
+            if r < 0 { r = r + 256 }
+            return r
+        }
+        low_byte = remaining % 256
+        if low_byte < 0 { low_byte = low_byte + 256 }
+        remaining = remaining - low_byte
+        remaining = remaining / 256
+        i = i + 8
+    }
+    return 0
+}
+
+def byte_mask(val: int) -> int {
+    r = val % 256
+    if r < 0 { r = r + 256 }
+    return r
+}
+
+def ord(ch: string) -> int {
+    if ch == "\n" { return 10 }
+    if ch == "\r" { return 13 }
+    if ch == "\t" { return 9 }
+    if ch == " " { return 32 }
+    if ch == "!" { return 33 }
+    if ch == "\"" { return 34 }
+    if ch == "#" { return 35 }
+    if ch == "$" { return 36 }
+    if ch == "%" { return 37 }
+    if ch == "&" { return 38 }
+    if ch == "'" { return 39 }
+    if ch == "(" { return 40 }
+    if ch == ")" { return 41 }
+    if ch == "*" { return 42 }
+    if ch == "+" { return 43 }
+    if ch == "," { return 44 }
+    if ch == "-" { return 45 }
+    if ch == "." { return 46 }
+    if ch == "/" { return 47 }
+    if ch == "0" { return 48 } if ch == "1" { return 49 } if ch == "2" { return 50 }
+    if ch == "3" { return 51 } if ch == "4" { return 52 } if ch == "5" { return 53 }
+    if ch == "6" { return 54 } if ch == "7" { return 55 } if ch == "8" { return 56 }
+    if ch == "9" { return 57 }
+    if ch == ":" { return 58 } if ch == ";" { return 59 }
+    if ch == "<" { return 60 } if ch == "=" { return 61 } if ch == ">" { return 62 }
+    if ch == "?" { return 63 } if ch == "@" { return 64 }
+    if ch == "A" { return 65 } if ch == "B" { return 66 } if ch == "C" { return 67 }
+    if ch == "D" { return 68 } if ch == "E" { return 69 } if ch == "F" { return 70 }
+    if ch == "G" { return 71 } if ch == "H" { return 72 } if ch == "I" { return 73 }
+    if ch == "J" { return 74 } if ch == "K" { return 75 } if ch == "L" { return 76 }
+    if ch == "M" { return 77 } if ch == "N" { return 78 } if ch == "O" { return 79 }
+    if ch == "P" { return 80 } if ch == "Q" { return 81 } if ch == "R" { return 82 }
+    if ch == "S" { return 83 } if ch == "T" { return 84 } if ch == "U" { return 85 }
+    if ch == "V" { return 86 } if ch == "W" { return 87 } if ch == "X" { return 88 }
+    if ch == "Y" { return 89 } if ch == "Z" { return 90 }
+    if ch == "[" { return 91 } if ch == "\\" { return 92 } if ch == "]" { return 93 }
+    if ch == "^" { return 94 } if ch == "_" { return 95 }
+    if ch == "`" { return 96 }
+    if ch == "a" { return 97 } if ch == "b" { return 98 } if ch == "c" { return 99 }
+    if ch == "d" { return 100 } if ch == "e" { return 101 } if ch == "f" { return 102 }
+    if ch == "g" { return 103 } if ch == "h" { return 104 } if ch == "i" { return 105 }
+    if ch == "j" { return 106 } if ch == "k" { return 107 } if ch == "l" { return 108 }
+    if ch == "m" { return 109 } if ch == "n" { return 110 } if ch == "o" { return 111 }
+    if ch == "p" { return 112 } if ch == "q" { return 113 } if ch == "r" { return 114 }
+    if ch == "s" { return 115 } if ch == "t" { return 116 } if ch == "u" { return 117 }
+    if ch == "v" { return 118 } if ch == "w" { return 119 } if ch == "x" { return 120 }
+    if ch == "y" { return 121 } if ch == "z" { return 122 }
+    if ch == "{" { return 123 } if ch == "|" { return 124 } if ch == "}" { return 125 }
+    if ch == "~" { return 126 }
+    return 0
+}
+
+# --- Register Encoding ---
+
+def reg_code(name: string) -> int {
+    if name == "eax" { return 0 }
+    if name == "ecx" { return 1 }
+    if name == "edx" { return 2 }
+    if name == "ebx" { return 3 }
+    if name == "esp" { return 4 }
+    if name == "ebp" { return 5 }
+    if name == "esi" { return 6 }
+    if name == "edi" { return 7 }
+    if name == "al" { return 0 }
+    if name == "cl" { return 1 }
+    if name == "bl" { return 3 }
+    if name == "dl" { return 2 }
+    return -1
+}
+
+def is_32bit_reg(name: string) -> int {
+    if name == "eax" { return 1 }
+    if name == "ecx" { return 1 }
+    if name == "edx" { return 1 }
+    if name == "ebx" { return 1 }
+    if name == "esp" { return 1 }
+    if name == "ebp" { return 1 }
+    if name == "esi" { return 1 }
+    if name == "edi" { return 1 }
+    return 0
+}
+
+# --- Data structures ---
+
+data AsmLine {
+    kind: string
+    label: string
+    mnemonic: string
+    operands: list
+    directive: string
+    dir_arg: string
+    raw: string
+}
+
+data LabelEntry {
+    name: string
+    offset: int
+    defined: int
+    section: int
+}
+
+data Fixup {
+    offset: int
+    target: string
+    size: int
+}
+
+data AssemblerState {
+    lines: list
+    labels: list
+    fixups: list
+    code: list
+    data_bytes: list
+    section: int
+    org: int
+    externs: list
+    globals: list
+    code_count: int
+    data_count: int
+}
+
+data OperandInfo {
+    kind: string
+    reg: int
+    imm_val: int
+    mem_base: int
+    mem_index: int
+    mem_scale: int
+    mem_disp: int
+    label: string
+}
+
+# --- Line parsing ---
+
+def trim(s: string) -> string {
+    start = 0
+    while start < len(s) {
+        if s[start] != " " and s[start] != "\t" { break }
+        start = start + 1
+    }
+    end = len(s)
+    while end > start {
+        if s[end - 1] != " " and s[end - 1] != "\t" and s[end - 1] != "\r" { break }
+        end = end - 1
+    }
+    if start >= end { return "" }
+    return str_sub(s, start, end)
+}
+
+def parse_line(raw: string) -> AsmLine {
+    line = AsmLine()
+    line.raw = raw
+    trimmed = trim(raw)
+
+    if len(trimmed) == 0 {
+        line.kind = "empty"
+        return line
+    }
+
+    if trimmed[0] == "#" {
+        line.kind = "empty"
+        return line
+    }
+
+    colon_idx = -1
+    i = 0
+    while i < len(trimmed) {
+        if trimmed[i] == ":" {
+            colon_idx = i
+            break
+        }
+        i = i + 1
+    }
+
+    if colon_idx >= 0 {
+        line.kind = "label"
+        line.label = trim(str_sub(trimmed, 0, colon_idx))
+        rest = trim(str_sub(trimmed, colon_idx + 1, len(trimmed)))
+        if len(rest) > 0 {
+            if rest[0] == "." {
+                line.kind = "label_directive"
+                line.directive = rest
+                space_idx2 = -1
+                j = 0
+                while j < len(rest) {
+                    if rest[j] == " " or rest[j] == "\t" {
+                        space_idx2 = j
+                        break
+                    }
+                    j = j + 1
+                }
+                if space_idx2 >= 0 {
+                    line.directive = str_sub(rest, 0, space_idx2)
+                    line.dir_arg = trim(str_sub(rest, space_idx2 + 1, len(rest)))
+                }
+            } else {
+                line.kind = "label_instruction"
+                line.mnemonic = rest
+                space_idx2 = -1
+                j = 0
+                while j < len(rest) {
+                    if rest[j] == " " or rest[j] == "\t" {
+                        space_idx2 = j
+                        break
+                    }
+                    j = j + 1
+                }
+                if space_idx2 >= 0 {
+                    line.mnemonic = str_sub(rest, 0, space_idx2)
+                    ops_str2 = trim(str_sub(rest, space_idx2 + 1, len(rest)))
+                    line.operands = []
+                    start2 = 0
+                    in_bracket2 = 0
+                    j = 0
+                    while j < len(ops_str2) {
+                        if ops_str2[j] == "[" { in_bracket2 = 1 }
+                        if ops_str2[j] == "]" { in_bracket2 = 0 }
+                        if ops_str2[j] == "," and in_bracket2 == 0 {
+                            line.operands.append(trim(str_sub(ops_str2, start2, j)))
+                            start2 = j + 1
+                        }
+                        j = j + 1
+                    }
+                    if start2 < len(ops_str2) {
+                        line.operands.append(trim(str_sub(ops_str2, start2, len(ops_str2))))
+                    }
+                }
+            }
+        }
+        return line
+    }
+
+    if trimmed[0] == "." {
+        line.kind = "directive"
+        space_idx = -1
+        i = 0
+        while i < len(trimmed) {
+            if trimmed[i] == " " or trimmed[i] == "\t" {
+                space_idx = i
+                break
+            }
+            i = i + 1
+        }
+        if space_idx >= 0 {
+            line.directive = str_sub(trimmed, 0, space_idx)
+            line.dir_arg = trim(str_sub(trimmed, space_idx + 1, len(trimmed)))
+        } else {
+            line.directive = trimmed
+            line.dir_arg = ""
+        }
+        return line
+    }
+
+    line.kind = "instruction"
+    line.operands = []
+
+    space_idx = -1
+    i = 0
+    while i < len(trimmed) {
+        if trimmed[i] == " " or trimmed[i] == "\t" {
+            space_idx = i
+            break
+        }
+        i = i + 1
+    }
+
+    if space_idx >= 0 {
+        line.mnemonic = str_sub(trimmed, 0, space_idx)
+        ops_str = trim(str_sub(trimmed, space_idx + 1, len(trimmed)))
+        start = 0
+        in_bracket = 0
+        i = 0
+        while i < len(ops_str) {
+            if ops_str[i] == "[" { in_bracket = 1 }
+            if ops_str[i] == "]" { in_bracket = 0 }
+            if ops_str[i] == "," and in_bracket == 0 {
+                line.operands.append(trim(str_sub(ops_str, start, i)))
+                start = i + 1
+            }
+            i = i + 1
+        }
+        if start < len(ops_str) {
+            line.operands.append(trim(str_sub(ops_str, start, len(ops_str))))
+        }
+    } else {
+        line.mnemonic = trimmed
+    }
+
+    return line
+}
+
+# --- Operand Parsing ---
+
+def parse_operand(op_str: string) -> OperandInfo {
+    info = OperandInfo()
+    info.mem_index = -1
+    info.reg = -1
+    info.mem_scale = 0
+    info.mem_disp = 0
+    info.label = ""
+    info.imm_val = 0
+    op_str = trim(op_str)
+
+    if len(op_str) >= 10 {
+        if str_sub(op_str, 0, 10) == "dword ptr " {
+            op_str = str_sub(op_str, 10, len(op_str))
+        }
+    }
+    if len(op_str) >= 9 {
+        if str_sub(op_str, 0, 9) == "byte ptr " {
+            op_str = str_sub(op_str, 9, len(op_str))
+        }
+    }
+    if len(op_str) >= 9 {
+        if str_sub(op_str, 0, 9) == "word ptr " {
+            op_str = str_sub(op_str, 9, len(op_str))
+        }
+    }
+
+    if len(op_str) >= 4 and str_sub(op_str, 0, 3) == "st(" and op_str[len(op_str) - 1] == ")" {
+        inner = str_sub(op_str, 3, len(op_str) - 1)
+        info.kind = "st"
+        info.reg = atoi(inner)
+        if info.reg < 0 or info.reg > 7 { info.reg = 0 }
+        return info
+    }
+
+    if is_32bit_reg(op_str) == 1 or op_str == "al" or op_str == "cl" or op_str == "bl" or op_str == "dl" {
+        info.kind = "reg"
+        info.reg = reg_code(op_str)
+        if op_str == "al" or op_str == "cl" or op_str == "bl" or op_str == "dl" {
+            info.kind = "reg8"
+        }
+        return info
+    }
+
+    if op_str[0] == "[" {
+        content = str_sub(op_str, 1, len(op_str) - 1)
+        content = trim(content)
+        info.kind = "mem"
+
+        star_idx = -1
+        i = 0
+        while i < len(content) {
+            if content[i] == "*" {
+                star_idx = i
+                break
+            }
+            i = i + 1
+        }
+
+        if star_idx >= 0 {
+            plus_idx = -1
+            i = 0
+            while i < star_idx {
+                if content[i] == "+" {
+                    plus_idx = i
+                    break
+                }
+                i = i + 1
+            }
+            if plus_idx >= 0 {
+                base_str = trim(str_sub(content, 0, plus_idx))
+                index_str = trim(str_sub(content, plus_idx + 1, star_idx))
+                scale_str = trim(str_sub(content, star_idx + 1, len(content)))
+                info.mem_base = reg_code(base_str)
+                info.mem_index = reg_code(index_str)
+                if scale_str == "1" { info.mem_scale = 0 }
+                if scale_str == "2" { info.mem_scale = 1 }
+                if scale_str == "4" { info.mem_scale = 2 }
+                if scale_str == "8" { info.mem_scale = 3 }
+            } else {
+                index_str = trim(str_sub(content, 0, star_idx))
+                scale_str = trim(str_sub(content, star_idx + 1, len(content)))
+                info.mem_index = reg_code(index_str)
+                info.mem_base = 5
+                info.mem_disp = 0
+                if scale_str == "1" { info.mem_scale = 0 }
+                if scale_str == "2" { info.mem_scale = 1 }
+                if scale_str == "4" { info.mem_scale = 2 }
+                if scale_str == "8" { info.mem_scale = 3 }
+            }
+        } else {
+            has_plus = 0
+            has_minus = 0
+            i = 0
+            while i < len(content) {
+                if content[i] == "+" {
+                    has_plus = 1
+                    break
+                }
+                if content[i] == "-" {
+                    has_minus = 1
+                    break
+                }
+                i = i + 1
+            }
+
+            if has_plus == 1 or has_minus == 1 {
+                sep_idx = -1
+                i = 0
+                while i < len(content) {
+                    if content[i] == "+" or content[i] == "-" {
+                        sep_idx = i
+                        break
+                    }
+                    i = i + 1
+                }
+                if sep_idx >= 0 {
+                    base_str = trim(str_sub(content, 0, sep_idx))
+                    disp_str = trim(str_sub(content, sep_idx, len(content)))
+                    info.mem_base = reg_code(base_str)
+                    sign = disp_str[0]
+                    rest = trim(str_sub(disp_str, 1, len(disp_str)))
+                    idx_reg = reg_code(rest)
+                    if idx_reg >= 0 {
+                        info.mem_index = idx_reg
+                        info.mem_scale = 0
+                        info.mem_disp = 0
+                    } else {
+                        info.mem_disp = atoi(disp_str)
+                    }
+                }
+            } else {
+                maybe_reg = reg_code(content)
+                if maybe_reg >= 0 {
+                    info.mem_base = maybe_reg
+                } else {
+                    info.mem_base = 5
+                    info.mem_disp = 0
+                    info.label = content
+                }
+            }
+        }
+        return info
+    }
+
+    first = op_str[0]
+    if first == "'" {
+        info.kind = "imm"
+        if len(op_str) >= 3 {
+            info.imm_val = ord(op_str[1])
+        }
+        return info
+    }
+    if (first >= "0" and first <= "9") or first == "-" {
+        info.kind = "imm"
+        info.imm_val = atoi(op_str)
+        return info
+    }
+
+    if len(op_str) >= 6 {
+        prefix = str_sub(op_str, 0, 6)
+        if prefix == "offset" {
+            info.kind = "offset"
+            info.label = trim(str_sub(op_str, 6, len(op_str)))
+            return info
+        }
+    }
+
+    info.kind = "rel"
+    info.label = op_str
+
+    return info
+}

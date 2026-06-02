@@ -1,0 +1,126 @@
+import os_win
+import compiler
+
+def str_to_int(s: string) -> int {
+    result = 0
+    i = 0
+    negative = 0
+    if len(s) > 0 and s[0] == "-" {
+        negative = 1
+        i = 1
+    }
+    while i < len(s) {
+        ch = s[i]
+        digit = 0
+        if ch == "0" { digit = 0 }
+        if ch == "1" { digit = 1 }
+        if ch == "2" { digit = 2 }
+        if ch == "3" { digit = 3 }
+        if ch == "4" { digit = 4 }
+        if ch == "5" { digit = 5 }
+        if ch == "6" { digit = 6 }
+        if ch == "7" { digit = 7 }
+        if ch == "8" { digit = 8 }
+        if ch == "9" { digit = 9 }
+        result = result * 10 + digit
+        i = i + 1
+    }
+    if negative == 1 { result = 0 - result }
+    return result
+}
+
+args = sys_get_args()
+if len(args) < 2 {
+    print("Usage: nova build <file.nv>")
+    print("")
+    print("Compile a Nova source file to a native executable.")
+    sys_exit(0)
+}
+
+cmd = args[1]
+print("cmd is " + cmd)
+sys_flush()
+if cmd == "build" {
+    file_path = ""
+    debug_mode = 0
+    i = 2
+    while i < len(args) {
+        if args[i] == "-d" or args[i] == "--debug" {
+            debug_mode = 1
+        } else {
+            file_path = args[i]
+        }
+        i = i + 1
+    }
+    if len(file_path) == 0 {
+        print("Usage: nova build [-d] <file.nv>")
+        sys_exit(1)
+    }
+    print("file is " + file_path)
+    sys_flush()
+    out_len = len(file_path)
+    print("out_len is " + str(out_len))
+    sys_flush()
+    out_file = file_path[0 : out_len - 3] + ".exe"
+    print("out_file is " + out_file)
+    sys_flush()
+    compile_to_exe(file_path, out_file, debug_mode)
+    print("Generated executable: " + out_file)
+} elif cmd == "assemble-link" {
+    if len(args) < 4 {
+        print("Usage: nova assemble-link <input.s> <output.exe>")
+        sys_exit(1)
+    }
+    asm_path = args[2]
+    out_path = args[3]
+    print("asm is " + asm_path)
+    print("out is " + out_path)
+    assemble_link_file(asm_path, out_path)
+} elif cmd == "build-bare" {
+    if len(args) < 3 {
+        print("Usage: nova build-bare <file.nv> [load_addr_dec] [entry_label]")
+        sys_exit(1)
+    }
+    file_path = args[2]
+    load_addr = 0
+    entry_name = "_start"
+    if len(args) >= 4 {
+        load_addr = str_to_int(args[3])
+    }
+    if len(args) >= 5 {
+        entry_name = args[4]
+    }
+    print("file is " + file_path)
+    print("load_addr is " + str(load_addr))
+    print("entry is " + entry_name)
+    sys_flush()
+    out_len = len(file_path)
+    out_file = file_path[0 : out_len - 3] + ".bin"
+    print("out_file is " + out_file)
+    sys_flush()
+    compile_to_bare(file_path, out_file, 0, load_addr, entry_name)
+    print("Generated flat binary: " + out_file)
+} elif cmd == "assemble-bare" {
+    if len(args) < 3 {
+        print("Usage: nova assemble-bare <input.s> <output.bin> [load_addr_dec]")
+        sys_exit(1)
+    }
+    asm_path = args[2]
+    out_path = args[3]
+    load_addr = 0
+    if len(args) >= 5 {
+        load_addr = str_to_int(args[4])
+    }
+    print("asm is " + asm_path)
+    print("out is " + out_path)
+    print("load_addr is " + str(load_addr))
+    sys_flush()
+    assemble_bare_file(asm_path, out_path, load_addr)
+    print("Generated: " + out_path)
+} else {
+    print("Unknown command: " + cmd)
+    print("Usage: nova build <file.nv>")
+    print("       nova build-bare <file.nv> [load_addr_dec] [entry_label]")
+    print("       nova assemble-bare <input.s> <output.bin> [load_addr_dec]")
+    sys_exit(1)
+}

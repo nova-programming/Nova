@@ -1,0 +1,184 @@
+import os_win
+import lexer
+import parser
+
+data Type {
+    kind: string
+    name: string
+    element_type: Type
+    params: list
+    ret: Type
+    fields: list
+}
+
+data TypeField {
+    name: string
+    typ: Type
+}
+
+def create_scalar_type(name: string) -> Type {
+    t = Type()
+    t.kind = "scalar"
+    t.name = name
+    return t
+}
+
+def create_any_type() -> Type {
+    t = Type()
+    t.kind = "any"
+    t.name = "any"
+    return t
+}
+
+def create_dyn_type() -> Type {
+    t = Type()
+    t.kind = "dyn"
+    t.name = "dyn"
+    return t
+}
+
+def create_list_type(element: Type) -> Type {
+    t = Type()
+    t.kind = "list"
+    t.name = ""
+    t.element_type = element
+    return t
+}
+
+def create_func_type(params: list, ret: Type) -> Type {
+    t = Type()
+    t.kind = "func"
+    t.name = ""
+    t.params = params
+    t.ret = ret
+    return t
+}
+
+def create_struct_type(name: string) -> Type {
+    t = Type()
+    t.kind = "struct"
+    t.name = name
+    t.fields = []
+    return t
+}
+
+def type_to_string(t: Type) -> string {
+    if t == 0 { return "null" }
+    
+    if t.kind == "scalar" { return t.name }
+    if t.kind == "any" { return "any" }
+    if t.kind == "dyn" { return "dyn" }
+    if t.kind == "struct" { return t.name }
+    if t.kind == "list" {
+        return "list[" + type_to_string(t.element_type) + "]"
+    }
+    if t.kind == "func" {
+        res = "func("
+        i = 0
+        while i < len(t.params) {
+            param = t.params[i]
+            res = res + type_to_string(param)
+            if i < len(t.params) - 1 {
+                res = res + ", "
+            }
+            i = i + 1
+        }
+        res = res + ") -> " + type_to_string(t.ret)
+        return res
+    }
+    return "unknown"
+}
+
+def types_equal(t1: Type, t2: Type) -> int {
+    if t1 == 0 or t2 == 0 { return 0 }
+    if t1.kind == "any" { return 1 }
+    if t2.kind == "any" { return 1 }
+    if t1.kind == "dyn" { return 1 }
+    if t2.kind == "dyn" { return 1 }
+    
+    if t1.kind == "scalar" {
+        if t1.name != 0 {
+            if str_eq(t1.name, "int") == 1 {
+                if t2.kind == "struct" { return 1 }
+                if t2.kind == "list" { return 1 }
+                if t2.kind == "func" { return 1 }
+            }
+        }
+    }
+    if t2.kind == "scalar" {
+        if t2.name != 0 {
+            if str_eq(t2.name, "int") == 1 {
+                if t1.kind == "struct" { return 1 }
+                if t1.kind == "list" { return 1 }
+                if t1.kind == "func" { return 1 }
+            }
+        }
+    }
+    
+    if str_eq(t1.kind, t2.kind) == 0 { return 0 }
+    
+    if t1.kind == "scalar" { return str_eq(t1.name, t2.name) }
+    if t1.kind == "struct" { return str_eq(t1.name, t2.name) }
+    if t1.kind == "list" { return types_equal(t1.element_type, t2.element_type) }
+    if t1.kind == "func" {
+        if len(t1.params) != len(t2.params) { return 0 }
+        i = 0
+        while i < len(t1.params) {
+            p1 = t1.params[i]
+            p2 = t2.params[i]
+            if types_equal(p1, p2) == 0 { return 0 }
+            i = i + 1
+        }
+        return types_equal(t1.ret, t2.ret)
+    }
+    
+    return 0
+}
+
+def resolve_type_annotation(annotation_str: string) -> Type {
+    if len(annotation_str) == 0 { return create_any_type() }
+    
+    if str_eq(annotation_str, "any") == 1 { return create_any_type() }
+    if str_eq(annotation_str, "dyn") == 1 { return create_dyn_type() }
+    
+    if str_eq(annotation_str, "int") == 1 { return create_scalar_type("int") }
+    if str_eq(annotation_str, "float") == 1 { return create_scalar_type("float") }
+    if str_eq(annotation_str, "bool") == 1 { return create_scalar_type("bool") }
+    if str_eq(annotation_str, "string") == 1 { return create_scalar_type("string") }
+    if str_eq(annotation_str, "byte") == 1 { return create_scalar_type("byte") }
+    if str_eq(annotation_str, "void") == 1 { return create_scalar_type("void") }
+    
+    # Handle bare aggregate type annotations
+    if str_eq(annotation_str, "list") == 1 { return create_list_type(create_any_type()) }
+    if str_eq(annotation_str, "func") == 1 { return create_func_type([], create_any_type()) }
+    if str_eq(annotation_str, "struct") == 1 { return create_struct_type("struct") }
+    
+    # Check for list[T]
+    if str_starts_with(annotation_str, "list[") == 1 {
+        last_char = str_sub(annotation_str, len(annotation_str) - 1, len(annotation_str))
+        if str_eq(last_char, "]") == 1 {
+            inner = str_sub(annotation_str, 5, len(annotation_str) - 1)
+            return create_list_type(resolve_type_annotation(inner))
+        }
+    }
+    
+    return create_struct_type(annotation_str)
+}
+
+def str_starts_with(s: string, prefix: string) -> int {
+    if len(prefix) > len(s) { return 0 }
+    
+    sub = str_sub(s, 0, len(prefix))
+    return str_eq(sub, prefix)
+}
+
+def str_eq(s1: string, s2: string) -> int {
+    if len(s1) != len(s2) { return 0 }
+    
+    i = 0
+    while i < len(s1) {
+        if s1[i] != s2[i] { return 0 }
+        i = i + 1
+    }
+    return 1
+}

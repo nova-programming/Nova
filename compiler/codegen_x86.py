@@ -2,8 +2,10 @@ import os
 from ast.nodes import *
 
 class X86Codegen:
-    def __init__(self, ast_nodes):
+    def __init__(self, ast_nodes, module_names=None, debug_mode=0):
         self.ast = ast_nodes
+        self.debug_mode = debug_mode
+        self.module_names = module_names or []
         self.assembly = []
         self.data_section = []
         self.string_literals = {} # string_value -> label_name
@@ -13,16 +15,93 @@ class X86Codegen:
         self.local_offset = 0
         self.loop_labels = [] # stack of (start_label, end_label)
         self.prop_offsets = {}
-        self.structs = set()
+        self.struct_defs = {}
 
     def get_prop_offset(self, name):
         if name not in self.prop_offsets:
             self.prop_offsets[name] = len(self.prop_offsets) * 4
+            print(f"  REG: {name} -> offset {self.prop_offsets[name]}")
         return self.prop_offsets[name]
+
+    def get_struct_prop_offset(self, struct_name, field_name):
+        if struct_name in self.struct_defs:
+            d = self.struct_defs[struct_name]
+            for i, (fname, ftype) in enumerate(d.fields):
+                if fname == field_name:
+                    return i * 4
+        return self.get_prop_offset(field_name)
+
+    def is_leaf_expr(self, node):
+        if isinstance(node, Number): return True
+        if isinstance(node, Boolean): return True
+        if isinstance(node, Variable): return True
+        return False
+
+    def compile_leaf_to_reg(self, node, reg):
+        if isinstance(node, Number):
+            if isinstance(node.value, float):
+                import struct
+                bits = struct.unpack('<I', struct.pack('<f', node.value))[0]
+                self.assembly.append(f"    mov {reg}, {bits}")
+            else:
+                self.assembly.append(f"    mov {reg}, {node.value}")
+        elif isinstance(node, Boolean):
+            val = 1 if node.value else 0
+            self.assembly.append(f"    mov {reg}, {val}")
+        elif isinstance(node, Variable):
+            offset = self.local_vars[node.name]
+            if isinstance(offset, str):
+                self.assembly.append(f"    mov {reg}, {offset}")
+            elif offset < 0:
+                self.assembly.append(f"    mov {reg}, [ebp + {-offset}]")
+            else:
+                self.assembly.append(f"    mov {reg}, [ebp - {offset}]")
+
+    def peephole(self):
+        lines = self.assembly
+        result = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+
+            # Pattern: push eax / pop eax → nop
+            if (i + 1 < len(lines) and
+                stripped == "push eax" and
+                lines[i + 1].strip() == "pop eax"):
+                i += 2
+                continue
+
+            # Pattern: push eax / pop ebx → mov ebx, eax
+            if (i + 1 < len(lines) and
+                stripped == "push eax" and
+                lines[i + 1].strip() == "pop ebx"):
+                result.append("    mov ebx, eax")
+                i += 2
+                continue
+
+            # Pattern: xor eax, eax → mov eax, 0 (simpler)
+            if stripped == "xor eax, eax":
+                result.append("    mov eax, 0")
+                i += 1
+                continue
+
+            result.append(line)
+            i += 1
+        self.assembly = result
 
     def next_label(self, prefix="L"):
         self.label_count += 1
         return f"{prefix}_{self.label_count}"
+
+    def _is_float_expr(self, node):
+        inferred = getattr(node, 'inferred_type', None)
+        if inferred:
+            if hasattr(inferred, 'name') and inferred.name == 'float':
+                return True
+            elif inferred == 'float':
+                return True
+        return False
 
     def _is_string_expr(self, node):
         """Check if an expression evaluates to a string at compile time."""
@@ -30,21 +109,37 @@ class X86Codegen:
             return True
         # Check inferred_type from the type checker
         inferred = getattr(node, 'inferred_type', None)
+        if hasattr(inferred, 'name') and getattr(inferred, 'name') == 'string':
+            return True
         if inferred == 'string':
             return True
         if isinstance(node, Variable):
             string_vars = getattr(self, 'string_vars', set())
-            return node.name in string_vars
+            if node.name in string_vars: return True
+            if node.name in ["path", "file", "cmd", "line", "token", "source", "out_path", "file_path", "out_file", "arg_str"]: return True
+            return False
         if isinstance(node, BinOp) and node.op == '+':
             return self._is_string_expr(node.left) or self._is_string_expr(node.right)
         if isinstance(node, Call):
+            # Check if function returns string based on pre-populated func_returns
+            if hasattr(self, 'func_returns') and node.name in self.func_returns:
+                return self.func_returns[node.name] == 'string'
+            # Also hardcode some stdlib functions if not found
+            if node.name in ['str', 'trim', 'str_sub', '_sys_extract_arg', 'sys_read', 'sys_platform']:
+                return True
             return False  # Can't determine statically
         if isinstance(node, ArrayIndex):
             return self._is_string_expr(node.base)
         if isinstance(node, DataFieldAccess):
-            # Hack: assume fields like val_str, name are strings
-            if node.field_name in ['val_str', 'kind', 'name', 'struct_names', 'prop_names', 'local_var_names', 'field_name']:
-                return True
+            # Trust struct_defs over hardcoded lists if available
+            if hasattr(self, 'struct_defs') and self.struct_defs:
+                for struct_def in self.struct_defs.values():
+                    for field in struct_def.fields:
+                        if field[0] == node.field_name and field[1] == 'string':
+                            return True
+            else:
+                if node.field_name in ['val_str', 'kind', 'name', 'directive', 'label', 'mnemonic', 'dir_arg', 'raw', 'target', 'val', 'cond', 'field_name']:
+                    return True
         if isinstance(node, StrConvert):
             return True
         if isinstance(node, Slice):
@@ -70,34 +165,56 @@ class X86Codegen:
         # Initial headers
         self.assembly.append(".intel_syntax noprefix")
         self.assembly.append(".global _main")
-        self.assembly.append(".extern _printf")
-        self.assembly.append(".extern _malloc")
-        self.assembly.append(".extern _free")
-        self.assembly.append(".extern _puts")
-        self.assembly.append(".extern _fopen")
-        self.assembly.append(".extern _fread")
-        self.assembly.append(".extern _fputs")
-        self.assembly.append(".extern _fclose")
-        self.assembly.append(".extern _strlen")
-        self.assembly.append(".extern _strcpy")
-        self.assembly.append(".extern _strcat")
-        self.assembly.append(".extern _realloc")
-        self.assembly.append(".extern _sprintf")
-        self.assembly.append(".extern _strcmp")
-        self.assembly.append(".extern _fflush")
+        # Win32 API externs (replaces MSVCRT)
+        self.assembly.append(".extern _GetProcessHeap@0")
+        self.assembly.append(".extern _HeapAlloc@12")
+        self.assembly.append(".extern _HeapFree@12")
+        self.assembly.append(".extern _HeapReAlloc@16")
+        self.assembly.append(".extern _GetStdHandle@4")
+        self.assembly.append(".extern _WriteFile@20")
+        self.assembly.append(".extern _ReadFile@20")
+        self.assembly.append(".extern _CreateFileA@28")
+        self.assembly.append(".extern _CloseHandle@4")
+        self.assembly.append(".extern _SetFilePointer@16")
+        self.assembly.append(".extern _FlushFileBuffers@4")
+        self.assembly.append(".extern _ExitProcess@4")
+        self.assembly.append(".extern _WinExec@8")
+        self.assembly.append(".extern _GetCommandLineA@0")
         
         # We also need format strings for printing
         self.data_section.append('fmt_int: .asciz "%d\\n"')
         self.data_section.append('fmt_int_pure: .asciz "%d"')
         self.data_section.append('fmt_str: .asciz "%s\\n"')
+        self.data_section.append('fmt_float: .asciz "%f\\n"')
+        self.data_section.append('fmt_float_pure: .asciz "%f"')
+        self.data_section.append('debug_prefix: .asciz "debug - [line "')
+        self.data_section.append('debug_suffix: .asciz "]: "')
+        self.data_section.append('L_realloc_fail_msg: .asciz "Realloc failed!\\n"')
+        self.data_section.append('L_out_of_bounds_msg: .asciz "Index Out Of Bounds\\n"')
+        
+        self.data_section.append("char_strings:")
+        for i in range(256):
+            self.data_section.append(f"    .byte {i}")
+            self.data_section.append(f"    .byte 0")
 
         # Split functions from top-level code
         functions = [node for node in self.ast if isinstance(node, Function)]
         top_level = [node for node in self.ast if not isinstance(node, Function) and not isinstance(node, Import) and not isinstance(node, ClassDef) and not isinstance(node, Data)]
         
+        # Pre-populate struct_defs from all struct field definitions
+        # so we know the total struct size before generating code
+        self.func_returns = {}
         for n in self.ast:
-            if isinstance(n, Data) or isinstance(n, ClassDef):
-                self.structs.add(n.name)
+            if isinstance(n, Data):
+                self.struct_defs[n.name] = n
+                for field_name, field_type in n.fields:
+                    self.get_prop_offset(field_name)
+            elif isinstance(n, ClassDef):
+                for field_name, field_type in n.fields:
+                    self.get_prop_offset(field_name)
+            elif isinstance(n, Function):
+                self.func_returns[n.name] = n.return_type
+        
         
         self.assembly.append(".text")
         
@@ -183,6 +300,10 @@ class X86Codegen:
         self.assembly.append("    mov ebx, [ebp+12]") # start
         self.assembly.append("    mov ecx, [ebp+16]") # end
         self.assembly.append("    sub ecx, ebx")       # len = end - start
+        self.assembly.append("    cmp ecx, 0")
+        self.assembly.append("    jge L_slice_alloc")
+        self.assembly.append("    mov ecx, 0")
+        self.assembly.append("L_slice_alloc:")
         self.assembly.append("    push ecx")           # save len
         self.assembly.append("    inc ecx")
         self.assembly.append("    push ecx")
@@ -194,13 +315,17 @@ class X86Codegen:
         # Manual byte copy
         self.assembly.append("    push edi")           # save dest
         self.assembly.append("    push ecx")           # save len
+        self.assembly.append("    cmp ecx, 0")
+        self.assembly.append("    jle L_slice_done")
         self.assembly.append("L_slice_copy:")
         self.assembly.append("    mov al, [esi]")
         self.assembly.append("    mov [edi], al")
         self.assembly.append("    inc esi")
         self.assembly.append("    inc edi")
         self.assembly.append("    dec ecx")
-        self.assembly.append("    jnz L_slice_copy")
+        self.assembly.append("    cmp ecx, 0")
+        self.assembly.append("    jg L_slice_copy")
+        self.assembly.append("L_slice_done:")
         self.assembly.append("    pop ecx")            # ecx = len
         self.assembly.append("    pop edi")            # edi = original dest
         self.assembly.append("    mov byte ptr [edi + ecx], 0")  # null term
@@ -211,6 +336,12 @@ class X86Codegen:
         self.assembly.append("    pop ebp")
         self.assembly.append("    ret")
         
+        # Win32 API runtime functions (replaces MSVCRT)
+        self._emit_win32_runtime()
+        
+        # Peephole optimization
+        self.peephole()
+        
         # Append data section
         self.assembly.append(".data")
         for line in self.data_section:
@@ -218,12 +349,711 @@ class X86Codegen:
             
         return "\n".join(self.assembly)
 
+    def _emit_win32_runtime(self):
+        """Emit Win32 API replacement functions for MSVCRT runtime."""
+        r = self.assembly.append
+        # Memory: malloc/free/realloc via Heap API
+        r("_malloc:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    push dword ptr [ebp + 8]")
+        r("    push 8") # HEAP_ZERO_MEMORY
+        r("    call _GetProcessHeap@0")
+        r("    push eax")
+        r("    call _HeapAlloc@12")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        r("_free:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    push dword ptr [ebp + 8]")
+        r("    push 0")
+        r("    call _GetProcessHeap@0")
+        r("    push eax")
+        r("    call _HeapFree@12")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        r("_out_of_bounds:")
+        r("    push offset fmt_str")
+        r("    push offset L_out_of_bounds_msg")
+        r("    call _printf")
+        r("    add esp, 8")
+        r("    push 1")
+        r("    call _ExitProcess@4")
+        r("")
+        r("_realloc:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    push dword ptr [ebp + 12]")
+        r("    push dword ptr [ebp + 8]")
+        r("    push 0")
+        r("    call _GetProcessHeap@0")
+        r("    push eax")
+        r("    call _HeapReAlloc@16")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        # String functions
+        r("_strlen:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    push edi")
+        r("    push ecx")
+        r("    mov edi, [ebp + 8]")
+        r("    mov ecx, -1")
+        r("    xor eax, eax")
+        r("    repnz scasb")
+        r("    not ecx")
+        r("    lea eax, [ecx - 1]")
+        r("    pop ecx")
+        r("    pop edi")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        r("_strcmp:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    push esi")
+        r("    push edi")
+        r("    mov esi, [ebp + 8]")
+        r("    mov edi, [ebp + 12]")
+        r("L_strcmp_loop:")
+        r("    mov al, [esi]")
+        r("    cmp al, [edi]")
+        r("    jne L_strcmp_diff")
+        r("    test al, al")
+        r("    jz L_strcmp_eq")
+        r("    inc esi")
+        r("    inc edi")
+        r("    jmp L_strcmp_loop")
+        r("L_strcmp_diff:")
+        r("    mov al, [esi]")
+        r("    sub al, [edi]")
+        r("    movsx eax, al")
+        r("    pop edi")
+        r("    pop esi")
+        r("    pop ebp")
+        r("    ret")
+        r("L_strcmp_eq:")
+        r("    xor eax, eax")
+        r("    pop edi")
+        r("    pop esi")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        r("_strcpy:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    push esi")
+        r("    push edi")
+        r("    mov esi, [ebp + 12]")
+        r("    mov edi, [ebp + 8]")
+        r("L_strcpy_loop:")
+        r("    mov al, [esi]")
+        r("    mov [edi], al")
+        r("    test al, al")
+        r("    jz L_strcpy_done")
+        r("    inc esi")
+        r("    inc edi")
+        r("    jmp L_strcpy_loop")
+        r("L_strcpy_done:")
+        r("    mov eax, [ebp + 8]")
+        r("    pop edi")
+        r("    pop esi")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        r("_strcat:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    push edi")
+        r("    push esi")
+        r("    mov edi, [ebp + 8]")
+        r("    xor eax, eax")
+        r("    mov ecx, -1")
+        r("    repnz scasb")
+        r("    dec edi")
+        r("    mov esi, [ebp + 12]")
+        r("L_strcat_loop:")
+        r("    mov al, [esi]")
+        r("    mov [edi], al")
+        r("    test al, al")
+        r("    jz L_strcat_done")
+        r("    inc esi")
+        r("    inc edi")
+        r("    jmp L_strcat_loop")
+        r("L_strcat_done:")
+        r("    mov eax, [ebp + 8]")
+        r("    pop esi")
+        r("    pop edi")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        r("_strstr:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    push esi")
+        r("    push edi")
+        r("    mov esi, [ebp + 8]")
+        r("    mov edx, [ebp + 12]")
+        r("    cmp byte ptr [edx], 0")
+        r("    jne L_strstr_outer")
+        r("    mov eax, [ebp + 8]")
+        r("    pop edi")
+        r("    pop esi")
+        r("    pop ebp")
+        r("    ret")
+        r("L_strstr_outer:")
+        r("    cmp byte ptr [esi], 0")
+        r("    je L_strstr_nf")
+        r("    mov ecx, esi")
+        r("    mov edi, edx")
+        r("L_strstr_inner:")
+        r("    mov al, [edi]")
+        r("    cmp al, [esi]")
+        r("    jne L_strstr_next")
+        r("    test al, al")
+        r("    je L_strstr_found")
+        r("    inc esi")
+        r("    inc edi")
+        r("    jmp L_strstr_inner")
+        r("L_strstr_next:")
+        r("    inc ecx")
+        r("    mov esi, ecx")
+        r("    jmp L_strstr_outer")
+        r("L_strstr_found:")
+        r("    mov eax, ecx")
+        r("    pop edi")
+        r("    pop esi")
+        r("    pop ebp")
+        r("    ret")
+        r("L_strstr_nf:")
+        r("    xor eax, eax")
+        r("    pop edi")
+        r("    pop esi")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        r("_memset:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    push edi")
+        r("    mov edi, [ebp + 8]")
+        r("    mov eax, [ebp + 12]")
+        r("    mov ecx, [ebp + 16]")
+        r("    rep stosb")
+        r("    mov eax, [ebp + 8]")
+        r("    pop edi")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        # sprintf: minimal, handles "%d"
+        r("_sprintf:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    push ebx")
+        r("    push edi")
+        r("    mov edi, [ebp + 8]")
+        r("    mov eax, [ebp + 12]")
+        r("    cmp byte ptr [eax], '%'")
+        r("    jne L_sprintf_raw")
+        r("    cmp byte ptr [eax + 1], 'd'")
+        r("    jne L_sprintf_raw")
+        r("    mov eax, [ebp + 16]")
+        r("    test eax, eax")
+        r("    jns L_sprintf_pos")
+        r("    neg eax")
+        r("    mov byte ptr [edi], '-'")
+        r("    inc edi")
+        r("L_sprintf_pos:")
+        r("    mov ebx, 10")
+        r("    xor ecx, ecx")
+        r("    cmp eax, 0")
+        r("    jne L_sprintf_loop1")
+        r("    mov byte ptr [edi], '0'")
+        r("    inc edi")
+        r("    jmp L_sprintf_done")
+        r("L_sprintf_loop1:")
+        r("    xor edx, edx")
+        r("    div ebx")
+        r("    push edx")
+        r("    inc ecx")
+        r("    test eax, eax")
+        r("    jnz L_sprintf_loop1")
+        r("L_sprintf_loop2:")
+        r("    pop edx")
+        r("    add dl, '0'")
+        r("    mov [edi], dl")
+        r("    inc edi")
+        r("    dec ecx")
+        r("    jnz L_sprintf_loop2")
+        r("L_sprintf_done:")
+        r("    mov byte ptr [edi], 0")
+        r("    mov eax, edi")
+        r("    sub eax, [ebp + 8]")
+        r("    pop edi")
+        r("    pop ebx")
+        r("    pop ebp")
+        r("    ret")
+        r("L_sprintf_raw:")
+        r("    mov al, [eax]")
+        r("    mov [edi], al")
+        r("    test al, al")
+        r("    jz L_sprintf_raw_done")
+        r("    inc edi")
+        r("    inc eax")
+        r("    jmp L_sprintf_raw")
+        r("L_sprintf_raw_done:")
+        r("    mov eax, edi")
+        r("    sub eax, [ebp + 8]")
+        r("    pop edi")
+        r("    pop ebx")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        # printf
+        r("_printf:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    push esi")
+        r("    mov esi, [ebp + 8]")
+        r("    cmp byte ptr [esi], '%'")
+        r("    jne L_printf_raw")
+        r("    cmp byte ptr [esi + 1], 's'")
+        r("    je L_printf_str")
+        r("    cmp byte ptr [esi + 1], 'd'")
+        r("    je L_printf_int")
+        r("    cmp byte ptr [esi + 1], 'f'")
+        r("    je L_printf_float")
+        r("L_printf_raw:")
+        r("    push dword ptr [ebp + 8]")
+        r("    call L_write_stdout")
+        r("    add esp, 4")
+        r("    pop esi")
+        r("    pop ebp")
+        r("    ret")
+        r("L_printf_str:")
+        r("    push dword ptr [ebp + 12]")
+        r("    call L_write_stdout")
+        r("    add esp, 4")
+        r("    mov esi, [ebp + 8]")
+        r("    cmp byte ptr [esi + 2], 10")
+        r("    jne L_printf_end")
+        r("    push 10")
+        r("    call L_write_char")
+        r("    add esp, 4")
+        r("L_printf_end:")
+        r("    pop esi")
+        r("    pop ebp")
+        r("    ret")
+        r("L_printf_int:")
+        r("    push dword ptr [ebp + 12]")
+        r("    call L_write_int")
+        r("    add esp, 4")
+        r("    mov esi, [ebp + 8]")
+        r("    cmp byte ptr [esi + 2], 10")
+        r("    jne L_printf_end_int")
+        r("    push 10")
+        r("    call L_write_char")
+        r("    add esp, 4")
+        r("L_printf_end_int:")
+        r("    pop esi")
+        r("    pop ebp")
+        r("    ret")
+        r("L_printf_float:")
+        r("    push dword ptr [ebp + 12]")
+        r("    call L_write_float")
+        r("    add esp, 4")
+        r("    mov esi, [ebp + 8]")
+        r("    cmp byte ptr [esi + 2], 10")
+        r("    jne L_printf_end_float")
+        r("    push 10")
+        r("    call L_write_char")
+        r("    add esp, 4")
+        r("L_printf_end_float:")
+        r("    pop esi")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        # stdout helpers
+        r("L_write_stdout:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    push esi")
+        r("    push ebx")
+        r("    mov esi, [ebp + 8]")
+        r("    push esi")
+        r("    call _strlen")
+        r("    add esp, 4")
+        r("    mov ebx, eax")
+        r("    sub esp, 4")
+        r("    push 0")
+        r("    lea eax, [esp + 4]")
+        r("    push eax")
+        r("    push ebx")
+        r("    push esi")
+        r("    push -11")
+        r("    call _GetStdHandle@4")
+        r("    push eax")
+        r("    call _WriteFile@20")
+        r("    add esp, 4")
+        r("    pop ebx")
+        r("    pop esi")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        r("L_write_char:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    sub esp, 8")
+        r("    mov eax, [ebp + 8]")
+        r("    mov byte ptr [ebp - 4], al")
+        r("    lea eax, [ebp - 8]")
+        r("    push 0")
+        r("    push eax")
+        r("    push 1")
+        r("    lea eax, [ebp - 4]")
+        r("    push eax")
+        r("    push -11")
+        r("    call _GetStdHandle@4")
+        r("    push eax")
+        r("    call _WriteFile@20")
+        r("    mov esp, ebp")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        r("L_write_int:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    sub esp, 16")
+        r("    push ebx")
+        r("    push edi")
+        r("    lea edi, [esp + 8]")
+        r("    mov eax, [ebp + 8]")
+        r("    test eax, eax")
+        r("    jns L_write_int_pos")
+        r("    neg eax")
+        r("    push eax")
+        r("    push 45")
+        r("    call L_write_char")
+        r("    add esp, 4")
+        r("    pop eax")
+        r("L_write_int_pos:")
+        r("    mov ebx, 10")
+        r("    xor ecx, ecx")
+        r("    cmp eax, 0")
+        r("    jne L_write_int_loop1")
+        r("    mov byte ptr [edi], '0'")
+        r("    inc edi")
+        r("    jmp L_write_int_done")
+        r("L_write_int_loop1:")
+        r("    xor edx, edx")
+        r("    div ebx")
+        r("    push edx")
+        r("    inc ecx")
+        r("    test eax, eax")
+        r("    jnz L_write_int_loop1")
+        r("L_write_int_loop2:")
+        r("    pop edx")
+        r("    add dl, '0'")
+        r("    mov [edi], dl")
+        r("    inc edi")
+        r("    dec ecx")
+        r("    jnz L_write_int_loop2")
+        r("L_write_int_done:")
+        r("    mov byte ptr [edi], 0")
+        r("    lea eax, [esp + 8]")
+        r("    push eax")
+        r("    call L_write_stdout")
+        r("    add esp, 4")
+        r("    pop edi")
+        r("    pop ebx")
+        r("    mov esp, ebp")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        # float writer
+        r("L_write_float:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    sub esp, 64")
+        r("    push ebx")
+        r("    push edi")
+        r("    lea edi, [ebp - 40]")
+        r("    fld dword ptr [ebp + 8]")
+        r("    ftst")
+        r("    fnstsw ax")
+        r("    sahf")
+        r("    jnz L_wf_not_zero")
+        r("    mov byte ptr [edi], '0'")
+        r("    inc edi")
+        r("    jmp L_wf_write_str")
+        r("L_wf_not_zero:")
+        r("    jae L_wf_pos")
+        r("    mov byte ptr [edi], '-'")
+        r("    inc edi")
+        r("    fchs")
+        r("L_wf_pos:")
+        r("    fnstcw [ebp - 42]")
+        r("    movzx eax, word ptr [ebp - 42]")
+        r("    or eax, 3072")
+        r("    mov [ebp - 48], eax")
+        r("    fldcw [ebp - 48]")
+        r("    fist dword ptr [ebp - 52]")
+        r("    fldcw [ebp - 42]")
+        r("    mov eax, [ebp - 52]")
+        r("    test eax, eax")
+        r("    jnz L_wf_int_start")
+        r("    mov byte ptr [edi], '0'")
+        r("    inc edi")
+        r("    jmp L_wf_dot")
+        r("L_wf_int_start:")
+        r("    xor ecx, ecx")
+        r("L_wf_int_loop1:")
+        r("    xor edx, edx")
+        r("    mov ebx, 10")
+        r("    div ebx")
+        r("    push edx")
+        r("    inc ecx")
+        r("    test eax, eax")
+        r("    jnz L_wf_int_loop1")
+        r("L_wf_int_loop2:")
+        r("    pop edx")
+        r("    add dl, '0'")
+        r("    mov [edi], dl")
+        r("    inc edi")
+        r("    dec ecx")
+        r("    jnz L_wf_int_loop2")
+        r("L_wf_dot:")
+        r("    mov byte ptr [edi], '.'")
+        r("    inc edi")
+        r("    fld dword ptr [ebp + 8]")
+        r("    fild dword ptr [ebp - 52]")
+        r("    fsubp st(1), st(0)")
+        r("    mov ecx, 6")
+        r("L_wf_frac_loop:")
+        r("    push 10")
+        r("    fild dword ptr [esp]")
+        r("    add esp, 4")
+        r("    fmulp st(1), st(0)")
+        r("    fnstcw [ebp - 42]")
+        r("    movzx eax, word ptr [ebp - 42]")
+        r("    or eax, 3072")
+        r("    mov [ebp - 48], eax")
+        r("    fldcw [ebp - 48]")
+        r("    fist dword ptr [ebp - 52]")
+        r("    fldcw [ebp - 42]")
+        r("    mov al, [ebp - 52]")
+        r("    add al, '0'")
+        r("    mov [edi], al")
+        r("    inc edi")
+        r("    fild dword ptr [ebp - 52]")
+        r("    fsubp st(1), st(0)")
+        r("    ftst")
+        r("    fnstsw ax")
+        r("    sahf")
+        r("    jz L_wf_frac_done")
+        r("    dec ecx")
+        r("    jnz L_wf_frac_loop")
+        r("L_wf_frac_done:")
+        r("    fstp st(0)")
+        r("L_wf_write_str:")
+        r("    mov byte ptr [edi], 0")
+        r("    lea eax, [ebp - 40]")
+        r("    push eax")
+        r("    call L_write_stdout")
+        r("    add esp, 4")
+        r("    pop edi")
+        r("    pop ebx")
+        r("    mov esp, ebp")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        # File I/O
+        r("_fopen:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    mov eax, [ebp + 12]")
+        r("    mov al, byte ptr [eax]")
+        r("    cmp al, 'w'")
+        r("    je L_fopen_write")
+        r("    push 0")
+        r("    push 128")
+        r("    push 3")
+        r("    push 0")
+        r("    push 0")
+        r("    push -2147483648")
+        r("    push dword ptr [ebp + 8]")
+        r("    call _CreateFileA@28")
+        r("    jmp L_fopen_end")
+        r("L_fopen_write:")
+        r("    push 0")
+        r("    push 128")
+        r("    push 2")
+        r("    push 0")
+        r("    push 0")
+        r("    push 1073741824")
+        r("    push dword ptr [ebp + 8]")
+        r("    call _CreateFileA@28")
+        r("L_fopen_end:")
+        r("    cmp eax, -1")
+        r("    jne L_fopen_ok")
+        r("    xor eax, eax")
+        r("L_fopen_ok:")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        r("_fclose:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    push dword ptr [ebp + 8]")
+        r("    call _CloseHandle@4")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        r("_fread:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    sub esp, 4")
+        r("    push 0")
+        r("    lea eax, [ebp - 4]")
+        r("    push eax")
+        r("    mov eax, [ebp + 12]")
+        r("    imul eax, [ebp + 16]")
+        r("    push eax")
+        r("    push dword ptr [ebp + 8]")
+        r("    push dword ptr [ebp + 20]")
+        r("    call _ReadFile@20")
+        r("    mov eax, [ebp - 4]")
+        r("    mov esp, ebp")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        r("_fputs:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    push ebx")
+        r("    sub esp, 4")
+        r("    push dword ptr [ebp + 8]")
+        r("    call _strlen")
+        r("    add esp, 4")
+        r("    mov ebx, eax")
+        r("    push 0")
+        r("    lea eax, [ebp - 4]")
+        r("    push eax")
+        r("    push ebx")
+        r("    push dword ptr [ebp + 8]")
+        r("    push dword ptr [ebp + 12]")
+        r("    call _WriteFile@20")
+        r("    mov eax, [ebp - 4]")
+        r("    mov esp, ebp")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        r("_fputc:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    sub esp, 8")
+        r("    mov eax, [ebp + 8]")
+        r("    mov byte ptr [ebp - 4], al")
+        r("    lea eax, [ebp - 8]")
+        r("    push 0")
+        r("    push eax")
+        r("    push 1")
+        r("    lea eax, [ebp - 4]")
+        r("    push eax")
+        r("    push dword ptr [ebp + 12]")
+        r("    call _WriteFile@20")
+        r("    mov eax, [ebp - 8]")
+        r("    mov esp, ebp")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        r("_fwrite:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    sub esp, 4")
+        r("    mov eax, [ebp + 12]")
+        r("    imul eax, [ebp + 16]")
+        r("    push 0")
+        r("    lea ecx, [ebp - 4]")
+        r("    push ecx")
+        r("    push eax")
+        r("    push dword ptr [ebp + 8]")
+        r("    push dword ptr [ebp + 20]")
+        r("    call _WriteFile@20")
+        r("    mov eax, [ebp - 4]")
+        r("    mov esp, ebp")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        r("_fseek:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    push dword ptr [ebp + 16]")
+        r("    push 0")
+        r("    push dword ptr [ebp + 12]")
+        r("    push dword ptr [ebp + 8]")
+        r("    call _SetFilePointer@16")
+        r("    xor eax, eax")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        r("_ftell:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    push 1")
+        r("    push 0")
+        r("    push 0")
+        r("    push dword ptr [ebp + 8]")
+        r("    call _SetFilePointer@16")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        r("_fflush:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    mov eax, [ebp + 8]")
+        r("    test eax, eax")
+        r("    jz L_fflush_done")
+        r("    push eax")
+        r("    call _FlushFileBuffers@4")
+        r("L_fflush_done:")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        # Process
+        r("_exit:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    push dword ptr [ebp + 8]")
+        r("    call _ExitProcess@4")
+        r("L_exit_never:")
+        r("    pop ebp")
+        r("    ret")
+        r("")
+        r("_system:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    push 1")
+        r("    push dword ptr [ebp + 8]")
+        r("    call _WinExec@8")
+        r("    pop ebp")
+        r("    ret")
+
     def scan_vars(self, node):
         """Pre-scan statements for assignments to reserve stack space for local variables"""
         if isinstance(node, Assignment):
             if node.name not in self.local_vars:
-                self.local_offset += 4
-                self.local_vars[node.name] = self.local_offset
+                if hasattr(self, 'reg_pool') and self.reg_pool:
+                    reg = self.reg_pool.pop(0)
+                    self.local_vars[node.name] = reg
+                    self.used_regs.append(reg)
+                else:
+                    self.local_offset += 4
+                    self.local_vars[node.name] = self.local_offset
         elif isinstance(node, IfElse):
             for s in node.if_body:
                 self.scan_vars(s)
@@ -234,12 +1064,32 @@ class X86Codegen:
                 self.scan_vars(s)
         elif isinstance(node, ForLoop):
             if node.var_name not in self.local_vars:
-                self.local_offset += 4
-                self.local_vars[node.var_name] = self.local_offset
+                if hasattr(self, 'reg_pool') and self.reg_pool:
+                    reg = self.reg_pool.pop(0)
+                    self.local_vars[node.var_name] = reg
+                    self.used_regs.append(reg)
+                else:
+                    self.local_offset += 4
+                    self.local_vars[node.var_name] = self.local_offset
+            for s in node.body:
+                self.scan_vars(s)
+        elif isinstance(node, ForIn):
+            if node.var_name not in self.local_vars:
+                if hasattr(self, 'reg_pool') and self.reg_pool:
+                    reg = self.reg_pool.pop(0)
+                    self.local_vars[node.var_name] = reg
+                    self.used_regs.append(reg)
+                else:
+                    self.local_offset += 4
+                    self.local_vars[node.var_name] = self.local_offset
+            for s in node.body:
+                self.scan_vars(s)
+        elif isinstance(node, RawBlock):
             for s in node.body:
                 self.scan_vars(s)
 
     def compile_function(self, fn):
+        print("Compiling function:", fn.name)
         self.assembly.append(f"_{fn.name}:")
         self.assembly.append("    push ebp")
         self.assembly.append("    mov ebp, esp")
@@ -261,16 +1111,23 @@ class X86Codegen:
             
         # Scan function body for local variables
         self.local_offset = 0
+        self.reg_pool = ["esi", "edi"]
+        self.used_regs = []
         for stmt in fn.body:
             self.scan_vars(stmt)
             
         if self.local_offset > 0:
             self.assembly.append(f"    sub esp, {self.local_offset}")
             
+        for reg in self.used_regs:
+            self.assembly.append(f"    push {reg}")
+            
         for stmt in fn.body:
             self.compile_stmt(stmt)
             
         # Epilogue
+        for reg in reversed(self.used_regs):
+            self.assembly.append(f"    pop {reg}")
         self.assembly.append("    mov esp, ebp")
         self.assembly.append("    pop ebp")
         self.assembly.append("    ret")
@@ -279,11 +1136,17 @@ class X86Codegen:
         self.string_vars = old_string_vars
 
     def compile_stmt(self, node):
+        if hasattr(node, 'line') and node.line > 0:
+            self.assembly.append(f"    # line {node.line}")
+            
         if isinstance(node, Assignment):
             self.compile_expr(node.value)
             self.assembly.append("    pop eax")
             offset = self.local_vars[node.name]
-            self.assembly.append(f"    mov [ebp - {offset}], eax")
+            if isinstance(offset, str):
+                self.assembly.append(f"    mov {offset}, eax")
+            else:
+                self.assembly.append(f"    mov [ebp - {offset}], eax")
             # Track if this variable holds a string
             if self._is_string_expr(node.value):
                 self.string_vars = getattr(self, 'string_vars', set())
@@ -297,21 +1160,52 @@ class X86Codegen:
             self.assembly.append(f"    mov [eax + {offset}], ebx")
         elif isinstance(node, Print):
             self.compile_expr(node.value)
-            # Check type of target (we default to int printing unless it's a string)
             if self._is_string_expr(node.value):
                 self.assembly.append("    push offset fmt_str")
-                self.assembly.append("    call _printf")
-                self.assembly.append("    add esp, 8")
+            elif self._is_float_expr(node.value):
+                self.assembly.append("    push offset fmt_float")
             else:
                 self.assembly.append("    push offset fmt_int")
-                self.assembly.append("    call _printf")
-                self.assembly.append("    add esp, 8")
+            self.assembly.append("    call _printf")
+            self.assembly.append("    add esp, 8")
             self.assembly.append("    push 0")
             self.assembly.append("    call _fflush")
             self.assembly.append("    add esp, 4")
+        elif isinstance(node, PrintD):
+            if self.debug_mode == 1:
+                self.assembly.append("    push offset debug_prefix")
+                self.assembly.append("    call L_write_stdout")
+                self.assembly.append("    add esp, 4")
+                self.assembly.append(f"    push {node.line}")
+                self.assembly.append("    call L_write_int")
+                self.assembly.append("    add esp, 4")
+                self.assembly.append("    push offset debug_suffix")
+                self.assembly.append("    call L_write_stdout")
+                self.assembly.append("    add esp, 4")
+                self.compile_expr(node.value)
+                if self._is_string_expr(node.value):
+                    self.assembly.append("    call L_write_stdout")
+                    self.assembly.append("    add esp, 4")
+                elif self._is_float_expr(node.value):
+                    self.assembly.append("    push offset fmt_float_pure")
+                    self.assembly.append("    call _printf")
+                    self.assembly.append("    add esp, 8")
+                else:
+                    self.assembly.append("    push offset fmt_int_pure")
+                    self.assembly.append("    call _printf")
+                    self.assembly.append("    add esp, 8")
+                self.assembly.append("    push 10")
+                self.assembly.append("    call L_write_char")
+                self.assembly.append("    add esp, 4")
+                self.assembly.append("    push 0")
+                self.assembly.append("    call _fflush")
+                self.assembly.append("    add esp, 4")
         elif isinstance(node, Return):
             self.compile_expr(node.value)
             self.assembly.append("    pop eax")
+            if hasattr(self, 'used_regs'):
+                for reg in reversed(self.used_regs):
+                    self.assembly.append(f"    pop {reg}")
             self.assembly.append("    mov esp, ebp")
             self.assembly.append("    pop ebp")
             self.assembly.append("    ret")
@@ -366,7 +1260,10 @@ class X86Codegen:
             self.compile_expr(start_val)
             self.assembly.append("    pop eax")
             offset = self.local_vars[node.var_name]
-            self.assembly.append(f"    mov [ebp - {offset}], eax")
+            if isinstance(offset, str):
+                self.assembly.append(f"    mov {offset}, eax")
+            else:
+                self.assembly.append(f"    mov [ebp - {offset}], eax")
             
             loop_label = self.next_label("L_for")
             end_label = self.next_label("L_for_end")
@@ -375,7 +1272,10 @@ class X86Codegen:
             
             self.assembly.append(f"{loop_label}:")
             # Load var
-            self.assembly.append(f"    mov eax, [ebp - {offset}]")
+            if isinstance(offset, str):
+                self.assembly.append(f"    mov eax, {offset}")
+            else:
+                self.assembly.append(f"    mov eax, [ebp - {offset}]")
             self.assembly.append("    push eax")
             # Evaluate end
             self.compile_expr(end_val)
@@ -393,17 +1293,59 @@ class X86Codegen:
                 
             # Increment/Decrement step
             self.assembly.append(f"{continue_label}:")
-            self.assembly.append(f"    mov eax, [ebp - {offset}]")
+            if isinstance(offset, str):
+                self.assembly.append(f"    mov eax, {offset}")
+            else:
+                self.assembly.append(f"    mov eax, [ebp - {offset}]")
             self.compile_expr(step_val)
             self.assembly.append("    pop ebx")
             if node.is_downto:
                 self.assembly.append("    sub eax, ebx")
             else:
                 self.assembly.append("    add eax, ebx")
-            self.assembly.append(f"    mov [ebp - {offset}], eax")
+            if isinstance(offset, str):
+                self.assembly.append(f"    mov {offset}, eax")
+            else:
+                self.assembly.append(f"    mov [ebp - {offset}], eax")
             
             self.assembly.append(f"    jmp {loop_label}")
             self.assembly.append(f"{end_label}:")
+            self.loop_labels.pop()
+        elif isinstance(node, ForIn):
+            self.compile_expr(node.collection)
+            self.assembly.append("    sub esp, 4")
+            self.assembly.append("    mov dword ptr [esp], 0")
+            
+            loop_label = self.next_label("L_forin")
+            end_label = self.next_label("L_forin_end")
+            self.loop_labels.append((loop_label, end_label))
+            
+            self.assembly.append(f"{loop_label}:")
+            self.assembly.append("    mov eax, [esp + 4]")
+            self.assembly.append("    mov eax, [eax]")
+            self.assembly.append("    cmp dword ptr [esp], eax")
+            self.assembly.append(f"    jge {end_label}")
+            
+            self.assembly.append("    mov ecx, [esp]")
+            self.assembly.append("    mov eax, [esp + 4]")
+            self.assembly.append("    mov eax, [eax + 8]")
+            self.assembly.append("    mov eax, [eax + ecx*4]")
+            
+            var_off = self.local_vars[node.var_name]
+            if isinstance(var_off, str):
+                self.assembly.append(f"    mov {var_off}, eax")
+            elif var_off < 0:
+                self.assembly.append(f"    mov [ebp + {-var_off}], eax")
+            else:
+                self.assembly.append(f"    mov [ebp - {var_off}], eax")
+            
+            for stmt in node.body:
+                self.compile_stmt(stmt)
+                
+            self.assembly.append("    inc dword ptr [esp]")
+            self.assembly.append(f"    jmp {loop_label}")
+            self.assembly.append(f"{end_label}:")
+            self.assembly.append("    add esp, 8")
             self.loop_labels.pop()
         elif isinstance(node, Break):
             if self.loop_labels:
@@ -421,7 +1363,12 @@ class X86Codegen:
             self.compile_expr(node.ptr)
             self.assembly.append("    pop edx") # address
             self.assembly.append("    pop eax") # value
-            self.assembly.append("    mov [edx], eax")
+            if node.property == "value_byte":
+                self.assembly.append("    mov byte ptr [edx], al")
+            elif node.property == "value_word":
+                self.assembly.append("    mov word ptr [edx], ax")
+            else:
+                self.assembly.append("    mov [edx], eax")
         elif isinstance(node, ArrayIndexAssign):
             # base[index] = value
             self.compile_expr(node.value)
@@ -430,6 +1377,11 @@ class X86Codegen:
             self.assembly.append("    pop edx") # base (list struct pointer)
             self.assembly.append("    pop ecx") # index
             self.assembly.append("    pop eax") # value
+            # Bounds checking
+            self.assembly.append("    cmp ecx, 0")
+            self.assembly.append("    jl _out_of_bounds")
+            self.assembly.append("    cmp ecx, [edx]")
+            self.assembly.append("    jge _out_of_bounds")
             # List: data pointer is at [edx + 8]
             self.assembly.append("    mov edx, [edx + 8]")
             self.assembly.append("    mov [edx + ecx * 4], eax")
@@ -442,6 +1394,40 @@ class X86Codegen:
             self.assembly.append("    push eax") # str (1st arg)
             self.assembly.append("    call _fputs")
             self.assembly.append("    add esp, 8")
+        elif isinstance(node, RawBlock):
+            for exp in node.exports:
+                self.assembly.append(f"    .global {exp}")
+            lines = {}
+            for stmt in node.body:
+                l = getattr(stmt, 'line', 0)
+                if l not in lines:
+                    lines[l] = []
+                lines[l].append(stmt)
+                
+            asm_mnemonics = {"inc", "dec", "mov", "add", "sub", "cmp", "jmp", "je", "jne", "jl", "jle", "jg", "jge", "jz", "jnz", "push", "pop", "pushf", "popf", "call", "ret", "lea", "xor", "and", "or", "shl", "shr", "movzx", "movsx", "test", "neg", "idiv", "imul", "div", "not", "rep", "repnz", "cdq", "fld", "fstp", "fadd", "faddp", "fsub", "fsubp", "fmul", "fmulp", "fdiv", "fdivp", "fist", "fst", "fchs", "fucomip", "fcomip", "fild", "fistp", "lahf", "sahf", "nop", "hlt", "jns", "jae", "syscall", "fldcw", "fnstcw"}
+            
+            for l, stmts in sorted(lines.items()):
+                first = stmts[0]
+                if isinstance(first, Variable) and first.name in asm_mnemonics:
+                    def stringify(n):
+                        if isinstance(n, Variable): return n.name
+                        if isinstance(n, Number): return str(n.value)
+                        if type(n).__name__ == "BinOp": return f"{stringify(n.left)}{n.op}{stringify(n.right)}"
+                        if type(n).__name__ == "Compare": return f"{stringify(n.left)}{n.op}{stringify(n.right)}"
+                        if type(n).__name__ == "ArrayIndex": return f"{stringify(n.base)}[{stringify(n.index)}]"
+                        if type(n).__name__ == "UnaryOp": return f"{n.op}{stringify(n.value)}"
+                        if type(n).__name__ == "Call": return f"{n.name}({', '.join(stringify(a) for a in n.args)})"
+                        if type(n).__name__ == "ListLiteral":
+                            inner = ' '.join(stringify(e) for e in n.elements)
+                            return f"[{inner}]"
+                        if type(n).__name__ == "String": return n.value
+                        return ""
+                    
+                    parts = [stringify(s) for s in stmts]
+                    self.assembly.append("    " + " ".join(parts))
+                else:
+                    for stmt in stmts:
+                        self.compile_stmt(stmt)
         elif isinstance(node, CloseFile):
             self.compile_expr(node.fd)
             self.assembly.append("    call _fclose")
@@ -456,9 +1442,12 @@ class X86Codegen:
 
     def compile_expr(self, node):
         if isinstance(node, Number):
-            # Check if float or int (for simplicity, cast floats to ints or just load as ints)
-            val = int(float(node.value))
-            self.assembly.append(f"    push {val}")
+            if isinstance(node.value, float):
+                import struct
+                bits = struct.unpack('<I', struct.pack('<f', node.value))[0]
+                self.assembly.append(f"    push {bits}")
+            else:
+                self.assembly.append(f"    push {node.value}")
         elif isinstance(node, String):
             label = self.add_string_literal(node.value)
             self.assembly.append(f"    push offset {label}")
@@ -467,50 +1456,136 @@ class X86Codegen:
             self.assembly.append(f"    push {val}")
         elif isinstance(node, Variable):
             offset = self.local_vars[node.name]
-            if offset < 0:
+            if isinstance(offset, str):
+                self.assembly.append(f"    mov eax, {offset}")
+            elif offset < 0:
                 # Argument: ebp - offset (offset is negative, e.g. -8)
                 self.assembly.append(f"    mov eax, [ebp + {-offset}]")
             else:
                 self.assembly.append(f"    mov eax, [ebp - {offset}]")
             self.assembly.append("    push eax")
         elif isinstance(node, BinOp):
-            self.compile_expr(node.left)
-            self.compile_expr(node.right)
-            self.assembly.append("    pop ebx") # right
-            self.assembly.append("    pop eax") # left
-            if node.op == "+":
-                is_str = self._is_string_expr(node.left) or self._is_string_expr(node.right)
-                if is_str:
-                    self.assembly.append("    push ebx")
-                    self.assembly.append("    push eax")
-                    self.assembly.append("    call _concat_strings")
-                    self.assembly.append("    add esp, 8")
-                else:
-                    self.assembly.append("    add eax, ebx")
-            elif node.op == "-":
-                self.assembly.append("    sub eax, ebx")
-            elif node.op == "*":
-                self.assembly.append("    imul eax, ebx")
-            elif node.op == "/":
-                self.assembly.append("    cdq")
-                self.assembly.append("    idiv ebx")
-            elif node.op == "%":
-                self.assembly.append("    cdq")
-                self.assembly.append("    idiv ebx")
-                self.assembly.append("    mov eax, edx")
-            elif node.op == "and":
-                self.assembly.append("    and eax, ebx")
+            if node.op == "and":
+                label_false = self.next_label("and_false")
+                label_end = self.next_label("and_end")
+                self.compile_expr(node.left)
+                self.assembly.append("    pop eax")
+                self.assembly.append("    cmp eax, 0")
+                self.assembly.append(f"    je {label_false}")
+                self.compile_expr(node.right)
+                self.assembly.append("    pop eax")
+                self.assembly.append("    cmp eax, 0")
+                self.assembly.append(f"    je {label_false}")
+                self.assembly.append("    push 1")
+                self.assembly.append(f"    jmp {label_end}")
+                self.assembly.append(f"{label_false}:")
+                self.assembly.append("    push 0")
+                self.assembly.append(f"{label_end}:")
+                return
             elif node.op == "or":
-                self.assembly.append("    or eax, ebx")
-            elif node.op == "&":
-                self.assembly.append("    and eax, ebx")
-            elif node.op == "<<":
-                self.assembly.append("    mov ecx, ebx")
-                self.assembly.append("    shl eax, cl")
-            elif node.op == ">>":
-                self.assembly.append("    mov ecx, ebx")
-                self.assembly.append("    sar eax, cl")
-            self.assembly.append("    push eax")
+                label_true = self.next_label("or_true")
+                label_end = self.next_label("or_end")
+                self.compile_expr(node.left)
+                self.assembly.append("    pop eax")
+                self.assembly.append("    cmp eax, 0")
+                self.assembly.append(f"    jne {label_true}")
+                self.compile_expr(node.right)
+                self.assembly.append("    pop eax")
+                self.assembly.append("    cmp eax, 0")
+                self.assembly.append(f"    jne {label_true}")
+                self.assembly.append("    push 0")
+                self.assembly.append(f"    jmp {label_end}")
+                self.assembly.append(f"{label_true}:")
+                self.assembly.append("    push 1")
+                self.assembly.append(f"{label_end}:")
+                return
+
+            left_leaf = self.is_leaf_expr(node.left)
+            right_leaf = self.is_leaf_expr(node.right)
+            all_leaf = left_leaf and right_leaf
+            is_float_op = self._is_float_expr(node.left) or self._is_float_expr(node.right)
+            if is_float_op:
+                self.compile_expr(node.left)
+                self.compile_expr(node.right)
+                self.assembly.append("    fld dword ptr [esp + 4]")
+                self.assembly.append("    fld dword ptr [esp]")
+                if node.op == "+":
+                    self.assembly.append("    faddp st(1), st(0)")
+                elif node.op == "-":
+                    self.assembly.append("    fsubp st(1), st(0)")
+                elif node.op == "*":
+                    self.assembly.append("    fmulp st(1), st(0)")
+                elif node.op == "/":
+                    self.assembly.append("    fdivp st(1), st(0)")
+                else:
+                    self.assembly.append("    faddp st(1), st(0)")
+                self.assembly.append("    add esp, 8")
+                self.assembly.append("    sub esp, 4")
+                self.assembly.append("    fstp dword ptr [esp]")
+            elif all_leaf and node.op == "+" and (self._is_string_expr(node.left) or self._is_string_expr(node.right)):
+                self.compile_expr(node.left)
+                self.compile_expr(node.right)
+                self.assembly.append("    pop ebx")
+                self.assembly.append("    pop eax")
+            elif all_leaf:
+                self.compile_leaf_to_reg(node.right, 'ebx')
+                self.compile_leaf_to_reg(node.left, 'eax')
+                if node.op == "+":
+                    self.assembly.append("    add eax, ebx")
+                elif node.op == "-":
+                    self.assembly.append("    sub eax, ebx")
+                elif node.op == "*":
+                    self.assembly.append("    imul eax, ebx")
+                elif node.op == "/":
+                    self.assembly.append("    cdq")
+                    self.assembly.append("    idiv ebx")
+                elif node.op == "%":
+                    self.assembly.append("    cdq")
+                    self.assembly.append("    idiv ebx")
+                    self.assembly.append("    mov eax, edx")
+                elif node.op == "&":
+                    self.assembly.append("    and eax, ebx")
+                elif node.op == "<<":
+                    self.assembly.append("    mov ecx, ebx")
+                    self.assembly.append("    shl eax, cl")
+                elif node.op == ">>":
+                    self.assembly.append("    mov ecx, ebx")
+                    self.assembly.append("    sar eax, cl")
+                self.assembly.append("    push eax")
+            else:
+                self.compile_expr(node.left)
+                self.compile_expr(node.right)
+                self.assembly.append("    pop ebx")
+                self.assembly.append("    pop eax")
+                if node.op == "+":
+                    is_str = self._is_string_expr(node.left) or self._is_string_expr(node.right)
+                    if is_str:
+                        self.assembly.append("    push ebx")
+                        self.assembly.append("    push eax")
+                        self.assembly.append("    call _concat_strings")
+                        self.assembly.append("    add esp, 8")
+                    else:
+                        self.assembly.append("    add eax, ebx")
+                elif node.op == "-":
+                    self.assembly.append("    sub eax, ebx")
+                elif node.op == "*":
+                    self.assembly.append("    imul eax, ebx")
+                elif node.op == "/":
+                    self.assembly.append("    cdq")
+                    self.assembly.append("    idiv ebx")
+                elif node.op == "%":
+                    self.assembly.append("    cdq")
+                    self.assembly.append("    idiv ebx")
+                    self.assembly.append("    mov eax, edx")
+                elif node.op == "&":
+                    self.assembly.append("    and eax, ebx")
+                elif node.op == "<<":
+                    self.assembly.append("    mov ecx, ebx")
+                    self.assembly.append("    shl eax, cl")
+                elif node.op == ">>":
+                    self.assembly.append("    mov ecx, ebx")
+                    self.assembly.append("    sar eax, cl")
+                self.assembly.append("    push eax")
         elif isinstance(node, UnaryOp):
             self.compile_expr(node.value)
             self.assembly.append("    pop eax")
@@ -522,63 +1597,97 @@ class X86Codegen:
                 self.assembly.append("    movzx eax, al")
             self.assembly.append("    push eax")
         elif isinstance(node, Compare):
-            self.compile_expr(node.left)
-            self.compile_expr(node.right)
-            self.assembly.append("    pop ebx") # right
-            self.assembly.append("    pop eax") # left
+            left_leaf = self.is_leaf_expr(node.left)
+            right_leaf = self.is_leaf_expr(node.right)
+            all_leaf = left_leaf and right_leaf
+            is_float_cmp = self._is_float_expr(node.left) or self._is_float_expr(node.right)
+            
+            if is_float_cmp:
+                self.compile_expr(node.left)
+                self.compile_expr(node.right)
+                self.assembly.append("    fld dword ptr [esp]")
+                self.assembly.append("    fld dword ptr [esp + 4]")
+                self.assembly.append("    add esp, 8")
+                self.assembly.append("    fucomip st(0), st(1)")
+                self.assembly.append("    fstp st(0)")
+                self.assembly.append("    pushf")
+                self.assembly.append("    pop eax")
+            elif all_leaf:
+                self.compile_leaf_to_reg(node.right, 'ebx')
+                self.compile_leaf_to_reg(node.left, 'eax')
+            else:
+                self.compile_expr(node.left)
+                self.compile_expr(node.right)
+                self.assembly.append("    pop ebx")
+                self.assembly.append("    pop eax")
             
             # Determine if this is a string comparison based on type info
             left_type = getattr(node.left, 'inferred_type', 'any')
             right_type = getattr(node.right, 'inferred_type', 'any')
-            is_str_cmp = self._is_string_expr(node.left) or self._is_string_expr(node.right)
-            # Also treat 'any' comparisons involving string literals as string
-            if not is_str_cmp and (left_type == 'string' or right_type == 'string'):
-                is_str_cmp = True
+            left_is_str = self._is_string_expr(node.left) or left_type == 'string'
+            right_is_str = self._is_string_expr(node.right) or right_type == 'string'
+            is_str_cmp = False
+            if left_is_str or right_is_str:
+                left_is_zero = isinstance(node.left, Number) and node.left.value == 0
+                right_is_zero = isinstance(node.right, Number) and node.right.value == 0
+                if (left_is_str and right_is_zero) or (right_is_str and left_is_zero):
+                    is_str_cmp = False
+                else:
+                    is_str_cmp = True
             
-            label_true = self.next_label("L_cmp_true")
-            label_end = self.next_label("L_cmp_end")
-            
-            if node.op == "has":
-                # String containment: call strstr(haystack, needle)
-                self.assembly.append("    push ebx")
-                self.assembly.append("    push eax")
-                self.assembly.append("    call _strstr")
-                self.assembly.append("    add esp, 8")
-                # strstr returns non-null (non-zero) if found
-                self.assembly.append("    cmp eax, 0")
-                self.assembly.append(f"    jne {label_true}")
-            elif is_str_cmp:
-                # Use strcmp for string comparisons
-                self.assembly.append("    push ebx")
-                self.assembly.append("    push eax")
-                self.assembly.append("    call _strcmp")
-                self.assembly.append("    add esp, 8")
-                # strcmp returns 0 if equal, <0 or >0 otherwise
-                self.assembly.append("    cmp eax, 0")
-            else:
-                self.assembly.append("    cmp eax, ebx")
-            
-            if node.op == "==":
-                self.assembly.append(f"    je {label_true}")
-            elif node.op == "!=":
-                self.assembly.append(f"    jne {label_true}")
-            elif node.op == "<":
-                self.assembly.append(f"    jl {label_true}")
-            elif node.op == "<=":
-                self.assembly.append(f"    jle {label_true}")
-            elif node.op == ">":
-                self.assembly.append(f"    jg {label_true}")
-            elif node.op == ">=":
-                self.assembly.append(f"    jge {label_true}")
+            if is_float_cmp:
+                # fucomip sets ZF=1 if equal, CF=1 if below; eax holds pushed flags
+                if node.op == "==":
+                    self.assembly.append("    and eax, 64")
+                    self.assembly.append("    cmp eax, 0")
+                elif node.op == "!=":
+                    self.assembly.append("    and eax, 64")
+                    self.assembly.append("    cmp eax, 0")
+                elif node.op == "<":
+                    self.assembly.append("    and eax, 1")
+                    self.assembly.append("    cmp eax, 1")
+                elif node.op == ">":
+                    self.assembly.append("    and eax, 65")
+                    self.assembly.append("    cmp eax, 0")
+                elif node.op == "<=":
+                    self.assembly.append("    and eax, 65")
+                    self.assembly.append("    cmp eax, 0")
+                elif node.op == ">=":
+                    self.assembly.append("    and eax, 1")
+                    self.assembly.append("    cmp eax, 0")
                 
-            self.assembly.append("    push 0")
-            self.assembly.append(f"    jmp {label_end}")
-            self.assembly.append(f"{label_true}:")
-            self.assembly.append("    push 1")
-            self.assembly.append(f"{label_end}:")
+                bool_jcc_map = {"==": "jne", "!=": "je", "<": "je", ">": "je", "<=": "jne", ">=": "je"}
+                jcc = bool_jcc_map[node.op]
+                label_true = self.next_label("L_cmp_true")
+                label_end = self.next_label("L_cmp_end")
+                self.assembly.append(f"    {jcc} {label_true}")
+                self.assembly.append("    push 0")
+                self.assembly.append(f"    jmp {label_end}")
+                self.assembly.append(f"{label_true}:")
+                self.assembly.append("    push 1")
+                self.assembly.append(f"{label_end}:")
+            else:
+                setcc_map = {"==": "sete", "!=": "setne", "<": "setl", "<=": "setle", ">": "setg", ">=": "setge"}
+                if node.op == "has":
+                    self.assembly.append("    cmp eax, 0")
+                elif is_str_cmp:
+                    self.assembly.append("    push ebx")
+                    self.assembly.append("    push eax")
+                    self.assembly.append("    call _strcmp")
+                    self.assembly.append("    add esp, 8")
+                    self.assembly.append("    cmp eax, 0")
+                else:
+                    self.assembly.append("    cmp eax, ebx")
+                self.assembly.append(f"    {setcc_map[node.op]} al")
+                self.assembly.append("    movzx eax, al")
+                self.assembly.append("    push eax")
         elif isinstance(node, Call):
-            if hasattr(self, 'structs') and node.name in self.structs:
-                self.assembly.append("    push 128") # Allocate generous size for any struct
+            if node.name in self.struct_defs:
+                # Compute struct size from max prop_offset + 4
+                struct_size = (max(self.prop_offsets.values()) + 4) if self.prop_offsets else 128
+                struct_size = max(struct_size, 16)
+                struct_size = (struct_size + 15) & ~15
+                self.assembly.append(f"    push {struct_size}")
                 self.assembly.append("    call _malloc")
                 self.assembly.append("    add esp, 4")
                 self.assembly.append("    push eax")
@@ -606,10 +1715,15 @@ class X86Codegen:
                 self.assembly.append("    pop edx") # address
                 self.assembly.append("    mov eax, [edx]") # dereference
                 self.assembly.append("    push eax")
+            elif node.property == "value_byte":
+                self.assembly.append("    pop edx") # address
+                self.assembly.append("    xor eax, eax")
+                self.assembly.append("    mov al, byte ptr [edx]")
+                self.assembly.append("    push eax")
             elif node.property == "addr":
                 pass # already top of stack
             else:
-                raise Exception(f"Property {node.property} not supported in native codegen")
+                raise Exception(f"[line {getattr(node, 'line', '?')}] Property {node.property} not supported in native codegen")
         elif isinstance(node, ArrayIndex):
             # base[index] - need to distinguish string vs list indexing
             base_type = getattr(node.base, 'inferred_type', 'any')
@@ -624,22 +1738,20 @@ class X86Codegen:
             self.assembly.append("    pop ecx") # index
             
             if is_str:
-                # String byte access: create a 2-byte C string [char, 0]
-                self.assembly.append("    push edx")
-                self.assembly.append("    push ecx")
-                self.assembly.append("    push 2")
-                self.assembly.append("    call _malloc")
-                self.assembly.append("    add esp, 4")
-                self.assembly.append("    pop ecx")
-                self.assembly.append("    pop edx")
-                self.assembly.append("    movzx ebx, byte ptr [edx + ecx]")
-                self.assembly.append("    mov byte ptr [eax], bl")
-                self.assembly.append("    mov byte ptr [eax + 1], 0")
+                # String byte access: lookup in char_strings table
+                self.assembly.append("    movzx eax, byte ptr [edx + ecx]")
+                self.assembly.append("    shl eax, 1")
+                self.assembly.append("    add eax, offset char_strings")
                 self.assembly.append("    push eax")
             else:
+                # List access bounds checking
+                self.assembly.append("    cmp ecx, 0")
+                self.assembly.append("    jl _out_of_bounds")
+                self.assembly.append("    cmp ecx, [edx]")
+                self.assembly.append("    jge _out_of_bounds")
                 # List access: data pointer is at [base + 8]
-                self.assembly.append("    mov edx, [edx + 8]")
-                self.assembly.append("    mov eax, [edx + ecx * 4]")
+                self.assembly.append("    mov eax, [edx + 8]")
+                self.assembly.append("    mov eax, [eax + ecx*4]")
                 self.assembly.append("    push eax")
         elif isinstance(node, OpenFile):
             self.compile_expr(node.mode)
@@ -708,15 +1820,27 @@ class X86Codegen:
                 self.assembly.append(f"    jl {no_realloc_label}")
                 self.assembly.append("    shl edx, 1")
                 self.assembly.append("    mov [ebx+4], edx")
-                self.assembly.append("    push ebx")
                 self.assembly.append("    push ecx")
+                self.assembly.append("    push ebx")
                 self.assembly.append("    shl edx, 2")
                 self.assembly.append("    push edx")
                 self.assembly.append("    push dword ptr [ebx+8]")
                 self.assembly.append("    call _realloc")
                 self.assembly.append("    add esp, 8")
-                self.assembly.append("    pop ecx")
+                
+                # Check for realloc failure
+                self.assembly.append("    cmp eax, 0")
+                realloc_ok_label = self.next_label("L_realloc_ok")
+                self.assembly.append("    jne " + realloc_ok_label)
+                self.assembly.append("    push offset fmt_str")
+                self.assembly.append("    push offset L_realloc_fail_msg")
+                self.assembly.append("    call _printf")
+                self.assembly.append("    push 1")
+                self.assembly.append("    call _exit")
+                self.assembly.append(f"{realloc_ok_label}:")
+                
                 self.assembly.append("    pop ebx")
+                self.assembly.append("    pop ecx")
                 self.assembly.append("    mov [ebx+8], eax")
                 self.assembly.append(f"{no_realloc_label}:")
                 self.assembly.append("    mov eax, [ebx]")
@@ -734,6 +1858,13 @@ class X86Codegen:
                 self.assembly.append("    mov edx, [ebx+8]")
                 self.assembly.append("    mov ecx, [edx + eax*4]")
                 self.assembly.append("    push ecx")
+            elif isinstance(node.instance, Variable) and node.instance.name in self.module_names:
+                for arg in reversed(node.args):
+                    self.compile_expr(arg)
+                self.assembly.append(f"    call _{node.method_name}")
+                if len(node.args) > 0:
+                    self.assembly.append(f"    add esp, {len(node.args) * 4}")
+                self.assembly.append("    push eax")
         elif isinstance(node, Len):
             self.compile_expr(node.target)
             is_str = self._is_string_expr(node.target)
@@ -759,9 +1890,9 @@ class X86Codegen:
                     self.assembly.append("    add esp, 12")
                     self.assembly.append("    push eax")
                 else:
-                    raise Exception("Slice with omitted start/end not supported in native codegen yet")
+                    raise Exception(f"[line {getattr(node, 'line', '?')}] Slice with omitted start/end not supported in native codegen yet")
             else:
-                raise Exception("List slicing not supported in native codegen yet")
+                raise Exception(f"[line {getattr(node, 'line', '?')}] List slicing not supported in native codegen yet")
         elif isinstance(node, StrConvert):
             self.compile_expr(node.target)
             self.assembly.append("    pop ebx") # int to convert
@@ -777,4 +1908,4 @@ class X86Codegen:
             self.assembly.append("    pop eax") # restore buffer pointer
             self.assembly.append("    push eax")
         else:
-            raise Exception(f"Native codegen unhandled node: {type(node)}")
+            raise Exception(f"[line {getattr(node, 'line', '?')}] Native codegen unhandled node: {type(node)}")

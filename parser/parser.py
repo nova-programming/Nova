@@ -7,8 +7,30 @@ class Parser:
         self.pos = 0
         self.in_raw = False
 
+    def parse_type_annotation(self):
+        token = self.current()
+        if not token:
+            return ""
+            
+        type_name = ""
+        if token[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING", "TYPE_BYTE", "TYPE_VOID"):
+            type_name = self.eat(token[0])[1]
+        elif token[0] == "IDENT":
+            type_name = self.eat("IDENT")[1]
+        else:
+            return ""
+            
+        if self.current() and self.current()[0] == "LBRACKET":
+            self.eat("LBRACKET")
+            inner_type = self.parse_type_annotation()
+            self.eat("RBRACKET")
+            return f"{type_name}[{inner_type}]"
+            
+        return type_name
+
     def parse_data(self):
         """Parse data structure definition"""
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("DATA")
         name = self.eat("IDENT")[1]
         
@@ -37,18 +59,28 @@ class Parser:
                 self.eat(self.current()[0])
         
         self.eat("RBRACE")
-        return Data(name, fields)
+        return Data(name, fields, line=line)
 
     def parse_data_instance(self, data_name):
         """Parse data instance creation: Point()"""
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("LPAREN")
         self.eat("RPAREN")
-        return DataInstance(data_name)
+        return DataInstance(data_name, line=line)
 
     def parse_for(self):
-        """Parse for loop: for i = 0 to 10 { body }"""
+        """Parse for loop: for i = 0 to 10 { body } or for i in items { body }"""
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("FOR")
         var_name = self.eat("IDENT")[1]
+        
+        if self.current() and self.current()[0] == "IN":
+            self.eat("IN")
+            collection = self.parse_expr()
+            body = self.parse_block()
+            from ast.nodes import ForIn
+            return ForIn(var_name, collection, body, line=line)
+            
         self.eat("EQUALS")
         start = self.parse_expr()
         
@@ -75,9 +107,9 @@ class Parser:
         
         # Default step is 1
         if step is None:
-            step = Number(1)
+            step = Number(1, line=line)
         
-        return ForLoop(var_name, start, end, step, body, is_downto)
+        return ForLoop(var_name, start, end, step, body, is_downto, line=line)
 
     def current(self):
         if self.pos < len(self.tokens):
@@ -89,7 +121,8 @@ class Parser:
         if token and token[0] == kind:
             self.pos += 1
             return token
-        raise SyntaxError(f"Expected {kind}, got {token}")
+        line = token[2] if token and len(token) > 2 else '?'
+        raise SyntaxError(f"[line {line}] Expected {kind}, got {token[0] if token else 'EOF'} ('{token[1] if token else ''}')")
 
     def skip_newlines(self):
         while self.current() and self.current()[0] == "NEWLINE":
@@ -98,70 +131,94 @@ class Parser:
     # ---------------- EXPRESSIONS ----------------
 
     def parse_expr(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         return self.parse_logic()
 
     def parse_logic(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         left = self.parse_compare()
         while self.current() and self.current()[0] in ("AND", "OR"):
             op = self.eat(self.current()[0])[1]
             right = self.parse_compare()
-            left = BinOp(left, op, right)
+            left = BinOp(left, op, right, line=line)
         return left
 
     def parse_compare(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         left = self.parse_add()
         ops = {"GT", "LT", "GE", "LE", "EQEQ", "NOTEQ", "HAS"}
         while self.current() and self.current()[0] in ops:
             op = self.eat(self.current()[0])[1]
             right = self.parse_add()
-            left = Compare(left, op, right)
+            left = Compare(left, op, right, line=line)
         return left
 
     def parse_add(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         left = self.parse_mul()
         while self.current() and self.current()[0] in ("PLUS", "MINUS"):
             op = self.eat(self.current()[0])[1]
             right = self.parse_mul()
-            left = BinOp(left, op, right)
+            if isinstance(left, Number) and isinstance(right, Number):
+                if op == "+": left = Number(left.value + right.value, line=line)
+                elif op == "-": left = Number(left.value - right.value, line=line)
+                continue
+            left = BinOp(left, op, right, line=line)
         return left
 
     def parse_mul(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         left = self.parse_unary()
         while self.current() and self.current()[0] in ("STAR", "SLASH", "PERCENT", "AMPERSAND", "GTGT", "LTLT"):
             op = self.eat(self.current()[0])[1]
             right = self.parse_unary()
-            left = BinOp(left, op, right)
+            if isinstance(left, Number) and isinstance(right, Number):
+                if op == "*": left = Number(left.value * right.value, line=line)
+                elif op == "/" and right.value != 0: left = Number(int(left.value / right.value), line=line)
+                elif op == "%" and right.value != 0: left = Number(left.value % right.value, line=line)
+                elif op == "&": left = Number(left.value & right.value, line=line)
+                elif op == ">>": left = Number(left.value >> right.value, line=line)
+                elif op == "<<": left = Number(left.value << right.value, line=line)
+                continue
+            left = BinOp(left, op, right, line=line)
         return left
 
     def parse_unary(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         if self.current() and self.current()[0] in ("MINUS", "NOT"):
             op = self.eat(self.current()[0])[1]
-            return UnaryOp(op, self.parse_unary())
+            return UnaryOp(op, self.parse_unary(), line=line)
         return self.parse_primary()
 
     def parse_primary(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         token = self.current()
         if not token:
             raise SyntaxError("Unexpected EOF")
-        kind, value = token
+        kind = token[0]
+        value = token[1]
+        line = token[2] if len(token) > 2 else 0
 
         node = None
 
         if kind == "NUMBER":
             self.eat("NUMBER")
-            node = Number(int(value))
+            node = Number(int(value), line=line)
+        elif kind == "FLOAT":
+            self.eat("FLOAT")
+            node = Number(float(value), line=line)
         
         elif kind == "STRING":
             self.eat("STRING")
-            node = String(value[1:-1])
+            node = String(value[1:-1], line=line)
         
         elif kind == "TRUE":
             self.eat("TRUE")
-            node = Boolean(True)
+            node = Boolean(True, line=line)
         
         elif kind == "FALSE":
             self.eat("FALSE")
-            node = Boolean(False)
+            node = Boolean(False, line=line)
         
         elif kind == "LPAREN":
             self.eat("LPAREN")
@@ -173,21 +230,21 @@ class Parser:
             self.eat("LPAREN")
             target = self.parse_expr()
             self.eat("RPAREN")
-            node = SizeOf(target)
+            node = SizeOf(target, line=line)
 
         elif kind == "LEN":
             self.eat("LEN")
             self.eat("LPAREN")
             target = self.parse_expr()
             self.eat("RPAREN")
-            node = Len(target)
+            node = Len(target, line=line)
 
         elif kind == "STR":
             self.eat("STR")
             self.eat("LPAREN")
             target = self.parse_expr()
             self.eat("RPAREN")
-            node = StrConvert(target)
+            node = StrConvert(target, line=line)
 
         elif kind == "OPEN":
             self.eat("OPEN")
@@ -196,18 +253,18 @@ class Parser:
             self.eat("COMMA")
             mode = self.parse_expr()
             self.eat("RPAREN")
-            node = OpenFile(path, mode)
+            node = OpenFile(path, mode, line=line)
 
         elif kind == "READ":
             self.eat("READ")
             self.eat("LPAREN")
             fd = self.parse_expr()
             self.eat("RPAREN")
-            node = ReadFile(fd)
+            node = ReadFile(fd, line=line)
 
         elif kind == "SELF":
             self.eat("SELF")
-            node = Self()
+            node = Self(line=line)
         
         elif kind == "ALLOC":
             node = self.parse_alloc()
@@ -222,7 +279,7 @@ class Parser:
                     if self.current() and self.current()[0] != "RBRACK":
                         elements.append(self.parse_expr())
             self.eat("RBRACK")
-            node = ListLiteral(elements)
+            node = ListLiteral(elements, line=line)
 
         elif kind == "LBRACE":
             self.eat("LBRACE")
@@ -239,7 +296,7 @@ class Parser:
                         self.eat("COLON")
                         values.append(self.parse_expr())
             self.eat("RBRACE")
-            node = DictLiteral(keys, values)
+            node = DictLiteral(keys, values, line=line)
 
         elif kind == "IDENT":
             name = self.eat("IDENT")[1]
@@ -255,9 +312,12 @@ class Parser:
                         if self.current() and self.current()[0] != "RPAREN":
                             args.append(self.parse_expr())
                 self.eat("RPAREN")
-                node = Call(name, args)
+                node = Call(name, args, line=line)
             else:
-                node = Variable(name)
+                node = Variable(name, line=line)
+        elif kind == "COMMA":
+            self.eat("COMMA")
+            node = Variable(",", line=line)
         else:
             raise SyntaxError(f"Unexpected token: {token}")
 
@@ -282,23 +342,23 @@ class Parser:
                             if self.current() and self.current()[0] != "RPAREN":
                                 args.append(self.parse_expr())
                     self.eat("RPAREN")
-                    node = MethodCall(node, prop, args)
+                    node = MethodCall(node, prop, args, line=line)
                     continue
                 
                 # Pointer property vs Data field
-                pointer_properties = ["value", "addr", "isValid", "isNull", "bytes"]
+                pointer_properties = ["value", "addr", "isValid", "isNull", "bytes", "value_byte", "value_word", "value_dword", "value_qword"]
                 if prop in pointer_properties:
                     if self.current() and self.current()[0] == "EQUALS":
                         self.eat("EQUALS")
                         value = self.parse_expr()
-                        return PointerAssign(node, prop, value)
-                    node = PointerProperty(node, prop)
+                        return PointerAssign(node, prop, value, line=line)
+                    node = PointerProperty(node, prop, line=line)
                 else:
                     if self.current() and self.current()[0] == "EQUALS":
                         self.eat("EQUALS")
                         value = self.parse_expr()
-                        return DataFieldAssign(node, prop, value)
-                    node = DataFieldAccess(node, prop)
+                        return DataFieldAssign(node, prop, value, line=line)
+                    node = DataFieldAccess(node, prop, line=line)
                 continue
                 
             elif next_kind == "LBRACK":
@@ -309,7 +369,7 @@ class Parser:
                     self.eat("COLON")
                     end_expr = self.parse_expr() if self.current() and self.current()[0] != "RBRACK" else None
                     self.eat("RBRACK")
-                    node = Slice(node, None, end_expr)
+                    node = Slice(node, None, end_expr, line=line)
                     continue
 
                 index = self.parse_expr()
@@ -317,15 +377,15 @@ class Parser:
                     self.eat("COLON")
                     end_expr = self.parse_expr() if self.current() and self.current()[0] != "RBRACK" else None
                     self.eat("RBRACK")
-                    node = Slice(node, index, end_expr)
+                    node = Slice(node, index, end_expr, line=line)
                     continue
 
                 self.eat("RBRACK")
                 if self.current() and self.current()[0] == "EQUALS":
                     self.eat("EQUALS")
                     value = self.parse_expr()
-                    return ArrayIndexAssign(node, index, value)
-                node = ArrayIndex(node, index)
+                    return ArrayIndexAssign(node, index, value, line=line)
+                node = ArrayIndex(node, index, line=line)
                 continue
                 
             else:
@@ -334,17 +394,19 @@ class Parser:
         return node
 
     def parse_alloc(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("ALLOC")
         if not self.current() or self.current()[0] != "LPAREN":
             raise SyntaxError("Expected '(' after alloc")
         self.eat("LPAREN")
         size = self.parse_expr()
         self.eat("RPAREN")
-        return Alloc(size)
+        return Alloc(size, line=line)
 
     # ---------------- STATEMENTS ----------------
 
     def parse_class(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("CLASS")
         name = self.eat("IDENT")[1]
         self.eat("LBRACE")
@@ -360,14 +422,10 @@ class Parser:
                 methods.append(self.parse_function())
             else:
                 field_name = self.eat("IDENT")[1]
-                field_type = None
-
+                field_type = ""
                 if self.current() and self.current()[0] == "COLON":
                     self.eat("COLON")
-                    if self.current()[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
-                        field_type = self.eat(self.current()[0])[1]
-                    else:
-                        field_type = self.eat("IDENT")[1]
+                    field_type = self.parse_type_annotation()
 
                 # Default assignments in class body not yet supported, just taking names
                 if self.current() and self.current()[0] == "EQUALS":
@@ -377,7 +435,7 @@ class Parser:
             self.skip_newlines()
 
         self.eat("RBRACE")
-        return ClassDef(name, methods, fields)
+        return ClassDef(name, methods, fields, line=line)
 
     def parse_statement(self):
         self.skip_newlines()
@@ -385,6 +443,7 @@ class Parser:
         if not token:
             return None
         kind = token[0]
+        line = token[2] if len(token) > 2 else 0
 
         if kind == "CLASS":
             return self.parse_class()
@@ -396,12 +455,18 @@ class Parser:
             return self.parse_for()
         if kind == "DEF":
             return self.parse_function()
+        if kind == "PRINTD":
+            self.eat("PRINTD")
+            self.eat("LPAREN")
+            value = self.parse_expr()
+            self.eat("RPAREN")
+            return PrintD(value, line=line)
         if kind == "PRINT":
             self.eat("PRINT")
             self.eat("LPAREN")
             value = self.parse_expr()
             self.eat("RPAREN")
-            return Print(value)
+            return Print(value, line=line)
         if kind == "WRITE":
             self.eat("WRITE")
             self.eat("LPAREN")
@@ -409,13 +474,13 @@ class Parser:
             self.eat("COMMA")
             content = self.parse_expr()
             self.eat("RPAREN")
-            return WriteFile(fd, content)
+            return WriteFile(fd, content, line=line)
         if kind == "CLOSE":
             self.eat("CLOSE")
             self.eat("LPAREN")
             fd = self.parse_expr()
             self.eat("RPAREN")
-            return CloseFile(fd)
+            return CloseFile(fd, line=line)
         if kind == "IF":
             return self.parse_if()
         if kind == "WHILE":
@@ -423,14 +488,14 @@ class Parser:
         if kind == "RETURN":
             self.eat("RETURN")
             if self.current() and self.current()[0] in ('RBRACE', 'NEWLINE', 'EOF'):
-                return Return(Number(0))
-            return Return(self.parse_expr())
+                return Return(Number(0), line=line)
+            return Return(self.parse_expr(), line=line)
         if kind == "BREAK":
             self.eat("BREAK")
-            return Break()
+            return Break(line=line)
         if kind == "CONTINUE":
             self.eat("CONTINUE")
-            return Continue()
+            return Continue(line=line)
         if kind == "FREE":
             return self.parse_free()
         if kind == "DATA":
@@ -448,64 +513,54 @@ class Parser:
 
         if isinstance(expr, Variable) and self.current() and self.current()[0] == "COLON":
             self.eat("COLON")
-            if self.current()[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
-                type_name = self.eat(self.current()[0])[1]
-            else:
-                type_name = self.eat("IDENT")[1]
+            type_name = self.parse_type_annotation()
             expr.type_name = type_name
 
         if self.current() and self.current()[0] == "EQUALS":
             self.eat("EQUALS")
             value = self.parse_expr()
             if isinstance(expr, Variable):
-                return Assignment(expr.name, value, type_name=expr.type_name, is_const=is_const)
+                return Assignment(expr.name, value, type_name=expr.type_name, is_const=is_const, line=line)
         return expr
 
     def parse_free(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("FREE")
         if not self.current() or self.current()[0] != "LPAREN":
             raise SyntaxError("Expected '(' after free")
         self.eat("LPAREN")
         ptr = self.parse_expr()
         self.eat("RPAREN")
-        return Free(ptr)
+        return Free(ptr, line=line)
 
     def parse_function(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("DEF")
         name = self.eat("IDENT")[1]
         self.eat("LPAREN")
         params = []
         if self.current() and self.current()[0] != "RPAREN":
             param_name = self.eat("IDENT")[1]
-            param_type = None
+            param_type = ""
             if self.current() and self.current()[0] == "COLON":
                 self.eat("COLON")
-                if self.current()[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
-                    param_type = self.eat(self.current()[0])[1]
-                else:
-                    param_type = self.eat("IDENT")[1]
+                param_type = self.parse_type_annotation()
             params.append((param_name, param_type))
 
             while self.current() and self.current()[0] == "COMMA":
                 self.eat("COMMA")
                 param_name = self.eat("IDENT")[1]
-                param_type = None
+                param_type = ""
                 if self.current() and self.current()[0] == "COLON":
                     self.eat("COLON")
-                    if self.current()[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
-                        param_type = self.eat(self.current()[0])[1]
-                    else:
-                        param_type = self.eat("IDENT")[1]
+                    param_type = self.parse_type_annotation()
                 params.append((param_name, param_type))
         self.eat("RPAREN")
 
-        return_type = None
+        return_type = ""
         if self.current() and self.current()[0] == "ARROW":
             self.eat("ARROW")
-            if self.current()[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
-                return_type = self.eat(self.current()[0])[1]
-            else:
-                return_type = self.eat("IDENT")[1]
+            return_type = self.parse_type_annotation()
 
         self.eat("LBRACE")
         body = []
@@ -518,9 +573,10 @@ class Parser:
                 body.append(stmt)
             self.skip_newlines()
         self.eat("RBRACE")
-        return Function(name, params, body, return_type=return_type)
+        return Function(name, params, body, return_type=return_type, line=line)
 
     def parse_block(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("LBRACE")
         body = []
         while self.current() and self.current()[0] != "RBRACE":
@@ -535,6 +591,7 @@ class Parser:
         return body
 
     def parse_import(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("IMPORT")
 
         # Check if it's an FFI string import `import "c" as libc`
@@ -542,7 +599,7 @@ class Parser:
             lib_path = self.eat("STRING")[1][1:-1] # Remove quotes
             self.eat("AS")
             alias = self.eat("IDENT")[1]
-            return LoadLib(lib_path, alias)
+            return LoadLib(lib_path, alias, line=line)
 
         # Standard .nv module import `import math` or `import math as m`
         module_name = self.eat("IDENT")[1]
@@ -550,9 +607,10 @@ class Parser:
         if self.current() and self.current()[0] == "AS":
             self.eat("AS")
             alias = self.eat("IDENT")[1]
-        return Import(module_name, alias=alias)
+        return Import(module_name, alias=alias, line=line)
 
     def parse_raw(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("RAW")
         self.eat("LBRACE")
         self.in_raw = True
@@ -572,9 +630,10 @@ class Parser:
             self.skip_newlines()
         self.eat("RBRACE")
         self.in_raw = False
-        return RawBlock(body, exports)
+        return RawBlock(body, exports, line=line)
 
     def parse_export(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("EXPORT")
         self.eat("LBRACE")
         items = []
@@ -583,17 +642,19 @@ class Parser:
             if self.current() and self.current()[0] == "COMMA":
                 self.eat("COMMA")
         self.eat("RBRACE")
-        return Export(items)
+        return Export(items, line=line)
 
     def parse_if(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("IF")
         cond = self.parse_expr()
         then = self.parse_block()
         else_body = self._parse_if_tail()
-        return IfElse(cond, then, else_body)
+        return IfElse(cond, then, else_body, line=line)
 
     def _parse_if_tail(self):
         """Parse the optional else/elif tail of an if statement."""
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         if not self.current():
             return []
         if self.current()[0] == "ELIF":
@@ -601,17 +662,18 @@ class Parser:
             elif_cond = self.parse_expr()
             elif_body = self.parse_block()
             tail = self._parse_if_tail()
-            return [IfElse(elif_cond, elif_body, tail)]
+            return [IfElse(elif_cond, elif_body, tail, line=line)]
         if self.current()[0] == "ELSE":
             self.eat("ELSE")
             return self.parse_block()
         return []
 
     def parse_while(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("WHILE")
         cond = self.parse_expr()
         body = self.parse_block()
-        return While(cond, body)
+        return While(cond, body, line=line)
 
     def parse(self):
         program = []
@@ -623,4 +685,3 @@ class Parser:
             if stmt:
                 program.append(stmt)
         return program
-

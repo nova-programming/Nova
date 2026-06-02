@@ -1,0 +1,47 @@
+# ============================================================
+# Nova Linux OS facade (stdlib/os_linux.nv)
+# ============================================================
+
+def sys_open(path: string, mode: string) -> int {
+    return open(path, mode)
+}
+
+def sys_read(fd: int) -> string {
+    return read(fd)
+}
+
+def sys_write(fd: int, content) {
+    write(fd, content)
+}
+
+def sys_write_raw(fd: int, content: list) {
+    @raw {
+        count = len(content)
+        i = 0
+        while i < count {
+            val = content[i]
+            fputc(val, fd)
+            i = i + 1
+        }
+    }
+}
+
+def sys_close(fd: int) {
+    close(fd)
+}
+
+def sys_alloc(size: int) -> int {
+    @raw {
+        return alloc(size)
+    }
+}
+
+def sys_free(ptr: int) {
+    @raw {
+        free(ptr)
+    }
+}
+
+def sys_platform() -> string {
+    return "linux"
+}

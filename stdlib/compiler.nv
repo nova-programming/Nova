@@ -1,6 +1,11 @@
+import os_win
 import lexer
 import parser
+import types
+import type_checker
 import codegen
+import assembler
+import linker
 
 def contains(lst: list, item: string) -> int {
     i = 0
@@ -20,18 +25,19 @@ def resolve_imports(ast: list, visited: list) -> list {
             module_name = node.val_str
             if contains(visited, module_name) == 0 {
                 visited.append(module_name)
-                fd = open(module_name + ".nv", "r")
+                fd = sys_open(module_name + ".nv", "r")
                 if fd == 0 {
-                    fd = open("stdlib/" + module_name + ".nv", "r")
+                    fd = sys_open("stdlib/" + module_name + ".nv", "r")
                 }
                 if fd == 0 {
-                    print("Import Error: Could not resolve module " + module_name)
+                    print("ERROR [Import]: Could not resolve module '" + module_name + "'")
+                    print("  -> make sure the file '" + module_name + ".nv' exists in the current directory or stdlib/")
                 } else {
-                    source = read(fd)
-                    close(fd)
+                    source = sys_read(fd)
+                    sys_close(fd)
                     print("Tokenizing... " + module_name)
                     tokens = tokenize(source)
-                    imported_ast = parse(tokens)
+                    imported_ast = parse(tokens, module_name + ".nv")
                     resolved_ast = resolve_imports(imported_ast, visited)
                     j = 0
                     while j < len(resolved_ast) {
@@ -48,46 +54,163 @@ def resolve_imports(ast: list, visited: list) -> list {
     return expanded
 }
 
-def compile_file(path: string) -> list {
+def compile_file(path: string, debug_mode: int) -> list {
     print("Reading file: " + path)
-    # Read the source file
-    fd = open(path, "r")
-    source = read(fd)
-    close(fd)
+    fd = sys_open(path, "r")
+    source = sys_read(fd)
+    sys_close(fd)
 
     print("Tokenizing...")
-    # Step 1: Tokenize
     tokens = tokenize(source)
 
     print("Parsing...")
-    # Step 2: Parse into AST
-    ast = parse(tokens)
+    ast = parse(tokens, path)
     
     print("Resolving imports...")
-    # Step 2.5: Resolve Imports
     visited = []
     ast = resolve_imports(ast, visited)
 
+    print("Type checking...")
+    tc = TypeChecker()
+    tc_init(tc)
+    tc_check(tc, ast)
+
     print("Generating assembly...")
-    # Step 3: Generate x86 assembly
-    asm = generate_assembly(ast)
+    asm = generate_assembly(ast, debug_mode)
 
     print("Compilation finished.")
     return asm
 }
 
-def compile_to_file(input_path: string, output_path: string) {
-    asm = compile_file(input_path)
-    fd = open(output_path, "w")
+def compile_to_file(input_path: string, output_path: string, debug_mode: int) {
+    asm = compile_file(input_path, debug_mode)
+    fd = sys_open(output_path, "w")
     i = 0
     while i < len(asm) {
-        write(fd, asm[i])
-        write(fd, "\n")
+        sys_write(fd, asm[i])
+        sys_write(fd, "\n")
         i = i + 1
     }
-    close(fd)
+    sys_close(fd)
     print("Compiled: " + input_path + " -> " + output_path)
 }
 
-# ===== DRIVER =====
-compile_to_file("stdlib/compiler.nv", "stdlib/compiler_stage2.s")
+def compile_to_exe(input_path: string, output_path: string, debug_mode: int) {
+    asm = compile_file(input_path, debug_mode)
+    
+    fd = sys_open(input_path + ".s", "w")
+    i = 0
+    while i < len(asm) {
+        sys_write(fd, asm[i])
+        sys_write(fd, "\n")
+        i = i + 1
+    }
+    sys_close(fd)
+
+    print("Assembling...")
+    assembled = assemble(asm)
+    print("Linking...")
+    exe_bytes = link(assembled)
+    fd = sys_open(output_path, "wb")
+    sys_write_raw(fd, exe_bytes)
+    sys_close(fd)
+    print("Compiled: " + input_path + " -> " + output_path)
+}
+
+def compile_to_bare(input_path: string, output_path: string, debug_mode: int, load_addr: int, entry_name: string) {
+    asm = compile_file(input_path, debug_mode)
+    
+    fd = sys_open(input_path + ".s", "w")
+    i = 0
+    while i < len(asm) {
+        sys_write(fd, asm[i])
+        sys_write(fd, "\n")
+        i = i + 1
+    }
+    sys_close(fd)
+    
+    print("Assembling...")
+    assembled = assemble(asm)
+    print("Linking bare-metal...")
+    bare_bytes = link_bare(assembled, load_addr)
+    fd2 = sys_open(output_path, "wb")
+    sys_write_raw(fd2, bare_bytes)
+    sys_close(fd2)
+    print("Compiled: " + input_path + " -> " + output_path)
+}
+
+def assemble_bare_file(asm_path: string, output_path: string, load_addr: int) {
+    print("Reading assembly: " + asm_path)
+    fd = sys_open(asm_path, "r")
+    if fd == 0 {
+        print("ERROR: Could not open file: " + asm_path)
+        return
+    }
+    content = sys_read(fd)
+    sys_close(fd)
+    asm_lines = []
+    start = 0
+    i = 0
+    content_len = len(content)
+    while i < content_len {
+        if content[i] == "\n" or content[i] == "\r" {
+            if i > start {
+                asm_lines.append(str_sub(content, start, i))
+            }
+            if content[i] == "\r" and i + 1 < content_len and content[i + 1] == "\n" {
+                i = i + 1
+            }
+            start = i + 1
+        }
+        i = i + 1
+    }
+    if i > start {
+        asm_lines.append(str_sub(content, start, i))
+    }
+    
+    assembled = assemble(asm_lines)
+    print("Linking bare-metal...")
+    bare_bytes = link_bare(assembled, load_addr)
+    fd2 = sys_open(output_path, "wb")
+    sys_write_raw(fd2, bare_bytes)
+    sys_close(fd2)
+    print("Generated: " + output_path)
+}
+
+def assemble_link_file(asm_path: string, output_path: string) {
+    print("Reading assembly: " + asm_path)
+    fd = sys_open(asm_path, "r")
+    if fd == 0 {
+        print("ERROR: Could not open file: " + asm_path)
+        return
+    }
+    content = sys_read(fd)
+    sys_close(fd)
+    asm_lines = []
+    start = 0
+    i = 0
+    content_len = len(content)
+    while i < content_len {
+        if content[i] == "\n" or content[i] == "\r" {
+            if i > start {
+                asm_lines.append(str_sub(content, start, i))
+            }
+            if content[i] == "\r" and i + 1 < content_len and content[i + 1] == "\n" {
+                i = i + 1
+            }
+            start = i + 1
+        }
+        i = i + 1
+    }
+    if i > start {
+        asm_lines.append(str_sub(content, start, i))
+    }
+    
+    assembled = assemble(asm_lines)
+    print("Linking...")
+    exe_bytes = link(assembled)
+    fd2 = sys_open(output_path, "wb")
+    sys_write_raw(fd2, exe_bytes)
+    sys_close(fd2)
+    print("Generated: " + output_path)
+}

@@ -1,17 +1,22 @@
 from ast.nodes import *
-
+from compiler.types import *
 
 class StaticTypeError(Exception):
-    pass
+    def __init__(self, message, line=None, suggestion=""):
+        prefix = f"[line {line}]" if line else ""
+        if suggestion:
+            super().__init__(f"{prefix} {message}\n  -> {suggestion}")
+        else:
+            super().__init__(f"{prefix} {message}")
 
-
-class TypeChecker:
+class TypeInferer:
     def __init__(self):
         self.env_stack = [{}]
-        self.functions = {}
+        self.structs = {}  # name -> StructType
+        self.functions = {} # name -> FuncType
         self.current_function_return_type = None
-        self.in_raw = False  # Track if we're inside a @raw block
-        self.const_vars = set()  # Track const variable names
+        self.in_raw = False
+        self.const_vars = set()
 
     def push_env(self):
         self.env_stack.append({})
@@ -19,120 +24,194 @@ class TypeChecker:
     def pop_env(self):
         self.env_stack.pop()
 
+    def set_var_type(self, name, type_obj):
+        self.env_stack[-1][name] = type_obj
+
+    def get_var_type(self, name):
+        for env in reversed(self.env_stack):
+            if name in env:
+                return env[name]
+        return AnyType()
+
+    def unify(self, t1, t2, node=None):
+        if isinstance(t1, DynType) or isinstance(t2, DynType):
+            return DynType()
+        if isinstance(t1, AnyType): return t2
+        if isinstance(t2, AnyType): return t1
+        
+        if t1 == t2:
+            return t1
+            
+        # Float and Int coerce
+        if (isinstance(t1, ScalarType) and isinstance(t2, ScalarType)):
+            if (t1.name == "float" and t2.name == "int") or (t1.name == "int" and t2.name == "float"):
+                return FloatType
+                
+        # Null pointer support (0 as struct/list/func pointer)
+        if isinstance(t1, ScalarType) and t1.name == "int" and (isinstance(t2, StructType) or isinstance(t2, ListType) or isinstance(t2, FuncType)):
+            return t2
+        if isinstance(t2, ScalarType) and t2.name == "int" and (isinstance(t1, StructType) or isinstance(t1, ListType) or isinstance(t1, FuncType)):
+            return t1
+                
+        line = node.line if node and hasattr(node, 'line') else '?'
+        raise StaticTypeError(
+            f"Type mismatch: cannot use {t1} where {t2} is expected",
+            line,
+            f"try converting the value with int() or str(), or use a variable of type {t2}"
+        )
+
     def visit(self, node):
         if node is None:
-            return "any"
-        if hasattr(self, f"visit_{type(node).__name__}"):
-            t = getattr(self, f"visit_{type(node).__name__}")(node)
-            node.inferred_type = t
-            return t
-        node.inferred_type = "any"
-        return "any"
+            return AnyType()
+        
+        method_name = f"visit_{type(node).__name__}"
+        if hasattr(self, method_name):
+            t = getattr(self, method_name)(node)
+        else:
+            t = AnyType()
+            
+        node.inferred_type = t
+        return t
 
-    def check(self, ast):
-        # Pass 1: Register function signatures
+    def infer(self, ast):
+        # Pass 1: Register structs and functions
         for stmt in ast:
-            if isinstance(stmt, Function):
-                self.functions[stmt.name] = {
-                    "params": stmt.params,
-                    "return_type": stmt.return_type
-                }
+            if isinstance(stmt, Data):
+                struct_type = StructType(stmt.name)
+                # We can't fully resolve field types yet until all structs are registered
+                self.structs[stmt.name] = struct_type
+            elif isinstance(stmt, Function):
+                params = []
+                for p_name, p_type_str in stmt.params:
+                    params.append(resolve_type_annotation(p_type_str))
+                ret_type = resolve_type_annotation(stmt.return_type)
+                func_type = FuncType(params, ret_type)
+                self.functions[stmt.name] = func_type
 
-        # Pass 2: Type check everything
+        # Pass 1.5: Resolve struct fields
+        for stmt in ast:
+            if isinstance(stmt, Data):
+                struct_type = self.structs[stmt.name]
+                for f_name, f_type_str in stmt.fields:
+                    struct_type.fields[f_name] = resolve_type_annotation(f_type_str)
+
+        # Pass 2: Infer everything
         for stmt in ast:
             self.visit(stmt)
 
+    # --- Node Visitors ---
+
     def visit_Number(self, node):
-        return "int" if isinstance(node.value, int) else "float"
+        return IntType if isinstance(node.value, int) else FloatType
 
     def visit_String(self, node):
-        return "string"
+        return StringType
 
     def visit_Boolean(self, node):
-        return "bool"
-
-    def visit_Assignment(self, node):
-        t = self.visit(node.value)
-
-        # Check for const reassignment
-        if node.name in self.const_vars and not node.is_const:
-            raise StaticTypeError(f"Cannot reassign const variable '{node.name}'")
-
-        # Track const variables
-        if node.is_const:
-            self.const_vars.add(node.name)
-
-        found_env = None
-        for env in reversed(self.env_stack):
-            if node.name in env:
-                found_env = env
-                break
-
-        if found_env is not None:
-            if found_env[node.name] != "dyn" and found_env[node.name] != t and found_env[node.name] != "any" and t != "any":
-                raise StaticTypeError(f"Cannot assign {t} to variable of type {found_env[node.name]}")
-        else:
-            self.env_stack[-1][node.name] = node.type_name if node.type_name else t
-        return t
+        return BoolType
 
     def visit_Variable(self, node):
-        for env in reversed(self.env_stack):
-            if node.name in env:
-                return env[node.name]
-        return "any"
-
-    def visit_UnaryOp(self, node):
-        return self.visit(node.value)
+        t = self.get_var_type(node.name)
+        return t
 
     def visit_BinOp(self, node):
         left_t = self.visit(node.left)
         right_t = self.visit(node.right)
-        if left_t != right_t and left_t != "dyn" and right_t != "dyn" and left_t != "any" and right_t != "any":
-            raise StaticTypeError(f"Type Error in binary operation: {left_t} {node.op} {right_t}")
-        return left_t
+        return self.unify(left_t, right_t, node)
+
+    def visit_UnaryOp(self, node):
+        return self.visit(node.value)
+
+    def visit_Compare(self, node):
+        self.visit(node.left)
+        self.visit(node.right)
+        return BoolType
+
+    def visit_Assignment(self, node):
+        t = self.visit_Assignment_real(node)
+        return t
+
+    def visit_Assignment_real(self, node):
+        val_t = self.visit(node.value)
+
+        if node.name in self.const_vars and not node.is_const:
+            raise StaticTypeError(f"Cannot reassign const variable '{node.name}'", node.line,
+                "remove the 'const' keyword from the declaration or use a different variable name")
+        if node.is_const:
+            self.const_vars.add(node.name)
+
+        # Check existing type
+        existing_t = None
+        for env in reversed(self.env_stack):
+            if node.name in env:
+                existing_t = env[node.name]
+                break
+                
+        if existing_t:
+            if not isinstance(existing_t, DynType):
+                self.unify(existing_t, val_t, node)
+            t = existing_t
+        else:
+            declared_t = resolve_type_annotation(node.type_name) if node.type_name else val_t
+            if node.type_name:
+                self.unify(declared_t, val_t, node)
+            self.set_var_type(node.name, declared_t)
+            t = declared_t
+            
+        return t
 
     def visit_Function(self, node):
         self.push_env()
-        prev_return_type = self.current_function_return_type
-        self.current_function_return_type = node.return_type if node.return_type else "any"
-
-        for param_name, param_type in node.params:
-            self.env_stack[-1][param_name] = param_type if param_type else "any"
+        prev_ret = self.current_function_return_type
+        
+        func_type = self.functions[node.name]
+        self.current_function_return_type = func_type.ret
+        
+        for (p_name, _), p_type in zip(node.params, func_type.params):
+            self.set_var_type(p_name, p_type)
 
         for stmt in node.body:
             self.visit(stmt)
 
-        self.current_function_return_type = prev_return_type
+        self.current_function_return_type = prev_ret
         self.pop_env()
+        return func_type
 
     def visit_Return(self, node):
         t = self.visit(node.value)
-        if self.current_function_return_type and self.current_function_return_type != "any":
-            if t != "dyn" and t != "any" and t != self.current_function_return_type:
-                raise StaticTypeError(f"Return type {t} does not match function signature {self.current_function_return_type}")
+        if self.current_function_return_type:
+            self.unify(self.current_function_return_type, t, node)
         return t
 
     def visit_Call(self, node):
+        # Function types
         if node.name in self.functions:
-            func_meta = self.functions[node.name]
-            params = func_meta["params"]
-            if len(node.args) != len(params):
-                raise StaticTypeError(f"Function {node.name} expects {len(params)} args, got {len(node.args)}")
-
-            for arg, (param_name, param_type) in zip(node.args, params):
+            func_type = self.functions[node.name]
+            if len(node.args) != len(func_type.params):
+                raise StaticTypeError(f"Function {node.name} expects {len(func_type.params)} args, got {len(node.args)}", node.line,
+                    f"add or remove arguments to match the function signature — expected {len(func_type.params)}, got {len(node.args)}")
+            
+            for arg, param_type in zip(node.args, func_type.params):
                 arg_t = self.visit(arg)
-                if param_type and param_type != "any" and arg_t != "dyn" and arg_t != "any" and arg_t != param_type:
-                    raise StaticTypeError(f"Argument type mismatch for {node.name}: expected {param_type}, got {arg_t}")
+                self.unify(param_type, arg_t, arg)
+                
+            return func_type.ret
+            
+        # Struct instantiation (faked as Call currently)
+        if node.name in self.structs:
+            # We don't check struct args here yet, handled in Phase 2
+            for arg in node.args:
+                self.visit(arg)
+            return self.structs[node.name]
 
-            return func_meta["return_type"] if func_meta["return_type"] else "any"
-
-        # If not globally known (e.g., builtin or from FFI)
+        # FFI or builtins
         for arg in node.args:
             self.visit(arg)
-        return "any"
+        return AnyType()
 
     def visit_IfElse(self, node):
         self.visit(node.condition)
+        
         self.push_env()
         for stmt in node.if_body:
             self.visit(stmt)
@@ -142,6 +221,7 @@ class TypeChecker:
         for stmt in node.else_body:
             self.visit(stmt)
         self.pop_env()
+        return AnyType()
 
     def visit_While(self, node):
         self.visit(node.condition)
@@ -149,162 +229,195 @@ class TypeChecker:
         for stmt in node.body:
             self.visit(stmt)
         self.pop_env()
+        return AnyType()
 
     def visit_ForLoop(self, node):
         self.push_env()
         start_t = self.visit(node.start)
-        self.env_stack[-1][node.var_name] = start_t
+        self.set_var_type(node.var_name, start_t)
         self.visit(node.end)
         self.visit(node.step)
 
         for stmt in node.body:
             self.visit(stmt)
         self.pop_env()
+        return AnyType()
+
+    def visit_ForIn(self, node):
+        self.push_env()
+        coll_t = self.visit(node.collection)
+        var_t = AnyType()
+        if isinstance(coll_t, ListType):
+            var_t = coll_t.element_type
+        self.set_var_type(node.var_name, var_t)
+        
+        for stmt in node.body:
+            self.visit(stmt)
+        self.pop_env()
+        return AnyType()
 
     def visit_ClassDef(self, node):
-        # We can implement full OOP type checking, but for now we skip method bodies or just visit them
         for method in node.methods:
             self.visit(method)
+        return AnyType()
 
     def visit_MethodCall(self, node):
         self.visit(node.instance)
         for arg in node.args:
             self.visit(arg)
-        return "any"
+        return AnyType()
+
+    def visit_PrintD(self, node):
+        self.visit(node.value)
+        return AnyType()
 
     def visit_Print(self, node):
         self.visit(node.value)
+        return AnyType()
 
     def visit_Import(self, node):
-        # Import type checking is a no-op; the compiler handles resolution
-        pass
+        return AnyType()
 
     def visit_RawBlock(self, node):
-        # Enter @raw context — unsafe operations allowed
         prev_raw = self.in_raw
         self.in_raw = True
         for stmt in node.body:
             self.visit(stmt)
         self.in_raw = prev_raw
+        return AnyType()
 
     def visit_Export(self, node):
-        # Export is handled inside @raw blocks
-        pass
+        return AnyType()
 
     def visit_Data(self, node):
-        # Data struct definitions are type-checked passively
-        pass
-
-    def visit_Compare(self, node):
-        self.visit(node.left)
-        self.visit(node.right)
-        return "bool"
-
-    def visit_UnaryOp(self, node):
-        return self.visit(node.value)
+        return self.structs[node.name]
 
     def visit_DataFieldAssign(self, node):
-        self.visit(node.instance)
-        return self.visit(node.value)
+        inst_t = self.visit(node.instance)
+        val_t = self.visit(node.value)
+        if isinstance(inst_t, StructType) and node.field_name in inst_t.fields:
+            self.unify(inst_t.fields[node.field_name], val_t, node)
+        return val_t
 
     def visit_DataFieldAccess(self, node):
-        self.visit(node.instance)
-        return "any"
+        inst_t = self.visit(node.instance)
+        if isinstance(inst_t, StructType) and node.field_name in inst_t.fields:
+            return inst_t.fields[node.field_name]
+        return AnyType()
 
     def visit_LoadLib(self, node):
-        pass
+        return AnyType()
 
     def visit_Alloc(self, node):
         if not self.in_raw:
-            raise StaticTypeError("alloc() is only available inside @raw blocks")
+            raise StaticTypeError("alloc() is only available inside @raw blocks", node.line,
+                "wrap this code in @raw { ... } to use low-level memory functions")
         self.visit(node.size)
-        return "any"
+        return AnyType()
 
     def visit_Free(self, node):
         if not self.in_raw:
-            raise StaticTypeError("free() is only available inside @raw blocks")
+            raise StaticTypeError("free() is only available inside @raw blocks", node.line,
+                "wrap this code in @raw { ... } to use low-level memory functions")
         self.visit(node.ptr)
+        return AnyType()
 
     def visit_PointerProperty(self, node):
         if not self.in_raw:
-            raise StaticTypeError("Pointer operations are only available inside @raw blocks")
+            raise StaticTypeError("Pointer operations are only available inside @raw blocks", node.line,
+                "wrap this code in @raw { ... } to use pointer operations")
         self.visit(node.ptr)
-        return "any"
+        return AnyType()
 
     def visit_PointerAssign(self, node):
         if not self.in_raw:
-            raise StaticTypeError("Pointer operations are only available inside @raw blocks")
+            raise StaticTypeError("Pointer operations are only available inside @raw blocks", node.line)
         self.visit(node.ptr)
         self.visit(node.value)
+        return AnyType()
 
     def visit_ArrayIndex(self, node):
-        self.visit(node.base)
+        base_t = self.visit(node.base)
         self.visit(node.index)
-        return "any"
+        if isinstance(base_t, ListType):
+            return base_t.element_type
+        if isinstance(base_t, ScalarType) and base_t.name == "string":
+            return StringType
+        return AnyType()
 
     def visit_Slice(self, node):
-        self.visit(node.base)
-        if node.start:
-            self.visit(node.start)
-        if node.end:
-            self.visit(node.end)
-        return "any"
+        base_t = self.visit(node.base)
+        if node.start: self.visit(node.start)
+        if node.end: self.visit(node.end)
+        if isinstance(base_t, ListType):
+            return base_t
+        if isinstance(base_t, ScalarType) and base_t.name == "string":
+            return StringType
+        return AnyType()
 
     def visit_ArrayIndexAssign(self, node):
-        self.visit(node.base)
+        base_t = self.visit(node.base)
         self.visit(node.index)
-        self.visit(node.value)
+        val_t = self.visit(node.value)
+        if isinstance(base_t, ListType):
+            self.unify(base_t.element_type, val_t, node)
+        return val_t
 
     def visit_SizeOf(self, node):
         self.visit(node.target)
-        return "int"
+        return IntType
 
     def visit_Len(self, node):
         self.visit(node.target)
-        return "int"
+        return IntType
 
     def visit_StrConvert(self, node):
         self.visit(node.target)
-        return "string"
+        return StringType
 
     def visit_OpenFile(self, node):
         self.visit(node.path)
         self.visit(node.mode)
-        return "int"
+        return IntType
 
     def visit_ReadFile(self, node):
         self.visit(node.fd)
-        return "string"
+        return StringType
 
     def visit_WriteFile(self, node):
         self.visit(node.fd)
         self.visit(node.content)
+        return AnyType()
 
     def visit_CloseFile(self, node):
         self.visit(node.fd)
+        return AnyType()
 
     def visit_Self(self, node):
-        return "any"
+        return AnyType()
 
     def visit_Break(self, node):
-        pass
+        return AnyType()
 
     def visit_Continue(self, node):
-        pass
+        return AnyType()
 
     def visit_ListLiteral(self, node):
+        elem_t = AnyType()
         for element in node.elements:
-            self.visit(element)
-        return "any"
+            t = self.visit(element)
+            if isinstance(elem_t, AnyType):
+                elem_t = t
+            else:
+                elem_t = self.unify(elem_t, t, element)
+        return ListType(elem_t)
 
     def visit_DictLiteral(self, node):
         for k, v in zip(node.keys, node.values):
             self.visit(k)
             self.visit(v)
-        return "any"
-
-    def visit_Assignment(self, node):
-        return "any"
+        return AnyType()
 
     def visit_DataInstance(self, node):
-        return "any"
+        # Unused currently, struct instantiation goes through Call
+        return AnyType()
