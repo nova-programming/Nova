@@ -114,10 +114,12 @@ nova/
 - Data structures (`data` blocks)
 - FFI to C libraries
 - Module import system (circular-import-safe)
-- Self-hosted lexer, parser, codegen, type checker
 - Bare-metal flat binary output (`build-bare` / `assemble-bare`, no PE headers)
 - `@raw` block assembly passthrough (lines starting with x86 mnemonics emit raw assembly; others compile as normal Nova)
 - `@export { name1, name2 }` inside `@raw` blocks for `.global` symbol export
+- **Self-Hosted Assembler & Linker** — fully integrated in-process x86 assembler and PE executable linker, entirely eliminating the GCC dependency.
+- **Variable-to-Register Promotion** — greedily maps local variables to CPU registers (`esi`/`edi`), massively boosting runtime performance.
+- Self-hosted lexer, parser, codegen, type checker
 
 ## License
 

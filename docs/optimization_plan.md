@@ -85,7 +85,7 @@ This eliminates ~50% of push/pop pairs in arithmetic chains.
 
 ---
 
-## Phase 3: Variable-to-Register Promotion (Week 3–4)
+## Phase 3: Variable-to-Register Promotion (Week 3–4) - ✅ DONE
 **Impact: ~2–3× on variable-heavy code. Effort: high (~200 lines per codegen).**
 
 Currently every variable access goes through `[ebp ± N]` — even hot loop counters.
