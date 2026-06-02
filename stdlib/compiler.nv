@@ -117,6 +117,66 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int) {
     print("Compiled: " + input_path + " -> " + output_path)
 }
 
+def compile_to_bare(input_path: string, output_path: string, debug_mode: int, load_addr: int, entry_name: string) {
+    asm = compile_file(input_path, debug_mode)
+    
+    fd = sys_open(input_path + ".s", "w")
+    i = 0
+    while i < len(asm) {
+        sys_write(fd, asm[i])
+        sys_write(fd, "\n")
+        i = i + 1
+    }
+    sys_close(fd)
+    
+    print("Assembling...")
+    assembled = assemble(asm)
+    print("Linking bare-metal...")
+    bare_bytes = link_bare(assembled, load_addr)
+    fd2 = sys_open(output_path, "wb")
+    sys_write_raw(fd2, bare_bytes)
+    sys_close(fd2)
+    print("Compiled: " + input_path + " -> " + output_path)
+}
+
+def assemble_bare_file(asm_path: string, output_path: string, load_addr: int) {
+    print("Reading assembly: " + asm_path)
+    fd = sys_open(asm_path, "r")
+    if fd == 0 {
+        print("ERROR: Could not open file: " + asm_path)
+        return
+    }
+    content = sys_read(fd)
+    sys_close(fd)
+    asm_lines = []
+    start = 0
+    i = 0
+    content_len = len(content)
+    while i < content_len {
+        if content[i] == "\n" or content[i] == "\r" {
+            if i > start {
+                asm_lines.append(str_sub(content, start, i))
+            }
+            if content[i] == "\r" and i + 1 < content_len and content[i + 1] == "\n" {
+                i = i + 1
+            }
+            start = i + 1
+        }
+        i = i + 1
+    }
+    if i > start {
+        asm_lines.append(str_sub(content, start, i))
+    }
+    
+    assembled = assemble(asm_lines)
+    print("Linking bare-metal...")
+    bare_bytes = link_bare(assembled, load_addr)
+    fd2 = sys_open(output_path, "wb")
+    sys_write_raw(fd2, bare_bytes)
+    sys_close(fd2)
+    print("Generated: " + output_path)
+}
+
 def assemble_link_file(asm_path: string, output_path: string) {
     print("Reading assembly: " + asm_path)
     fd = sys_open(asm_path, "r")

@@ -271,9 +271,50 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
     }
     if node.kind == "RawBlock" {
         i = 0
-        while i < len(node.body) {
-            compile_stmt(state, node.body[i], debug_mode)
+        while i < len(node.args) {
+            emit(state, "    .global " + node.args[i])
             i = i + 1
+        }
+        lines = []
+        i = 0
+        while i < len(node.body) {
+            l = node.body[i].line
+            found = 0
+            j = 0
+            while j < len(lines) {
+                if lines[j] == l { found = 1 }
+                j = j + 1
+            }
+            if found == 0 { lines.append(l) }
+            i = i + 1
+        }
+        j = 0
+        while j < len(lines) {
+            l = lines[j]
+            line_nodes = []
+            i = 0
+            while i < len(node.body) {
+                if node.body[i].line == l { line_nodes.append(node.body[i]) }
+                i = i + 1
+            }
+            first = line_nodes[0]
+            if first.kind == "Variable" and is_asm_mnemonic(state, first.val_str) == 1 {
+                asm_line = "    "
+                k = 0
+                while k < len(line_nodes) {
+                    asm_line = asm_line + node_to_asm(state, line_nodes[k])
+                    if k < len(line_nodes) - 1 { asm_line = asm_line + " " }
+                    k = k + 1
+                }
+                emit(state, asm_line)
+            } else {
+                k = 0
+                while k < len(line_nodes) {
+                    compile_stmt(state, line_nodes[k], debug_mode)
+                    k = k + 1
+                }
+            }
+            j = j + 1
         }
     }
     

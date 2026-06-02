@@ -848,6 +848,18 @@ def encode_fldcw(state, ops: list) {
         encode_modrm_mem(state, op1, 5)
     }
 }
+def encode_nop(state) {
+    state.code.append(144)
+}
+def encode_pushf(state) {
+    state.code.append(156)
+}
+def encode_popf(state) {
+    state.code.append(157)
+}
+def encode_lahf(state) {
+    state.code.append(159)
+}
 def encode_fchs(state) {
     state.code.append(217)
     state.code.append(224)
@@ -953,6 +965,30 @@ def emit_instruction(state, line: AsmLine) {
     }
     if line.mnemonic == "cdq" {
         state.code.append(153)
+        return
+    }
+    if line.mnemonic == "nop" {
+        state.code.append(144)
+        return
+    }
+    if line.mnemonic == "hlt" {
+        state.code.append(244)
+        return
+    }
+    if line.mnemonic == "int3" {
+        state.code.append(204)
+        return
+    }
+    if line.mnemonic == "pushf" {
+        state.code.append(156)
+        return
+    }
+    if line.mnemonic == "popf" {
+        state.code.append(157)
+        return
+    }
+    if line.mnemonic == "lahf" {
+        state.code.append(159)
         return
     }
     if line.mnemonic == "push" {

@@ -83,6 +83,17 @@ def tokenize(src: string) -> list {
         ch = src[i]
 
         if ch == "@" {
+            if i + 6 < length {
+                if src[i + 1] == "e" and src[i + 2] == "x" and src[i + 3] == "p" and src[i + 4] == "o" and src[i + 5] == "r" and src[i + 6] == "t" {
+                    tok = Token()
+                    tok.kind = "EXPORT"
+                    tok.val = "@export"
+                    tok.line = line_num
+                    tokens.append(tok)
+                    i = i + 7
+                    continue
+                }
+            }
             if i + 3 < length {
                 if src[i + 1] == "r" and src[i + 2] == "a" and src[i + 3] == "w" {
                     tok = Token()

@@ -29,3 +29,16 @@ Import name resolution strips `@N` stdcall suffixes (e.g., `ExitProcess@4` → `
 ## Imports
 
 Generates thunks and IAT entries for external functions (`GetProcessHeap`, `HeapAlloc`, `WriteFile`, `CreateFileA`, `ReadFile`, `GetCommandLineA`, `ExitProcess`, `WinExec`, `SetFilePointer`, `FlushFileBuffers`, `CloseHandle`, `GetStdHandle`), mapping them to `kernel32.dll` and constructing `IMAGE_IMPORT_DESCRIPTOR` structures.
+
+## Bare-Metal Flat Binary Mode (`link_bare`)
+
+In addition to PE generation, the linker supports a bare-metal flat binary mode via `link_bare(sections, load_addr)`:
+
+- **No PE headers** — raw code + data concatenation
+- **No import section** — undefined symbols cause a hard error
+- **Configurable load address** — used for absolute fixup resolution (e.g., 0x7C00 for bootsector)
+- **Layout**: code starts at offset 0, data follows immediately after
+
+CLI commands:
+- `nova build-bare <file.nv> [load_addr_dec] [entry_label]` — compile `.nv` source to flat binary
+- `nova assemble-bare <input.s> <output.bin> [load_addr_dec]` — assemble `.s` file to flat binary

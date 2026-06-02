@@ -560,3 +560,36 @@ def link(sections: list) -> list {
     
     return image
 }
+
+# --- Bare-metal flat binary linker ---
+
+def link_bare(sections: list, load_addr: int) -> list {
+    code = sections[0]
+    data_sec = sections[1]
+    labels = sections[2]
+    fixups = sections[3]
+    
+    # Check for undefined labels (imports not allowed in bare mode)
+    i = 0
+    while i < len(labels) {
+        if labels[i].defined == 0 {
+            print("ERROR: Undefined symbol in bare-metal mode: " + labels[i].name)
+            sys_flush()
+            sys_exit(1)
+        }
+        i = i + 1
+    }
+    
+    # Layout: code at offset 0, data immediately after code
+    text_base = 0
+    data_base = len(code)
+    
+    apply_relocs(code, fixups, labels, text_base, data_base, load_addr)
+    
+    # Concatenate code + data into flat binary
+    flat = []
+    append_bytes(flat, code)
+    append_bytes(flat, data_sec)
+    
+    return flat
+}

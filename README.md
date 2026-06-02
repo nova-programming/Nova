@@ -16,11 +16,18 @@ cd Nova
 # Build to native executable (uses GCC as linker)
 python main.py build program.nv
 
+# Build using self-hosted compiler (no GCC needed)
+nova_main.exe build program.nv
+
 # Run in the Python bytecode VM (fast iteration)
 python main.py dev program.nv
 
 # Assemble .s file and link directly (GCC-free, uses self-hosted assembler+linker)
 nova_main.exe assemble-link input.s output.exe
+
+# Build to bare-metal flat binary (no PE headers, no imports)
+nova_main.exe build-bare program.nv 31744 _start
+nova_main.exe assemble-bare program.s output.bin 0x7C00
 ```
 
 ## Self-Hosted Bootstrap Chain
@@ -108,6 +115,9 @@ nova/
 - FFI to C libraries
 - Module import system (circular-import-safe)
 - Self-hosted lexer, parser, codegen, type checker
+- Bare-metal flat binary output (`build-bare` / `assemble-bare`, no PE headers)
+- `@raw` block assembly passthrough (lines starting with x86 mnemonics emit raw assembly; others compile as normal Nova)
+- `@export { name1, name2 }` inside `@raw` blocks for `.global` symbol export
 
 ## License
 

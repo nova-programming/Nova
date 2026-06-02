@@ -1,0 +1,7 @@
+x = 1
+print(x)
+
+@raw {
+    @export { my_func }
+    nop
+}

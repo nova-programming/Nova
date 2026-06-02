@@ -315,6 +315,9 @@ class Parser:
                 node = Call(name, args, line=line)
             else:
                 node = Variable(name, line=line)
+        elif kind == "COMMA":
+            self.eat("COMMA")
+            node = Variable(",", line=line)
         else:
             raise SyntaxError(f"Unexpected token: {token}")
 

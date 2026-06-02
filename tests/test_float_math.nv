@@ -1,0 +1,42 @@
+x = 3.14
+y = 2.0
+print("x = ")
+print(x)
+
+print("y = ")
+print(y)
+
+print("x + y = ")
+print(x + y)
+
+print("x - y = ")
+print(x - y)
+
+print("x * y = ")
+print(x * y)
+
+print("x / y = ")
+print(x / y)
+
+print("x == 3.14 ?")
+if x == 3.14 {
+    print("yes")
+} else {
+    print("no")
+}
+
+print("x > y ?")
+if x > y {
+    print("yes")
+} else {
+    print("no")
+}
+
+print("x < y ?")
+if x < y {
+    print("yes")
+} else {
+    print("no")
+}
+
+print("done")

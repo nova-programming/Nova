@@ -216,8 +216,14 @@ def parse_primary(state: ParserState) -> AstNode {
                                                                         eat_tok(state, "RBRACE")
                                                                         node.kind = "NONE"
                                                                     } else {
+                                                                        if tok.kind == "COMMA" {
+                                                                            eat_tok(state, "COMMA")
+                                                                            node.kind = "Variable"
+                                                                            node.val_str = ","
+                                                                        } else {
                                                                         errors.err("Syntax", state.filename, tok.line, "unexpected token: " + tok.kind, "this token does not belong here — check for misplaced operators, missing expressions, or extra punctuation")
                                                                         state.pos = state.pos + 1
+                                                                        }
                                                                     }
                                                                 }
                                                             }
@@ -838,11 +844,32 @@ def parse_statement(state: ParserState) -> AstNode {
 
     if tok.kind == "RAW" {
         eat_tok(state, "RAW")
-        body = parse_block(state)
+        eat_tok(state, "LBRACE")
+        body = []
+        exports = []
+        while 1 == 1 {
+            check = current_tok(state)
+            if check.kind == "RBRACE" or check.kind == "EOF" { break }
+            if check.kind == "EXPORT" {
+                exp = parse_export(state)
+                j = 0
+                while j < len(exp) {
+                    exports.append(exp[j])
+                    j = j + 1
+                }
+            } else {
+                stmt = parse_statement(state)
+                if stmt.kind != "NONE" {
+                    body.append(stmt)
+                }
+            }
+        }
+        eat_tok(state, "RBRACE")
         node = AstNode()
         node.line = stmt_line
         node.kind = "RawBlock"
         node.body = body
+        node.args = exports
         return node
     }
 
@@ -903,6 +930,24 @@ def parse_statement(state: ParserState) -> AstNode {
     }
     
     return expr
+}
+
+def parse_export(state: ParserState) -> list {
+    eat_tok(state, "EXPORT")
+    eat_tok(state, "LBRACE")
+    names = []
+    check = current_tok(state)
+    while check.kind != "RBRACE" {
+        name_tok = eat_tok(state, "IDENT")
+        names.append(name_tok.val)
+        check = current_tok(state)
+        if check.kind == "COMMA" {
+            eat_tok(state, "COMMA")
+            check = current_tok(state)
+        }
+    }
+    eat_tok(state, "RBRACE")
+    return names
 }
 
 def parse(tokens: list, filename: string) -> list {

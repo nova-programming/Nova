@@ -1291,6 +1291,8 @@ class X86Codegen:
             self.assembly.append("    call _fputs")
             self.assembly.append("    add esp, 8")
         elif isinstance(node, RawBlock):
+            for exp in node.exports:
+                self.assembly.append(f"    .global {exp}")
             lines = {}
             for stmt in node.body:
                 l = getattr(stmt, 'line', 0)
@@ -1298,7 +1300,7 @@ class X86Codegen:
                     lines[l] = []
                 lines[l].append(stmt)
                 
-            asm_mnemonics = {"inc", "dec", "mov", "add", "sub", "cmp", "jmp", "je", "jne", "jl", "jle", "jg", "jge", "jz", "jnz", "push", "pop", "call", "ret", "lea", "xor", "and", "or", "shl", "shr", "movzx", "movsx", "test", "neg", "idiv", "imul"}
+            asm_mnemonics = {"inc", "dec", "mov", "add", "sub", "cmp", "jmp", "je", "jne", "jl", "jle", "jg", "jge", "jz", "jnz", "push", "pop", "pushf", "popf", "call", "ret", "lea", "xor", "and", "or", "shl", "shr", "movzx", "movsx", "test", "neg", "idiv", "imul", "div", "not", "rep", "repnz", "cdq", "fld", "fstp", "fadd", "faddp", "fsub", "fsubp", "fmul", "fmulp", "fdiv", "fdivp", "fist", "fst", "fchs", "fucomip", "fcomip", "fild", "fistp", "lahf", "sahf", "nop", "hlt", "jns", "jae", "syscall", "fldcw", "fnstcw"}
             
             for l, stmts in sorted(lines.items()):
                 first = stmts[0]
@@ -1307,7 +1309,14 @@ class X86Codegen:
                         if isinstance(n, Variable): return n.name
                         if isinstance(n, Number): return str(n.value)
                         if type(n).__name__ == "BinOp": return f"{stringify(n.left)}{n.op}{stringify(n.right)}"
-                        if type(n).__name__ == "ArrayIndex": return f"{stringify(n.base)} [{stringify(n.index)}]"
+                        if type(n).__name__ == "Compare": return f"{stringify(n.left)}{n.op}{stringify(n.right)}"
+                        if type(n).__name__ == "ArrayIndex": return f"{stringify(n.base)}[{stringify(n.index)}]"
+                        if type(n).__name__ == "UnaryOp": return f"{n.op}{stringify(n.value)}"
+                        if type(n).__name__ == "Call": return f"{n.name}({', '.join(stringify(a) for a in n.args)})"
+                        if type(n).__name__ == "ListLiteral":
+                            inner = ' '.join(stringify(e) for e in n.elements)
+                            return f"[{inner}]"
+                        if type(n).__name__ == "String": return n.value
                         return ""
                     
                     parts = [stringify(s) for s in stmts]
@@ -1452,8 +1461,8 @@ class X86Codegen:
             is_float_cmp = self._is_float_expr(node.left) or self._is_float_expr(node.right)
             
             if is_float_cmp:
-                self.assembly.append("    fld dword ptr [esp + 4]")
                 self.assembly.append("    fld dword ptr [esp]")
+                self.assembly.append("    fld dword ptr [esp + 4]")
                 self.assembly.append("    add esp, 8")
                 self.assembly.append("    fucomip st(0), st(1)")
                 self.assembly.append("    fstp st(0)")
@@ -1484,29 +1493,63 @@ class X86Codegen:
                 self.assembly.append("    cmp eax, 0")
                 self.assembly.append(f"    jne {label_true}")
             elif is_float_cmp:
-                # fucomip sets flags: ZF=1 if equal, CF=1 if below
-                self.assembly.append("    lahf")
+                # fucomip sets ZF=1 if equal, CF=1 if below; eax holds pushed flags
+                if node.op == "==":
+                    self.assembly.append("    and eax, 64")
+                    self.assembly.append("    cmp eax, 0")
+                    self.assembly.append(f"    jne {label_true}")
+                elif node.op == "!=":
+                    self.assembly.append("    and eax, 64")
+                    self.assembly.append("    cmp eax, 0")
+                    self.assembly.append(f"    je {label_true}")
+                elif node.op == "<":
+                    self.assembly.append("    and eax, 1")
+                    self.assembly.append("    cmp eax, 1")
+                    self.assembly.append(f"    je {label_true}")
+                elif node.op == ">":
+                    self.assembly.append("    and eax, 65")
+                    self.assembly.append("    cmp eax, 0")
+                    self.assembly.append(f"    je {label_true}")
+                elif node.op == "<=":
+                    self.assembly.append("    and eax, 65")
+                    self.assembly.append("    cmp eax, 0")
+                    self.assembly.append(f"    jne {label_true}")
+                elif node.op == ">=":
+                    self.assembly.append("    and eax, 1")
+                    self.assembly.append("    cmp eax, 0")
+                    self.assembly.append(f"    je {label_true}")
             elif is_str_cmp:
                 self.assembly.append("    push ebx")
                 self.assembly.append("    push eax")
                 self.assembly.append("    call _strcmp")
                 self.assembly.append("    add esp, 8")
                 self.assembly.append("    cmp eax, 0")
+                if node.op == "==":
+                    self.assembly.append(f"    je {label_true}")
+                elif node.op == "!=":
+                    self.assembly.append(f"    jne {label_true}")
+                elif node.op == "<":
+                    self.assembly.append(f"    jl {label_true}")
+                elif node.op == "<=":
+                    self.assembly.append(f"    jle {label_true}")
+                elif node.op == ">":
+                    self.assembly.append(f"    jg {label_true}")
+                elif node.op == ">=":
+                    self.assembly.append(f"    jge {label_true}")
             else:
                 self.assembly.append("    cmp eax, ebx")
-            
-            if node.op == "==":
-                self.assembly.append(f"    je {label_true}")
-            elif node.op == "!=":
-                self.assembly.append(f"    jne {label_true}")
-            elif node.op == "<":
-                self.assembly.append(f"    jl {label_true}")
-            elif node.op == "<=":
-                self.assembly.append(f"    jle {label_true}")
-            elif node.op == ">":
-                self.assembly.append(f"    jg {label_true}")
-            elif node.op == ">=":
-                self.assembly.append(f"    jge {label_true}")
+                if node.op == "==":
+                    self.assembly.append(f"    je {label_true}")
+                elif node.op == "!=":
+                    self.assembly.append(f"    jne {label_true}")
+                elif node.op == "<":
+                    self.assembly.append(f"    jl {label_true}")
+                elif node.op == "<=":
+                    self.assembly.append(f"    jle {label_true}")
+                elif node.op == ">":
+                    self.assembly.append(f"    jg {label_true}")
+                elif node.op == ">=":
+                    self.assembly.append(f"    jge {label_true}")
                 
             self.assembly.append("    push 0")
             self.assembly.append(f"    jmp {label_end}")

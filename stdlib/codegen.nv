@@ -1031,7 +1031,7 @@ def generate_assembly(ast: list, debug_mode: int) -> list {
     emit(state, ".extern FlushFileBuffers")
     emit(state, ".extern ExitProcess")
     emit(state, ".extern WinExec")
-    emit(state, ".extern GetCommandLineA")
+    emit(state, ".extern _GetCommandLineA")
 
     emit_data(state, "fmt_int: .asciz \"%d\\n\"")
     emit_data(state, "fmt_int_pure: .asciz \"%d\"")

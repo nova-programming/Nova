@@ -6,7 +6,7 @@ def sys_read_byte(ptr: int) -> int {
     @raw {
         mov eax, [ebp + 8]
         movzx eax, byte ptr [eax]
-        return eax
+        ret
     }
 }
 
