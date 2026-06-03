@@ -1,0 +1,6 @@
+f = openf("tests/test_read.txt")
+content = f.read()
+print("Length:")
+print(len(content))
+print("Content:")
+print(content)

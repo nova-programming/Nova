@@ -754,6 +754,35 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    add esp, 4")
         emit(state, "    push eax")
     }
+    if node.kind == "Openf" {
+        emit(state, "    push 12")
+        emit(state, "    call _malloc")
+        emit(state, "    add esp, 4")
+        emit(state, "    push eax")
+        
+        compile_expr(state, node.left)
+        
+        if node.right != 0 {
+            compile_expr(state, node.right)
+        } else {
+            emit(state, "    push offset str_fmode_r")
+        }
+        
+        emit(state, "    pop edx")
+        emit(state, "    pop ecx")
+        
+        emit(state, "    mov ebx, [esp]")
+        emit(state, "    mov [ebx + 8], ecx")
+        
+        emit(state, "    push edx")
+        emit(state, "    push ecx")
+        emit(state, "    call _fopen")
+        emit(state, "    add esp, 8")
+        
+        emit(state, "    pop ebx")
+        emit(state, "    mov [ebx], eax")
+        emit(state, "    push ebx")
+    }
     if node.kind == "ListLiteral" {
         emit(state, "    push 12")
         emit(state, "    call _malloc")

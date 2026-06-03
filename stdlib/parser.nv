@@ -129,14 +129,23 @@ def parse_primary(state: ParserState) -> AstNode {
                                 node.left = parse_expr(state)
                                 eat_tok(state, "RPAREN")
                             } else {
-                                if tok.kind == "OPEN" {
-                                    eat_tok(state, "OPEN")
+                                if tok.kind == "OPENF" {
+                                    eat_tok(state, "OPENF")
                                     eat_tok(state, "LPAREN")
                                     path_node = parse_expr(state)
-                                    eat_tok(state, "COMMA")
-                                    mode_node = parse_expr(state)
+                                    
+                                    mode_node = AstNode()
+                                    mode_node.kind = "String"
+                                    mode_node.val_str = "r"
+                                    
+                                    check_comma = current_tok(state)
+                                    if check_comma.kind == "COMMA" {
+                                        eat_tok(state, "COMMA")
+                                        mode_node = parse_expr(state)
+                                    }
+                                    
                                     eat_tok(state, "RPAREN")
-                                    node.kind = "OpenFile"
+                                    node.kind = "Openf"
                                     node.left = path_node
                                     node.right = mode_node
                                 } else {

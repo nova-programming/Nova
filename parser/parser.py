@@ -252,8 +252,12 @@ class Parser:
             self.eat("OPENF")
             self.eat("LPAREN")
             path = self.parse_expr()
+            mode = String("r", line=line)
+            if self.current() and self.current()[0] == "COMMA":
+                self.eat("COMMA")
+                mode = self.parse_expr()
             self.eat("RPAREN")
-            node = Openf(path, line=line)
+            node = Openf(path, mode=mode, line=line)
 
         elif kind == "OPEN":
             self.eat("OPEN")

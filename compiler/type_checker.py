@@ -426,6 +426,8 @@ class TypeInferer:
 
     def visit_Openf(self, node):
         self.visit(node.path)
+        if hasattr(node, 'mode') and node.mode:
+            self.visit(node.mode)
         return FileType
 
     def visit_Self(self, node):

@@ -1,0 +1,1 @@
+This is a dynamically read file. The size is evaluated accurately without the fseek workaround!
