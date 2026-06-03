@@ -58,6 +58,12 @@ Nova bridges high-level Pythonic simplicity with low-level C-like control. This 
 * **`write(fd, content)`**: Writes a string `content` to the file referenced by `fd`.
 * **`close(fd)`**: Closes the file descriptor `fd`.
 
+### Standard Output & Debugging
+* **`print`**: Outputs the value of an expression to standard output. Resolves the value's type at compile time and invokes the appropriate printing routine (e.g. `_printf` with `%d` for integers, `%f` for floats, or `L_write_stdout` for strings).
+  * *Syntax*: `print(x)`
+* **`printd`**: Debug print. Outputs a debug prefix containing the source file line number, followed by the evaluated value (e.g., `debug - [line 42]: <value>`). The compiler only generates assembly instructions for `printd` statements when compiling with the `--debug` flag active; otherwise, they are discarded as no-ops.
+  * *Syntax*: `printd(x)`
+
 ---
 
 ## 2. Built-In Data Types
