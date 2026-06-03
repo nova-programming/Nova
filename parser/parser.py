@@ -259,6 +259,22 @@ class Parser:
             self.eat("RPAREN")
             node = Openf(path, mode=mode, line=line)
 
+        elif kind == "API":
+            self.eat("API")
+            self.eat("LPAREN")
+            url = self.parse_expr()
+            method = "GET"
+            if self.current() and self.current()[0] == "COMMA":
+                self.eat("COMMA")
+                # For now just eat the method string and hardcode GET compilation later, 
+                # or store it in ApiRequest node
+                if self.current() and self.current()[0] == "STRING":
+                    method = self.eat("STRING")[1][1:-1]
+                else:
+                    self.parse_expr() # fallback 
+            self.eat("RPAREN")
+            node = ApiRequest(url, method=method, line=line)
+
         elif kind == "OPEN":
             self.eat("OPEN")
             self.eat("LPAREN")

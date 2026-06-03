@@ -56,6 +56,7 @@ def match_keyword(word: string) -> string {
     if word == "printd" { return "PRINTD" }
     if word == "print" { return "PRINT" }
     if word == "openf" { return "OPENF" }
+    if word == "api" { return "API" }
     if word == "open" { return "OPEN" }
     if word == "read" { return "READ" }
     if word == "write" { return "WRITE" }

@@ -131,18 +131,29 @@ def print_usage():
     print("  nova dev <file.nv>     Run in VM (fast, for development)")
     print("  nova build <file.nv>   Compile to native executable")
     print("  nova run <file.nv>     Alias for 'dev' (backward compatible)")
+    print("  nova galaxy <cmd>      Run Galaxy Package Manager commands")
     print("")
     print("Examples:")
     print("  python main.py dev program.nv")
-    print("  python main.py build program.nv")
+    print("  python main.py galaxy init")
 
 
 def main():
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 2:
         print_usage()
         return
 
     command = sys.argv[1]
+    
+    if command == "galaxy":
+        from tools.galaxy import run_galaxy_cli
+        run_galaxy_cli(sys.argv[2:])
+        return
+        
+    if len(sys.argv) < 3:
+        print_usage()
+        return
+
     debug_mode = 0
     bench_mode = 0
     file_path = None

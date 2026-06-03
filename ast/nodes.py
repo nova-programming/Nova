@@ -265,6 +265,37 @@ class Openf:
     def __repr__(self):
         return f"Openf({self.path}, {self.mode})"
 
+class ApiRequest:
+    def __init__(self, url, method="GET", line=0):
+        self.line = line
+        self.url = url
+        self.method = method
+    def __repr__(self):
+        return f"ApiRequest({self.url}, {self.method})"
+
+class ApiGet:
+    def __init__(self, request, line=0):
+        self.line = line
+        self.request = request
+    def __repr__(self):
+        return f"ApiGet({self.request})"
+
+class ApiPost:
+    def __init__(self, request, data, line=0):
+        self.line = line
+        self.request = request
+        self.data = data
+    def __repr__(self):
+        return f"ApiPost({self.request}, {self.data})"
+
+class ApiDownload:
+    def __init__(self, request, filepath, line=0):
+        self.line = line
+        self.request = request
+        self.filepath = filepath
+    def __repr__(self):
+        return f"ApiDownload({self.request}, {self.filepath})"
+
 class OpenFile:
     def __init__(self, path, mode, line=0):
         self.line = line
