@@ -1,97 +1,135 @@
 # KEYWORDS & LOGIC ARCHITECTURE
 
-Nova bridges high-level Pythonic simplicity with low-level C-like control. This document lists every keyword, type, operator, built-in function, pointer property, and low-level directive supported by the Nova compiler and bytecode VM.
+Nova bridges high-level Pythonic simplicity with low-level C-like control. This document provides a complete, detailed architectural guide to all keywords, types, pointer properties, operators, built-in functions, and compiler internals of the Nova language.
 
 ---
 
-## Language Keywords
+## 1. High-Level Language Keywords
 
-### High-Level Flow & Structure
-* **`def`**: Declares functions. Generates standard x86 `call`/`ret` routines using the `cdecl` calling convention (arguments pushed right-to-left, caller cleans stack).
-* **`class`**: Defines object-oriented blueprints. Supports vtables and dynamic dispatch in native codegen.
-* **`self`**: Reference to the current class instance. Used for `ebp`-relative field lookups.
-* **`import`**: Loads other `.nv` files. Circular-import-safe (uses a global visited set).
-* **`from` / `as`**: Used in imports for namespace management (e.g., `import module as alias` or FFI libraries `import "c" as libc`).
-* **`if` / `elif` / `else`**: Conditional branch logic. Emits conditional jump instructions based on comparative evaluations.
-* **`while`**: Basic loop iteration. Evaluates condition, jumps to loop body, or jumps to end.
-* **`for`**: Supports two iteration syntax forms:
-  1. Range-based loops: `for i = start to end step s { ... }` (or `downto` for descending iteration).
-  2. Collection iteration: `for item in list { ... }` (syntactic sugar over length-based iteration).
-* **`break` / `continue`**: Standard loop control. The codegen tracks a stack of loop labels to resolve jumps.
-* **`return`**: Returns a value from a function. Emits code to pop the return value into `eax`, clean the local stack frames, and return.
-* **`const`**: Enforces compile-time variable immutability. Assigments to a `const` variable raise compilation errors.
-* **`null`**: Represents a null reference or uninitialized pointer value.
+### Flow & Structure Control
+* **`def`**: Declares a function. Native codegen generates standard x86 `call`/`ret` routines using the `cdecl` calling convention (arguments pushed right-to-left, caller cleans the stack).
+  * *Syntax*: `def add(a: int, b: int) -> int { return a + b }`
+* **`class`**: Defines an object-oriented class template. Methods are compiled with virtual method table (vtable) entry offsets for dynamic dispatch.
+  * *Syntax*:
+    ```python
+    class Point {
+        x: int
+        y: int
+        def __init__(x_val: int, y_val: int) {
+            self.x = x_val
+            self.y = y_val
+        }
+        def move(dx: int, dy: int) {
+            self.x = self.x + dx
+            self.y = self.y + dy
+        }
+    }
+    ```
+* **`self`**: Reference to the current class instance (implicitly passed as the first parameter to methods). Used for `ebp`-relative field or method offset resolution.
+* **`import`**: Loads external modules (searches current directory first, then fallback to `stdlib/`). Circular imports are handled safely via a global import visited set.
+  * *Syntax*: `import math_utils`
+* **`from` / `as`**: Used in imports for aliasing module namespaces or specifying FFI libraries.
+  * *Syntax*: `import "kernel32.dll" as kernel32` or `import math_utils as mu`
+* **`if` / `elif` / `else`**: Conditional branching. Codegen emits test instructions (`cmp eax, 0`) and conditional jumps (`je`, `jne`, etc.) using generated unique labels.
+* **`while`**: Basic loop iteration. Evaluates a condition before executing the loop body.
+* **`for`**: Supports two iteration syntaxes:
+  1. **Range-based loops**: `for i = start to end step s { ... }` or `for i = start downto end step s { ... }` for descending iteration.
+  2. **Collection loops**: `for item in list { ... }` (syntactic sugar over index-based list retrieval).
+* **`break` / `continue`**: Controls loop execution. The compiler maintains stacks of active loop labels to resolve jumps to loop heads or loop exits.
+* **`return`**: Returns a value from a function. Pops the returned value into `eax`, restores any pushed registers, cleans local stack frames, and executes the x86 `ret` instruction.
+* **`const`**: Enforces compile-time variable immutability. Assigning to a variable declared with `const` will cause a static compilation error.
+* **`null`**: Evaluates to the memory address `0` (used for pointer checks and object initialization checks).
 
-### Low-Level Control
-* **`data`**: Defines C-style data structures. Fields can have optional type annotations. Offsets are resolved during codegen via field layout calculations.
-* **`alloc(size)`**: Dynamically allocates `size` bytes of raw memory on the heap. Only allowed inside `@raw` blocks. Calls `_malloc` (`HeapAlloc`) under the hood.
-* **`free(ptr)`**: Frees memory allocated at `ptr`. Only allowed inside `@raw` blocks. Calls `_free` (`HeapFree`) under the hood.
+### Heap Allocation & Raw Memory
+* **`data`**: Declares C-style structs with statically typed fields. Offsets are resolved during codegen based on field order (4 bytes per field).
+  * *Syntax*:
+    ```python
+    data Point {
+        x: int
+        y: int
+    }
+    ```
+* **`alloc(size)`**: Dynamically allocates `size` bytes of raw memory on the heap. Only allowed inside `@raw` blocks. Calls `_malloc` (`HeapAlloc` on Windows) under the hood.
+* **`free(ptr)`**: Deallocates memory pointed to by `ptr`. Only allowed inside `@raw` blocks. Calls `_free` (`HeapFree` on Windows) under the hood.
 
-### File I/O Built-ins
-* **`open(path, mode)`**: Opens the file at `path` in `mode` (`"r"` or `"w"`). Returns an integer file descriptor.
-* **`read(fd)`**: Reads the entire contents of the file referenced by the file descriptor `fd` and returns it as a string.
+### File I/O Keywords
+* **`open(path, mode)`**: Opens the file at `path` using mode `mode` (`"r"` or `"w"`). Returns a 32-bit integer file descriptor.
+* **`read(fd)`**: Reads the entire contents of the file referenced by `fd` and returns it as a string.
 * **`write(fd, content)`**: Writes a string `content` to the file referenced by `fd`.
 * **`close(fd)`**: Closes the file descriptor `fd`.
 
 ---
 
-## Data Types
+## 2. Built-In Data Types
 
-The type checker (`type_checker.nv`) resolves and validates the following types:
+The static type checker (`type_checker.nv`) resolves, infers, and enforces the following types:
 * **`int`**: 32-bit signed integer.
 * **`float`**: IEEE-754 32-bit single-precision floating point.
 * **`bool`**: Boolean values (`true` and `false`).
-* **`string`**: Null-terminated character sequences.
+* **`string`**: Null-terminated character sequences (e.g. `"hello\n"`).
 * **`byte`**: 8-bit unsigned byte.
-* **`void`**: Denotes no return value or empty expression.
-* **`list[T]`**: Dynamically-sized array of elements of type `T` (e.g., `list[int]`).
-* **User-defined structures**: Created using the `data` keyword.
+* **`void`**: Denotes an empty expression or a function returning no value.
+* **`list[T]`**: Dynamically-sized array containing elements of type `T` (e.g. `list[int]`).
+* **User-defined structs**: Types defined using the `data` keyword.
+* **User-defined classes**: Object templates defined using the `class` keyword.
 
 ---
 
-## Pointer Properties & Accessors
+## 3. Pointer Suffix Properties (Unsafe `@raw` Mode)
 
-Within `@raw` blocks, pointers (variables containing memory addresses) can access special suffix properties:
-* **`.value`**: Resolves/assigns the 32-bit integer value pointed to by the memory address.
-* **`.value_byte`**: Resolves/assigns a single 8-bit byte at the memory address.
-* **`.value_word`**: Resolves/assigns a 16-bit word at the memory address.
-* **`.value_dword`**: Resolves/assigns a 32-bit double word at the memory address.
-* **`.value_qword`**: Resolves/assigns a 64-bit quad word at the memory address.
-* **`.addr`**: Obtains the raw memory address of the variable or field itself.
-* **`.bytes`**: Accesses raw byte array representation of the memory.
-* **`.isValid`**: Checks if the pointer address is non-zero.
-* **`.isNull`**: Checks if the pointer address is zero (`null`).
+Within `@raw` blocks, pointers (integer addresses representing memory locations) can be read or written to using suffix properties:
+* **`ptr.value` / `ptr.value_dword`**: Dereferences the pointer to read or write a 32-bit double-word (4 bytes).
+  * *Syntax*: `val = ptr.value` (read) or `ptr.value = 42` (write).
+* **`ptr.value_byte`**: Dereferences the pointer to read or write a single 8-bit byte.
+  * *Syntax*: `b = ptr.value_byte` (read) or `ptr.value_byte = 10` (write).
+* **`ptr.value_word`**: Dereferences the pointer to read or write a 16-bit word (2 bytes).
+  * *Syntax*: `w = ptr.value_word` (read) or `ptr.value_word = 1000` (write).
+* **`ptr.addr`**: Returns the raw memory address of the variable or property itself.
+* **`ptr.isValid`**: Checks if the pointer address is valid (returns `true` if `addr != 0`, `false` if `addr == 0`).
+* **`ptr.isNull`**: Checks if the pointer address is null (returns `true` if `addr == 0`, `false` if `addr != 0`).
+* **`ptr.bytes`**: Accesses raw byte-level array representations of memory.
 
 ---
 
-## Operators
+## 4. Operators
 
-Nova supports a complete range of unary and binary operators:
-* **Arithmetic**: `+` (addition), `-` (subtraction), `*` (multiplication), `/` (division), `%` (modulo)
-* **Bitwise**: `&` (AND), `|` (OR), `^` (XOR), `~` (NOT), `<<` (left shift), `>>` (right shift)
-* **Logical**: `and` (short-circuiting logical AND), `or` (short-circuiting logical OR), `not` (logical inversion)
+Nova supports a complete range of unary and binary operators, which are type-checked and folded if possible:
+* **Arithmetic**: `+` (addition / string concatenation), `-` (subtraction / negation), `*` (multiplication), `/` (signed division), `%` (modulo)
+* **Bitwise**: `&` (AND), `|` (OR), `^` (XOR), `~` (NOT), `<<` (logical left shift), `>>` (arithmetic right shift)
+* **Logical**: `and` (short-circuiting logical AND), `or` (short-circuiting logical OR), `not` (logical NOT)
 * **Comparison**: `==` (equality), `!=` (inequality), `<` (less than), `>` (greater than), `<=` (less than or equal), `>=` (greater than or equal)
-* **Metadata/Field Checks**: `has` (evaluates whether a property field exists on a `data` structure at compile time)
-* **Assignment**: `=` (stores values in variables, pointer locations, array indices, or struct fields)
-* **Annotation**: `:` (declares types for variables, parameters, and fields), `->` (return type annotation on functions)
+* **Structure Check**: `has` (evaluates whether a property field exists on a `data` structure at compile-time)
+* **Assignment**: `=` (assigns value to variables, pointer locations, array indices, or struct/class fields)
+* **Type Signatures**: `:` (declares types for parameters/variables/fields), `->` (return type annotation on functions)
 
 ---
 
-## Built-In Functions
+## 5. Built-In Standard Functions
 
 These functions are available natively in all programs without requiring manual imports:
 
 ### General & String Utilities
-* **`len(var)`**: Returns the count of elements. For `string` values, it computes the length via a built-in `_strlen` loop. For lists, it reads the internal capacity/size fields.
+* **`len(var)`**: Returns the count of elements. For `string` values, it computes the length via a built-in `_strlen` loop. For lists, it reads the internal capacity/size fields. For objects, it invokes the custom `__len__` dunder method if defined.
 * **`str(var)`**: Converts integers or floats into their string representation using an internal FFI `sprintf` routine.
 * **`sizeof(var)`**: Evaluates the compile-time byte size of variables, structures, or data types.
+
+### Lists & Arrays
+* **`lst.append(value)`**: Appends `value` to `lst`. If size exceeds current capacity, dynamically doubles the allocated memory buffer (`HeapReAlloc`), preventing linear allocation overhead.
+* **`lst.pop()`**: Removes and returns the last element from the list, decreasing the logical length.
+* **Array bounds checking**: Array reads (`arr[i]`) and writes (`arr[i] = val`) emit bounds checking instructions:
+  ```asm
+  cmp ecx, 0
+  jl _out_of_bounds       ; negative index
+  cmp ecx, [edx]          ; index >= list length
+  jge _out_of_bounds      ; exits process with code 1
+  ```
 
 ### Native OS Interface (`os_win.nv` / `os_linux.nv`)
 * **`sys_get_args()`**: Extracts CLI arguments via FFI (using `GetCommandLineA` on Windows), returning them as a parsed string array. Surrounding quotes are automatically stripped.
 * **`sys_system(cmd)`**: Executes shell commands via system sub-processes (uses `WinExec` FFI on Windows).
 * **`sys_flush()`**: Flushes standard output buffers.
 * **`sys_exit(code)`**: Terminates the current process immediately with status `code` (uses `ExitProcess` FFI on Windows).
-* **`sys_platform()`**: Returns the host platform identifier (e.g. `"windows"`).
+* **`sys_platform()`**: Returns the host platform identifier (e.g. `"windows"` or `"linux"`).
 * **`sys_get_tick_count()`**: Returns the system uptime tick count in milliseconds (uses `GetTickCount` FFI on Windows).
 
 ### Cryptographically Secure PRNG
@@ -100,14 +138,21 @@ These functions are available natively in all programs without requiring manual 
 
 ---
 
-## Low-Level Compiler Directives
+## 6. Low-Level Compiler Directives
 
 * **`@raw { ... }`**: Unsafe block mode. Permits inline assembly instructions, pointer dereferencing, heap allocations, and direct FFI calls.
+  * *Example*:
+    ```python
+    @raw {
+        mov eax, 42
+        push eax
+    }
+    ```
 * **`@export { name1, name2 }`**: Exports defined symbols globally, allowing them to be resolved externally or by other compiled modules.
 
 ---
 
-## Compiler Infrastructure
+## 7. Compiler Infrastructure
 
 ### Self-Hosted Compiler pipeline
 The self-hosted compiler files located in `stdlib/` run as a sequential pipeline:
@@ -120,7 +165,7 @@ The self-hosted compiler files located in `stdlib/` run as a sequential pipeline
 
 ---
 
-## CLI Modes
+## 8. CLI Modes
 
 | Command | Mode | Description |
 |---------|------|-------------|
