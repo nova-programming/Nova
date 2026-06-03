@@ -119,6 +119,8 @@ nova/
 - `@export { name1, name2 }` inside `@raw` blocks for `.global` symbol export
 - **Self-Hosted Assembler & Linker** — fully integrated in-process x86 assembler and PE executable linker, entirely eliminating the GCC dependency.
 - **Variable-to-Register Promotion** — greedily maps local variables to CPU registers (`esi`/`edi`), massively boosting runtime performance.
+- **Native Standard Library Injection** — standard library functions (from `os_win` and `math_utils`) are automatically injected and natively compiled into all executables, removing the need for manual imports of core modules.
+- **Automatic CSPRNG Initialization** — the built-in ChaCha20 random number generator automatically seeds itself at runtime using the Windows tick count (`sys_get_tick_count()`), removing the need for manual seeding initialization.
 - Self-hosted lexer, parser, codegen, type checker
 
 ## License

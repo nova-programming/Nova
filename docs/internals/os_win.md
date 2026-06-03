@@ -1,6 +1,6 @@
 # Nova Windows OS Internals (`stdlib/os_win.nv`)
 
-Platform-specific HAL for Windows native compilation via MinGW GCC. Provides OS-level services using C library FFI and inline assembly.
+Platform-specific HAL for Windows native compilation. All standard OS functions are natively injected and compiled into every executable (no import statement is required).
 
 ## Functions
 
@@ -13,6 +13,7 @@ Platform-specific HAL for Windows native compilation via MinGW GCC. Provides OS-
 - **`sys_flush()`**: Flushes stdout via `FlushFileBuffers` (kernel32)
 - **`sys_exit(code)`**: Terminates process via `ExitProcess` (kernel32)
 - **`sys_platform()`**: Returns `"windows"`
+- **`sys_get_tick_count()`**: Returns system tick count in milliseconds via `GetTickCount` (kernel32)
 
 ## Implementation Details
 

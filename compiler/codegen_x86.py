@@ -191,6 +191,8 @@ class X86Codegen:
         self.data_section.append('debug_suffix: .asciz "]: "')
         self.data_section.append('L_realloc_fail_msg: .asciz "Realloc failed!\\n"')
         self.data_section.append('L_out_of_bounds_msg: .asciz "Index Out Of Bounds\\n"')
+        self.data_section.append('str_const_sys_platform: .asciz "windows"')
+        self.data_section.append('str_const_chacha_mem: .asciz "expand 32-byte k"')
         
         self.data_section.append("char_strings:")
         for i in range(256):
@@ -1271,7 +1273,7 @@ class X86Codegen:
         self.assembly.append("push ebp")
         self.assembly.append("mov ebp, esp")
         self.assembly.append("# line 56")
-        self.assembly.append("push offset str_const_1")
+        self.assembly.append("push offset str_const_sys_platform")
         self.assembly.append("pop eax")
         self.assembly.append("mov esp, ebp")
         self.assembly.append("pop ebp")
@@ -2081,7 +2083,7 @@ class X86Codegen:
         self.assembly.append("push ebp")
         self.assembly.append("mov ebp, esp")
         self.assembly.append("# line 44")
-        self.assembly.append("push offset str_const_2")
+        self.assembly.append("push offset str_const_chacha_mem")
         self.assembly.append("pop eax")
         self.assembly.append("mov esp, ebp")
         self.assembly.append("pop ebp")

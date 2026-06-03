@@ -601,7 +601,7 @@ def emit_win32_runtime(state) {
     emit(state, "push ebp")
     emit(state, "mov ebp, esp")
     emit(state, "# line 56")
-    emit(state, "push offset str_const_1")
+    emit(state, "push offset str_const_sys_platform")
     emit(state, "pop eax")
     emit(state, "mov esp, ebp")
     emit(state, "pop ebp")
@@ -1411,7 +1411,7 @@ def emit_win32_runtime(state) {
     emit(state, "push ebp")
     emit(state, "mov ebp, esp")
     emit(state, "# line 44")
-    emit(state, "push offset str_const_2")
+    emit(state, "push offset str_const_chacha_mem")
     emit(state, "pop eax")
     emit(state, "mov esp, ebp")
     emit(state, "pop ebp")
@@ -3939,6 +3939,9 @@ def generate_assembly(ast: list, debug_mode: int) -> list {
     emit_data(state, "debug_prefix: .asciz \"debug - [line \"")
     emit_data(state, "debug_suffix: .asciz \"]: \"")
     emit_data(state, "L_out_of_bounds_msg: .asciz \"Index Out Of Bounds\\n\"")
+    emit_data(state, "L_realloc_fail_msg: .asciz \"Realloc failed!\\n\"")
+    emit_data(state, "str_const_sys_platform: .asciz \"windows\"")
+    emit_data(state, "str_const_chacha_mem: .asciz \"expand 32-byte k\"")
 
     emit_data(state, "char_strings:")
     char_idx = 0

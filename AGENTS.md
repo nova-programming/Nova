@@ -1,31 +1,21 @@
 # Agent Session Summary
 
+## Global Lock
+- **RELEASED**: All files unlocked. No active locks.
+
 ## Current Milestone
-- **COMPLETED: Native Standard Library Integration into Compiler Backend**
+- **COMPLETED: Repository Clean-Up, String Collision Resolution, and Exhaustive Documentation**
 
 ## What Was Accomplished
-
-### Deep Native Stdlib Integration
-1. **Goal**: The user explicitly requested to integrate core library functions directly into the language code, moving away from explicit/implicit imports to native compiler-level intrinsics.
-2. **Execution**:
-   - Re-architected how the standard library is bundled. Instead of linking external `.nv` files at compile time via an auto-import system, the core standard library functions (like `random()`, memory allocation, Win32 bindings) are now directly injected into the code generation phase.
-   - Wrote a new Python script (`generate_injections.py`) which acts as a bridge. It parses the base `stdlib` Nova files (like `math_utils.nv`), compiles them into raw assembly using the Gen2 Python compiler, and packages them into a flat `stdlib_asm.txt` file.
-   - Modified `compiler/codegen_x86.py` and `stdlib/codegen.nv` to load and emit this injected native assembly during the `.text` section generation of *every* compiled executable.
-3. **Debug Resolution (0xC0000139)**:
-   - Diagnosed an obscure `Exit code: -1073741511 (0xC0000139 STATUS_ENTRYPOINT_NOT_FOUND)` access violation. 
-   - Found that the Windows Loader was rejecting our executables because the linker (`stdlib/linker.nv`) treats unresolved symbols as DLL imports. The compiler appended underscores to function calls depending on whether they were built-in (`print` -> `_printf`) or user-defined (`__get_idx`), which resulted in a naming mismatch against the injected assembly (`_get_idx`).
-   - Fixed the symbol name discrepancies across the user code, the generator, and the linker.
-4. **Verification**: Re-bootstrapped `nova_main.exe` using the Python compiler. Ran `test_hello.nv` and `test_crash.nv` successfully. The executables are now completely self-contained, independent of local `stdlib` files, and execute the cryptography layer seamlessly.
+1. **Cleaned Up Workspace**: Removed all unwanted temporary build scripts (`apply_injection.py`, `generate_injections.py`, etc.), scratch files, and debug test files from the git index and local directory. Purged all untracked `.exe`, `.s`, and `.o` artifacts to ensure a pristine codebase.
+2. **Resolved Critical String Collision**: Fixed a memory corruption bug where standard library string constants (`str_const_1` and `str_const_2` for `"windows"` and `"expand 32-byte k"`) collided with the user program's string constants. Created unique, built-in string constant labels (`str_const_sys_platform` and `str_const_chacha_mem`) to eliminate collisions.
+3. **Fixed Missing Definition in Self-Hosted Compiler**: Appended the missing `L_realloc_fail_msg` string constant to the data section of `stdlib/codegen.nv`, allowing the self-hosted compiler to resolve all string references during direct PE linking.
+4. **Exhaustive Documentation Updates**: Expanded and aligned the language reference (`KEYWORDS_AND_LOGIC.md`), `README.md`, and the internal implementation guides (`codegen.md`, `compiler.md`, `os_win.md`) to fully capture native standard library injection, automatic PRNG seeding, and register optimizations.
 
 ## State
-- **Status: STABLE & FULLY BOOTSTRAPPED**. Standard library functions are baked into the compiler natively.
-
-## Next Steps
-1. Answer the user's questions on memory management strategy (GC vs manual vs ownership).
-2. "Galaxy" library manager architecture planning.
-3. Phase 4: Small Function Inlining.
+- **Status: STABLE, BOOTSTRAPPED, & CLEAN**. Both the Python-based compiler and the self-hosted compiler natively inject the standard library and link programs successfully without GCC.
 
 ## Handover Command
 ```powershell
-.\nova_main.exe build tests\test_hello.nv; .\tests\test_hello.exe
+python main.py build tests\test_random.nv; .\tests\test_random.exe
 ```

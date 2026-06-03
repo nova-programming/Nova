@@ -1,5 +1,0 @@
-y = 10 << 2
-x = 10 + 0
-z = x << 2
-print(y)
-print(z)

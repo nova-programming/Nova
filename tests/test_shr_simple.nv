@@ -1,5 +1,0 @@
-x = 40
-y = x >> 2
-print("y = ")
-print(y)
-print("\n")

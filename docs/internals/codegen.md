@@ -1,13 +1,15 @@
 # Nova Native Codegen Internals (`stdlib/codegen.nv`)
 
-The `codegen.nv` module (plus `codegen_expr.nv` and `codegen_stmt.nv`) traverses the AST and emits Intel-syntax x86-32 assembly for the MinGW/GCC linker.
+The `codegen.nv` module (plus `codegen_expr.nv` and `codegen_stmt.nv`) traverses the AST and emits Intel-syntax x86-32 assembly, which can be linked using MinGW/GCC or directly assembled and linked using the integrated PE linker.
 
 ## State Management
 
 `CodegenState` struct tracks:
 - `asm_lines` — list of assembly instruction strings
 - `data_lines` — list of `.data` section entries (string literals, format strings)
-- `local_vars` / `local_var_names` — maps variable names to `ebp`-relative stack offsets
+- `local_vars` / `local_var_names` — maps variable names to `ebp`-relative stack offsets or promoted CPU registers
+- `local_var_regs` — tracks which variables are promoted to CPU registers (`esi`/`edi`)
+- `used_regs` — list of CPU registers used in the current function frame
 - `local_offset` — total local stack frame size
 - `label_counter` — unique label generator for control flow
 - `loop_labels` / `loop_end_labels` — stack of labels for `break`/`continue`
@@ -69,3 +71,17 @@ Expression codegen reads `node.inferred_type` (set by `type_checker.nv`'s `tc_ch
 - Detect float vs int via `is_float_expr()` for PrintD format selection
 
 The helper functions `is_string_expr()` and `is_float_expr()` provide type-aware branching in the codegen without requiring full type resolution at codegen time.
+
+## Variable-to-Register Promotion
+
+To optimize runtime execution, local variables are greedily mapped to CPU registers (`esi` and `edi`) instead of standard `ebp`-relative stack offsets:
+- Variables with frequent reads/writes are selected for promotion.
+- Pointers to promoted registers are push/popped in the prologue/epilogue of functions and the main entry point to prevent register clobbering.
+- Access to promoted variables directly targets the allocated registers, bypassing stack memory access overhead.
+
+## Native Standard Library Injection
+
+Standard library helper functions (including file I/O `sys_*` from `os_win.nv` and ChaCha20 random functions from `math_utils.nv`) are compiled and injected directly into the assembly output of every compiled program:
+- Users do not need to manually import standard library modules.
+- Unique symbol prefixing (`L_SYS_`) is applied to all injected labels to prevent collision with user labels.
+- Standard library string literals are defined under reserved labels (`str_const_sys_platform` and `str_const_chacha_mem`) to prevent conflict with user string constants.

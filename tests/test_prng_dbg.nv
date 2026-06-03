@@ -1,9 +1,0 @@
-chacha20_init(42, 1337)
-i = 0
-while i < 10 {
-    r = random()
-    print(r)
-    print(" ")
-    i = i + 1
-}
-print("\n")

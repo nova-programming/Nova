@@ -1,149 +1,131 @@
 # KEYWORDS & LOGIC ARCHITECTURE
 
-Nova aims to simplify programming by blending high-level ease with low-level power.
+Nova bridges high-level Pythonic simplicity with low-level C-like control. This document lists every keyword, type, operator, built-in function, pointer property, and low-level directive supported by the Nova compiler and bytecode VM.
 
 ---
 
-## High-Level Keywords
+## Language Keywords
 
-### `def`
-Defines functions/methods. In native codegen, emits x86 `call`/`ret` with cdecl stack convention.
+### High-Level Flow & Structure
+* **`def`**: Declares functions. Generates standard x86 `call`/`ret` routines using the `cdecl` calling convention (arguments pushed right-to-left, caller cleans stack).
+* **`class`**: Defines object-oriented blueprints. Supports vtables and dynamic dispatch in native codegen.
+* **`self`**: Reference to the current class instance. Used for `ebp`-relative field lookups.
+* **`import`**: Loads other `.nv` files. Circular-import-safe (uses a global visited set).
+* **`from` / `as`**: Used in imports for namespace management (e.g., `import module as alias` or FFI libraries `import "c" as libc`).
+* **`if` / `elif` / `else`**: Conditional branch logic. Emits conditional jump instructions based on comparative evaluations.
+* **`while`**: Basic loop iteration. Evaluates condition, jumps to loop body, or jumps to end.
+* **`for`**: Supports two iteration syntax forms:
+  1. Range-based loops: `for i = start to end step s { ... }` (or `downto` for descending iteration).
+  2. Collection iteration: `for item in list { ... }` (syntactic sugar over length-based iteration).
+* **`break` / `continue`**: Standard loop control. The codegen tracks a stack of loop labels to resolve jumps.
+* **`return`**: Returns a value from a function. Emits code to pop the return value into `eax`, clean the local stack frames, and return.
+* **`const`**: Enforces compile-time variable immutability. Assigments to a `const` variable raise compilation errors.
+* **`null`**: Represents a null reference or uninitialized pointer value.
 
-### `class`
-Defines an OOP blueprint with dunder methods. Native codegen supports vtables and dynamic dispatch.
+### Low-Level Control
+* **`data`**: Defines C-style data structures. Fields can have optional type annotations. Offsets are resolved during codegen via field layout calculations.
+* **`alloc(size)`**: Dynamically allocates `size` bytes of raw memory on the heap. Only allowed inside `@raw` blocks. Calls `_malloc` (`HeapAlloc`) under the hood.
+* **`free(ptr)`**: Frees memory allocated at `ptr`. Only allowed inside `@raw` blocks. Calls `_free` (`HeapFree`) under the hood.
 
-**Supported dunder methods (native codegen):**
-| Method | Trigger |
-|--------|---------|
-| `__init__(...)` | `ClassName(args)` — auto-constructor |
-| `__str__()` | `print(obj)`, `str(obj)` |
-| `__len__()` | `len(obj)` |
-| `__eq__(other)` | `obj == other` |
-| `__add__(other)` | `obj + other` |
-| `__sub__(other)` | `obj - other` |
-| `__mul__(other)` | `obj * other` |
-
-### `self`
-Refers to the current class instance. In native codegen, `ebp`-relative access resolves struct fields.
-
-### `import`
-Loads Nova modules: searches relative path, then `stdlib/`. Circular-import-safe via visited set.
-
-### `if`, `elif`, `else`, `while`, `for`
-Control flow. Native codegen emits conditional jumps with unique labels from a label counter.
-
-### `for` (extended)
-Range-based: `for i = start to end step s { }` with `downto` for descending iteration.
-
-### `break`, `continue`
-Loop control. Codegen tracks loop label stacks for correct jump targets.
-
-### `and`, `or`, `not`
-Short-circuit logical operators.
-
-### `&`, `<<`, `>>`
-Bitwise AND, left shift, right shift on integers.
-
-### `has`
-Runtime field-existence check for `data` structs. Evaluated at compile time in native codegen.
-
-### `print`
-Outputs to console. Native: pushes format string and calls `_printf` via FFI.
-
-### `return`
-Returns value from function. Native: `mov [result], eax; jmp epilogue`.
-
-### Variable Mutability
-Mutable by default; `const` for immutability (enforced at compile time).
+### File I/O Built-ins
+* **`open(path, mode)`**: Opens the file at `path` in `mode` (`"r"` or `"w"`). Returns an integer file descriptor.
+* **`read(fd)`**: Reads the entire contents of the file referenced by the file descriptor `fd` and returns it as a string.
+* **`write(fd, content)`**: Writes a string `content` to the file referenced by `fd`.
+* **`close(fd)`**: Closes the file descriptor `fd`.
 
 ---
 
-## Low-Level Keywords
+## Data Types
 
-### `@raw`
-Enters unsafe low-level mode enabling `alloc`/`free` and pointer `.value_byte` access. Enforced at compile time.
+The type checker (`type_checker.nv`) resolves and validates the following types:
+* **`int`**: 32-bit signed integer.
+* **`float`**: IEEE-754 32-bit single-precision floating point.
+* **`bool`**: Boolean values (`true` and `false`).
+* **`string`**: Null-terminated character sequences.
+* **`byte`**: 8-bit unsigned byte.
+* **`void`**: Denotes no return value or empty expression.
+* **`list[T]`**: Dynamically-sized array of elements of type `T` (e.g., `list[int]`).
+* **User-defined structures**: Created using the `data` keyword.
 
-### `alloc(size)` / `free(ptr)`
-Raw memory allocation/deallocation. Only inside `@raw`. Native: calls `_malloc`/`_free` via FFI.
+---
 
-### Type annotations (`: int`, `: string`, `: list[int]`, etc.)
-Variables, function parameters, and return types support annotation syntax. The type checker resolves `int`, `float`, `bool`, `string`, `byte`, `void`, `list[T]`, and user-defined struct types.
+## Pointer Properties & Accessors
 
-### `data`
-Defines raw C-style structs with typed fields. Native codegen resolves field offsets via `get_prop_offset()`. Fields can use `: type` annotations. Struct types are registered for type inference.
+Within `@raw` blocks, pointers (variables containing memory addresses) can access special suffix properties:
+* **`.value`**: Resolves/assigns the 32-bit integer value pointed to by the memory address.
+* **`.value_byte`**: Resolves/assigns a single 8-bit byte at the memory address.
+* **`.value_word`**: Resolves/assigns a 16-bit word at the memory address.
+* **`.value_dword`**: Resolves/assigns a 32-bit double word at the memory address.
+* **`.value_qword`**: Resolves/assigns a 64-bit quad word at the memory address.
+* **`.addr`**: Obtains the raw memory address of the variable or field itself.
+* **`.bytes`**: Accesses raw byte array representation of the memory.
+* **`.isValid`**: Checks if the pointer address is non-zero.
+* **`.isNull`**: Checks if the pointer address is zero (`null`).
 
-### `.value_byte`
-Byte-level pointer dereference for raw memory access inside `@raw` blocks.
+---
+
+## Operators
+
+Nova supports a complete range of unary and binary operators:
+* **Arithmetic**: `+` (addition), `-` (subtraction), `*` (multiplication), `/` (division), `%` (modulo)
+* **Bitwise**: `&` (AND), `|` (OR), `^` (XOR), `~` (NOT), `<<` (left shift), `>>` (right shift)
+* **Logical**: `and` (short-circuiting logical AND), `or` (short-circuiting logical OR), `not` (logical inversion)
+* **Comparison**: `==` (equality), `!=` (inequality), `<` (less than), `>` (greater than), `<=` (less than or equal), `>=` (greater than or equal)
+* **Metadata/Field Checks**: `has` (evaluates whether a property field exists on a `data` structure at compile time)
+* **Assignment**: `=` (stores values in variables, pointer locations, array indices, or struct fields)
+* **Annotation**: `:` (declares types for variables, parameters, and fields), `->` (return type annotation on functions)
 
 ---
 
 ## Built-In Functions
 
-### `len(var)`
-Returns logical element count. For strings: `_strlen`. For lists: struct `length` field. For objects: `__len__` dunder. Type checker returns `int`.
+These functions are available natively in all programs without requiring manual imports:
 
-### Array bounds checking
-All list element reads (`arr[i]`) and writes (`arr[i] = x`) include runtime bounds checks: `cmp ecx, 0; jl _out_of_bounds; cmp ecx, [length]; jge _out_of_bounds`. Bounds violation calls `ExitProcess(1)` with "Index Out Of Bounds" message.
+### General & String Utilities
+* **`len(var)`**: Returns the count of elements. For `string` values, it computes the length via a built-in `_strlen` loop. For lists, it reads the internal capacity/size fields.
+* **`str(var)`**: Converts integers or floats into their string representation using an internal FFI `sprintf` routine.
+* **`sizeof(var)`**: Evaluates the compile-time byte size of variables, structures, or data types.
 
-### Constant folding (`parser.nv`/`parser.py`)
-During parsing, `+`, `-`, `*`, `/`, `%`, `&`, `<<`, `>>` on two literal `Number` nodes are evaluated immediately. `1 + 2 * 3` collapses to `7` at compile time — zero runtime instructions emitted.
+### Native OS Interface (`os_win.nv` / `os_linux.nv`)
+* **`sys_get_args()`**: Extracts CLI arguments via FFI (using `GetCommandLineA` on Windows), returning them as a parsed string array. Surrounding quotes are automatically stripped.
+* **`sys_system(cmd)`**: Executes shell commands via system sub-processes (uses `WinExec` FFI on Windows).
+* **`sys_flush()`**: Flushes standard output buffers.
+* **`sys_exit(code)`**: Terminates the current process immediately with status `code` (uses `ExitProcess` FFI on Windows).
+* **`sys_platform()`**: Returns the host platform identifier (e.g. `"windows"`).
+* **`sys_get_tick_count()`**: Returns the system uptime tick count in milliseconds (uses `GetTickCount` FFI on Windows).
 
-### List type unification
-`[1, 2, 3]` infers as `list[int]`. `[1, "hello"]` raises `StaticTypeError` at compile time. Array index assignments are checked against the element type.
-
-### `str(var)`
-Converts value to string. Native: emits format-string selection and `sprintf` call.
-
-### `sizeof(var)`
-Returns memory size in bytes.
-
-### `sys_get_args()`, `sys_system(cmd)`, `sys_flush()`, `sys_exit(code)`
-Native OS interface functions provided by `os_win.nv`/`os_linux.nv`.
+### Cryptographically Secure PRNG
+* **`random()`**: Returns a cryptographically secure 32-bit random integer. Uses an optimized, fully-unrolled ChaCha20 block generation algorithm. The CSPRNG is automatically initialized and seeded at startup using `sys_get_tick_count()`.
+* **`chacha20_init(seed1, seed2)`**: Manually initializes or seeds the ChaCha20 CSPRNG with specific seeds (useful for reproducible deterministic pseudorandom sequences).
 
 ---
 
-## Self-Hosted Compiler Components
+## Low-Level Compiler Directives
 
-### `stdlib/lexer.nv`
-Character-by-character tokenizer. Produces `Token` structs with `kind` and `val` fields. Handles escape sequences, multi-char operators, comments, and all Nova keywords.
+* **`@raw { ... }`**: Unsafe block mode. Permits inline assembly instructions, pointer dereferencing, heap allocations, and direct FFI calls.
+* **`@export { name1, name2 }`**: Exports defined symbols globally, allowing them to be resolved externally or by other compiled modules.
 
-### `stdlib/parser.nv`
-Recursive-descent parser consuming Token list → `AstNode` AST. Expression hierarchy: `primary → unary → mul → add → compare → logic → expr`. Statement parsing for assignments, if/elif/else, while, for, break, continue, return, functions.
+---
 
-### `stdlib/codegen.nv` (+ `codegen_expr.nv`, `codegen_stmt.nv`)
-x86-32 assembly code generator. Walks AST and emits Intel-syntax assembly using `CodegenState` struct tracking:
-- Assembly lines and data section entries
-- Label counter for unique jump labels
-- Local variable offsets (`ebp`-relative)
-- Struct field offset tables (`struct_names`, `struct_field_names`, `struct_field_offsets`)
-- Variable-to-struct-type mappings for `DataFieldAccess`/`DataFieldAssign`
-- Runtime helpers: `_concat_strings`, `_slice_string`
-- Format string selection for `print`
+## Compiler Infrastructure
 
-The generated `.s` assembly is written to disk and linked via a `sys_system("gcc ...")` call.
+### Self-Hosted Compiler pipeline
+The self-hosted compiler files located in `stdlib/` run as a sequential pipeline:
+1. **`lexer.nv`**: Tokenizes source characters into a stream of structured `Token` structs.
+2. **`parser.nv`**: Constructs a syntax tree (AST) via recursive-descent parsing. Performs constant folding for integer operations.
+3. **`types.nv` & `type_checker.nv`**: Infers and validates static types across all AST nodes.
+4. **`codegen.nv` (+ `codegen_expr.nv`, `codegen_stmt.nv`)**: Generates Intel-syntax x86-32 assembly lines. Injects list/array bounds checking code and maps local variables to CPU registers (`esi` and `edi`) where possible.
+5. **`assembler.nv` (+ submodules)**: Encodes x86-32 assembly lines to native machine code bytes.
+6. **`linker.nv`**: Manually packages machine code, imports, and resources into a valid Windows PE binary (GCC-free compilation).
 
-### `stdlib/compiler.nv`
-Pipeline orchestrator: `compile_file(path)` → read file → tokenize → parse → resolve imports → generate assembly. `compile_to_file(input, output)` writes assembly to `.s`.
-
-### `stdlib/assembler.nv` (+ `assembler_parse.nv`, `assembler_encode.nv`, `assembler_pass.nv`)
-x86-32 instruction encoder written in Nova. Parses assembly lines → encodes with ModRM/SIB → two-pass assembly with fixup resolution. **Not yet integrated into default compilation path.**
-
-### `stdlib/linker.nv`
-Native PE (Portable Executable) generator written in Nova. Constructs DOS/PE headers, section tables, import address tables. **Not yet integrated into default compilation path.**
-
-### `stdlib/os_win.nv`
-Windows HAL providing `sys_get_args()` (via `GetCommandLineA` FFI), file I/O (`sys_open`, `sys_read`, `sys_write`), `sys_system`, `sys_exit`, `sys_flush`, `sys_platform()`.
-
-### `stdlib/memory.nv`
-Raw byte-level memory access utilities using inline assembly in `@raw` blocks.
-
-### `stdlib/os_linux.nv`
-Linux runtime facade (parallel to `os_win.nv`, targeting POSIX FFI).
+---
 
 ## CLI Modes
 
 | Command | Mode | Description |
 |---------|------|-------------|
-| `python main.py build <file.nv>` | Production | Compiles to native x86 executable via GCC |
+| `python main.py build <file.nv>` | Production | Compiles to native x86 executable using python codegen + GCC |
 | `python main.py dev <file.nv>` | Development | Runs in Python bytecode VM |
-| `nova_main.exe build <file.nv>` | Self-hosted | Nova-compiled compiler produces .s → GCC → .exe |
+| `nova_main.exe build <file.nv>` | Self-hosted | Nova-compiled compiler compiles directly to native PE executable using internal assembler + linker (no external toolchain required) |
+| `nova_main.exe assemble-link <file.s> <out.exe>` | Assembler/Linker | Assembles and links a raw x86 assembly file directly to a PE executable |
+| `nova_main.exe build-bare <file.nv> <org> <entry>` | Flat Binary | Compiles to a flat, headerless binary (ideal for bare-metal/bootloader use) |

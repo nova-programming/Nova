@@ -1,6 +1,0 @@
-def run() {
-    print("Calling random")
-    val = random()
-    print("val: " + str(val))
-}
-run()
