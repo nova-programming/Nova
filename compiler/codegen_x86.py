@@ -357,8 +357,8 @@ class X86Codegen:
         self.assembly.append("    pop ebp")
         self.assembly.append("    ret")
         
-        # Win32 API runtime functions (replaces MSVCRT)
-        self._emit_win32_runtime()
+        # Win32 API runtime functions (replaces MSVCRT) — with tree-shaking
+        self._emit_win32_runtime_shaken()
         
         # Peephole optimization
         self.peephole()
@@ -369,6 +369,104 @@ class X86Codegen:
             self.assembly.append(line)
             
         return "\n".join(self.assembly)
+
+    def _emit_win32_runtime_shaken(self):
+        """Tree-shaking wrapper: emit stdlib to staging buffer, then copy only required functions."""
+        import re
+        
+        # 1. Capture current assembly length (user code boundary)
+        user_code_end = len(self.assembly)
+        
+        # 2. Emit all stdlib code into a staging buffer
+        staging = []
+        original_assembly = self.assembly
+        self.assembly = staging
+        self._emit_win32_runtime()
+        self.assembly = original_assembly
+        
+        # 3. Build label index: map each top-level label to its line range in staging
+        # A "top-level label" is a line like "_funcname:" that starts with _ and has no leading whitespace
+        label_ranges = {}  # label_name -> (start_idx, end_idx_exclusive)
+        current_label = None
+        current_start = 0
+        
+        for i, line in enumerate(staging):
+            stripped = line.strip()
+            # Detect top-level function labels (start with _ or L_ for stdout helpers)
+            if stripped and stripped.endswith(':') and not stripped.startswith('#'):
+                # Check if this is a top-level function label (not an internal branch label)
+                name = stripped[:-1]  # Remove trailing ':'
+                # Top-level labels: start with _ and don't start with L_ (internal branches)
+                # Exception: L_write_stdout, L_write_char, L_write_int, L_write_float are top-level
+                is_toplevel = False
+                if name.startswith('_') and not name.startswith('__'):
+                    is_toplevel = True
+                elif name.startswith('__') and not name.startswith('___'):
+                    is_toplevel = True
+                elif name in ('L_write_stdout', 'L_write_char', 'L_write_int', 'L_write_float'):
+                    is_toplevel = True
+                    
+                if is_toplevel:
+                    # Close previous label range
+                    if current_label is not None:
+                        label_ranges[current_label] = (current_start, i)
+                    current_label = name
+                    current_start = i
+        
+        # Close the last label range
+        if current_label is not None:
+            label_ranges[current_label] = (current_start, len(staging))
+        
+        # 4. Core functions that are ALWAYS required (implicitly used by codegen)
+        always_required = {
+            '_malloc', '_free', '_realloc', '_out_of_bounds',
+            '_strlen', '_strcmp', '_strcpy', '_strcat', '_memset',
+            '_sprintf', '_printf',
+            'L_write_stdout', 'L_write_char', 'L_write_int', 'L_write_float',
+            '_exit',
+        }
+        
+        # 5. Scan user code for "call _funcname" references
+        required = set(always_required)
+        call_pattern = re.compile(r'call\s+(_\w+|L_write_\w+|__\w+)')
+        
+        for line in original_assembly[:user_code_end]:
+            m = call_pattern.search(line)
+            if m:
+                target = m.group(1)
+                if target in label_ranges:
+                    required.add(target)
+        
+        # 6. Recursively resolve internal dependencies within stdlib functions
+        resolved = set()
+        work_queue = list(required)
+        
+        while work_queue:
+            func = work_queue.pop()
+            if func in resolved:
+                continue
+            resolved.add(func)
+            
+            if func not in label_ranges:
+                continue
+                
+            start, end = label_ranges[func]
+            for line in staging[start:end]:
+                m = call_pattern.search(line)
+                if m:
+                    dep = m.group(1)
+                    if dep in label_ranges and dep not in resolved:
+                        work_queue.append(dep)
+        
+        # 7. Copy only required function blocks (in original order for stable output)
+        sorted_labels = sorted(
+            [(start, end, name) for name, (start, end) in label_ranges.items() if name in resolved],
+            key=lambda x: x[0]
+        )
+        
+        for start, end, name in sorted_labels:
+            for line in staging[start:end]:
+                self.assembly.append(line)
 
     def _emit_win32_runtime(self):
         """Emit Win32 API replacement functions for MSVCRT runtime."""
