@@ -63,7 +63,7 @@ def galaxy_install(pkg_name):
         download_url = f"https://github.com/{github_repo}/archive/refs/heads/main.zip"
     else:
         try:
-            req = urllib.request.Request(f"{REGISTRY_URL}/packages/{pkg_name}")
+            req = urllib.request.Request(f"{REGISTRY_URL}/api/packages/{pkg_name}")
             with urllib.request.urlopen(req) as response:
                 data = json.loads(response.read().decode('utf-8'))
                 github_repo = data.get("github_repo")
