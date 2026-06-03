@@ -6,7 +6,7 @@ import urllib.error
 import zipfile
 import io
 
-REGISTRY_URL = "https://galaxy-registry.vercel.app/api"
+REGISTRY_URL = "https://galaxy-registry.vercel.app"
 
 def run_galaxy_cli(args):
     if not args:
@@ -48,24 +48,38 @@ def galaxy_init():
     main_nv = os.path.join("src", "main.nv")
     if not os.path.exists(main_nv):
         with open(main_nv, "w") as f:
-            f.write('print("Hello from Galaxy!")\n')
+            f.write('print("Hello from Galaxy!")\\n')
             
     print(f"Initialized new Galaxy project '{project_name}'")
 
 def galaxy_install(pkg_name):
     print(f"Resolving '{pkg_name}'...")
-    # For now, simulate fetching from registry by assuming direct github url if it contains a slash
+    
     github_repo = None
+    download_url = None
+    
     if "/" in pkg_name:
         github_repo = pkg_name
+        download_url = f"https://github.com/{github_repo}/archive/refs/heads/main.zip"
     else:
-        # Mocking registry hit for now before the backend is up
-        print(f"Hitting registry {REGISTRY_URL}/packages/{pkg_name} ...")
-        print("Registry API not live yet. For now, use direct GitHub repo (e.g. nova galaxy install user/repo)")
+        try:
+            req = urllib.request.Request(f"{REGISTRY_URL}/packages/{pkg_name}")
+            with urllib.request.urlopen(req) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                github_repo = data.get("github_repo")
+                download_url = data.get("download_url")
+        except urllib.error.HTTPError as e:
+            print(f"Error: Package '{pkg_name}' not found in registry (HTTP {e.code})")
+            return
+        except Exception as e:
+            print(f"Failed to connect to registry: {e}")
+            return
+            
+    if not download_url:
+        print("Error: Could not resolve download URL.")
         return
         
     print(f"Fetching {github_repo} from GitHub...")
-    download_url = f"https://github.com/{github_repo}/archive/refs/heads/main.zip"
     
     try:
         req = urllib.request.Request(download_url, headers={'User-Agent': 'Nova-Galaxy/1.0'})
@@ -77,11 +91,8 @@ def galaxy_install(pkg_name):
         with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
             z.extractall("galaxy_modules")
             
-        # The zip usually contains a folder named repo-main, we should probably rename it to pkg_name
-        # But for now this works as a prototype
         print(f"Successfully installed '{pkg_name}' into galaxy_modules/")
         
-        # Add to galaxy.json
         if os.path.exists("galaxy.json"):
             with open("galaxy.json", "r") as f:
                 config = json.load(f)
