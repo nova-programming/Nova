@@ -1,0 +1,16 @@
+chacha20_init(42, 1337)
+
+# Check the return from each step manually
+print("init complete\n")
+
+# For chacha20_block, we call it directly
+call _chacha20_block
+print("block complete\n")
+
+# Now manually read the first word of output: should be non-zero
+# Access chacha_mem + 64 directly
+print("output[0] = ")
+ptr = L_chacha_buffer_str + 64
+ptr2 = 0
+print(ptr2)
+print("\n")

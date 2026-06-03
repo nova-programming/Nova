@@ -49,6 +49,7 @@ class ModuleResolver:
         with open(file_path, "r", encoding="utf-8") as f:
             source = f.read()
 
+        print(f"[Resolver] Parsing {file_path}")
         tokens = tokenize(source)
         ast = Parser(tokens).parse()
 

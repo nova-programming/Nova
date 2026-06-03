@@ -1,0 +1,3 @@
+# Get the chacha buffer address and check it after init
+chacha20_init(42, 1337)
+print("init done\n")

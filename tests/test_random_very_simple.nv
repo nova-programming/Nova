@@ -1,0 +1,13 @@
+chacha20_init(42, 1337)
+
+# First call should trigger chacha20_block and produce random value
+r = random()
+
+# Check the first nibble to see if it's truly non-zero
+if r != 0 {
+    print("random is NOT zero: ")
+    print(r)
+    print("\n")
+} else {
+    print("random is ZERO!\n")
+}

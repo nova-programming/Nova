@@ -1,0 +1,15 @@
+def run() {
+    print("=== Nova ChaCha20 PRNG Test ===")
+    print("Calling init")
+    chacha20_init(12345, 67890)
+    print("Init done")
+    print("Block 1:")
+    i = 0
+    while i < 16 {
+        print("Calling random " + str(i))
+        v = random()
+        print("  " + str(i) + ": " + str(v))
+        i = i + 1
+    }
+}
+run()

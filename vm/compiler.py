@@ -315,6 +315,8 @@ class Compiler:
                 self.emit(OpCode.MUL)
             elif node.op == "not":
                 self.emit(OpCode.NOT)
+            elif node.op == "~":
+                self.emit(OpCode.BIT_NOT)
         elif isinstance(node, BinOp):
             self.compile_expr(node.left)
             self.compile_expr(node.right)
@@ -323,7 +325,8 @@ class Compiler:
                 "*": OpCode.MUL, "/": OpCode.DIV,
                 "%": OpCode.MOD,
                 "and": OpCode.AND, "or": OpCode.OR,
-                "&": OpCode.BIT_AND, "<<": OpCode.SHL, ">>": OpCode.SAR
+                "&": OpCode.BIT_AND, "|": OpCode.BIT_OR, "^": OpCode.BIT_XOR,
+                "<<": OpCode.SHL, ">>": OpCode.SAR
             }
             self.emit(ops[node.op])
         elif isinstance(node, Compare):

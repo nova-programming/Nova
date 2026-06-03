@@ -1,0 +1,8 @@
+chacha20_init(42, 1337)
+print("init done\n")
+call _chacha20_block
+print("block done\n")
+r = random()
+print("random = ")
+print(r)
+print("\n")

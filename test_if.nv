@@ -1,0 +1,9 @@
+def run() {
+    print("Testing 2 <= 1")
+    if 2 <= 1 {
+        print("2 <= 1 is TRUE?!")
+    } else {
+        print("2 <= 1 is FALSE (correct)")
+    }
+}
+run()

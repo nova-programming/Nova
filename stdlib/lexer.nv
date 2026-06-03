@@ -256,6 +256,9 @@ def tokenize(src: string) -> list {
             if ch == "%" { tok.kind = "PERCENT" }
             if ch == "=" { tok.kind = "EQUALS" }
             if ch == "&" { tok.kind = "AMPERSAND" }
+            if ch == "|" { tok.kind = "PIPE" }
+            if ch == "^" { tok.kind = "CARET" }
+            if ch == "~" { tok.kind = "TILDE" }
             if ch == "<" { tok.kind = "LT" }
             if ch == ">" { tok.kind = "GT" }
             if ch == "(" { tok.kind = "LPAREN" }

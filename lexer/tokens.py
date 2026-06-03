@@ -79,6 +79,9 @@ TOKEN_SPEC = [
     ("SLASH",    r"/"),
     ("PERCENT",  r"%"),
     ("AMPERSAND", r"&"),
+    ("PIPE",     r"\|"),
+    ("CARET",    r"\^"),
+    ("TILDE",    r"~"),
     ("EQUALS",   r"="),
 
     # Delimiters

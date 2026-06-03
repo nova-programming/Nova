@@ -34,6 +34,9 @@ class OpCode(Enum):
 
     # Bitwise
     BIT_AND = auto()
+    BIT_OR = auto()
+    BIT_XOR = auto()
+    BIT_NOT = auto()
     SHL = auto()
     SAR = auto()
     HAS = auto()

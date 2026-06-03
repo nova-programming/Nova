@@ -198,6 +198,17 @@ class VirtualMachine:
                 b = self.stack.pop()
                 a = self.stack.pop()
                 self.stack.append(a & b)
+            elif opcode == OpCode.BIT_OR:
+                b = self.stack.pop()
+                a = self.stack.pop()
+                self.stack.append(a | b)
+            elif opcode == OpCode.BIT_XOR:
+                b = self.stack.pop()
+                a = self.stack.pop()
+                self.stack.append(a ^ b)
+            elif opcode == OpCode.BIT_NOT:
+                a = self.stack.pop()
+                self.stack.append(~a)
             elif opcode == OpCode.SHL:
                 b = self.stack.pop()
                 a = self.stack.pop()

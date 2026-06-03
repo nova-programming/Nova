@@ -1,0 +1,17 @@
+# Access chacha buffer first word directly
+print("testing chacha buffer access...\n")
+
+# Call chacha20_init - which writes to buffer[0..63] and buffer[128]
+chacha20_init(42, 1337)
+print("init done\n")
+
+# Now call chacha20_block which writes to buffer[64..127]
+call _chacha20_block
+print("block done\n")
+
+# Now read buffer[64] directly - but how?
+# Use __get_word(0) to read first word of block output
+ptr = 0
+print("get_word(0) = ")
+call __get_word, 0
+print("\n")

@@ -727,9 +727,16 @@ def encode_ror(state, ops: list) {
 def encode_shl(state, ops: list) {
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
-    state.code.append(193)
-    state.code.append(build_modrm(3, 4, op1.reg))
-    state.code.append(byte_mask(op2.imm_val))
+    if op2.reg == 1 {
+        # shl r32, cl: opcode 0xD3, modrm reg=4
+        state.code.append(211)
+        state.code.append(build_modrm(3, 4, op1.reg))
+    } else {
+        # shl r32, imm8: opcode 0xC1
+        state.code.append(193)
+        state.code.append(build_modrm(3, 4, op1.reg))
+        state.code.append(byte_mask(op2.imm_val))
+    }
 }
 
 

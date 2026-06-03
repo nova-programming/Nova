@@ -169,7 +169,7 @@ class Parser:
     def parse_mul(self):
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         left = self.parse_unary()
-        while self.current() and self.current()[0] in ("STAR", "SLASH", "PERCENT", "AMPERSAND", "GTGT", "LTLT"):
+        while self.current() and self.current()[0] in ("STAR", "SLASH", "PERCENT", "AMPERSAND", "GTGT", "LTLT", "PIPE", "CARET"):
             op = self.eat(self.current()[0])[1]
             right = self.parse_unary()
             if isinstance(left, Number) and isinstance(right, Number):
@@ -179,13 +179,15 @@ class Parser:
                 elif op == "&": left = Number(left.value & right.value, line=line)
                 elif op == ">>": left = Number(left.value >> right.value, line=line)
                 elif op == "<<": left = Number(left.value << right.value, line=line)
+                elif op == "|": left = Number(left.value | right.value, line=line)
+                elif op == "^": left = Number(left.value ^ right.value, line=line)
                 continue
             left = BinOp(left, op, right, line=line)
         return left
 
     def parse_unary(self):
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
-        if self.current() and self.current()[0] in ("MINUS", "NOT"):
+        if self.current() and self.current()[0] in ("MINUS", "NOT", "TILDE"):
             op = self.eat(self.current()[0])[1]
             return UnaryOp(op, self.parse_unary(), line=line)
         return self.parse_primary()

@@ -566,6 +566,12 @@ def compile_expr(state: CodegenState, node: AstNode) {
                         emit(state, "    mov ecx, ebx")
                         emit(state, "    shl eax, cl")
                     }
+                    if node.val_str == "|" {
+                        emit(state, "    or eax, ebx")
+                    }
+                    if node.val_str == "^" {
+                        emit(state, "    xor eax, ebx")
+                    }
                     emit(state, "    push eax")
                 }
                 }
@@ -689,6 +695,9 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    cmp eax, 0")
             emit(state, "    sete al")
             emit(state, "    movzx eax, al")
+        }
+        if node.val_str == "~" {
+            emit(state, "    not eax")
         }
         emit(state, "    push eax")
     }

@@ -1,0 +1,14 @@
+x = 10
+z = 2
+# variable << variable
+y = x << z
+print(y)
+# variable << constant
+y = x << 2
+print(y)
+# constant << variable
+y = 10 << z
+print(y)
+# constant << constant
+y = 10 << 2
+print(y)

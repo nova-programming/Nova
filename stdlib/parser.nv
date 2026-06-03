@@ -368,7 +368,7 @@ def parse_primary(state: ParserState) -> AstNode {
 
 def parse_unary(state: ParserState) -> AstNode {
     tok = current_tok(state)
-    if tok.kind == "MINUS" or tok.kind == "NOT" {
+    if tok.kind == "MINUS" or tok.kind == "NOT" or tok.kind == "TILDE" {
         eat_tok(state, tok.kind)
         node = AstNode()
         node.kind = "UnaryOp"
@@ -384,7 +384,7 @@ def parse_mul(state: ParserState) -> AstNode {
     loop = 1
     while loop == 1 {
         tok = current_tok(state)
-        if tok.kind == "STAR" or tok.kind == "SLASH" or tok.kind == "PERCENT" or tok.kind == "AMPERSAND" or tok.kind == "GTGT" or tok.kind == "LTLT" {
+        if tok.kind == "STAR" or tok.kind == "SLASH" or tok.kind == "PERCENT" or tok.kind == "AMPERSAND" or tok.kind == "GTGT" or tok.kind == "LTLT" or tok.kind == "PIPE" or tok.kind == "CARET" {
             eat_tok(state, tok.kind)
             right = parse_unary(state)
             
@@ -392,7 +392,11 @@ def parse_mul(state: ParserState) -> AstNode {
                 if tok.val == "*" { left.val_int = left.val_int * right.val_int }
                 if tok.val == "/" and right.val_int != 0 { left.val_int = left.val_int / right.val_int }
                 if tok.val == "%" and right.val_int != 0 { left.val_int = left.val_int % right.val_int }
-                # Note: Bitwise operators omitted from simple constant folding for now due to language limitations on operators
+                if tok.val == "<<" { left.val_int = left.val_int << right.val_int }
+                if tok.val == ">>" { left.val_int = left.val_int >> right.val_int }
+                if tok.val == "&" { left.val_int = left.val_int & right.val_int }
+                if tok.val == "|" { left.val_int = left.val_int | right.val_int }
+                if tok.val == "^" { left.val_int = left.val_int ^ right.val_int }
             } else {
                 node = AstNode()
                 node.kind = "BinOp"

@@ -1,0 +1,16 @@
+chacha20_init(42, 1337)
+i = 0
+while i < 100000 {
+    last = random()
+    i = i + 1
+}
+print("last = " + str(last) + "\n")
+t0 = sys_get_tick_count()
+i = 0
+while i < 1000000 {
+    last = random()
+    i = i + 1
+}
+t1 = sys_get_tick_count()
+print("last = " + str(last) + "\n")
+print("time = " + str(t1 - t0) + " ms\n")

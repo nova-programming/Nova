@@ -1,0 +1,2843 @@
+_sys_open:
+    push ebp
+    mov ebp, esp
+    # line 6
+    mov eax, [ebp + 12]
+    push eax
+    mov eax, [ebp + 8]
+    push eax
+    call _fopen
+    add esp, 8
+    push eax
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+    mov esp, ebp
+    pop ebp
+    ret
+_sys_read:
+    push ebp
+    mov ebp, esp
+    sub esp, 4
+    push esi
+    push edi
+    # line 10
+    push 2
+    push 0
+    mov eax, [ebp + 8]
+    push eax
+    call _fseek
+    add esp, 12
+    push eax
+    pop eax
+    # line 11
+    mov eax, [ebp + 8]
+    push eax
+    call _ftell
+    add esp, 4
+    push eax
+    pop eax
+    mov esi, eax
+    # line 12
+    push 0
+    push 0
+    mov eax, [ebp + 8]
+    push eax
+    call _fseek
+    add esp, 12
+    push eax
+    pop eax
+    # line 14
+    mov ebx, 1
+    mov eax, esi
+    add eax, ebx
+    push eax
+    call _malloc
+    add esp, 4
+    push eax
+    pop eax
+    mov edi, eax
+    # line 15
+    mov eax, [ebp + 8]
+    push eax
+    mov eax, esi
+    push eax
+    push 1
+    mov eax, edi
+    push eax
+    call _fread
+    add esp, 16
+    push eax
+    pop eax
+    mov [ebp - 4], eax
+    # line 18
+    push 1
+    push 0
+    mov ebx, [ebp - 4]
+    mov eax, edi
+    add eax, ebx
+    push eax
+    call _memset
+    add esp, 12
+    push eax
+    pop eax
+    # line 20
+    mov eax, edi
+    push eax
+    pop eax
+    pop edi
+    pop esi
+    mov esp, ebp
+    pop ebp
+    ret
+    pop edi
+    pop esi
+    mov esp, ebp
+    pop ebp
+    ret
+_sys_write:
+    push ebp
+    mov ebp, esp
+    # line 24
+    mov eax, [ebp + 8]
+    push eax
+    mov eax, [ebp + 12]
+    push eax
+    call _fputs
+    add esp, 8
+    push eax
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+_sys_write_raw:
+    push ebp
+    mov ebp, esp
+    sub esp, 4
+    push esi
+    push edi
+    # line 28
+    # line 29
+    mov eax, [ebp + 12]
+    push eax
+    pop eax
+    mov eax, [eax]
+    push eax
+    pop eax
+    mov esi, eax
+    # line 30
+    push 0
+    pop eax
+    mov edi, eax
+    # line 31
+L_SYS_loop_1:
+    mov ebx, esi
+    mov eax, edi
+    cmp eax, ebx
+    setl al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_loop_end_2
+    # line 32
+    mov eax, edi
+    push eax
+    mov eax, [ebp + 12]
+    push eax
+    pop edx
+    pop ecx
+    cmp ecx, 0
+    jl _out_of_bounds
+    cmp ecx, [edx]
+    jge _out_of_bounds
+    mov eax, [edx + 8]
+    mov eax, [eax + ecx*4]
+    push eax
+    pop eax
+    mov [ebp - 4], eax
+    # line 33
+    mov eax, [ebp + 8]
+    push eax
+    mov eax, [ebp - 4]
+    push eax
+    call _fputc
+    add esp, 8
+    push eax
+    pop eax
+    # line 34
+    mov ebx, 1
+    mov eax, edi
+    add eax, ebx
+    push eax
+    pop eax
+    mov edi, eax
+    jmp L_SYS_loop_1
+L_SYS_loop_end_2:
+    pop edi
+    pop esi
+    mov esp, ebp
+    pop ebp
+    ret
+_sys_close:
+    push ebp
+    mov ebp, esp
+    # line 40
+    mov eax, [ebp + 8]
+    push eax
+    call _fclose
+    add esp, 4
+    push eax
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+_sys_alloc:
+    push ebp
+    mov ebp, esp
+    # line 44
+    # line 45
+    mov eax, [ebp + 8]
+    push eax
+    call _malloc
+    add esp, 4
+    push eax
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+    mov esp, ebp
+    pop ebp
+    ret
+_sys_free:
+    push ebp
+    mov ebp, esp
+    # line 50
+    # line 51
+    mov eax, [ebp + 8]
+    push eax
+    call _free
+    add esp, 4
+    mov esp, ebp
+    pop ebp
+    ret
+_sys_platform:
+    push ebp
+    mov ebp, esp
+    # line 56
+    push offset str_const_1
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+    mov esp, ebp
+    pop ebp
+    ret
+__sys_is_space:
+    push ebp
+    mov ebp, esp
+    # line 61
+    mov ebx, 32
+    mov eax, [ebp + 8]
+    cmp eax, ebx
+    sete al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_else_3
+    # line 61
+    push 1
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+    jmp L_SYS_end_4
+L_SYS_else_3:
+L_SYS_end_4:
+    # line 62
+    mov ebx, 9
+    mov eax, [ebp + 8]
+    cmp eax, ebx
+    sete al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_else_5
+    # line 62
+    push 1
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+    jmp L_SYS_end_6
+L_SYS_else_5:
+L_SYS_end_6:
+    # line 63
+    push 0
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+    mov esp, ebp
+    pop ebp
+    ret
+__sys_extract_arg:
+    push ebp
+    mov ebp, esp
+    sub esp, 12
+    push esi
+    push edi
+    # line 69
+    push 0
+    pop eax
+    mov esi, eax
+    # line 70
+    push 0
+    pop eax
+    mov edi, eax
+    # line 71
+    push 0
+    pop eax
+    mov [ebp - 4], eax
+    # line 72
+    push 0
+    pop eax
+    mov [ebp - 8], eax
+    # line 73
+    # line 74
+    mov ebx, 1
+    mov eax, [ebp + 12]
+    add eax, ebx
+    push eax
+    call _malloc
+    add esp, 4
+    push eax
+    pop eax
+    mov esi, eax
+    # line 75
+    mov eax, [ebp + 8]
+    push eax
+    pop eax
+    mov edi, eax
+    # line 76
+    mov eax, edi
+    push eax
+    pop edx
+    xor eax, eax
+    mov al, byte ptr [edx]
+    push eax
+    push 34
+    pop ebx
+    pop eax
+    cmp eax, ebx
+    sete al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_else_7
+    # line 77
+    mov ebx, 1
+    mov eax, edi
+    add eax, ebx
+    push eax
+    pop eax
+    mov edi, eax
+    # line 78
+    mov ebx, 1
+    mov eax, [ebp + 12]
+    sub eax, ebx
+    push eax
+    pop eax
+    mov [ebp - -12], eax
+    # line 79
+    mov ebx, 0
+    mov eax, [ebp + 12]
+    cmp eax, ebx
+    setg al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_else_9
+    # line 80
+    mov ebx, [ebp + 12]
+    mov eax, edi
+    add eax, ebx
+    push eax
+    push 1
+    pop ebx
+    pop eax
+    sub eax, ebx
+    push eax
+    pop eax
+    mov [ebp - 12], eax
+    # line 81
+    mov eax, [ebp - 12]
+    push eax
+    pop edx
+    xor eax, eax
+    mov al, byte ptr [edx]
+    push eax
+    push 34
+    pop ebx
+    pop eax
+    cmp eax, ebx
+    sete al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_else_11
+    # line 82
+    mov ebx, 1
+    mov eax, [ebp + 12]
+    sub eax, ebx
+    push eax
+    pop eax
+    mov [ebp - -12], eax
+    jmp L_SYS_end_12
+L_SYS_else_11:
+L_SYS_end_12:
+    jmp L_SYS_end_10
+L_SYS_else_9:
+L_SYS_end_10:
+    jmp L_SYS_end_8
+L_SYS_else_7:
+L_SYS_end_8:
+    # line 86
+    mov eax, esi
+    push eax
+    pop eax
+    mov [ebp - 4], eax
+    # line 87
+    push 0
+    pop eax
+    mov [ebp - 8], eax
+    # line 88
+L_SYS_loop_13:
+    mov ebx, [ebp + 12]
+    mov eax, [ebp - 8]
+    cmp eax, ebx
+    setl al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_loop_end_14
+    # line 89
+    mov eax, edi
+    push eax
+    pop edx
+    xor eax, eax
+    mov al, byte ptr [edx]
+    push eax
+    mov eax, [ebp - 4]
+    push eax
+    pop edx
+    pop eax
+    mov byte ptr [edx], al
+    # line 90
+    mov ebx, 1
+    mov eax, [ebp - 4]
+    add eax, ebx
+    push eax
+    pop eax
+    mov [ebp - 4], eax
+    # line 91
+    mov ebx, 1
+    mov eax, edi
+    add eax, ebx
+    push eax
+    pop eax
+    mov edi, eax
+    # line 92
+    mov ebx, 1
+    mov eax, [ebp - 8]
+    add eax, ebx
+    push eax
+    pop eax
+    mov [ebp - 8], eax
+    jmp L_SYS_loop_13
+L_SYS_loop_end_14:
+    # line 94
+    push 0
+    mov eax, [ebp - 4]
+    push eax
+    pop edx
+    pop eax
+    mov byte ptr [edx], al
+    # line 96
+    mov eax, esi
+    push eax
+    pop eax
+    pop edi
+    pop esi
+    mov esp, ebp
+    pop ebp
+    ret
+    pop edi
+    pop esi
+    mov esp, ebp
+    pop ebp
+    ret
+_sys_get_args:
+    push ebp
+    mov ebp, esp
+    sub esp, 24
+    push esi
+    push edi
+    # line 100
+    push 12
+    call _malloc
+    add esp, 4
+    push eax
+    push 16
+    call _malloc
+    add esp, 4
+    pop ebx
+    mov dword ptr [ebx], 0
+    mov dword ptr [ebx+4], 4
+    mov [ebx+8], eax
+    push ebx
+    pop eax
+    mov esi, eax
+    # line 101
+    push 0
+    pop eax
+    mov edi, eax
+    # line 102
+    push 0
+    pop eax
+    mov [ebp - 4], eax
+    # line 103
+    # line 104
+    call _GetCommandLineA
+    push eax
+    pop eax
+    mov edi, eax
+    # line 105
+    mov eax, edi
+    push eax
+    pop eax
+    mov [ebp - 4], eax
+    # line 106
+    push 0
+    pop eax
+    mov [ebp - 8], eax
+    # line 108
+L_SYS_loop_15:
+    mov eax, [ebp - 4]
+    push eax
+    pop edx
+    xor eax, eax
+    mov al, byte ptr [edx]
+    push eax
+    push 0
+    pop ebx
+    pop eax
+    cmp eax, ebx
+    setne al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_loop_end_16
+    # line 109
+L_SYS_loop_17:
+    mov eax, [ebp - 4]
+    push eax
+    pop edx
+    xor eax, eax
+    mov al, byte ptr [edx]
+    push eax
+    call __sys_is_space
+    add esp, 4
+    push eax
+    push 1
+    pop ebx
+    pop eax
+    cmp eax, ebx
+    sete al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_loop_end_18
+    # line 110
+    mov ebx, 1
+    mov eax, [ebp - 4]
+    add eax, ebx
+    push eax
+    pop eax
+    mov [ebp - 4], eax
+    jmp L_SYS_loop_17
+L_SYS_loop_end_18:
+    # line 112
+    mov eax, [ebp - 4]
+    push eax
+    pop edx
+    xor eax, eax
+    mov al, byte ptr [edx]
+    push eax
+    push 0
+    pop ebx
+    pop eax
+    cmp eax, ebx
+    sete al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_else_19
+    # line 113
+    jmp L_SYS_loop_end_16
+    jmp L_SYS_end_20
+L_SYS_else_19:
+L_SYS_end_20:
+    # line 115
+    mov eax, [ebp - 4]
+    push eax
+    pop eax
+    mov [ebp - 12], eax
+    # line 116
+    push 0
+    pop eax
+    mov [ebp - 16], eax
+    # line 117
+L_SYS_loop_21:
+    mov eax, [ebp - 4]
+    push eax
+    pop edx
+    xor eax, eax
+    mov al, byte ptr [edx]
+    push eax
+    push 0
+    pop ebx
+    pop eax
+    cmp eax, ebx
+    setne al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_loop_end_22
+    # line 118
+    mov eax, [ebp - 4]
+    push eax
+    pop edx
+    xor eax, eax
+    mov al, byte ptr [edx]
+    push eax
+    pop eax
+    mov [ebp - 20], eax
+    # line 119
+    mov ebx, 0
+    mov eax, [ebp - 8]
+    cmp eax, ebx
+    sete al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_else_23
+    # line 120
+    mov eax, [ebp - 20]
+    push eax
+    call __sys_is_space
+    add esp, 4
+    push eax
+    push 1
+    pop ebx
+    pop eax
+    cmp eax, ebx
+    sete al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_else_25
+    # line 121
+    jmp L_SYS_loop_end_22
+    jmp L_SYS_end_26
+L_SYS_else_25:
+L_SYS_end_26:
+    jmp L_SYS_end_24
+L_SYS_else_23:
+L_SYS_end_24:
+    # line 125
+    mov ebx, 34
+    mov eax, [ebp - 20]
+    cmp eax, ebx
+    sete al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_else_27
+    # line 126
+    mov ebx, 1
+    mov eax, [ebp - 8]
+    cmp eax, ebx
+    sete al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_else_29
+    # line 127
+    push 0
+    pop eax
+    mov [ebp - 8], eax
+    jmp L_SYS_end_30
+L_SYS_else_29:
+    # line 129
+    push 1
+    pop eax
+    mov [ebp - 8], eax
+L_SYS_end_30:
+    jmp L_SYS_end_28
+L_SYS_else_27:
+L_SYS_end_28:
+    # line 132
+    mov ebx, 1
+    mov eax, [ebp - 16]
+    add eax, ebx
+    push eax
+    pop eax
+    mov [ebp - 16], eax
+    # line 133
+    mov ebx, 1
+    mov eax, [ebp - 4]
+    add eax, ebx
+    push eax
+    pop eax
+    mov [ebp - 4], eax
+    jmp L_SYS_loop_21
+L_SYS_loop_end_22:
+    # line 135
+    mov eax, [ebp - 16]
+    push eax
+    mov eax, [ebp - 12]
+    push eax
+    call __sys_extract_arg
+    add esp, 8
+    push eax
+    pop eax
+    mov [ebp - 24], eax
+    # line 136
+    mov eax, [ebp - 24]
+    push eax
+    mov eax, esi
+    push eax
+    pop ebx
+    pop ecx
+    mov eax, [ebx]
+    mov edx, [ebx+4]
+    cmp eax, edx
+    jl L_no_realloc_31
+    shl edx, 1
+    mov [ebx+4], edx
+    push ecx
+    push ebx
+    shl edx, 2
+    push edx
+    push dword ptr [ebx+8]
+    call _realloc
+    add esp, 8
+    cmp eax, 0
+    jne L_realloc_ok_32
+    push offset fmt_str
+    push offset L_realloc_fail_msg
+    call _printf
+    push 1
+    call _exit
+L_realloc_ok_32:
+    pop ebx
+    pop ecx
+    mov [ebx+8], eax
+L_no_realloc_31:
+    mov eax, [ebx]
+    mov edx, [ebx+8]
+    mov [edx + eax*4], ecx
+    inc eax
+    mov [ebx], eax
+    push 0
+    pop eax
+    jmp L_SYS_loop_15
+L_SYS_loop_end_16:
+    # line 139
+    mov eax, esi
+    push eax
+    pop eax
+    pop edi
+    pop esi
+    mov esp, ebp
+    pop ebp
+    ret
+    pop edi
+    pop esi
+    mov esp, ebp
+    pop ebp
+    ret
+_sys_system:
+    push ebp
+    mov ebp, esp
+    push esi
+    # line 144
+    push 0
+    pop eax
+    mov esi, eax
+    # line 145
+    # line 146
+    mov eax, [ebp + 8]
+    push eax
+    call _system
+    add esp, 4
+    push eax
+    pop eax
+    mov esi, eax
+    # line 148
+    mov eax, esi
+    push eax
+    pop eax
+    pop esi
+    mov esp, ebp
+    pop ebp
+    ret
+    pop esi
+    mov esp, ebp
+    pop ebp
+    ret
+_sys_exit:
+    push ebp
+    mov ebp, esp
+    # line 153
+    # line 154
+    mov eax, [ebp + 8]
+    push eax
+    call _exit
+    add esp, 4
+    push eax
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+_sys_flush:
+    push ebp
+    mov ebp, esp
+    # line 160
+    # line 161
+    push 0
+    call _fflush
+    add esp, 4
+    push eax
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+_sys_get_tick_count:
+    push ebp
+    mov ebp, esp
+    # line 166
+    call _GetTickCount@0
+    push eax
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+    mov esp, ebp
+    pop ebp
+    ret
+_square:
+    push ebp
+    mov ebp, esp
+    # line 5
+    mov ebx, [ebp + 8]
+    mov eax, [ebp + 8]
+    imul eax, ebx
+    push eax
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+    mov esp, ebp
+    pop ebp
+    ret
+_cube:
+    push ebp
+    mov ebp, esp
+    # line 9
+    mov ebx, [ebp + 8]
+    mov eax, [ebp + 8]
+    imul eax, ebx
+    push eax
+    mov eax, [ebp + 8]
+    push eax
+    pop ebx
+    pop eax
+    imul eax, ebx
+    push eax
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+    mov esp, ebp
+    pop ebp
+    ret
+_abs_val:
+    push ebp
+    mov ebp, esp
+    # line 13
+    mov ebx, 0
+    mov eax, [ebp + 8]
+    cmp eax, ebx
+    setl al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_else_33
+    # line 14
+    mov ebx, [ebp + 8]
+    mov eax, 0
+    sub eax, ebx
+    push eax
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+    jmp L_SYS_end_34
+L_SYS_else_33:
+L_SYS_end_34:
+    # line 16
+    mov eax, [ebp + 8]
+    push eax
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+    mov esp, ebp
+    pop ebp
+    ret
+_max_of:
+    push ebp
+    mov ebp, esp
+    # line 20
+    mov ebx, [ebp + 12]
+    mov eax, [ebp + 8]
+    cmp eax, ebx
+    setg al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_else_35
+    # line 21
+    mov eax, [ebp + 8]
+    push eax
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+    jmp L_SYS_end_36
+L_SYS_else_35:
+L_SYS_end_36:
+    # line 23
+    mov eax, [ebp + 12]
+    push eax
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+    mov esp, ebp
+    pop ebp
+    ret
+_min_of:
+    push ebp
+    mov ebp, esp
+    # line 27
+    mov ebx, [ebp + 12]
+    mov eax, [ebp + 8]
+    cmp eax, ebx
+    setl al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_else_37
+    # line 28
+    mov eax, [ebp + 8]
+    push eax
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+    jmp L_SYS_end_38
+L_SYS_else_37:
+L_SYS_end_38:
+    # line 30
+    mov eax, [ebp + 12]
+    push eax
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+    mov esp, ebp
+    pop ebp
+    ret
+_factorial:
+    push ebp
+    mov ebp, esp
+    # line 34
+    mov ebx, 1
+    mov eax, [ebp + 8]
+    cmp eax, ebx
+    setle al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_else_39
+    # line 35
+    push 1
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+    jmp L_SYS_end_40
+L_SYS_else_39:
+L_SYS_end_40:
+    # line 37
+    mov eax, [ebp + 8]
+    push eax
+    mov ebx, 1
+    mov eax, [ebp + 8]
+    sub eax, ebx
+    push eax
+    call _factorial
+    add esp, 4
+    push eax
+    pop ebx
+    pop eax
+    imul eax, ebx
+    push eax
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+    mov esp, ebp
+    pop ebp
+    ret
+__chacha_mem:
+    push ebp
+    mov ebp, esp
+    # line 44
+    push offset str_const_2
+    pop eax
+    mov esp, ebp
+    pop ebp
+    ret
+    mov esp, ebp
+    pop ebp
+    ret
+_chacha20_init:
+    push ebp
+    mov ebp, esp
+    # line 48
+    call __chacha_mem
+    mov dword ptr [eax+0] , 1634760805
+    mov dword ptr [eax+4] , 857760878
+    mov dword ptr [eax+8] , 2036477234
+    mov dword ptr [eax+12] , 1797285236
+    mov ecx , dword ptr [ebp+8]
+    mov dword ptr [eax+16] , ecx
+    mov dword ptr [eax+20] , ecx
+    mov ecx , dword ptr [ebp+12]
+    mov dword ptr [eax+24] , ecx
+    mov dword ptr [eax+28] , ecx
+    mov dword ptr [eax+32] , 0
+    mov dword ptr [eax+36] , 0
+    mov dword ptr [eax+40] , 0
+    mov dword ptr [eax+44] , 0
+    mov dword ptr [eax+48] , 0
+    mov dword ptr [eax+52] , 0
+    mov dword ptr [eax+56] , 0
+    mov dword ptr [eax+60] , 0
+    mov dword ptr [eax+128] , 16
+    mov esp, ebp
+    pop ebp
+    ret
+_chacha20_block:
+    push ebp
+    mov ebp, esp
+    # line 72
+    push ebx
+    push esi
+    push edi
+    call __chacha_mem
+    mov edi , eax
+    inc dword ptr [edi+48]
+    sub esp , 64
+    mov ecx , 16
+    mov esi , edi
+    mov eax , edi
+    mov edi , esp
+    cld
+    rep movsd
+    mov edi , eax
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+56] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+0]
+    mov ebx , dword ptr [esp+20]
+    mov ecx , dword ptr [esp+40]
+    mov edx , dword ptr [esp+60]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+0] , eax
+    mov dword ptr [esp+20] , ebx
+    mov dword ptr [esp+40] , ecx
+    mov dword ptr [esp+60] , edx
+    mov eax , dword ptr [esp+4]
+    mov ebx , dword ptr [esp+24]
+    mov ecx , dword ptr [esp+44]
+    mov edx , dword ptr [esp+48]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+4] , eax
+    mov dword ptr [esp+24] , ebx
+    mov dword ptr [esp+44] , ecx
+    mov dword ptr [esp+48] , edx
+    mov eax , dword ptr [esp+8]
+    mov ebx , dword ptr [esp+28]
+    mov ecx , dword ptr [esp+32]
+    mov edx , dword ptr [esp+52]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+8] , eax
+    mov dword ptr [esp+28] , ebx
+    mov dword ptr [esp+32] , ecx
+    mov dword ptr [esp+52] , edx
+    mov eax , dword ptr [esp+12]
+    mov ebx , dword ptr [esp+16]
+    mov ecx , dword ptr [esp+36]
+    mov edx , dword ptr [esp+56]
+    add eax , ebx
+    xor edx , eax
+    rol edx , 16
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 12
+    add eax , ebx
+    xor edx , eax
+    rol edx , 8
+    add ecx , edx
+    xor ebx , ecx
+    rol ebx , 7
+    mov dword ptr [esp+12] , eax
+    mov dword ptr [esp+16] , ebx
+    mov dword ptr [esp+36] , ecx
+    mov dword ptr [esp+56] , edx
+    mov esi , edi
+    mov eax , edi
+    add eax , 64
+    mov edx , eax
+    mov edi , esp
+    mov eax , dword ptr [esi+0]
+    add eax , dword ptr [edi+0]
+    mov dword ptr [edx+0] , eax
+    mov eax , dword ptr [esi+4]
+    add eax , dword ptr [edi+4]
+    mov dword ptr [edx+4] , eax
+    mov eax , dword ptr [esi+8]
+    add eax , dword ptr [edi+8]
+    mov dword ptr [edx+8] , eax
+    mov eax , dword ptr [esi+12]
+    add eax , dword ptr [edi+12]
+    mov dword ptr [edx+12] , eax
+    mov eax , dword ptr [esi+16]
+    add eax , dword ptr [edi+16]
+    mov dword ptr [edx+16] , eax
+    mov eax , dword ptr [esi+20]
+    add eax , dword ptr [edi+20]
+    mov dword ptr [edx+20] , eax
+    mov eax , dword ptr [esi+24]
+    add eax , dword ptr [edi+24]
+    mov dword ptr [edx+24] , eax
+    mov eax , dword ptr [esi+28]
+    add eax , dword ptr [edi+28]
+    mov dword ptr [edx+28] , eax
+    mov eax , dword ptr [esi+32]
+    add eax , dword ptr [edi+32]
+    mov dword ptr [edx+32] , eax
+    mov eax , dword ptr [esi+36]
+    add eax , dword ptr [edi+36]
+    mov dword ptr [edx+36] , eax
+    mov eax , dword ptr [esi+40]
+    add eax , dword ptr [edi+40]
+    mov dword ptr [edx+40] , eax
+    mov eax , dword ptr [esi+44]
+    add eax , dword ptr [edi+44]
+    mov dword ptr [edx+44] , eax
+    mov eax , dword ptr [esi+48]
+    add eax , dword ptr [edi+48]
+    mov dword ptr [edx+48] , eax
+    mov eax , dword ptr [esi+52]
+    add eax , dword ptr [edi+52]
+    mov dword ptr [edx+52] , eax
+    mov eax , dword ptr [esi+56]
+    add eax , dword ptr [edi+56]
+    mov dword ptr [edx+56] , eax
+    mov eax , dword ptr [esi+60]
+    add eax , dword ptr [edi+60]
+    mov dword ptr [edx+60] , eax
+    add esp , 64
+    pop edi
+    pop esi
+    pop ebx
+    mov esp, ebp
+    pop ebp
+    ret
+__get_idx:
+    push ebp
+    mov ebp, esp
+    # line 1755
+    call __chacha_mem
+    mov eax , dword ptr [eax+128]
+    mov esp, ebp
+    pop ebp
+    ret
+__set_idx:
+    push ebp
+    mov ebp, esp
+    # line 1762
+    call __chacha_mem
+    mov ecx , dword ptr [ebp+8]
+    mov dword ptr [eax+128] , ecx
+    mov esp, ebp
+    pop ebp
+    ret
+__get_word:
+    push ebp
+    mov ebp, esp
+    # line 1770
+    call __chacha_mem
+    mov ecx , dword ptr [ebp+8]
+    add eax , 64
+    mov eax , dword ptr [eax+ecx*4]
+    mov esp, ebp
+    pop ebp
+    ret
+_random:
+    push ebp
+    mov ebp, esp
+    push esi
+    push edi
+    # line 1779
+    call __get_idx
+    push eax
+    pop eax
+    mov esi, eax
+    # line 1780
+    mov ebx, 16
+    mov eax, esi
+    cmp eax, ebx
+    setge al
+    movzx eax, al
+    push eax
+    pop eax
+    cmp eax, 0
+    je L_SYS_else_41
+    # line 1781
+    call _chacha20_block
+    push eax
+    pop eax
+    # line 1782
+    push 0
+    pop eax
+    mov esi, eax
+    jmp L_SYS_end_42
+L_SYS_else_41:
+L_SYS_end_42:
+    # line 1784
+    mov eax, esi
+    push eax
+    call __get_word
+    add esp, 4
+    push eax
+    pop eax
+    mov edi, eax
+    # line 1785
+    mov ebx, 1
+    mov eax, esi
+    add eax, ebx
+    push eax
+    call __set_idx
+    add esp, 4
+    push eax
+    pop eax
+    # line 1786
+    mov eax, edi
+    push eax
+    pop eax
+    pop edi
+    pop esi
+    mov esp, ebp
+    pop ebp
+    ret
+    pop edi
+    pop esi
+    mov esp, ebp
+    pop ebp
+    ret
