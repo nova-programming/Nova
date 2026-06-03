@@ -20,6 +20,7 @@ TOKEN_SPEC = [
     ("SELF",     r"self\b"),
     ("SIZEOF",   r"sizeof\b"),
     ("LEN",      r"len\b"),
+    ("OPENF",    r"openf\b"),
     ("OPEN",     r"open\b"),
     ("READ",     r"read\b"),
     ("WRITE",    r"write\b"),

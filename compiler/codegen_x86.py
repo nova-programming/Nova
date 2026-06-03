@@ -146,6 +146,15 @@ class X86Codegen:
             return self._is_string_expr(node.base)
         return False
 
+    def _is_file_expr(self, node):
+        """Check if an expression evaluates to a file object at compile time."""
+        if isinstance(node, Openf):
+            return True
+        inferred = getattr(node, 'inferred_type', None)
+        if hasattr(inferred, 'name') and getattr(inferred, 'name') == 'file':
+            return True
+        return False
+
     def add_string_literal(self, value):
         if value in self.string_literals:
             return self.string_literals[value]
@@ -163,6 +172,8 @@ class X86Codegen:
 
     def generate(self):
         # Initial headers
+        self.assembly.append("str_fmode_a: .asciz \"a\"")
+        self.assembly.append("")
         self.assembly.append(".intel_syntax noprefix")
         self.assembly.append(".global _main")
         # Win32 API externs (replaces MSVCRT)
@@ -193,6 +204,14 @@ class X86Codegen:
         self.data_section.append('L_out_of_bounds_msg: .asciz "Index Out Of Bounds\\n"')
         self.data_section.append('str_const_sys_platform: .asciz "windows"')
         self.data_section.append('str_const_chacha_mem: .asciz "expand 32-byte k"')
+        self.data_section.append('str_fmode_rw: .asciz "r+"')
+        self.data_section.append('str_fmode_wp: .asciz "w+"')
+        self.data_section.append('str_fmode_w: .asciz "w"')
+        self.data_section.append('dbg_openf_1: .asciz "debug 1\\n"')
+        self.data_section.append('dbg_openf_2: .asciz "debug 2\\n"')
+        self.data_section.append('dbg_openf_3: .asciz "debug 3\\n"')
+        self.data_section.append('dbg_openf_4: .asciz "debug 4\\n"')
+        self.data_section.append('dbg_openf_5: .asciz "debug 5\\n"')
         
         self.data_section.append("char_strings:")
         for i in range(256):
@@ -877,23 +896,83 @@ class X86Codegen:
         r("_fopen:")
         r("    push ebp")
         r("    mov ebp, esp")
-        r("    mov eax, [ebp + 12]")
-        r("    mov al, byte ptr [eax]")
-        r("    cmp al, 'w'")
+        r("    push dword ptr [ebp + 12]")
+        r("    push offset str_fmode_w")
+        r("    call _strcmp")
+        r("    add esp, 8")
+        r("    cmp eax, 0")
         r("    je L_fopen_write")
+        
+        r("    push dword ptr [ebp + 12]")
+        r("    push offset str_fmode_wp")
+        r("    call _strcmp")
+        r("    add esp, 8")
+        r("    cmp eax, 0")
+        r("    je L_fopen_write")
+        
+        r("    push dword ptr [ebp + 12]")
+        r("    push offset str_fmode_rw")
+        r("    call _strcmp")
+        r("    add esp, 8")
+        r("    cmp eax, 0")
+        r("    je L_fopen_rw")
+        
+        r("    push dword ptr [ebp + 12]")
+        r("    push offset str_fmode_a")
+        r("    call _strcmp")
+        r("    add esp, 8")
+        r("    cmp eax, 0")
+        r("    je L_fopen_append")
+        
+        # Default: Read mode
         r("    push 0")
         r("    push 128")
-        r("    push 3")
+        r("    push 3") # OPEN_EXISTING
         r("    push 0")
         r("    push 0")
-        r("    push -2147483648")
+        r("    push -2147483648") # GENERIC_READ
         r("    push dword ptr [ebp + 8]")
         r("    call _CreateFileA@28")
         r("    jmp L_fopen_end")
+        
+        r("L_fopen_rw:")
+        r("    push 0")
+        r("    push 128")
+        r("    push 3") # OPEN_EXISTING
+        r("    push 0")
+        r("    push 0")
+        r("    push -1073741824") # GENERIC_READ | GENERIC_WRITE (0xC0000000)
+        r("    push dword ptr [ebp + 8]")
+        r("    call _CreateFileA@28")
+        r("    jmp L_fopen_end")
+        
+        r("L_fopen_append:")
+        r("    push 0")
+        r("    push 128")
+        r("    push 4") # OPEN_ALWAYS
+        r("    push 0")
+        r("    push 0")
+        r("    push 1073741824") # GENERIC_WRITE
+        r("    push dword ptr [ebp + 8]")
+        r("    call _CreateFileA@28")
+        r("    cmp eax, -1")
+        r("    jne L_fopen_append_ok")
+        r("    mov eax, 0")
+        r("    jmp L_fopen_end")
+        r("L_fopen_append_ok:")
+        r("    push eax")
+        r("    push 2") # FILE_END
+        r("    push 0")
+        r("    push 0")
+        r("    push eax")
+        r("    call _SetFilePointer@16")
+        r("    pop eax")
+        r("    jmp L_fopen_end")
+        
         r("L_fopen_write:")
         r("    push 0")
         r("    push 128")
-        r("    push 2")
+        r("    push 2") # CREATE_ALWAYS
         r("    push 0")
         r("    push 0")
         r("    push 1073741824")
@@ -915,15 +994,46 @@ class X86Codegen:
         r("    pop ebp")
         r("    ret")
         r("")
+        r("_fwrite_append:")
+        r("    push ebp")
+        r("    mov ebp, esp")
+        r("    sub esp, 4")
+        r("    mov eax, [ebp + 8]")
+        r("    mov ecx, [eax + 8]")
+        r("    push offset str_fmode_a")
+        r("    push ecx")
+        r("    call _fopen")
+        r("    add esp, 8")
+        r("    mov [ebp - 4], eax")
+        r("    push dword ptr [ebp + 12]")
+        r("    call _strlen")
+        r("    add esp, 4")
+        r("    mov ecx, [ebp - 4]")
+        r("    push ecx")
+        r("    push eax")
+        r("    push 1")
+        r("    push dword ptr [ebp + 12]")
+        r("    call _fwrite")
+        r("    add esp, 16")
+        r("    mov ecx, [ebp - 4]")
+        r("    push ecx")
+        r("    call _fclose")
+        r("    add esp, 4")
+        r("    mov esp, ebp")
+        r("    pop ebp")
+        r("    ret")
+        r("")
         r("_fread:")
         r("    push ebp")
         r("    mov ebp, esp")
         r("    sub esp, 4")
+        r("    mov dword ptr [ebp - 4], 0")
         r("    push 0")
         r("    lea eax, [ebp - 4]")
         r("    push eax")
         r("    mov eax, [ebp + 12]")
-        r("    imul eax, [ebp + 16]")
+        r("    mov ecx, [ebp + 16]")
+        r("    imul eax, ecx")
         r("    push eax")
         r("    push dword ptr [ebp + 8]")
         r("    push dword ptr [ebp + 20]")
@@ -943,14 +1053,15 @@ class X86Codegen:
         r("    add esp, 4")
         r("    mov ebx, eax")
         r("    push 0")
-        r("    lea eax, [ebp - 4]")
+        r("    lea eax, [ebp - 8]")
         r("    push eax")
         r("    push ebx")
         r("    push dword ptr [ebp + 8]")
         r("    push dword ptr [ebp + 12]")
         r("    call _WriteFile@20")
-        r("    mov eax, [ebp - 4]")
-        r("    mov esp, ebp")
+        r("    mov eax, [ebp - 8]")
+        r("    add esp, 4")
+        r("    pop ebx")
         r("    pop ebp")
         r("    ret")
         r("")
@@ -978,7 +1089,8 @@ class X86Codegen:
         r("    mov ebp, esp")
         r("    sub esp, 4")
         r("    mov eax, [ebp + 12]")
-        r("    imul eax, [ebp + 16]")
+        r("    mov ecx, [ebp + 16]")
+        r("    imul eax, ecx")
         r("    push 0")
         r("    lea ecx, [ebp - 4]")
         r("    push ecx")
@@ -4004,18 +4116,31 @@ class X86Codegen:
             offset = self.get_prop_offset(node.field_name)
             self.assembly.append(f"    mov [eax + {offset}], ebx")
         elif isinstance(node, Print):
-            self.compile_expr(node.value)
-            if self._is_string_expr(node.value):
+            if self._is_file_expr(node.value):
+                # Print file object: load content pointer from [struct+4]
+                self.compile_expr(node.value)
+                self.assembly.append("    pop eax")  # struct ptr
+                self.assembly.append("    mov eax, [eax + 4]")  # content ptr
+                self.assembly.append("    push eax")
                 self.assembly.append("    push offset fmt_str")
-            elif self._is_float_expr(node.value):
-                self.assembly.append("    push offset fmt_float")
+                self.assembly.append("    call _printf")
+                self.assembly.append("    add esp, 8")
+                self.assembly.append("    push 0")
+                self.assembly.append("    call _fflush")
+                self.assembly.append("    add esp, 4")
             else:
-                self.assembly.append("    push offset fmt_int")
-            self.assembly.append("    call _printf")
-            self.assembly.append("    add esp, 8")
-            self.assembly.append("    push 0")
-            self.assembly.append("    call _fflush")
-            self.assembly.append("    add esp, 4")
+                self.compile_expr(node.value)
+                if self._is_string_expr(node.value):
+                    self.assembly.append("    push offset fmt_str")
+                elif self._is_float_expr(node.value):
+                    self.assembly.append("    push offset fmt_float")
+                else:
+                    self.assembly.append("    push offset fmt_int")
+                self.assembly.append("    call _printf")
+                self.assembly.append("    add esp, 8")
+                self.assembly.append("    push 0")
+                self.assembly.append("    call _fflush")
+                self.assembly.append("    add esp, 4")
         elif isinstance(node, PrintD):
             if self.debug_mode == 1:
                 self.assembly.append("    push offset debug_prefix")
@@ -4598,6 +4723,73 @@ class X86Codegen:
                 self.assembly.append("    mov eax, [edx + 8]")
                 self.assembly.append("    mov eax, [eax + ecx*4]")
                 self.assembly.append("    push eax")
+        elif isinstance(node, Openf):
+            # Allocate 12-byte File struct: [fd(4), content(4), path(4)]
+            self.assembly.append("    push 12")
+            self.assembly.append("    call _malloc")
+            self.assembly.append("    add esp, 4")
+            self.assembly.append("    push eax")  # save struct ptr on stack
+
+            # Compile path expression
+            self.compile_expr(node.path)
+            self.assembly.append("    pop ecx")  # ecx = path string ptr
+            self.assembly.append("    pop eax")  # eax = struct ptr
+            self.assembly.append("    push eax")  # re-save struct ptr
+            # Store path at [struct+8]
+            self.assembly.append("    mov [eax + 8], ecx")
+
+            # Try fopen(path, "r+")
+            self.assembly.append("    push offset str_fmode_rw")
+            self.assembly.append("    push ecx")
+            self.assembly.append("    call _fopen")
+            self.assembly.append("    add esp, 8")
+
+            # If fopen returns 0 (file doesn't exist), try "w+"
+            fopen_ok = self.next_label("L_fopen_ok")
+            self.assembly.append("    cmp eax, 0")
+            self.assembly.append(f"    jne {fopen_ok}")
+            # Fallback: open with "w+"
+            self.assembly.append("    pop ebx")  # struct ptr
+            self.assembly.append("    push ebx")  # re-save
+            self.assembly.append("    mov ecx, [ebx + 8]")  # reload path
+            self.assembly.append("    push offset str_fmode_wp")
+            self.assembly.append("    push ecx")
+            self.assembly.append("    call _fopen")
+            self.assembly.append("    add esp, 8")
+            self.assembly.append(f"{fopen_ok}:")
+
+            # eax = fd, store at [struct+0]
+            self.assembly.append("    pop ebx")  # struct ptr
+            self.assembly.append("    push ebx")  # re-save
+            self.assembly.append("    mov [ebx], eax")  # store fd
+            self.assembly.append("    push eax")  # save fd
+
+            # Allocate content buffer: 65536 bytes
+            self.assembly.append("    push 65536")
+            self.assembly.append("    call _malloc")
+            self.assembly.append("    add esp, 4")
+            # eax = buffer ptr
+
+            self.assembly.append("    pop ecx")  # restore fd
+            self.assembly.append("    push eax")  # save buffer ptr
+
+            # fread(buffer, 1, 65535, fd)
+            self.assembly.append("    push ecx")   # fd (stream)
+            self.assembly.append("    push 65535")  # count
+            self.assembly.append("    push 1")      # size
+            self.assembly.append("    push eax")    # buffer
+            self.assembly.append("    call _fread")
+            self.assembly.append("    add esp, 16")
+
+            # Null-terminate: buffer[bytes_read] = 0
+            self.assembly.append("    pop ebx")  # restore buffer ptr
+            self.assembly.append("    mov byte ptr [ebx + eax], 0")
+
+            # Store content ptr at [struct+4]
+            self.assembly.append("    pop edx")  # struct ptr (was re-saved)
+            self.assembly.append("    mov [edx + 4], ebx")  # store content
+            self.assembly.append("    push edx")  # push struct ptr as result
+
         elif isinstance(node, OpenFile):
             self.compile_expr(node.mode)
             self.compile_expr(node.path)
@@ -4653,7 +4845,171 @@ class X86Codegen:
                 self.assembly.append(f"    mov [eax + {i*4}], ecx")
             self.assembly.append("    push ebx")
         elif isinstance(node, MethodCall):
-            if node.method_name == "append":
+            if self._is_file_expr(node.instance) and node.method_name == "write":
+                # .write(content) — overwrite entire file
+                # 1. Compile instance (file struct ptr) and content arg
+                self.compile_expr(node.args[0])   # content string
+                self.compile_expr(node.instance)   # struct ptr
+                self.assembly.append("    pop esi")  # esi = struct ptr
+                self.assembly.append("    pop edi")  # edi = content string
+
+                # 2. Close old fd
+                self.assembly.append("    push esi")
+                self.assembly.append("    push edi")
+                self.assembly.append("    mov eax, [esi]")  # old fd
+                self.assembly.append("    push eax")
+                self.assembly.append("    call _fclose")
+                self.assembly.append("    add esp, 4")
+                self.assembly.append("    pop edi")
+                self.assembly.append("    pop esi")
+
+                # 3. Reopen in "w" mode (truncates)
+                self.assembly.append("    push esi")
+                self.assembly.append("    push edi")
+                self.assembly.append("    mov eax, [esi + 8]")  # path
+                self.assembly.append("    push offset str_fmode_w")
+                self.assembly.append("    push eax")
+                self.assembly.append("    call _fopen")
+                self.assembly.append("    add esp, 8")
+                self.assembly.append("    pop edi")
+                self.assembly.append("    pop esi")
+
+                # 4. Write content to new fd
+                self.assembly.append("    push esi")
+                self.assembly.append("    push eax")  # save new fd
+                self.assembly.append("    push eax")  # stream arg
+                self.assembly.append("    push edi")  # string arg
+                self.assembly.append("    call _fputs")
+                self.assembly.append("    add esp, 8")
+                self.assembly.append("    pop eax")  # restore new fd
+                self.assembly.append("    pop esi")  # restore struct
+
+                # 5. Close the write fd
+                self.assembly.append("    push esi")
+                self.assembly.append("    push edi")
+                self.assembly.append("    push eax")
+                self.assembly.append("    call _fclose")
+                self.assembly.append("    add esp, 4")
+                self.assembly.append("    pop edi")
+                self.assembly.append("    pop esi")
+
+                # 6. Reopen in "r+" for future operations
+                self.assembly.append("    mov eax, [esi + 8]")  # path
+                self.assembly.append("    push esi")
+                self.assembly.append("    push edi")
+                self.assembly.append("    push offset str_fmode_rw")
+                self.assembly.append("    push eax")
+                self.assembly.append("    call _fopen")
+                self.assembly.append("    add esp, 8")
+                self.assembly.append("    pop edi")
+                self.assembly.append("    pop esi")
+                self.assembly.append("    mov [esi], eax")  # update fd
+
+                # 7. Update in-memory content to new content
+                self.assembly.append("    mov [esi + 4], edi")
+
+                self.assembly.append("    push 0")  # void return
+
+            elif self._is_file_expr(node.instance) and node.method_name == "awrite":
+                # .awrite(content) — append content to end of file
+                self.compile_expr(node.args[0])   # content string
+                self.compile_expr(node.instance)   # struct ptr
+                self.assembly.append("    pop esi")  # esi = struct ptr
+                self.assembly.append("    pop edi")  # edi = content string
+
+                # 2. Close old fd
+
+                self.assembly.append("    push esi")
+                self.assembly.append("    push edi")
+                self.assembly.append("    mov eax, [esi]")  # old fd
+                self.assembly.append("    push eax")
+                self.assembly.append("    call _fclose")
+                self.assembly.append("    add esp, 4")
+                self.assembly.append("    pop edi")
+                self.assembly.append("    pop esi")
+
+                # 3. Reopen in "a" mode (appends)
+
+                self.assembly.append("    push esi")
+                self.assembly.append("    push edi")
+                self.assembly.append("    mov eax, [esi + 8]")  # path
+                self.assembly.append("    push offset str_fmode_a")
+                self.assembly.append("    push eax")
+                self.assembly.append("    call _fopen")
+                self.assembly.append("    add esp, 8")
+                self.assembly.append("    pop edi")
+                self.assembly.append("    pop esi")
+
+                # 4. Write content to new fd (using fputs)
+
+                self.assembly.append("    push esi")
+                self.assembly.append("    push eax")  # save new fd
+                self.assembly.append("    push eax")  # stream arg
+                self.assembly.append("    push edi")  # string arg
+                self.assembly.append("    call _fputs")
+                self.assembly.append("    add esp, 8")
+                self.assembly.append("    pop eax")  # restore new fd
+                self.assembly.append("    pop esi")  # restore struct
+
+                # 5. Close the append fd
+
+                self.assembly.append("    push esi")
+                self.assembly.append("    push edi")
+                self.assembly.append("    push eax")
+                self.assembly.append("    call _fclose")
+                self.assembly.append("    add esp, 4")
+                self.assembly.append("    pop edi")
+                self.assembly.append("    pop esi")
+
+                # 6. Reopen in "r+" for future operations
+
+                self.assembly.append("    mov eax, [esi + 8]")  # path
+                self.assembly.append("    push esi")
+                self.assembly.append("    push edi")
+                self.assembly.append("    push offset str_fmode_rw")
+                self.assembly.append("    push eax")
+                self.assembly.append("    call _fopen")
+                self.assembly.append("    add esp, 8")
+                self.assembly.append("    pop edi")
+                self.assembly.append("    pop esi")
+                self.assembly.append("    mov [esi], eax") # update fd
+                
+                # 7. Update in-memory content buffer (read updated file)
+                self.assembly.append("    push eax")  # fd
+                self.assembly.append("    push 65536")
+                self.assembly.append("    call _malloc")
+                self.assembly.append("    add esp, 4")
+                self.assembly.append("    mov ebx, eax") # ebx = buffer
+                self.assembly.append("    pop eax") # restore fd
+                
+                self.assembly.append("    push eax")
+                self.assembly.append("    push 65535")
+                self.assembly.append("    push 1")
+                self.assembly.append("    push ebx")
+                self.assembly.append("    call _fread")
+                self.assembly.append("    add esp, 16")
+                self.assembly.append("    mov byte ptr [ebx + eax], 0") # null term
+                self.assembly.append("    mov [esi + 4], ebx") # update struct content
+                
+                self.assembly.append("    push 0") # method returns nothing
+
+            elif self._is_file_expr(node.instance) and node.method_name == "close":
+                # .close() — close file descriptor
+                self.compile_expr(node.instance)
+                self.assembly.append("    pop eax")  # struct ptr
+                self.assembly.append("    mov eax, [eax]")  # fd
+                self.assembly.append("    push eax")
+                self.assembly.append("    call _fclose")
+                self.assembly.append("    add esp, 4")
+                self.assembly.append("    push 0")  # void return
+
+            elif self._is_file_expr(node.instance) and node.method_name == "read":
+                self.compile_expr(node.instance)
+                self.assembly.append("    pop eax")  # struct ptr
+                self.assembly.append("    mov ecx, [eax + 4]") # content ptr
+                self.assembly.append("    push ecx")
+
+            elif node.method_name == "append":
                 self.compile_expr(node.args[0])
                 self.compile_expr(node.instance)
                 self.assembly.append("    pop ebx")

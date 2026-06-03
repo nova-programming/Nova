@@ -901,6 +901,19 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    mov ecx, [edx + eax*4]")
             emit(state, "    push ecx")
         }
+        if str_eq(node.val_str, "append") == 0 and str_eq(node.val_str, "pop") == 0 {
+            # Standard module call (e.g. errors.err)
+            i = len(node.args) - 1
+            while i >= 0 {
+                compile_expr(state, node.args[i])
+                i = i - 1
+            }
+            emit(state, "    call _" + node.val_str)
+            if len(node.args) > 0 {
+                emit(state, "    add esp, " + str(len(node.args) * 4))
+            }
+            emit(state, "    push eax")
+        }
     }
     if node.kind == "Call" {
         if node.val_str == "len" {

@@ -215,6 +215,12 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     }
     
     if str_eq(k, "Function") == 1 {
+        print("DEBUG: Function name is: " + node.val_str + " on line: " + str(node.line))
+        sys_flush()
+        if str_eq(node.val_str, "main") == 1 {
+            errors.err("ReservedName", "", node.line, "Cannot declare a function named 'main'", "the function name 'main' is reserved for the executable's entry point. Please rename it (e.g. to 'run' or 'start')")
+            sys_exit(1)
+        }
         tc_push_env(tc)
         prev_ret = tc.current_ret
         

@@ -257,6 +257,13 @@ def runtime_error(msg):
 
 # ========== OOP AND BUILTIN NODES ==========
 
+class Openf:
+    def __init__(self, path, line=0):
+        self.line = line
+        self.path = path
+    def __repr__(self):
+        return f"Openf({self.path})"
+
 class OpenFile:
     def __init__(self, path, mode, line=0):
         self.line = line

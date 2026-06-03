@@ -248,6 +248,13 @@ class Parser:
             self.eat("RPAREN")
             node = StrConvert(target, line=line)
 
+        elif kind == "OPENF":
+            self.eat("OPENF")
+            self.eat("LPAREN")
+            path = self.parse_expr()
+            self.eat("RPAREN")
+            node = Openf(path, line=line)
+
         elif kind == "OPEN":
             self.eat("OPEN")
             self.eat("LPAREN")
@@ -331,7 +338,21 @@ class Parser:
             next_kind = self.current()[0]
             if next_kind == "DOT":
                 self.eat("DOT")
-                prop = self.eat("IDENT")[1]
+                # Allow keywords as method/property names (e.g. file1.write, file1.close)
+                tok = self.current()
+                if tok and tok[0] == "IDENT":
+                    prop = self.eat("IDENT")[1]
+                elif tok and tok[0] in ("WRITE", "CLOSE", "READ", "OPEN", "PRINT", "DATA",
+                                        "IMPORT", "FREE", "ALLOC", "LEN", "STR", "SELF",
+                                        "CLASS", "RETURN", "BREAK", "CONTINUE", "FOR",
+                                        "WHILE", "IF", "ELSE", "ELIF", "IN", "TO",
+                                        "STEP", "DOWNTO", "AND", "OR", "NOT", "HAS",
+                                        "AS", "CONST", "DEF", "SIZEOF", "OPENF",
+                                        "TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING",
+                                        "TRUE", "FALSE"):
+                    prop = self.eat(tok[0])[1]
+                else:
+                    prop = self.eat("IDENT")[1]  # will raise proper error
                 
                 # Method call?
                 if self.current() and self.current()[0] == "LPAREN":

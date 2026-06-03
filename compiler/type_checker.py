@@ -161,6 +161,12 @@ class TypeInferer:
         return t
 
     def visit_Function(self, node):
+        if node.name == "main":
+            raise StaticTypeError(
+                "Cannot declare a function named 'main'",
+                node.line,
+                "the function name 'main' is reserved for the executable's entry point. Please rename it (e.g. to 'run' or 'start')"
+            )
         self.push_env()
         prev_ret = self.current_function_return_type
         
@@ -262,9 +268,34 @@ class TypeInferer:
         return AnyType()
 
     def visit_MethodCall(self, node):
-        self.visit(node.instance)
+        inst_t = self.visit(node.instance)
         for arg in node.args:
             self.visit(arg)
+        # FileType method validation
+        if isinstance(inst_t, ScalarType) and inst_t.name == "file":
+            if node.method_name == "write":
+                if len(node.args) != 1:
+                    raise StaticTypeError("file.write() expects exactly 1 argument", node.line,
+                        "usage: file_var.write(\"content\")")
+                return AnyType()
+            elif node.method_name == "awrite":
+                if len(node.args) != 1:
+                    raise StaticTypeError("file.awrite() expects exactly 1 argument", node.line,
+                        "usage: file_var.awrite(\"content\")")
+                return AnyType()
+            elif node.method_name == "close":
+                if len(node.args) != 0:
+                    raise StaticTypeError("file.close() takes no arguments", node.line,
+                        "usage: file_var.close()")
+                return AnyType()
+            elif node.method_name == "read":
+                if len(node.args) != 0:
+                    raise StaticTypeError("file.read() takes no arguments", node.line,
+                        "usage: file_var.read()")
+                return StringType
+            else:
+                raise StaticTypeError(f"File object has no method '{node.method_name}'", node.line,
+                    "available methods: .write(content), .awrite(content), .close(), .read()")
         return AnyType()
 
     def visit_PrintD(self, node):
@@ -392,6 +423,10 @@ class TypeInferer:
     def visit_CloseFile(self, node):
         self.visit(node.fd)
         return AnyType()
+
+    def visit_Openf(self, node):
+        self.visit(node.path)
+        return FileType
 
     def visit_Self(self, node):
         return AnyType()

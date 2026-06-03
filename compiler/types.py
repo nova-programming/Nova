@@ -68,6 +68,7 @@ BoolType = ScalarType("bool")
 StringType = ScalarType("string")
 ByteType = ScalarType("byte")
 VoidType = ScalarType("void")
+FileType = ScalarType("file")
 
 def resolve_type_annotation(annotation_str):
     """Convert a string annotation like 'int' into a Type object."""
@@ -86,6 +87,7 @@ def resolve_type_annotation(annotation_str):
         "string": StringType,
         "byte": ByteType,
         "void": VoidType,
+        "file": FileType,
         "any": AnyType(),
         "dyn": DynType(),
     }
