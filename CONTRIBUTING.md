@@ -19,13 +19,39 @@ By submitting code to this project, you agree that:
 3. Make your changes
 4. Submit a pull request
 
+## Contributing Libraries
+
+The best way to contribute is by creating useful Nova libraries and publishing them to the Galaxy registry:
+
+```bash
+# Scaffold a library
+galaxy init library my-lib
+cd my-lib
+
+# Write your library code in src/
+
+# Publish to the registry
+galaxy publish
+```
+
+This validates your manifest, computes SHA-256 hashes, and opens a pre-filled GitHub Issue on the galaxy-registry repository. See [galaxy-registry.vercel.app](https://galaxy-registry.vercel.app) for details.
+
+## Running the Installer
+
+```bash
+curl -O https://galaxy-registry.vercel.app/install.py && python install.py
+```
+
+## Running Tests
+
+```bash
+python -m unittest tests/test_galaxy.py
+```
+
 # Contributors
 
 ## Creator & Maintainer
 - Laksh Goyal - Original author
-
-## Contributors
-- Laksh Goyal
 
 ## How to Get Credit
 Submit a pull request with your changes and your name will be added here.

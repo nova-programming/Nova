@@ -5,8 +5,8 @@
 ### 1. Cross-Platform Abstractions (`os_*.nv`)
 Develop a unified OS-layer interface (`system.nv`) that automatically swaps out implementations based on whether the host is Windows (`os_win.nv`), Linux (`os_linux.nv`), or macOS (`os_mac.nv`), completely hiding specific configs from end-users.
 
-### 2. The "Galaxy" Package Manager
-Design and architect a central repository and library manager (akin to `pip` or `cargo`) to allow developers to build, pull, and distribute pure Nova codebase packages effortlessly.
+### 2. Galaxy Package Manager (Implemented)
+Galaxy is a fully functional package manager with a Git-backed registry website, standalone CLI (`galaxy`), three trust tiers (Core/Verified/Community), template system (`galaxy init`), GitHub Issues-based publishing workflow, and GitHub Actions automation for validation/quarantine/promotion. See the [Galaxy Registry](https://galaxy-registry.vercel.app) for documentation.
 
 ### 3. Small Function Inlining (Phase 4)
 Implement advanced compiler optimizations to inline extremely short, non-recursive functions, entirely eliminating call/ret overhead for utility methods.

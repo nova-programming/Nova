@@ -2,12 +2,26 @@
 
 A language that bridges high-level Pythonic simplicity with low-level C-like control. Nova features a **fully functional self-hosted compiler pipeline** — the compiler is written in Nova itself, can lex, parse, and generate x86 assembly, and bootstraps via GCC to produce native executables.
 
-## Installation
+## Quick Install
+
+One command installs both the Nova compiler and Galaxy package manager:
 
 ```bash
-git clone https://github.com/laksh-goyal22/Nova.git
-cd Nova
-# Requires Python 3 and MinGW GCC (Windows) or GCC (Linux)
+curl -O https://galaxy-registry.vercel.app/install.py && python install.py
+```
+
+Or on Windows without curl:
+
+```powershell
+Invoke-WebRequest -Uri https://galaxy-registry.vercel.app/install.py -OutFile install.py; python install.py
+```
+
+After installation, open a new terminal and run:
+
+```bash
+nova build hello.nv     # Compile a Nova program
+galaxy install pkg      # Install a package
+galaxy init my-lib      # Create a library
 ```
 
 ## Usage
@@ -56,8 +70,10 @@ Additional standard library modules:
 
 ```
 nova/
-├── ast/              # AST node definitions (Python)
-├── compiler/         # Type checker (Python)
+├── nova_ast/         # AST node definitions (Python)
+├── compiler/         # Compiler pipeline (Python)
+├── vm/               # Python bytecode VM (Python)
+├── modules/          # Module resolver (Python)
 ├── lexer/            # Reference tokenizer (Python)
 ├── parser/           # Reference parser (Python)
 ├── stdlib/           # Self-hosted compiler written in Nova

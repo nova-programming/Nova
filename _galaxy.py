@@ -55,8 +55,7 @@ def print_usage():
     print("Galaxy Package Manager for Nova")
     print()
     print("Usage:")
-    print("  galaxy init [template] [name]   Create a package")
-    print("                       Templates: library, app, cli")
+    print("  galaxy init library <name>      Create a library package")
     print("  galaxy install <pkg>           Install a package")
     print("  galaxy list              List installed packages")
     print("  galaxy search <query>    Search the registry")
@@ -66,10 +65,8 @@ def print_usage():
     print("  galaxy remove <pkg>      Remove an installed package")
     print()
     print("Examples:")
-    print("  galaxy init my-lib")
     print("  galaxy init library my-lib")
-    print("  galaxy init app my-app")
-    print("  galaxy init cli my-tool")
+    print("  galaxy init my-lib")
     print("  galaxy install nova-math")
     print("  galaxy install owner/repo")
     print("  galaxy search http")
@@ -188,52 +185,6 @@ TEMPLATES["library"] = {
     "scaffold": {
         "src/main.nv": 'import "os"\n\nprint("Hello from {name}!")\n',
         "tests/test_main.nv": '# Tests for {name}\nprint("All tests passed!")\n',
-    },
-}
-TEMPLATES["app"] = {
-    "desc": "Standalone application",
-    "scaffold": {
-        "src/main.nv": (
-            'import "os"\nimport "cli"\n\n'
-            "fn main() {{\n"
-            '    args = os.args()\n'
-            '    print("Welcome to {name}!")\n'
-            '    print("Args:", args)\n'
-            "}}\n\n"
-            "main()\n"
-        ),
-        "src/lib.nv": (
-            "pub fn version() -> string {{\n"
-            '    return "0.1.0"\n'
-            "}}\n"
-        ),
-        "README.md": "# {name}\n\nA Nova application.\n\n## Usage\n\n```\nnova run src/main.nv\n```\n",
-        "tests/test_main.nv": '# Tests for {name}\nprint("All tests passed!")\n',
-    },
-}
-TEMPLATES["cli"] = {
-    "desc": "Command-line tool with argument parsing",
-    "scaffold": {
-        "src/main.nv": (
-            'import "os"\nimport "cli"\n\n'
-            "fn main() {{\n"
-            '    args = cli.parse("{name} [command] --verbose")\n'
-            "    if args.verbose {{\n"
-            '        print("Verbose mode")\n'
-            "    }}\n"
-            '    print("Hello from {name}!")\n'
-            "}}\n\n"
-            "main()\n"
-        ),
-        "src/commands.nv": (
-            "pub fn handle_install(args) {{\n"
-            '    print("Install command")\n'
-            "}}\n\n"
-            "pub fn handle_build(args) {{\n"
-            '    print("Build command")\n'
-            "}}\n"
-        ),
-        "tests/test_cli.nv": '# CLI tests for {name}\nprint("CLI tests passed!")\n',
     },
 }
 TEMPLATES["lib"] = {"desc": "Alias for library template", "alias": "library"}

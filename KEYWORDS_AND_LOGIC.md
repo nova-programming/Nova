@@ -173,6 +173,8 @@ The self-hosted compiler files located in `stdlib/` run as a sequential pipeline
 
 ## 8. CLI Modes
 
+### Nova Compiler
+
 | Command | Mode | Description |
 |---------|------|-------------|
 | `python main.py build <file.nv>` | Production | Compiles to native x86 executable using python codegen + GCC |
@@ -180,3 +182,25 @@ The self-hosted compiler files located in `stdlib/` run as a sequential pipeline
 | `nova_main.exe build <file.nv>` | Self-hosted | Nova-compiled compiler compiles directly to native PE executable using internal assembler + linker (no external toolchain required) |
 | `nova_main.exe assemble-link <file.s> <out.exe>` | Assembler/Linker | Assembles and links a raw x86 assembly file directly to a PE executable |
 | `nova_main.exe build-bare <file.nv> <org> <entry>` | Flat Binary | Compiles to a flat, headerless binary (ideal for bare-metal/bootloader use) |
+
+### Galaxy Package Manager
+
+After installing with `python install.py`, the `nova` and `galaxy` commands are available globally:
+
+| Command | Description |
+|---------|-------------|
+| `nova build <file.nv>` | Compile a Nova program (alias for `python main.py build`) |
+| `galaxy init library <name>` | Scaffold a new library project |
+| `galaxy install <pkg>` | Install a package from the registry or GitHub |
+| `galaxy search <query>` | Search the registry by name, keyword, or author |
+| `galaxy info <pkg>` | Show detailed package information |
+| `galaxy publish` | Submit your package to the registry (opens GitHub Issue) |
+| `galaxy update [pkg]` | Check for and apply version updates |
+| `galaxy remove <pkg>` | Uninstall a package |
+| `galaxy list` | List locally installed packages |
+
+### Quick Install
+
+```bash
+curl -O https://galaxy-registry.vercel.app/install.py && python install.py
+```
