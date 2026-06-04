@@ -1,4 +1,4 @@
-from ast.nodes import *
+from nova_ast.nodes import *
 from compiler.types import *
 
 class StaticTypeError(Exception):

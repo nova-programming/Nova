@@ -1,5 +1,5 @@
 import os
-from ast.nodes import *
+from nova_ast.nodes import *
 
 class X86Codegen:
     def __init__(self, ast_nodes, module_names=None, debug_mode=0):

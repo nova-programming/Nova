@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "nova-lang"
+version = "0.1.0"
+description = "Nova Programming Language compiler and Galaxy Package Manager"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+
+[project.scripts]
+nova = "main:main"
+galaxy = "tools.galaxy:main"
+
+[tool.setuptools.packages.find]
+where = ["."]

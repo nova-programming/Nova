@@ -1,4 +1,4 @@
-from ast.nodes import *
+from nova_ast.nodes import *
 
 
 class Parser:
@@ -78,7 +78,7 @@ class Parser:
             self.eat("IN")
             collection = self.parse_expr()
             body = self.parse_block()
-            from ast.nodes import ForIn
+            from nova_ast.nodes import ForIn
             return ForIn(var_name, collection, body, line=line)
             
         self.eat("EQUALS")

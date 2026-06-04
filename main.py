@@ -34,7 +34,7 @@ def run_source(file_path):
 
 def expand_imports(ast, base_dir, resolver=None, visited=None):
     from modules.resolver import ModuleResolver
-    from ast.nodes import Import
+    from nova_ast.nodes import Import
     import sys
     if resolver is None:
         resolver = ModuleResolver(base_dir=base_dir)
@@ -70,7 +70,7 @@ def compile_native(file_path, debug_mode=0):
     ast = Parser(tokens).parse()
     
     # Collect module names before expansion
-    from ast.nodes import Import
+    from nova_ast.nodes import Import
     module_names = set()
     for node in ast:
         if isinstance(node, Import):
@@ -132,10 +132,12 @@ def print_usage():
     print("  nova build <file.nv>   Compile to native executable")
     print("  nova run <file.nv>     Alias for 'dev' (backward compatible)")
     print("  nova galaxy <cmd>      Run Galaxy Package Manager commands")
+    print("  galaxy <cmd>           Or use the standalone 'galaxy' command")
     print("")
     print("Examples:")
     print("  python main.py dev program.nv")
     print("  python main.py galaxy init")
+    print("  galaxy init (standalone)")
 
 
 def main():
@@ -146,8 +148,12 @@ def main():
     command = sys.argv[1]
     
     if command == "galaxy":
-        from tools.galaxy import run_galaxy_cli
-        run_galaxy_cli(sys.argv[2:])
+        from tools.galaxy import main as galaxy_main
+        # Pass sys.argv[1:] so galaxy sees "galaxy" as argv[0] and the subcommand as argv[1]
+        old_argv = sys.argv
+        sys.argv = ["galaxy"] + sys.argv[2:]
+        galaxy_main()
+        sys.argv = old_argv
         return
         
     if len(sys.argv) < 3:
