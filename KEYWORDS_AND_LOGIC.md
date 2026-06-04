@@ -205,6 +205,15 @@ After installing with `python install.py`, the `nova` and `galaxy` commands are 
 
 ### Quick Install
 
+**macOS / Linux (bash):**
+```bash
+curl -O https://galaxy-registry.vercel.app/install.sh && bash install.sh
+```
+**Windows (PowerShell):**
+```powershell
+Invoke-WebRequest -Uri https://galaxy-registry.vercel.app/install.ps1 -OutFile install.ps1; powershell -File install.ps1
+```
+**Python fallback (any platform):**
 ```bash
 curl -O https://galaxy-registry.vercel.app/install.py && python install.py
 ```

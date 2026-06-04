@@ -17,6 +17,7 @@ NOVA_VERSION = "0.5.0"
 REGISTRY_URL = "https://galaxy-registry.vercel.app"
 NOVA_ZIP_URL = "https://github.com/nova-programming/Nova/archive/refs/heads/develop.zip"
 ZIP_PREFIX = "Nova-develop"
+NOVA_RELEASE_BASE = "https://github.com/nova-programming/Nova/releases/download"
 
 ALLOWED_UPDATE_FILES = {"main.py"}
 ALLOWED_UPDATE_DIRS = {"compiler", "parser", "lexer", "nova_ast", "vm", "stdlib", "modules", "tools"}
@@ -203,32 +204,33 @@ def cmd_update():
     print(f"Install directory: {install_dir}")
     print("Downloading...")
 
+    url = f"{NOVA_RELEASE_BASE}/nova-v{latest}/nova-v{latest}.zip"
     try:
-        req = urllib.request.Request(NOVA_ZIP_URL, headers={"User-Agent": "Nova/1.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Nova/1.0"})
         with urllib.request.urlopen(req, timeout=120) as r:
             zip_data = r.read()
     except Exception as e:
-        print(f"Download failed: {e}")
-        return
+        print(f"Download failed ({e}). Falling back to full repo zip...")
+        try:
+            req = urllib.request.Request(NOVA_ZIP_URL, headers={"User-Agent": "Nova/1.0"})
+            with urllib.request.urlopen(req, timeout=120) as r:
+                zip_data = r.read()
+        except Exception as e2:
+            print(f"Download failed: {e2}")
+            return
 
     print("Extracting...")
     count = 0
-    prefix = ZIP_PREFIX + "/"
     with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
         bad = zf.testzip()
         if bad is not None:
             print(f"Corrupted archive: {bad}")
             return
         for name in zf.namelist():
-            if not name.startswith(prefix):
-                continue
-            rel = name[len(prefix):]
-            if not rel or rel.endswith("/"):
-                continue
-            parts = rel.split("/")
+            parts = name.split("/")
             top = parts[0]
             if top in ALLOWED_UPDATE_FILES or top in ALLOWED_UPDATE_DIRS:
-                dst = os.path.join(install_dir, rel)
+                dst = os.path.join(install_dir, name)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 with zf.open(name) as src, open(dst, "wb") as df:
                     shutil.copyfileobj(src, df)

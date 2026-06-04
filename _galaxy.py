@@ -26,6 +26,7 @@ GALAXY_MODULES_DIR = "galaxy_modules"
 MANIFEST_FILE = "galaxy.json"
 NOVA_ZIP_URL = "https://github.com/nova-programming/Nova/archive/refs/heads/develop.zip"
 ZIP_PREFIX = "Nova-develop"
+GALAXY_RELEASE_BASE = "https://github.com/nova-programming/Nova/releases/download"
 
 
 def main():
@@ -268,42 +269,74 @@ def cmd_init(args):
         print("  3. Run 'galaxy publish' to submit to the registry")
 
 
-def cmd_install(args):
-    if not args:
-        print("Usage: galaxy install <pkg>")
-        print("  <pkg> can be a registry name (e.g. nova-math)")
-        print("  or a GitHub repo (e.g. owner/repo)")
+def _verify_hashes(dest_dir, version_data, pkg_name):
+    """Verify SHA-256 hashes of extracted files against registry metadata."""
+    expected_files = version_data.get("files") if version_data else None
+    if not expected_files:
         return
 
-    pkg_name = args[0]
-    print(f"Resolving '{pkg_name}'...")
+    ok = True
+    for ef in expected_files:
+        path = ef.get("path", "")
+        expected_hash = ef.get("sha256", "")
+        if not path or not expected_hash:
+            continue
+        full_path = os.path.join(dest_dir, path)
+        if not os.path.exists(full_path):
+            print(f"  [WARN] Missing file: {path}")
+            ok = False
+            continue
+        actual = compute_sha256(full_path)
+        if actual == expected_hash:
+            print(f"  [OK]   {path}")
+        else:
+            print(f"  [FAIL] {path} (hash mismatch)")
+            ok = False
 
-    github_repo = None
-    download_url = None
-    version = None
+    if ok:
+        print(f"  All file hashes verified for '{pkg_name}'")
+    else:
+        print(f"  [WARN] Some files failed hash verification for '{pkg_name}'")
+
+
+def _install_package(pkg_name, visited=None):
+    """Internal install — supports transitive dependency resolution."""
+    if visited is None:
+        visited = set()
+
+    if pkg_name in visited:
+        print(f"  (already visited '{pkg_name}' — skipping cycle)")
+        return None
+    visited.add(pkg_name)
+
+    pkg_dir_name = pkg_name.replace("/", "_")
+    installed_path = os.path.join(GALAXY_MODULES_DIR, pkg_dir_name)
+    if os.path.exists(installed_path):
+        print(f"  '{pkg_name}' already installed at {installed_path}")
+        return None
+
+    print(f"  Installing '{pkg_name}'...")
 
     if "/" in pkg_name and not pkg_name.startswith("nova-"):
         github_repo = pkg_name
         download_url = github_download_url(github_repo)
-        print(f"  Source: GitHub ({github_repo})")
+        data = None
     else:
         data = registry_fetch_pkg(pkg_name)
         if data:
             github_repo = data.get("github_repo", pkg_name)
             download_url = data.get("download_url") or github_download_url(github_repo)
-            version = data.get("version")
-            print(f"  Source: Registry ({data.get('tier', 'community')} tier, v{version})")
         else:
             github_repo = pkg_name
             download_url = github_download_url(github_repo)
-            print(f"  Source: GitHub (fallback, {github_repo})")
+            data = None
 
     if not download_url:
-        print("Error: Could not resolve download URL.")
-        return
+        print(f"  Error: Could not resolve download URL for '{pkg_name}'")
+        return None
 
     os.makedirs(GALAXY_MODULES_DIR, exist_ok=True)
-    dest_dir = os.path.join(GALAXY_MODULES_DIR, pkg_name.replace("/", "_"))
+    dest_dir = os.path.join(GALAXY_MODULES_DIR, pkg_dir_name)
 
     try:
         req = urllib.request.Request(download_url, headers={"User-Agent": "Nova-Galaxy/1.0"})
@@ -313,11 +346,6 @@ def cmd_install(args):
         with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
             members = z.infolist()
             top_dir = os.path.commonprefix([m.filename for m in members]).split("/")[0]
-
-            if os.path.exists(dest_dir):
-                import shutil
-                shutil.rmtree(dest_dir)
-
             for m in members:
                 rel_path = m.filename[len(top_dir)+1:]
                 if not rel_path:
@@ -330,22 +358,59 @@ def cmd_install(args):
                     with z.open(m) as src, open(target, "wb") as dst:
                         dst.write(src.read())
 
+        # SHA-256 verification
+        version_str = data.get("version", "") if data else ""
+        version_entry = None
+        if data and "versions" in data:
+            for v in data["versions"]:
+                if v.get("version") == version_str:
+                    version_entry = v
+                    break
+        _verify_hashes(dest_dir, version_entry, pkg_name)
+
+        # Transitive dependencies
+        deps = data.get("dependencies", {}) if data else {}
+        if deps:
+            print(f"  Resolving dependencies...")
+            for dep_name in deps:
+                _install_package(dep_name, visited)
+
+        version = version_str or github_repo
         manifest = load_manifest() if os.path.exists(MANIFEST_FILE) else create_default_manifest()
         if "dependencies" not in manifest:
             manifest["dependencies"] = {}
-        manifest["dependencies"][pkg_name] = version or github_repo
+        manifest["dependencies"][pkg_name] = version
         save_manifest(manifest)
 
-        print(f"Successfully installed '{pkg_name}'")
-        print(f"  Location: {dest_dir}")
-        print(f"  Added to {MANIFEST_FILE}")
+        print(f"  Successfully installed '{pkg_name}'")
+        return dest_dir
 
     except urllib.error.HTTPError as e:
-        print(f"Error: Download failed (HTTP {e.code})")
+        print(f"  Error: Download failed (HTTP {e.code})")
         if e.code == 404:
-            print(f"  Check that '{github_repo}' exists on GitHub")
+            print(f"    Check that '{github_repo}' exists on GitHub")
+        return None
     except Exception as e:
-        print(f"Error installing package: {e}")
+        print(f"  Error installing '{pkg_name}': {e}")
+        return None
+
+
+def cmd_install(args):
+    if not args:
+        print("Usage: galaxy install <pkg>")
+        print("  <pkg> can be a registry name (e.g. nova-math)")
+        print("  or a GitHub repo (e.g. owner/repo)")
+        print()
+        print("Transitive dependencies are resolved automatically.")
+        return
+
+    pkg_name = args[0]
+    result = _install_package(pkg_name)
+    if result:
+        print(f"  Location: {result}")
+        print(f"  Added to {MANIFEST_FILE}")
+    else:
+        print(f"Failed to install '{pkg_name}'")
 
 
 def cmd_list(args):
@@ -386,40 +451,55 @@ def cmd_search(args):
         print("Usage: galaxy search <query>")
         return
 
-    query = " ".join(args).lower()
+    query = " ".join(args)
     print(f"Searching registry for '{query}'...")
     print()
 
-    packages = registry_fetch_all()
-    if not packages:
-        print("Could not reach registry. Try again later.")
+    url = f"{REGISTRY_URL}/api/search?q={urllib.parse.quote(query)}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Nova-Galaxy/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            data = json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        print(f"Search failed ({e}). Falling back to client-side search...")
+        results = _client_side_search(query)
+        data = {"packages": results} if results else {"packages": []}
+        data["count"] = len(results)
+
+    results = data.get("packages", [])
+    if not results:
+        print(f"No packages found matching '{query}'")
         return
 
+    print(f"Found {data.get('count', len(results))} package(s):")
+    print()
+    for p in results:
+        name = p.get("name", p.get("package", "?"))
+        tier_tag = f"[{p.get('tier', 'unknown').upper()}]"
+        kw = ", ".join(p.get("keywords", [])[:3])
+        print(f"  {name:<15} {tier_tag:<10} v{p.get('version', '?')}")
+        print(f"  {'':<15} {p.get('description', '')[:70]}")
+        if kw:
+            print(f"  {'':<15} keywords: {kw}")
+        print()
+
+
+def _client_side_search(query):
+    """Fallback search that downloads the full index and filters locally."""
+    q = query.lower()
+    packages = registry_fetch_all()
+    if not packages:
+        return []
     results = []
     for p in packages:
         name = p.get("name", "").lower()
         desc = p.get("description", "").lower()
         keywords = [k.lower() for k in p.get("keywords", [])]
         author = p.get("author", "").lower()
-
-        if (query in name or query in desc or query in author or
-            any(query in kw for kw in keywords)):
+        if (q in name or q in desc or q in author or
+            any(q in kw for kw in keywords)):
             results.append(p)
-
-    if not results:
-        print(f"No packages found matching '{query}'")
-        return
-
-    print(f"Found {len(results)} package(s):")
-    print()
-    for p in results:
-        tier_tag = f"[{p.get('tier', 'unknown').upper()}]"
-        kw = ", ".join(p.get("keywords", [])[:3])
-        print(f"  {p['name']:<15} {tier_tag:<10} v{p.get('version', '?')}")
-        print(f"  {'':<15} {p.get('description', '')[:70]}")
-        if kw:
-            print(f"  {'':<15} keywords: {kw}")
-        print()
+    return results
 
 
 def cmd_info(args):
@@ -604,7 +684,6 @@ def cmd_update(args):
     print(f"Galaxy v{GALAXY_VERSION}")
     print()
 
-    # If args given, delegate to cmd_upgrade
     if args:
         cmd_upgrade(args)
         return
@@ -633,32 +712,33 @@ def cmd_update(args):
     print(f"Install directory: {install_dir}")
     print("Downloading...")
 
+    url = f"{GALAXY_RELEASE_BASE}/galaxy-v{latest}/galaxy-v{latest}.zip"
     try:
-        req = urllib.request.Request(NOVA_ZIP_URL, headers={"User-Agent": "Nova-Galaxy/1.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Nova-Galaxy/1.0"})
         with urllib.request.urlopen(req, timeout=120) as r:
             zip_data = r.read()
     except Exception as e:
-        print(f"Download failed: {e}")
-        return
+        print(f"Download failed ({e}). Falling back to full repo zip...")
+        try:
+            req = urllib.request.Request(NOVA_ZIP_URL, headers={"User-Agent": "Nova-Galaxy/1.0"})
+            with urllib.request.urlopen(req, timeout=120) as r:
+                zip_data = r.read()
+        except Exception as e2:
+            print(f"Download failed: {e2}")
+            return
 
     print("Extracting...")
     count = 0
-    prefix = ZIP_PREFIX + "/"
     with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
         bad = zf.testzip()
         if bad is not None:
             print(f"Corrupted archive: {bad}")
             return
         for name in zf.namelist():
-            if not name.startswith(prefix):
-                continue
-            rel = name[len(prefix):]
-            if not rel or rel.endswith("/"):
-                continue
-            parts = rel.split("/")
+            parts = name.split("/")
             top = parts[0]
-            if top in ("_galaxy.py",) or top == "galaxy" or rel.startswith("galaxy/"):
-                dst = os.path.join(install_dir, rel)
+            if top in ("_galaxy.py",) or top == "galaxy" or name.startswith("galaxy/"):
+                dst = os.path.join(install_dir, name)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 with zf.open(name) as src, open(dst, "wb") as df:
                     shutil.copyfileobj(src, df)
@@ -702,7 +782,7 @@ def cmd_upgrade(args):
             answer = input(f"  Update to v{latest}? (y/N): ").strip().lower()
             if answer in ("y", "yes"):
                 print(f"  Reinstalling '{pkg}' v{latest}...")
-                cmd_install([pkg])
+                _install_package(pkg)
             else:
                 print(f"  Skipped")
         else:

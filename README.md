@@ -4,16 +4,21 @@ A language that bridges high-level Pythonic simplicity with low-level C-like con
 
 ## Quick Install
 
-One command installs both the Nova compiler and Galaxy package manager:
+No Python required — native installers for every platform:
 
+**macOS / Linux (bash, pre-installed):**
 ```bash
-curl -O https://galaxy-registry.vercel.app/install.py && python install.py
+curl -O https://galaxy-registry.vercel.app/install.sh && bash install.sh
 ```
 
-Or on Windows without curl:
-
+**Windows (PowerShell, pre-installed):**
 ```powershell
-Invoke-WebRequest -Uri https://galaxy-registry.vercel.app/install.py -OutFile install.py; python install.py
+Invoke-WebRequest -Uri https://galaxy-registry.vercel.app/install.ps1 -OutFile install.ps1; powershell -File install.ps1
+```
+
+**Python fallback (any platform):**
+```bash
+curl -O https://galaxy-registry.vercel.app/install.py && python install.py
 ```
 
 After installation, open a new terminal and run:

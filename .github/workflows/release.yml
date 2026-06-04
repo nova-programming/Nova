@@ -1,0 +1,74 @@
+name: Release & Version Bump
+on:
+  push:
+    tags:
+      - 'nova-v*'
+      - 'galaxy-v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine release type and version
+        id: meta
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" == nova-v* ]]; then
+            echo "type=nova" >> $GITHUB_OUTPUT
+            echo "version=${TAG#nova-v}" >> $GITHUB_OUTPUT
+            echo "zipname=nova-${TAG#nova-v}.zip" >> $GITHUB_OUTPUT
+          elif [[ "$TAG" == galaxy-v* ]]; then
+            echo "type=galaxy" >> $GITHUB_OUTPUT
+            echo "version=${TAG#galaxy-v}" >> $GITHUB_OUTPUT
+            echo "zipname=galaxy-${TAG#galaxy-v}.zip" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build production archives (nova)
+        if: steps.meta.outputs.type == 'nova'
+        run: |
+          mkdir -p dist
+          cp main.py dist/
+          for d in compiler parser lexer nova_ast vm stdlib modules tools; do
+            [ -d "$d" ] && cp -r "$d" dist/
+          done
+          cd dist && zip -r "../nova-${{ steps.meta.outputs.version }}.zip" ./*
+          tar czf "../nova-${{ steps.meta.outputs.version }}.tar.gz" ./*
+
+      - name: Build production archives (galaxy)
+        if: steps.meta.outputs.type == 'galaxy'
+        run: |
+          mkdir -p dist
+          cp _galaxy.py dist/
+          for d in galaxy tools; do
+            [ -d "$d" ] && cp -r "$d" dist/
+          done
+          cd dist && zip -r "../galaxy-${{ steps.meta.outputs.version }}.zip" ./*
+          tar czf "../galaxy-${{ steps.meta.outputs.version }}.tar.gz" ./*
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          files: |
+            *-${{ steps.meta.outputs.version }}.zip
+            *-${{ steps.meta.outputs.version }}.tar.gz
+          generate_release_notes: true
+
+      - name: Update version JSON in galaxy-registry
+        env:
+          GH_TOKEN: ${{ secrets.GALAXY_PAT }}
+        run: |
+          TYPE="${{ steps.meta.outputs.type }}"
+          VERSION="${{ steps.meta.outputs.version }}"
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/nova-programming/galaxy-registry.git"
+          cd galaxy-registry
+          mkdir -p versions
+          echo "{\"version\":\"${VERSION}\"}" > "versions/${TYPE}.json"
+          git add "versions/${TYPE}.json"
+          git config user.name "Nova Bot"
+          git config user.email "bot@nova-lang.org"
+          git commit -m "chore: bump ${TYPE} version to ${VERSION}"
+          git push
