@@ -12,7 +12,7 @@
 
 ### Package Manager (Galaxy)
 - **galaxy-registry** static website on Vercel with tier-filtered package grid, detail views, documentation, admin dashboard
-- **`_galaxy.py`** — single-file CLI (700+ lines) with `init`, `install`, `publish`, `list`, `search`, `info`, `update`, `remove`
+- **`_galaxy.py`** — single-file CLI (750+ lines) with `init`, `install`, `publish`, `list`, `search`, `info`, `update` (self-update), `upgrade` (package update), `remove`, `--version`
 - **Three trust tiers**: Core (inbuilt), Verified (human-reviewed), Community (auto-published)
 - **Template system**: `galaxy init library` scaffolds project structure
 - **Publishing**: `galaxy publish` validates manifest, computes SHA-256, opens GitHub Issue
@@ -48,7 +48,12 @@ curl -O https://galaxy-registry.vercel.app/install.py && python install.py
 
 # Usage after install
 nova build hello.nv        # Compile Nova program
+nova --version             # Check Nova version
+nova update                # Update Nova compiler
 galaxy init library my-lib # Create a library
 galaxy install pkg         # Install from registry
+galaxy --version           # Check Galaxy version
+galaxy update              # Update Galaxy CLI
+galaxy upgrade [pkg]       # Update installed packages
 galaxy publish             # Publish to registry
 ```

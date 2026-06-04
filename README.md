@@ -19,9 +19,19 @@ Invoke-WebRequest -Uri https://galaxy-registry.vercel.app/install.py -OutFile in
 After installation, open a new terminal and run:
 
 ```bash
-nova build hello.nv     # Compile a Nova program
-galaxy install pkg      # Install a package
-galaxy init my-lib      # Create a library
+nova --version           # Check Nova version
+nova build hello.nv      # Compile a Nova program
+galaxy --version         # Check Galaxy version
+galaxy install pkg       # Install a package
+galaxy init my-lib       # Create a library
+```
+
+Stay updated with:
+
+```bash
+nova update              # Update Nova compiler
+galaxy update            # Update Galaxy CLI
+galaxy upgrade [pkg]     # Update installed packages
 ```
 
 ## Usage

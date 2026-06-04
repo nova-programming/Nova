@@ -1,11 +1,25 @@
 import sys
 import os
+import json
+import urllib.request
+import urllib.error
+import zipfile
+import io
+import shutil
 
 from lexer.tokenizer import tokenize
 from parser.parser import Parser
 from vm.compiler import Compiler
 from vm.machine import VirtualMachine
 from compiler.type_checker import TypeInferer, StaticTypeError
+
+NOVA_VERSION = "0.5.0"
+REGISTRY_URL = "https://galaxy-registry.vercel.app"
+NOVA_ZIP_URL = "https://github.com/nova-programming/Nova/archive/refs/heads/develop.zip"
+ZIP_PREFIX = "Nova-develop"
+
+ALLOWED_UPDATE_FILES = {"main.py"}
+ALLOWED_UPDATE_DIRS = {"compiler", "parser", "lexer", "nova_ast", "vm", "stdlib", "modules", "tools"}
 
 
 def run_source(file_path):
@@ -126,21 +140,103 @@ def compile_native(file_path, debug_mode=0):
 
 def print_usage():
     print("Nova Programming Language")
+    print(f"Version: {NOVA_VERSION}")
     print("")
     print("Usage:")
-    print("  nova dev <file.nv>     Run in VM (fast, for development)")
-    print("  nova build <file.nv>   Compile to native executable")
-    print("  nova run <file.nv>     Alias for 'dev' (backward compatible)")
-    print("  nova galaxy <cmd>      Run Galaxy Package Manager")
-    print("  galaxy <cmd>           Or use the standalone 'galaxy' command")
-    print("  galaxy init library pkg     Init a library")
-    print("  galaxy init app myapp       Init an application")
-    print("  galaxy init cli mytool      Init a CLI tool")
+    print("  nova --version            Show version")
+    print("  nova dev <file.nv>       Run in VM (fast, for development)")
+    print("  nova build <file.nv>     Compile to native executable")
+    print("  nova run <file.nv>       Alias for 'dev' (backward compatible)")
+    print("  nova update              Update Nova compiler")
+    print("  nova galaxy <cmd>        Run Galaxy Package Manager")
+    print("  galaxy <cmd>             Or use the standalone 'galaxy' command")
     print("")
     print("Examples:")
     print("  python main.py dev program.nv")
     print("  python main.py galaxy init")
-    print("  galaxy init (standalone)")
+    print("  python main.py update")
+
+
+def _detect_install_dir():
+    """Detect the Nova installation directory."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if os.path.exists(os.path.join(script_dir, "main.py")):
+        return script_dir
+    known = [
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "nova"),
+        os.path.join(os.path.expanduser("~"), ".nova"),
+    ]
+    for p in known:
+        if p and os.path.exists(os.path.join(p, "main.py")):
+            return p
+    return script_dir
+
+
+def cmd_update():
+    """Update the Nova compiler itself."""
+    print(f"Nova v{NOVA_VERSION}")
+    print()
+
+    try:
+        req = urllib.request.Request(
+            f"{REGISTRY_URL}/versions/nova.json",
+            headers={"User-Agent": "Nova/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        latest = data.get("version", "")
+    except Exception as e:
+        print(f"Could not check for updates ({e})")
+        return
+
+    if latest == NOVA_VERSION:
+        print(f"Already up to date (v{NOVA_VERSION}).")
+        return
+
+    print(f"Latest version: v{latest}  (current: v{NOVA_VERSION})")
+    answer = input(f"Update to v{latest}? (Y/n): ").strip().lower()
+    if answer not in ("", "y", "yes"):
+        print("Update cancelled.")
+        return
+
+    install_dir = _detect_install_dir()
+    print(f"Install directory: {install_dir}")
+    print("Downloading...")
+
+    try:
+        req = urllib.request.Request(NOVA_ZIP_URL, headers={"User-Agent": "Nova/1.0"})
+        with urllib.request.urlopen(req, timeout=120) as r:
+            zip_data = r.read()
+    except Exception as e:
+        print(f"Download failed: {e}")
+        return
+
+    print("Extracting...")
+    count = 0
+    prefix = ZIP_PREFIX + "/"
+    with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
+        bad = zf.testzip()
+        if bad is not None:
+            print(f"Corrupted archive: {bad}")
+            return
+        for name in zf.namelist():
+            if not name.startswith(prefix):
+                continue
+            rel = name[len(prefix):]
+            if not rel or rel.endswith("/"):
+                continue
+            parts = rel.split("/")
+            top = parts[0]
+            if top in ALLOWED_UPDATE_FILES or top in ALLOWED_UPDATE_DIRS:
+                dst = os.path.join(install_dir, rel)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                with zf.open(name) as src, open(dst, "wb") as df:
+                    shutil.copyfileobj(src, df)
+                count += 1
+
+    print(f"Updated {count} files.")
+    print(f"Nova has been updated to v{latest}.")
+    print("Restart your terminal or run 'nova --version' to confirm.")
 
 
 def main():
@@ -149,16 +245,23 @@ def main():
         return
 
     command = sys.argv[1]
-    
+
+    if command in ("-v", "--version", "version"):
+        print(f"Nova v{NOVA_VERSION}")
+        return
+
+    if command == "update":
+        cmd_update()
+        return
+
     if command == "galaxy":
         from tools.galaxy import main as galaxy_main
-        # Pass sys.argv[1:] so galaxy sees "galaxy" as argv[0] and the subcommand as argv[1]
         old_argv = sys.argv
         sys.argv = ["galaxy"] + sys.argv[2:]
         galaxy_main()
         sys.argv = old_argv
         return
-        
+
     if len(sys.argv) < 3:
         print_usage()
         return

@@ -15,12 +15,17 @@ import zipfile
 import io
 import textwrap
 import webbrowser
+import shutil
+import platform
 from pathlib import Path
 
+GALAXY_VERSION = "0.2.0"
 REGISTRY_URL = "https://galaxy-registry.vercel.app"
 REGISTRY_REPO = "nova-programming/galaxy-registry"
 GALAXY_MODULES_DIR = "galaxy_modules"
 MANIFEST_FILE = "galaxy.json"
+NOVA_ZIP_URL = "https://github.com/nova-programming/Nova/archive/refs/heads/develop.zip"
+ZIP_PREFIX = "Nova-develop"
 
 
 def main():
@@ -31,6 +36,10 @@ def main():
     cmd = sys.argv[1]
     args = sys.argv[2:]
 
+    if cmd in ("-v", "--version", "version"):
+        print(f"Galaxy v{GALAXY_VERSION}")
+        return
+
     commands = {
         "init":    cmd_init,
         "install": cmd_install,
@@ -39,6 +48,7 @@ def main():
         "info":    cmd_info,
         "publish": cmd_publish,
         "update":  cmd_update,
+        "upgrade": cmd_upgrade,
         "remove":  cmd_remove,
     }
 
@@ -53,16 +63,19 @@ def main():
 
 def print_usage():
     print("Galaxy Package Manager for Nova")
+    print(f"Version: {GALAXY_VERSION}")
     print()
     print("Usage:")
-    print("  galaxy init library <name>      Create a library package")
-    print("  galaxy install <pkg>           Install a package")
-    print("  galaxy list              List installed packages")
-    print("  galaxy search <query>    Search the registry")
-    print("  galaxy info <pkg>        Show package details")
-    print("  galaxy publish           Publish current package to registry")
-    print("  galaxy update [pkg]      Update installed packages")
-    print("  galaxy remove <pkg>      Remove an installed package")
+    print("  galaxy --version              Show version")
+    print("  galaxy init library <name>   Create a library package")
+    print("  galaxy install <pkg>         Install a package")
+    print("  galaxy list                  List installed packages")
+    print("  galaxy search <query>        Search the registry")
+    print("  galaxy info <pkg>            Show package details")
+    print("  galaxy publish               Publish current package to registry")
+    print("  galaxy update                Update Galaxy CLI itself")
+    print("  galaxy upgrade [pkg]         Update installed packages")
+    print("  galaxy remove <pkg>          Remove an installed package")
     print()
     print("Examples:")
     print("  galaxy init library my-lib")
@@ -71,6 +84,7 @@ def print_usage():
     print("  galaxy install owner/repo")
     print("  galaxy search http")
     print("  galaxy publish")
+    print("  galaxy update                Update Galaxy to latest version")
 
 
 MANIFEST_SCHEMA = {
@@ -570,7 +584,92 @@ def cmd_publish(args):
         print(f"  {issue_url}")
 
 
+def _detect_install_dir():
+    """Detect the Galaxy installation directory."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if os.path.exists(os.path.join(script_dir, "_galaxy.py")):
+        return script_dir
+    known = [
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "nova"),
+        os.path.join(os.path.expanduser("~"), ".nova"),
+    ]
+    for p in known:
+        if p and os.path.exists(os.path.join(p, "_galaxy.py")):
+            return p
+    return script_dir
+
+
 def cmd_update(args):
+    """Update Galaxy CLI itself."""
+    print(f"Galaxy v{GALAXY_VERSION}")
+    print()
+
+    # If args given, delegate to cmd_upgrade
+    if args:
+        cmd_upgrade(args)
+        return
+
+    try:
+        data = registry_fetch("versions/galaxy.json")
+        if not data:
+            print("Could not check for updates. Check your connection.")
+            return
+        latest = data.get("version", "")
+    except Exception as e:
+        print(f"Could not check for updates ({e})")
+        return
+
+    if latest == GALAXY_VERSION:
+        print(f"Already up to date (v{GALAXY_VERSION}).")
+        return
+
+    print(f"Latest version: v{latest}  (current: v{GALAXY_VERSION})")
+    answer = input(f"Update to v{latest}? (Y/n): ").strip().lower()
+    if answer not in ("", "y", "yes"):
+        print("Update cancelled.")
+        return
+
+    install_dir = _detect_install_dir()
+    print(f"Install directory: {install_dir}")
+    print("Downloading...")
+
+    try:
+        req = urllib.request.Request(NOVA_ZIP_URL, headers={"User-Agent": "Nova-Galaxy/1.0"})
+        with urllib.request.urlopen(req, timeout=120) as r:
+            zip_data = r.read()
+    except Exception as e:
+        print(f"Download failed: {e}")
+        return
+
+    print("Extracting...")
+    count = 0
+    prefix = ZIP_PREFIX + "/"
+    with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
+        bad = zf.testzip()
+        if bad is not None:
+            print(f"Corrupted archive: {bad}")
+            return
+        for name in zf.namelist():
+            if not name.startswith(prefix):
+                continue
+            rel = name[len(prefix):]
+            if not rel or rel.endswith("/"):
+                continue
+            parts = rel.split("/")
+            top = parts[0]
+            if top in ("_galaxy.py",) or top == "galaxy" or rel.startswith("galaxy/"):
+                dst = os.path.join(install_dir, rel)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                with zf.open(name) as src, open(dst, "wb") as df:
+                    shutil.copyfileobj(src, df)
+                count += 1
+
+    print(f"Updated {count} files.")
+    print(f"Galaxy has been updated to v{latest}.")
+    print("Restart your terminal or run 'galaxy --version' to confirm.")
+
+
+def cmd_upgrade(args):
     if not os.path.exists(MANIFEST_FILE):
         print(f"Error: {MANIFEST_FILE} not found.")
         return

@@ -189,13 +189,17 @@ After installing with `python install.py`, the `nova` and `galaxy` commands are 
 
 | Command | Description |
 |---------|-------------|
+| `nova --version` | Show Nova compiler version |
 | `nova build <file.nv>` | Compile a Nova program (alias for `python main.py build`) |
+| `nova update` | Update Nova compiler itself |
+| `galaxy --version` | Show Galaxy CLI version |
 | `galaxy init library <name>` | Scaffold a new library project |
 | `galaxy install <pkg>` | Install a package from the registry or GitHub |
 | `galaxy search <query>` | Search the registry by name, keyword, or author |
 | `galaxy info <pkg>` | Show detailed package information |
 | `galaxy publish` | Submit your package to the registry (opens GitHub Issue) |
-| `galaxy update [pkg]` | Check for and apply version updates |
+| `galaxy update` | Update Galaxy CLI itself |
+| `galaxy upgrade [pkg]` | Update installed packages |
 | `galaxy remove <pkg>` | Uninstall a package |
 | `galaxy list` | List locally installed packages |
 
