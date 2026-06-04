@@ -1,4 +1,5 @@
 @echo off
-REM Galaxy Package Manager for Nova - Windows entry point
-REM Usage: galaxy <command> [args]
-python "%~dp0tools\galaxy.py" %*
+REM Galaxy Package Manager for Nova - Windows standalone entry
+REM After 'python install.py', the 'galaxy' command is on PATH globally.
+REM This wrapper runs directly from the source tree without installation.
+python "%~dp0_galaxy.py" %*

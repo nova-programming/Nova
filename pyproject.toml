@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "nova-lang"
-version = "0.1.0"
+version = "0.2.0"
 description = "Nova Programming Language compiler and Galaxy Package Manager"
 readme = "README.md"
 license = {text = "MIT"}
@@ -12,7 +12,11 @@ requires-python = ">=3.10"
 
 [project.scripts]
 nova = "main:main"
-galaxy = "tools.galaxy:main"
+galaxy = "_galaxy:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["galaxy*", "tools*", "nova_ast*", "compiler*", "parser*", "lexer*", "vm*", "modules*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.nv", "*.txt", "*.json"]
