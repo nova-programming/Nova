@@ -40,8 +40,11 @@ remove_from_path() {
 }
 
 create_launchers() {
-    printf '%s\n' '#!/usr/bin/env python3' 'import sys, os' 'sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))' 'os.chdir(os.path.dirname(os.path.abspath(__file__)))' 'from main import main; main()' > "${INSTALL_DIR}/nova"
-    printf '%s\n' '#!/usr/bin/env python3' 'import sys, os' 'sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))' 'from _galaxy import main; main()' > "${INSTALL_DIR}/galaxy"
+    # Probe for python command — prefer python3, fall back to python
+    py_cmd="python3"
+    command -v python3 >/dev/null 2>&1 || py_cmd="python"
+    printf '%s\n' "#!/usr/bin/env ${py_cmd}" 'import sys, os' 'sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))' 'os.chdir(os.path.dirname(os.path.abspath(__file__)))' 'from main import main; main()' > "${INSTALL_DIR}/nova"
+    printf '%s\n' "#!/usr/bin/env ${py_cmd}" 'import sys, os' 'sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))' 'from _galaxy import main; main()' > "${INSTALL_DIR}/galaxy"
     chmod +x "${INSTALL_DIR}/nova" "${INSTALL_DIR}/galaxy"
     ok "Created launchers"
 }
@@ -53,13 +56,14 @@ do_install() {
     if [ -d "$INSTALL_DIR" ]; then info "Directory exists — will overwrite."; fi
     mkdir -p "$INSTALL_DIR"
 
-    have_curl=0; have_tar=0; have_unzip=0; have_python=0
+    have_curl=0; have_tar=0; have_unzip=0; have_python=0; have_python3=0
     command -v curl >/dev/null 2>&1 && have_curl=1
     command -v tar >/dev/null 2>&1 && have_tar=1
     command -v unzip >/dev/null 2>&1 && have_unzip=1
-    command -v python3 >/dev/null 2>&1 && have_python=1
+    command -v python3 >/dev/null 2>&1 && have_python3=1 && have_python=1
     command -v python >/dev/null 2>&1 && have_python=1
     [ "$have_curl" = 0 ] && fail "curl is required. Install curl and try again."
+    [ "$have_python" = 0 ] && fail "Python 3 is required. Install python3/python and try again."
 
     # Try release tarball first (lean, needs only curl+tar)
     downloaded=0

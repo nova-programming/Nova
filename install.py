@@ -15,6 +15,9 @@ import os
 import shutil
 import stat
 import platform
+
+if sys.version_info < (3, 6):
+    sys.exit("ERROR: Python 3.6+ is required. You have " + sys.version)
 import urllib.request
 import urllib.error
 import zipfile
@@ -37,7 +40,6 @@ ALLOWED_SUBDIRS = {
 # Portable MinGW-w64 for Windows — only downloaded if 'gcc' not on PATH
 MINGW_ZIP_URL = "https://github.com/brechtsanders/winlibs_mingw/releases/download/16.1.0posix-14.0.0-msvcrt-r2/winlibs-x86_64-posix-seh-gcc-16.1.0-mingw-w64msvcrt-14.0.0-r2.zip"
 MINGW_ZIP_TOP = "mingw64"
-GCC_DIR = os.path.join(INSTALL_DIR, "gcc")
 
 if platform.system() == "Windows":
     INSTALL_DIR = os.path.join(
@@ -58,7 +60,7 @@ else:
     INSTALL_DIR = os.path.join(os.path.expanduser("~"), ".nova")
     LAUNCHER_TEMPLATES = {
         "nova": (
-            '#!/usr/bin/env python3\n'
+            '#!/usr/bin/env python\n'
             '"""Nova compiler launcher"""\n'
             'import sys, os\n'
             'sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))\n'
@@ -67,7 +69,7 @@ else:
             'main()\n'
         ),
         "galaxy": (
-            '#!/usr/bin/env python3\n'
+            '#!/usr/bin/env python\n'
             '"""Galaxy package manager launcher"""\n'
             'import sys, os\n'
             'sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))\n'
@@ -75,6 +77,8 @@ else:
             'main()\n'
         ),
     }
+
+GCC_DIR = os.path.join(INSTALL_DIR, "gcc")
 
 
 # ---------------------------------------------------------------------------

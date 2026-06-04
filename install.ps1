@@ -38,16 +38,25 @@ function Add-ToPath {
         $pathKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Environment", $true)
         $current = $pathKey.GetValue("PATH", "", "DoNotExpandEnvironmentNames")
         $parts = $current.Split(";", [StringSplitOptions]::RemoveEmptyEntries)
-        $normed = [System.IO.Path]::GetFullPath($InstallDir).TrimEnd('\')
-        if ($parts | Where-Object { [System.IO.Path]::GetFullPath($_).TrimEnd('\') -eq $normed }) {
+        $normed = [System.IO.Path]::GetFullPath([System.Environment]::ExpandEnvironmentVariables($InstallDir)).TrimEnd('\')
+        $alreadyInPath = $false
+        foreach ($p in $parts) {
+            try {
+                $expanded = [System.Environment]::ExpandEnvironmentVariables($p)
+                $pNormed = [System.IO.Path]::GetFullPath($expanded).TrimEnd('\')
+                if ($pNormed -eq $normed) { $alreadyInPath = $true; break }
+            } catch { continue }
+        }
+        if ($alreadyInPath) {
             Info "Install directory already in PATH"
+            $pathKey.Close()
             return
         }
         $newPath = $current.TrimEnd(";") + ";" + $InstallDir
         $pathKey.SetValue("PATH", $newPath, "ExpandString")
         $pathKey.Close()
-        # Notify Windows
-        [Environment]::SetEnvironmentVariable("PATH", $env:PATH + ";" + $InstallDir, "User")
+        # Update current session only, registry already set above
+        [Environment]::SetEnvironmentVariable("PATH", [Environment]::GetEnvironmentVariable("PATH", "User") + ";" + $InstallDir, "Process")
         Ok "Added to PATH: $InstallDir"
         Info "Restart your terminal for the change to take effect."
     } catch {
@@ -60,9 +69,12 @@ function Remove-FromPath {
     try {
         $pathKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Environment", $true)
         $current = $pathKey.GetValue("PATH", "", "DoNotExpandEnvironmentNames")
-        $normed = [System.IO.Path]::GetFullPath($InstallDir).TrimEnd('\')
+        $normed = [System.IO.Path]::GetFullPath([System.Environment]::ExpandEnvironmentVariables($InstallDir)).TrimEnd('\')
         $parts = $current.Split(";", [StringSplitOptions]::RemoveEmptyEntries) | Where-Object {
-            [System.IO.Path]::GetFullPath($_).TrimEnd('\') -ne $normed
+            try {
+                $expanded = [System.Environment]::ExpandEnvironmentVariables($_)
+                [System.IO.Path]::GetFullPath($expanded).TrimEnd('\') -ne $normed
+            } catch { $true }
         }
         $newPath = $parts -join ";"
         $pathKey.SetValue("PATH", $newPath, "ExpandString")
