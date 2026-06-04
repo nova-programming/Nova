@@ -21,15 +21,21 @@ Invoke-WebRequest -Uri https://galaxy-registry.vercel.app/install.ps1 -OutFile i
 curl -O https://galaxy-registry.vercel.app/install.py && python install.py
 ```
 
-After installation, open a new terminal and run:
+After installation, open a **new** terminal, then:
 
 ```bash
 nova --version           # Check Nova version
-nova build hello.nv      # Compile a Nova program
+nova build hello.nv      # Compile a Nova program (requires GCC)
+nova dev hello.nv        # Run in VM mode (no GCC needed)
 galaxy --version         # Check Galaxy version
-galaxy install pkg       # Install a package
 galaxy init my-lib       # Create a library
+galaxy install pkg       # Install a package
 ```
+
+**To use `nova` and `galaxy` immediately without restarting your terminal:**
+
+- **cmd.exe:** `call "%LOCALAPPDATA%\nova\use_nova.bat"`
+- **PowerShell:** `$env:PATH = "$env:LOCALAPPDATA\nova;$env:PATH"`
 
 Stay updated with:
 
@@ -42,8 +48,7 @@ galaxy upgrade [pkg]     # Update installed packages
 Remove Nova entirely:
 
 ```bash
-nova --uninstall         # Remove Nova from your system
-python install.py --uninstall   # Or re-run the installer with --uninstall
+python install.py --uninstall   # Remove Nova, Galaxy, and PATH entries
 ```
 
 ## Usage

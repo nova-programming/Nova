@@ -94,10 +94,25 @@
 - `pyproject.toml` console_scripts entry for `pip install`
 - GitHub foundry cross-repo linking (nova-programming/Nova + galaxy-registry)
 
+### Installer PATH Fix (This Session)
+- **Root cause**: `_add_to_path_windows()` wrote PATH to registry + broadcast `WM_SETTINGCHANGE`, but child processes inherit the parent's environment block — they never re-read the registry. So `nova`/`galaxy` remained unavailable even in new terminal tabs until Explorer itself restarted.
+- **`install.py` fix**: After writing registry PATH, also updates `os.environ["PATH"]` so child processes of the installer see the change immediately.
+- **`use_nova.bat` helper**: New batch file in both `install.py` and `install.ps1` that prepends `%~dp0` to the current cmd.exe session's PATH. Created alongside `nova.bat`/`galaxy.bat`.
+- **Output improvement**: Both installers now print one-liners for immediate PATH refresh:
+  - cmd.exe: `call "%LOCALAPPDATA%\nova\use_nova.bat"`
+  - PowerShell: `$env:PATH = "$env:LOCALAPPDATA\nova;$env:PATH"`
+- **Test fix**: `test_launcher_execution_simulated` updated to skip `use_nova.bat` (helper script, not a python launcher).
+- **Registry cleanup**: Stale unit-test PATH entries (9 `nova-test-*` dirs) cleaned from registry.
+- **All 35 installer tests pass**, 19 galaxy tests pass, `nova build` self-hosted compiler builds successfully.
+
 ## Commands Reference
 ```powershell
 # One-command install
 curl -O https://galaxy-registry.vercel.app/install.sh && bash install.sh
+
+# Use immediately without restarting terminal (Windows)
+call "%LOCALAPPDATA%\nova\use_nova.bat"    # cmd.exe
+$env:PATH = "$env:LOCALAPPDATA\nova;$env:PATH"   # PowerShell
 
 # Usage after install
 nova build hello.nv        # Compile Nova program

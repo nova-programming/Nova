@@ -55,6 +55,14 @@ if platform.system() == "Windows":
             '@echo off\r\n'
             'python "%~dp0_galaxy.py" %*\r\n'
         ),
+        "use_nova.bat": (
+            '@echo off\r\n'
+            'set "PATH=%~dp0;%PATH%"\r\n'
+            'echo Nova and Galaxy are now available in this terminal.\r\n'
+            'echo.\r\n'
+            'echo Try: nova --version\r\n'
+            'echo      galaxy --version\r\n'
+        ),
     }
 else:
     INSTALL_DIR = os.path.join(os.path.expanduser("~"), ".nova")
@@ -377,6 +385,12 @@ def _add_to_path_windows() -> bool:
         except Exception:
             pass
 
+        # Also update the current process's PATH so child terminals
+        # (opened from this session) inherit the correct environment
+        old_path = os.environ.get("PATH", "")
+        if INSTALL_DIR not in old_path:
+            os.environ["PATH"] = old_path.rstrip(";") + ";" + INSTALL_DIR
+
         ok(f"Added to PATH: {INSTALL_DIR}")
         info("Restart your terminal for the change to take effect.")
         return True
@@ -511,7 +525,10 @@ def install():
     print()
     info(f"Location: {INSTALL_DIR}")
     if platform.system() == "Windows":
-        info("Open a NEW terminal, then:")
+        info("To use nova/galaxy in THIS terminal:")
+        info('  cmd.exe:  call "%LOCALAPPDATA%\\nova\\use_nova.bat"')
+        info('  PowerShell: $env:PATH = "$env:LOCALAPPDATA\\nova;$env:PATH"')
+        info("Or open a NEW terminal.")
     else:
         info("Restart your terminal or source your shell config, then:")
     print()

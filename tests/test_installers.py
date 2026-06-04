@@ -404,6 +404,8 @@ class TestInstallDryRun(unittest.TestCase):
         """Simulate launcher execution to verify imports work."""
         import install
         for name, content in install.LAUNCHER_TEMPLATES.items():
+            if name == "use_nova.bat":
+                continue  # helper script, not a python launcher
             if name.endswith(".bat"):
                 self.assertIn(".py", content)
             else:

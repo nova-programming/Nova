@@ -94,12 +94,23 @@ python "%~dp0main.py" %*
 @echo off
 python "%~dp0_galaxy.py" %*
 '@
+    $useNovaLauncher = @'
+@echo off
+set "PATH=%~dp0;%PATH%"
+echo Nova and Galaxy are now available in this terminal.
+echo.
+echo Try: nova --version
+echo      galaxy --version
+'@
     $novaPath = Join-Path $InstallDir "nova.bat"
     $galaxyPath = Join-Path $InstallDir "galaxy.bat"
+    $useNovaPath = Join-Path $InstallDir "use_nova.bat"
     Set-Content -Path $novaPath -Value $novaLauncher -Encoding ASCII
     Set-Content -Path $galaxyPath -Value $galaxyLauncher -Encoding ASCII
+    Set-Content -Path $useNovaPath -Value $useNovaLauncher -Encoding ASCII
     Ok "Created launcher: $novaPath"
     Ok "Created launcher: $galaxyPath"
+    Ok "Created helper: $useNovaPath"
 }
 
 function Install-GccIfMissing {
@@ -223,7 +234,10 @@ function Install-NovaGalaxy {
     Write-Host "  +------------------------------------------------+"
     Write-Host ""
     Info "Location: $InstallDir"
-    Info "Open a NEW terminal, then:"
+    Info "To use nova/galaxy in THIS terminal:"
+    Info '  cmd.exe:  call "%LOCALAPPDATA%\nova\use_nova.bat"'
+    Info '  PowerShell: $env:PATH = "$env:LOCALAPPDATA\nova;$env:PATH"'
+    Info "Or open a NEW terminal."
     Write-Host ""
     Info "  nova --version          Check Nova version"
     Info "  nova build hello.nv     Compile a Nova program"
