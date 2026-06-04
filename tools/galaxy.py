@@ -55,8 +55,9 @@ def print_usage():
     print("Galaxy Package Manager for Nova")
     print()
     print("Usage:")
-    print("  galaxy init [name]       Create a new Nova package")
-    print("  galaxy install <pkg>     Install a package")
+    print("  galaxy init [template] [name]   Create a package")
+    print("                       Templates: library, app, cli")
+    print("  galaxy install <pkg>           Install a package")
     print("  galaxy list              List installed packages")
     print("  galaxy search <query>    Search the registry")
     print("  galaxy info <pkg>        Show package details")
@@ -66,6 +67,9 @@ def print_usage():
     print()
     print("Examples:")
     print("  galaxy init my-lib")
+    print("  galaxy init library my-lib")
+    print("  galaxy init app my-app")
+    print("  galaxy init cli my-tool")
     print("  galaxy install nova-math")
     print("  galaxy install owner/repo")
     print("  galaxy search http")
@@ -190,12 +194,97 @@ def github_download_url(repo):
     return f"https://github.com/{repo}/archive/refs/heads/main.zip"
 
 
+TEMPLATES = {}
+TEMPLATES["library"] = {
+    "desc": "Reusable library package (default)",
+    "scaffold": {
+        "src/main.nv": 'import "os"\n\nprint("Hello from {name}!")\n',
+        "tests/test_main.nv": '# Tests for {name}\nprint("All tests passed!")\n',
+    },
+}
+TEMPLATES["app"] = {
+    "desc": "Standalone application",
+    "scaffold": {
+        "src/main.nv": (
+            'import "os"\nimport "cli"\n\n'
+            "fn main() {{\n"
+            '    args = os.args()\n'
+            '    print("Welcome to {name}!")\n'
+            '    print("Args:", args)\n'
+            "}}\n\n"
+            "main()\n"
+        ),
+        "src/lib.nv": (
+            "pub fn version() -> string {{\n"
+            '    return "0.1.0"\n'
+            "}}\n"
+        ),
+        "README.md": "# {name}\n\nA Nova application.\n\n## Usage\n\n```\nnova run src/main.nv\n```\n",
+        "tests/test_main.nv": '# Tests for {name}\nprint("All tests passed!")\n',
+    },
+}
+TEMPLATES["cli"] = {
+    "desc": "Command-line tool with argument parsing",
+    "scaffold": {
+        "src/main.nv": (
+            'import "os"\nimport "cli"\n\n'
+            "fn main() {{\n"
+            '    args = cli.parse("{name} [command] --verbose")\n'
+            "    if args.verbose {{\n"
+            '        print("Verbose mode")\n'
+            "    }}\n"
+            '    print("Hello from {name}!")\n'
+            "}}\n\n"
+            "main()\n"
+        ),
+        "src/commands.nv": (
+            "pub fn handle_install(args) {{\n"
+            '    print("Install command")\n'
+            "}}\n\n"
+            "pub fn handle_build(args) {{\n"
+            '    print("Build command")\n'
+            "}}\n"
+        ),
+        "tests/test_cli.nv": '# CLI tests for {name}\nprint("CLI tests passed!")\n',
+    },
+}
+TEMPLATES["lib"] = {"desc": "Alias for library template", "alias": "library"}
+
+
+def get_template(name):
+    if name in TEMPLATES:
+        t = TEMPLATES[name]
+        if "alias" in t:
+            return get_template(t["alias"])
+        return t
+    return None
+
+
 # ---------------------------------------------------------------------------
-# COMMAND: galaxy init [name]
+# COMMAND: galaxy init [template] [name]
 # ---------------------------------------------------------------------------
 
 def cmd_init(args):
-    name = args[0] if args else None
+    name = None
+    template_name = "library"
+
+    if not args:
+        pass
+    elif len(args) == 1:
+        if args[0] in TEMPLATES:
+            template_name = args[0]
+        else:
+            name = args[0]
+    else:
+        template_name = args[0]
+        name = args[1]
+
+    template = get_template(template_name)
+    if not template:
+        valid = ", ".join(k for k, v in TEMPLATES.items() if "alias" not in v)
+        print(f"Unknown template '{template_name}'. Available: {valid}")
+        return
+
     target_dir = name if name else "."
 
     if os.path.exists(os.path.join(target_dir, MANIFEST_FILE)):
@@ -208,31 +297,25 @@ def cmd_init(args):
     manifest = create_default_manifest(name)
     save_manifest(manifest, target_dir)
 
-    src_dir = os.path.join(target_dir, "src")
-    tests_dir = os.path.join(target_dir, "tests")
-    os.makedirs(src_dir, exist_ok=True)
-    os.makedirs(tests_dir, exist_ok=True)
-
-    main_nv = os.path.join(src_dir, "main.nv")
-    if not os.path.exists(main_nv):
-        with open(main_nv, "w") as f:
-            f.write('import "os"\n\nprint("Hello from ' + manifest["name"] + '!")\n')
-
-    test_nv = os.path.join(tests_dir, "test_main.nv")
-    if not os.path.exists(test_nv):
-        with open(test_nv, "w") as f:
-            f.write('# Tests for ' + manifest["name"] + '\nprint("All tests passed!")\n')
+    for rel_path, content_template in template["scaffold"].items():
+        full_path = os.path.join(target_dir, rel_path)
+        dir_name = os.path.dirname(full_path)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+        if not os.path.exists(full_path):
+            with open(full_path, "w") as f:
+                f.write(content_template.format(name=manifest["name"]))
 
     display_name = name or os.path.basename(os.getcwd())
-    print(f"Initialized package '{manifest['name']}'")
-    print(f"  {MANIFEST_FILE}          Package manifest")
-    print(f"  src/main.nv          Entry point")
-    print(f"  tests/test_main.nv   Tests")
+    print(f"Initialized {template_name} package '{manifest['name']}'")
+    print(f"  Template: {template_name} ({template['desc']})")
+    for rel_path in sorted(template["scaffold"].keys()):
+        print(f"  {rel_path}")
     print()
     if not manifest["repository"]:
         print("Next steps:")
         print(f"  1. Edit {MANIFEST_FILE} and set your repository URL")
-        print("  2. Write your library code in src/")
+        print("  2. Write your code in src/")
         print("  3. Run 'galaxy publish' to submit to the registry")
 
 
