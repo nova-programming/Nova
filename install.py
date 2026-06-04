@@ -543,6 +543,22 @@ def uninstall():
 def main():
     if len(sys.argv) > 1 and sys.argv[1] in ("--uninstall", "uninstall", "remove"):
         uninstall()
+    elif len(sys.argv) > 1 and sys.argv[1] in ("--dry-run", "dry-run"):
+        print()
+        print(f"  +========================================+")
+        print(f"  |  Nova + Galaxy Dry Run                |")
+        print(f"  +========================================+")
+        print()
+        info(f"Install directory: {INSTALL_DIR}")
+        info(f"GCC directory:     {GCC_DIR}")
+        info(f"Launchers:         {', '.join(LAUNCHER_TEMPLATES.keys())}")
+        info(f"Allowed root:      {', '.join(ALLOWED_ROOT_FILES)}")
+        info(f"Allowed subdirs:   {', '.join(sorted(ALLOWED_SUBDIRS))}")
+        info(f"Python version:    {sys.version}")
+        info(f"Platform:          {platform.system()}")
+        print()
+        info("Dry-run complete — no files were written.")
+        print()
     else:
         install()
 
