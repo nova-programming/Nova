@@ -19,8 +19,8 @@ NOVA_ZIP_URL = "https://github.com/nova-programming/Nova/archive/refs/heads/deve
 ZIP_PREFIX = "Nova-develop"
 NOVA_RELEASE_BASE = "https://github.com/nova-programming/Nova/releases/download"
 
-ALLOWED_UPDATE_FILES = {"main.py"}
-ALLOWED_UPDATE_DIRS = {"compiler", "parser", "lexer", "nova_ast", "vm", "stdlib", "modules", "tools"}
+ALLOWED_UPDATE_FILES = {"main.py", "_galaxy.py", "nova_main.nv"}
+ALLOWED_UPDATE_DIRS = {"compiler", "parser", "lexer", "nova_ast", "vm", "stdlib", "modules", "tools", "galaxy"}
 
 
 def run_source(file_path):

@@ -28,7 +28,7 @@ NOVA_RELEASE_BASE = "https://github.com/nova-programming/Nova/releases/download"
 NOVA_ZIP_URL = "https://github.com/nova-programming/Nova/archive/refs/heads/develop.zip"
 ZIP_PREFIX = "Nova-develop"
 
-ALLOWED_ROOT_FILES = {"main.py", "_galaxy.py"}
+ALLOWED_ROOT_FILES = {"main.py", "_galaxy.py", "nova_main.nv"}
 ALLOWED_SUBDIRS = {
     "compiler", "parser", "lexer", "stdlib",
     "nova_ast", "tools", "galaxy", "vm", "modules",
