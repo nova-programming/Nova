@@ -28,11 +28,16 @@ NOVA_RELEASE_BASE = "https://github.com/nova-programming/Nova/releases/download"
 NOVA_ZIP_URL = "https://github.com/nova-programming/Nova/archive/refs/heads/develop.zip"
 ZIP_PREFIX = "Nova-develop"
 
-ALLOWED_ROOT_FILES = {"main.py", "_galaxy.py", "nova_main.nv"}
+ALLOWED_ROOT_FILES = {"main.py", "_galaxy.py", "nova.nv"}
 ALLOWED_SUBDIRS = {
     "compiler", "parser", "lexer", "stdlib",
     "nova_ast", "tools", "galaxy", "vm", "modules",
 }
+
+# Portable MinGW-w64 for Windows — only downloaded if 'gcc' not on PATH
+MINGW_ZIP_URL = "https://github.com/brechtsanders/winlibs_mingw/releases/download/16.1.0posix-14.0.0-msvcrt-r2/winlibs-x86_64-posix-seh-gcc-16.1.0-mingw-w64msvcrt-14.0.0-r2.zip"
+MINGW_ZIP_TOP = "mingw64"
+GCC_DIR = os.path.join(INSTALL_DIR, "gcc")
 
 if platform.system() == "Windows":
     INSTALL_DIR = os.path.join(
@@ -268,6 +273,52 @@ def _extract_zip(zip_data: bytes) -> int:
 # Launchers
 # ---------------------------------------------------------------------------
 
+def _install_gcc_if_missing():
+    """Download and bundle a portable MinGW-w64 if GCC is not found on PATH."""
+    if shutil.which("gcc"):
+        info("GCC found on PATH — skipping bundle.")
+        return
+    gcc_bin = os.path.join(GCC_DIR, "bin", "gcc.exe")
+    if os.path.exists(gcc_bin):
+        info("Bundled GCC found — skipping download.")
+        return
+    # On non-Windows, GCC is typically installed via package manager
+    if platform.system() != "Windows":
+        info("GCC not found. Use your package manager to install build-essential (Linux) or Xcode CLI tools (macOS).")
+        info("Alternatively, use 'nova dev <file.nv>' (VM mode) which needs no compiler.")
+        return
+    info("GCC not found — downloading portable MinGW-w64 (~130MB)...")
+    try:
+        req = urllib.request.Request(MINGW_ZIP_URL, headers={"User-Agent": "nova-installer/1.0"})
+        rsp = urllib.request.urlopen(req, timeout=300)
+        data = rsp.read()
+        mb = len(data) / (1024 * 1024)
+        info(f"Downloaded {mb:.1f} MB — extracting...")
+    except Exception as e:
+        warn(f"Could not download portable GCC: {e}")
+        info("Install GCC manually, or use 'nova dev' (VM mode) instead.")
+        return
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            prefix = MINGW_ZIP_TOP + "/"
+            count = 0
+            for name in zf.namelist():
+                if name.endswith("/"):
+                    continue
+                if not name.startswith(prefix):
+                    continue
+                rel = name[len(prefix):]
+                dst = os.path.join(GCC_DIR, rel)
+                dst_dir = os.path.dirname(dst)
+                os.makedirs(dst_dir, exist_ok=True)
+                with zf.open(name) as src, open(dst, "wb") as df:
+                    shutil.copyfileobj(src, df)
+                count += 1
+            ok(f"Extracted {count} GCC files to {GCC_DIR}")
+    except Exception as e:
+        warn(f"Could not extract GCC: {e}")
+
+
 def _create_launchers():
     for name, content in LAUNCHER_TEMPLATES.items():
         path = os.path.join(INSTALL_DIR, name)
@@ -445,6 +496,7 @@ def install():
     count = _extract_archive(data)
     ok(f"Extracted {count} files")
 
+    _install_gcc_if_missing()
     _create_launchers()
     _add_to_path()
 

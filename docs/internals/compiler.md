@@ -1,10 +1,10 @@
-# Nova Native Compiler Internals (`stdlib/compiler.nv` & `nova_main.nv`)
+# Nova Native Compiler Internals (`stdlib/compiler.nv` & `nova.nv`)
 
 The compilation pipeline orchestrates tokenizer → parser → codegen → in-process assembler → in-process linker.
 
 ## Entry Points
 
-- **`nova_main.nv`**: CLI entry point for the self-hosted native compiler. Parses `build` command (reads `.nv` → `compile_to_exe()` → native PE executable) or `assemble-link` command (reads `.s` → `assemble_link_file()` → in-process PE generation).
+- **`nova.nv`**: CLI entry point for the self-hosted native compiler. Parses `build` command (reads `.nv` → `compile_to_exe()` → native PE executable) or `assemble-link` command (reads `.s` → `assemble_link_file()` → in-process PE generation).
 - **`stdlib/compiler.nv`**: Core library exposing `compile_file(path)`, `compile_to_file(input, output)`, `compile_to_exe(input, output, debug_mode)`, and `assemble_link_file(asm_path, output_path)`. Orchestrates full pipeline: read file → tokenize → parse → resolve imports → type check → generate assembly.
 - **`stdlib/compiler_driver.nv`**: Minimal standalone CLI driver for the compiler (used for testing).
 
@@ -23,7 +23,7 @@ The compilation pipeline orchestrates tokenizer → parser → codegen → in-pr
 
 The `assemble_link_file(asm_path, output_path)` function reads an `.s` assembly file, splits it into lines, calls `assemble(asm_lines)` to generate raw x86 byte streams, and `link(assembled)` to produce a PE executable — all in-process without any external toolchain.
 
-`main.py` auto-delegates non-self builds to `nova_main.exe assemble-link` when `nova_main.exe` is available, making the pipeline fully GCC-free for all programs compiled with the self-hosted compiler.
+`main.py` auto-delegates non-self builds to `nova.exe assemble-link` when `nova.exe` is available, making the pipeline fully GCC-free for all programs compiled with the self-hosted compiler.
 
 ## Modularity
 

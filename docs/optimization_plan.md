@@ -80,6 +80,6 @@ But **within 2× of GCC -O3** is an excellent place for a self-hosted compiler.
 Each phase MUST:
 1. Both Python and Nova codegens updated (not one without the other)
 2. Compile: `python main.py build tests/bench.nv` → run and verify output
-3. Self-hosted compile: `.\nova_main.exe build tests/bench.nv` → run and verify same output
-4. Bootstrap: `python main.py build nova_main.nv && .\nova_main.exe build nova_main.nv`
-5. Commit: `.\nova_main.exe build nova_main.nv && .\nova_main.exe build tests/hello.nv`
+3. Self-hosted compile: `.\nova.exe build tests/bench.nv` → run and verify same output
+4. Bootstrap: `python main.py build nova.nv && .\nova.exe build nova.nv`
+5. Commit: `.\nova.exe build nova.nv && .\nova.exe build tests/hello.nv`

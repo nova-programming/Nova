@@ -179,9 +179,9 @@ The self-hosted compiler files located in `stdlib/` run as a sequential pipeline
 |---------|------|-------------|
 | `python main.py build <file.nv>` | Production | Compiles to native x86 executable using python codegen + GCC |
 | `python main.py dev <file.nv>` | Development | Runs in Python bytecode VM |
-| `nova_main.exe build <file.nv>` | Self-hosted | Nova-compiled compiler compiles directly to native PE executable using internal assembler + linker (no external toolchain required) |
-| `nova_main.exe assemble-link <file.s> <out.exe>` | Assembler/Linker | Assembles and links a raw x86 assembly file directly to a PE executable |
-| `nova_main.exe build-bare <file.nv> <org> <entry>` | Flat Binary | Compiles to a flat, headerless binary (ideal for bare-metal/bootloader use) |
+| `nova.exe build <file.nv>` | Self-hosted | Nova-compiled compiler compiles directly to native PE executable using internal assembler + linker (no external toolchain required) |
+| `nova.exe assemble-link <file.s> <out.exe>` | Assembler/Linker | Assembles and links a raw x86 assembly file directly to a PE executable |
+| `nova.exe build-bare <file.nv> <org> <entry>` | Flat Binary | Compiles to a flat, headerless binary (ideal for bare-metal/bootloader use) |
 
 ### Galaxy Package Manager
 

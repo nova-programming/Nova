@@ -20,8 +20,13 @@ $AppName = "Nova + Galaxy"
 $NovaZipUrl = "https://github.com/nova-programming/Nova/archive/refs/heads/develop.zip"
 $ZipPrefix = "Nova-develop"
 $InstallDir = Join-Path $env:LOCALAPPDATA "nova"
-$AllowedFiles = @("main.py", "_galaxy.py", "nova_main.nv")
+$GccDir = Join-Path $InstallDir "gcc"
+$AllowedFiles = @("main.py", "_galaxy.py", "nova.nv")
 $AllowedDirs = @("compiler", "parser", "lexer", "nova_ast", "vm", "stdlib", "modules", "tools", "galaxy")
+
+# Portable GCC (winlibs) — only downloaded on Windows if 'gcc' not on PATH
+$MINGW_ZIP_URL = "https://github.com/brechtsanders/winlibs_mingw/releases/download/16.1.0posix-14.0.0-msvcrt-r2/winlibs-x86_64-posix-seh-gcc-16.1.0-mingw-w64msvcrt-14.0.0-r2.zip"
+$MINGW_ZIP_TOP = "mingw64"
 
 function Info  { Write-Host "  [..]  $($args[0])" }
 function Ok    { Write-Host "  [OK]   $($args[0])" -ForegroundColor Green }
@@ -83,6 +88,51 @@ python "%~dp0_galaxy.py" %*
     Set-Content -Path $galaxyPath -Value $galaxyLauncher -Encoding ASCII
     Ok "Created launcher: $novaPath"
     Ok "Created launcher: $galaxyPath"
+}
+
+function Install-GccIfMissing {
+    $hasGcc = $null -ne (Get-Command "gcc" -ErrorAction SilentlyContinue)
+    if ($hasGcc) {
+        Info "GCC found on PATH — skipping bundle."
+        return
+    }
+    if (Test-Path (Join-Path $GccDir "bin\gcc.exe")) {
+        Info "Bundled GCC found — skipping download."
+        return
+    }
+    Info "GCC not found — downloading portable MinGW-w64 (~130MB)..."
+    $tmpFile = Join-Path ([System.IO.Path]::GetTempPath()) "mingw-$(Get-Random).zip"
+    try {
+        $progressPreference = 'silentlyContinue'
+        Invoke-WebRequest -Uri $MINGW_ZIP_URL -OutFile $tmpFile -TimeoutSec 300
+        $progressPreference = 'continue'
+    } catch {
+        Warn "Could not download portable GCC: $_"
+        Info "Install GCC manually, or use 'nova dev' (VM mode) instead."
+        return
+    }
+    $size = (Get-Item $tmpFile).Length / 1MB
+    Info "Downloaded $([math]::Round($size, 1)) MB — extracting..."
+    try {
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($tmpFile)
+        $prefix = "$MINGW_ZIP_TOP/"
+        $count = 0
+        foreach ($entry in $zip.Entries) {
+            if ($entry.FullName -like "$prefix*" -and $entry.Length -gt 0) {
+                $rel = $entry.FullName.Substring($prefix.Length)
+                $dst = Join-Path $GccDir $rel.Replace("/", "\")
+                $dstDir = Split-Path $dst -Parent
+                if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Path $dstDir -Force | Out-Null }
+                [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dst, $true)
+                $count++
+            }
+        }
+        $zip.Dispose()
+        Ok "Extracted $count GCC files to $GccDir"
+    } catch {
+        Warn "Could not extract GCC: $_"
+    }
+    Remove-Item $tmpFile -Force
 }
 
 function Should-Extract($relPath) {
@@ -151,6 +201,7 @@ function Install-NovaGalaxy {
 
     Ok "Extracted $count files"
 
+    Install-GccIfMissing
     New-Launchers
     Add-ToPath
 

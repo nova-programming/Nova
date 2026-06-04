@@ -141,9 +141,9 @@ class X86Codegen:
                 if node.field_name in ['val_str', 'kind', 'name', 'directive', 'label', 'mnemonic', 'dir_arg', 'raw', 'target', 'val', 'cond', 'field_name']:
                     return True
         if isinstance(node, StrConvert):
-            return self.is_pure_expression(node.value)
+            return self.is_leaf_expr(node.value)
         if isinstance(node, Slice):
-            return self.is_pure_expression(node.base) and self.is_pure_expression(node.start) and (node.end is None or self.is_pure_expression(node.end))
+            return self.is_leaf_expr(node.base) and self.is_leaf_expr(node.start) and (node.end is None or self.is_leaf_expr(node.end))
         if isinstance(node, Openf):
             return False
         if isinstance(node, ApiRequest):
@@ -179,8 +179,8 @@ class X86Codegen:
         self.assembly.append("str_fmode_a: .asciz \"a\"")
         self.assembly.append("")
         self.assembly.append(".intel_syntax noprefix")
-        self.assembly.append(".global _main")
         # Win32 API externs (replaces MSVCRT)
+        self.assembly.append(".global _main")
         self.assembly.append(".extern _GetProcessHeap@0")
         self.assembly.append(".extern _HeapAlloc@12")
         self.assembly.append(".extern _HeapFree@12")
@@ -267,7 +267,7 @@ class X86Codegen:
             self.compile_function(fn)
             
         # Compile main entry point
-        self.assembly.append("_nova_start:")
+        self.assembly.append("_main:")
         self.assembly.append("    push ebp")
         self.assembly.append("    mov ebp, esp")
         self.assembly.append("    and esp, -16")
@@ -1222,52 +1222,22 @@ class X86Codegen:
         r("_fopen:")
         r("    push ebp")
         r("    mov ebp, esp")
-        r("    push dword ptr [ebp + 12]")
-        r("    push offset str_fmode_w")
-        r("    call _strcmp")
-        r("    add esp, 8")
-        r("    cmp eax, 0")
+        r("    mov eax, [ebp + 12]")
+        r("    mov al, byte ptr [eax]")
+        r("    cmp al, 'w'")
         r("    je L_fopen_write")
-        
-        r("    push dword ptr [ebp + 12]")
-        r("    push offset str_fmode_wp")
-        r("    call _strcmp")
-        r("    add esp, 8")
-        r("    cmp eax, 0")
-        r("    je L_fopen_write")
-        
-        r("    push dword ptr [ebp + 12]")
-        r("    push offset str_fmode_rw")
-        r("    call _strcmp")
-        r("    add esp, 8")
-        r("    cmp eax, 0")
-        r("    je L_fopen_rw")
-        
-        r("    push dword ptr [ebp + 12]")
-        r("    push offset str_fmode_a")
-        r("    call _strcmp")
-        r("    add esp, 8")
-        r("    cmp eax, 0")
+        r("    cmp al, 'a'")
         r("    je L_fopen_append")
-        
-        # Default: Read mode
+        r("    cmp al, 'r'")
+        r("    je L_fopen_read")
+        # Unknown mode — default read
+        r("L_fopen_read:")
         r("    push 0")
         r("    push 128")
         r("    push 3") # OPEN_EXISTING
         r("    push 0")
         r("    push 0")
         r("    push -2147483648") # GENERIC_READ
-        r("    push dword ptr [ebp + 8]")
-        r("    call _CreateFileA@28")
-        r("    jmp L_fopen_end")
-        
-        r("L_fopen_rw:")
-        r("    push 0")
-        r("    push 128")
-        r("    push 3") # OPEN_EXISTING
-        r("    push 0")
-        r("    push 0")
-        r("    push -1073741824") # GENERIC_READ | GENERIC_WRITE (0xC0000000)
         r("    push dword ptr [ebp + 8]")
         r("    call _CreateFileA@28")
         r("    jmp L_fopen_end")
@@ -1385,9 +1355,7 @@ class X86Codegen:
         r("    push ebx")
         r("    push dword ptr [ebp + 8]")
         
-        r("    mov eax, [ebp + 12]")
-        r("    push dword ptr [eax]")
-        
+        r("    push dword ptr [ebp + 12]")
         r("    call _WriteFile@20")
         r("    add esp, 4")
         r("    pop ebx")
@@ -2004,7 +1972,7 @@ class X86Codegen:
         self.assembly.append("mov [ebp - 4], eax")
         self.assembly.append("# line 103")
         self.assembly.append("# line 104")
-        self.assembly.append("call _GetCommandLineA")
+        self.assembly.append("call _GetCommandLineA@0")
         self.assembly.append("push eax")
         self.assembly.append("pop eax")
         self.assembly.append("mov edi, eax")

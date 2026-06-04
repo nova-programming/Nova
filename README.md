@@ -4,7 +4,7 @@ A language that bridges high-level Pythonic simplicity with low-level C-like con
 
 ## Quick Install
 
-No Python required — native installers for every platform:
+One command, zero dependencies — installers handle everything including GCC/MinGW bundling on Windows:
 
 **macOS / Linux (bash, pre-installed):**
 ```bash
@@ -39,32 +39,47 @@ galaxy update            # Update Galaxy CLI
 galaxy upgrade [pkg]     # Update installed packages
 ```
 
+Remove Nova entirely:
+
+```bash
+nova --uninstall         # Remove Nova from your system
+python install.py --uninstall   # Or re-run the installer with --uninstall
+```
+
 ## Usage
+
+### Primary — `nova` commands (self-hosted bootstrap)
+
+```bash
+# Build to native executable (GCC-free, uses self-hosted assembler+linker)
+nova.exe build program.nv
+
+# Assemble .s file and link directly
+nova.exe assemble-link input.s output.exe
+
+# Build to bare-metal flat binary (no PE headers, no imports)
+nova.exe build-bare program.nv 31744 _start
+nova.exe assemble-bare program.s output.bin 0x7C00
+```
+
+### Fallback — `python` commands (Python bootstrap)
+
+If the self-hosted compiler (`nova.exe`) is not available or encounters issues, use the Python compiler directly:
 
 ```bash
 # Build to native executable (uses GCC as linker)
 python main.py build program.nv
 
-# Build using self-hosted compiler (no GCC needed)
-nova_main.exe build program.nv
-
-# Run in the Python bytecode VM (fast iteration)
+# Run in the Python bytecode VM (fast iteration, no GCC needed)
 python main.py dev program.nv
-
-# Assemble .s file and link directly (GCC-free, uses self-hosted assembler+linker)
-nova_main.exe assemble-link input.s output.exe
-
-# Build to bare-metal flat binary (no PE headers, no imports)
-nova_main.exe build-bare program.nv 31744 _start
-nova_main.exe assemble-bare program.s output.bin 0x7C00
 ```
 
 ## Self-Hosted Bootstrap Chain
 
 The compiler is written in Nova and bootstraps in three stages:
 
-1. **Stage 0** — Python compiler (`main.py`) compiles `nova_main.nv` → `nova_main.s` → GCC → `nova_main.exe`
-2. **Stage 1** — `nova_main.exe` (self-hosted compiler) compiles `nova_main.nv` → `nova_main.s` → GCC `nova_main.exe`. Non-self builds use the GCC-free `assemble-link` path: `.s` → `assembler.nv` → `linker.nv` → `.exe` (no external toolchain).
+1. **Stage 0** — Python compiler (`main.py`) compiles `nova.nv` → `nova.s` → GCC → `nova.exe`
+2. **Stage 1** — `nova.exe` (self-hosted compiler) compiles `nova.nv` → `nova.s` → GCC `nova.exe`. Non-self builds use the GCC-free `assemble-link` path: `.s` → `assembler.nv` → `linker.nv` → `.exe` (no external toolchain).
 3. **Stage 2** — The Nova-compiled executable can now recompile itself, proving the bootstrap is self-sustaining
 
 The compiler pipeline within a single invocation:
@@ -112,7 +127,7 @@ nova/
 │   ├── os_linux.nv       # Linux syscall/runtime facade (Nova)
 │   └── math_utils.nv     # Math utilities (Nova)
 ├── main.py           # Python bootstrap compiler entry point
-├── nova_main.nv      # Self-hosted compiler entry point
+├── nova.nv      # Self-hosted compiler entry point
 ├── modules/          # Standard library modules (Nova)
 ├── docs/             # Documentation
 └── tests/            # Test programs

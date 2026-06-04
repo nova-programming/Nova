@@ -38,8 +38,11 @@ if len(args) < 2 {
 }
 
 cmd = args[1]
-print("cmd is " + cmd)
-sys_flush()
+if cmd == "--uninstall" or cmd == "uninstall" or cmd == "remove" {
+    print("To uninstall Nova, run: python main.py --uninstall")
+    print("Or re-run: python install.py --uninstall")
+    sys_exit(0)
+}
 if cmd == "build" {
     file_path = ""
     debug_mode = 0

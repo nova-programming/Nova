@@ -6,7 +6,7 @@ RELEASE_BASE="https://github.com/nova-programming/Nova/releases/download"
 NOVA_REPO_ZIP="https://github.com/nova-programming/Nova/archive/refs/heads/develop.zip"
 ZIP_PREFIX="Nova-develop"
 INSTALL_DIR="${HOME}/.nova"
-ALLOWED_FILES="main.py _galaxy.py nova_main.nv"
+ALLOWED_FILES="main.py _galaxy.py nova.nv"
 ALLOWED_DIRS="compiler parser lexer nova_ast vm stdlib modules tools galaxy"
 
 info()  { printf "  [..]  %s\n" "$1"; }
@@ -118,6 +118,15 @@ zf.close()
     fi
 
     [ "$downloaded" = 0 ] && fail "Extraction failed"
+
+    # Check for GCC (needed by 'nova build')
+    if command -v gcc >/dev/null 2>&1; then
+        ok "GCC found on PATH"
+    else
+        warn "GCC not found — 'nova build' will need it."
+        warn "Install build-essential (Linux) or Xcode CLI tools (macOS)."
+        warn "Or use 'nova dev <file.nv>' (VM mode, no compiler needed)."
+    fi
 
     create_launchers
     add_to_path

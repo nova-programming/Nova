@@ -38,12 +38,26 @@
 - Update flow: compares versions → shows diff → prompts "Update to vX.Y.Z? (Y/n)" with default Y → replaces only necessary files
 - No app/cli templates — only `library` template remains in codebase
 
-### Installer Improvements (This Session)
-- **`install.sh`** — native bash installer: uses only `curl` + `tar` (both preinstalled everywhere). Falls back to `unzip` or `python3 -m zipfile` if release tarball unavailable.
-- **`install.ps1`** — native PowerShell installer: uses only built-in .NET APIs (`Invoke-WebRequest`, `System.IO.Compression.ZipFile`). No Python needed.
-- **`install.py`** — Python fallback, now also supports `.tar.gz` release archives on Unix.
-- All three installers detect the platform, download the release zip/tarball (lean) or full repo zip, extract only production files, create launchers, and add to PATH.
-- All three support `--uninstall` for clean removal.
+### Self-Hosted Bootstrap Fixed (This Session)
+- **`_fopen` "wb" mode bug** (`codegen_x86.py:1222`): `_fopen` used `_strcmp` to match mode strings against "w", "w+", "r+", "a" but NOT "wb". `sys_open(path, "wb")` fell through to default read mode (OPEN_EXISTING/GENERIC_READ), so the PE output file was never created. Fixed by checking first char of mode string instead of exact match — handles all mode variants (w, wb, w+, w+b, r, rb, r+, a, ab, etc.).
+- **`_fputs` HANDLE dereference bug** (`codegen_x86.py:1272-1273`, `codegen.nv:3824-3825`): `_fputs` executed `mov eax, [ebp + 12]; push dword ptr [eax]` — dereferencing the HANDLE as if it were a pointer to a HANDLE. `_fputc` and `_fwrite` correctly passed the HANDLE directly. This caused `STATUS_ACCESS_VIOLATION` (0xC0000005) when `compile_to_exe` called `sys_write(fd, string)` during assembly file output. Fixed by changing to `push dword ptr [ebp + 12]` (direct HANDLE, no dereference).
+- **Result**: `nova.exe build <file.nv>` now works end-to-end. Full self-hosted bootstrap: reads source → tokenizes → parses → type-checks → generates assembly → writes `.s` file → assembles → links → produces working PE executable. Both `nova.exe assemble-link` and `nova.exe build` commands are functional.
+- **Cross-drive relpath fix** (`main.py:131-136`): `os.path.relpath()` raises `ValueError` when source and destination are on different Windows drives (e.g., GCC on C:, project on D:). Caught exception and falls back to absolute paths.
+
+### Compiler Codegen Fixes (Previous Session)
+- **`_is_string_expr` bug** (`codegen_x86.py:144,146`): `self.is_pure_expression` → `self.is_leaf_expr` (referenced undefined method on `X86Codegen`, blocking all `nova build`).
+- **Entry point name** (`codegen_x86.py:270`): `_nova_start:` → `_main:` — GCC couldn't find the entry symbol since `.global _main` was declared but `_main:` never defined.
+- **`GetCommandLineA` stdcall decoration** (`codegen_x86.py:197,2007` + `codegen.nv:873,3946`): Call and extern now consistently use `_GetCommandLineA@0` (with `@0` suffix), matching MinGW's kernel32 import library.
+
+### GCC Bundling (This Session)
+- **`main.py`**: New `_find_gcc()` — checks bundled `gcc/bin/gcc.exe` first, then system PATH. Clear platform-specific install instructions when missing. Cross-drive `relpath` fix.
+- **`install.ps1`**: Downloads portable winlibs MinGW-w64 (~130MB) into `<InstallDir>/gcc/` if `gcc` not on PATH. Handles silent extraction of the `.zip` archive.
+- **`install.py`**: Same GCC bundling logic — downloads winlibs on Windows, warns with package manager instructions on Unix.
+- **`install.sh`**: Detects GCC presence after extraction, warns if missing with platform-specific install commands.
+- **`nova build` auto-fallback**: Tries `nova.exe assemble-link` first (verifies output exists), falls back to system/bundled GCC.
+
+### Version Bump
+- **NOVA_VERSION**: `0.5.0` → `0.6.0`
 
 ### GitHub Release Automation
 - **`.github/workflows/release.yml`** — triggers on `nova-v*` or `galaxy-v*` tags
