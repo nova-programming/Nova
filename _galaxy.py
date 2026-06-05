@@ -42,15 +42,16 @@ def main():
         return
 
     commands = {
-        "init":    cmd_init,
-        "install": cmd_install,
-        "list":    cmd_list,
-        "search":  cmd_search,
-        "info":    cmd_info,
-        "publish": cmd_publish,
-        "update":  cmd_update,
-        "upgrade": cmd_upgrade,
-        "remove":  cmd_remove,
+        "init":      cmd_init,
+        "install":   cmd_install,
+        "list":      cmd_list,
+        "search":    cmd_search,
+        "info":      cmd_info,
+        "publish":   cmd_publish,
+        "update":    cmd_update,
+        "upgrade":   cmd_upgrade,
+        "remove":    cmd_remove,
+        "uninstall": cmd_remove,
     }
 
     if cmd in commands:
@@ -77,6 +78,7 @@ def print_usage():
     print("  galaxy update                Update Galaxy CLI itself")
     print("  galaxy upgrade [pkg]         Update installed packages")
     print("  galaxy remove <pkg>          Remove an installed package")
+    print("  galaxy uninstall <pkg>       Alias for remove")
     print()
     print("Examples:")
     print("  galaxy init library my-lib")

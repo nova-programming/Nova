@@ -183,6 +183,14 @@ def compile_native(file_path, debug_mode=0):
 
 def cmd_uninstall():
     """Remove Nova installation and all files it downloaded (GCC, launchers, galaxy_modules, etc)."""
+    try:
+        _do_uninstall()
+    except KeyboardInterrupt:
+        print("\n  Uninstall cancelled.")
+        sys.exit(130)
+
+
+def _do_uninstall():
     print(f"Nova v{NOVA_VERSION}")
     print()
 
@@ -191,10 +199,11 @@ def cmd_uninstall():
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
     # Detect install locations
+    localappdata = os.environ.get("LOCALAPPDATA", "")
     if os.name == "nt":
         candidates = [
-            os.path.join(os.environ.get("LOCALAPPDATA", ""), "nova"),
-            os.path.join(os.environ.get("LOCALAPPDATA", ""), "galaxy"),
+            os.path.join(localappdata, "nova"),
+            os.path.join(localappdata, "galaxy"),
             script_dir if "nova" in script_dir.lower() else None,
         ]
     else:
@@ -206,13 +215,12 @@ def cmd_uninstall():
         if d and os.path.exists(d):
             install_dirs.add(d)
 
-    # Also check for galaxy_modules directories that may have been installed
-    for search_root in [os.path.expanduser("~"), os.environ.get("LOCALAPPDATA", ""), script_dir]:
+    # Check for galaxy_modules in specific install dirs only (avoid crawling entire home)
+    for search_root in list(install_dirs):
         if search_root and os.path.exists(search_root):
             for root, dirs, files in os.walk(search_root):
                 if "galaxy_modules" in dirs:
                     install_dirs.add(os.path.join(root, "galaxy_modules"))
-                dirs[:] = [d for d in dirs if d not in ("__pycache__", ".git", "node_modules") and not d.startswith(".")]
 
     # Also check for galaxy_modules in typical project locations
     for loc in [script_dir, os.path.join(os.path.expanduser("~"), "projects")]:
