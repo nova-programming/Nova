@@ -112,7 +112,10 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64"):
     except StaticTypeError as e:
         print(f"TypeWarning: {e} (continuing build)")
 
-    if target_arch == "x86_64":
+    if target_arch == "arm64":
+        from compiler.backend.arm64.codegen import Arm64Codegen
+        codegen = Arm64Codegen(ast, module_names=module_names, debug_mode=debug_mode)
+    elif target_arch == "x86_64":
         from compiler.backend.x86_64.codegen import X86_64Codegen
         codegen = X86_64Codegen(ast, module_names=module_names, debug_mode=debug_mode)
     else:
@@ -440,9 +443,10 @@ def main():
         print_usage()
         return
 
+    import platform
     debug_mode = 0
     bench_mode = 0
-    target_arch = "x86_64"
+    target_arch = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x86_64"
     file_path = None
     
     i = 2
