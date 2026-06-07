@@ -16,7 +16,7 @@ def compile_to_asm(source):
         TypeInferer().infer(ast)
     except StaticTypeError:
         pass
-    from compiler.codegen_x86_64 import X86_64Codegen
+    from compiler.backend.x86_64.codegen import X86_64Codegen
     module_names = set()
     from nova_ast.nodes import Import
     for node in ast:
@@ -277,7 +277,7 @@ class TestX86_64CodegenOutput(unittest.TestCase):
         self.assertIn("seta al", asm)
 
     def test_printd_debug(self):
-        from compiler.codegen_x86_64 import X86_64Codegen
+        from compiler.backend.x86_64.codegen import X86_64Codegen
         tokens = tokenize("print(1)")
         ast = Parser(tokens).parse()
         codegen = X86_64Codegen(ast, debug_mode=1)
