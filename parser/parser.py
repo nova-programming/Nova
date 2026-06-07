@@ -205,7 +205,7 @@ class Parser:
 
         if kind == "NUMBER":
             self.eat("NUMBER")
-            node = Number(int(value), line=line)
+            node = Number(int(value, 0), line=line)
         elif kind == "FLOAT":
             self.eat("FLOAT")
             node = Number(float(value), line=line)

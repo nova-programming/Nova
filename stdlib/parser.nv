@@ -990,26 +990,32 @@ def atoi(str_val: string) -> int {
     val = 0
     i = 0
     sign = 1
+    base = 10
     if len(str_val) > 0 {
         if str_val[0] == "-" {
             sign = -1
             i = 1
         }
     }
+    if i + 1 < len(str_val) {
+        if str_val[i] == "0" and (str_val[i + 1] == "x" or str_val[i + 1] == "X") {
+            base = 16
+            i = i + 2
+        }
+        elif str_val[i] == "0" and (str_val[i + 1] == "b" or str_val[i + 1] == "B") {
+            base = 2
+            i = i + 2
+        }
+    }
     while i < len(str_val) {
         ch = str_val[i]
         digit = 0
-        if ch == "0" { digit = 0 }
-        if ch == "1" { digit = 1 }
-        if ch == "2" { digit = 2 }
-        if ch == "3" { digit = 3 }
-        if ch == "4" { digit = 4 }
-        if ch == "5" { digit = 5 }
-        if ch == "6" { digit = 6 }
-        if ch == "7" { digit = 7 }
-        if ch == "8" { digit = 8 }
-        if ch == "9" { digit = 9 }
-        val = val * 10 + digit
+        if ch >= "0" and ch <= "9" { digit = char_code(ch) - char_code("0") }
+        elif base == 16 and ch >= "a" and ch <= "f" { digit = char_code(ch) - char_code("a") + 10 }
+        elif base == 16 and ch >= "A" and ch <= "F" { digit = char_code(ch) - char_code("A") + 10 }
+        else { break }
+        if digit >= base { break }
+        val = val * base + digit
         i = i + 1
     }
     return val * sign

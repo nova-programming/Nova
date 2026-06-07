@@ -4,6 +4,8 @@ import re
 
 TOKEN_SPEC = [
     # Literals (FLOAT must come before NUMBER so 3.14 isn't split)
+    ("HEX",      r"0[xX][0-9a-fA-F]+"),
+    ("BIN",      r"0[bB][01]+"),
     ("FLOAT",    r"\d+\.\d+"),
     ("NUMBER",   r"\d+"),
     ("STRING",   r'"(?:[^"\\]|\\.)*"'),

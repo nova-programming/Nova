@@ -1,5 +1,6 @@
 """Custom Virtual Machine to execute Nova bytecode"""
 
+import re
 import struct
 import ctypes
 import os
@@ -57,6 +58,61 @@ class VirtualMachine:
                 # Since Python GC actually handles Instance backing, we simulate the logic.
                 # If we mapped instances entirely to self.heap bytearray, we'd add to a free list here.
 
+    def _to_str(self, val):
+        if isinstance(val, bytearray):
+            return val.decode('utf-8')
+        return str(val)
+
+    def _to_bytes(self, val):
+        return bytearray(self._to_str(val).encode('utf-8'))
+
+    def _call_string_builtin(self, func_name, args):
+        if func_name == "split":
+            s = self._to_str(args[0])
+            delim = self._to_str(args[1]) if len(args) > 1 else " "
+            parts = s.split(delim)
+            result = [bytearray(p.encode('utf-8')) for p in parts]
+            self.stack.append(result)
+            return True
+        if func_name == "join":
+            lst = args[0]
+            delim = self._to_str(args[1]) if len(args) > 1 else ""
+            result = delim.join(self._to_str(x) for x in lst)
+            self.stack.append(bytearray(result.encode('utf-8')))
+            return True
+        if func_name == "trim":
+            s = self._to_str(args[0])
+            self.stack.append(bytearray(s.strip().encode('utf-8')))
+            return True
+        if func_name == "contains":
+            s = self._to_str(args[0])
+            sub = self._to_str(args[1])
+            self.stack.append(1 if sub in s else 0)
+            return True
+        if func_name == "replace":
+            s = self._to_str(args[0])
+            old = self._to_str(args[1]) if len(args) > 1 else ""
+            new = self._to_str(args[2]) if len(args) > 2 else ""
+            self.stack.append(bytearray(s.replace(old, new).encode('utf-8')))
+            return True
+        if func_name == "to_upper":
+            self.stack.append(bytearray(self._to_str(args[0]).upper().encode('utf-8')))
+            return True
+        if func_name == "to_lower":
+            self.stack.append(bytearray(self._to_str(args[0]).lower().encode('utf-8')))
+            return True
+        if func_name == "starts_with":
+            s = self._to_str(args[0])
+            prefix = self._to_str(args[1])
+            self.stack.append(1 if s.startswith(prefix) else 0)
+            return True
+        if func_name == "ends_with":
+            s = self._to_str(args[0])
+            suffix = self._to_str(args[1])
+            self.stack.append(1 if s.endswith(suffix) else 0)
+            return True
+        return False
+
     def run(self):
         while self.ip < len(self.code):
             opcode, arg = self.code[self.ip]
@@ -106,6 +162,10 @@ class VirtualMachine:
                         self.frames.append(Frame(self.ip, local_env, self_context=a))
                         self.ip = func_meta["ip"]
                         continue
+                if isinstance(a, bytearray) and not isinstance(b, bytearray):
+                    b = bytearray(str(b).encode('utf-8'))
+                elif isinstance(b, bytearray) and not isinstance(a, bytearray):
+                    a = bytearray(str(a).encode('utf-8'))
                 self.stack.append(a + b)
             elif opcode == OpCode.SUB:
                 b = self.stack.pop()
@@ -603,6 +663,8 @@ class VirtualMachine:
                     continue
 
                 if func_name not in self.functions:
+                    if self._call_string_builtin(func_name, args):
+                        continue
                     raise Exception(f"Function {func_name} not found")
 
                 # Setup local frame

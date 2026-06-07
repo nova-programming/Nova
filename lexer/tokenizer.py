@@ -57,12 +57,48 @@ def tokenize(code):
         elif kind == "MISMATCH":
             raise SyntaxError(f"Unexpected character: {value!r} at line {line_num}")
         
+        # Treat hex and binary literals as regular numbers (int() handles both)
+        if kind in ("HEX", "BIN"):
+            kind = "NUMBER"
+
         # Process escape sequences in string literals
         if kind == "STRING":
             # value includes quotes, e.g. '"Hello\nWorld"'
             # Strip quotes, process escapes, re-add quotes
             inner = value[1:-1]
             inner = process_escapes(inner)
+
+            if "{" in inner:
+                # String interpolation: "Hello {name}!" → "Hello " + name + "!"
+                new_tokens = []
+                i = 0
+                while i < len(inner):
+                    if inner[i] == '{':
+                        depth = 1
+                        j = i + 1
+                        while j < len(inner) and depth > 0:
+                            if inner[j] == '{': depth += 1
+                            elif inner[j] == '}': depth -= 1
+                            j += 1
+                        expr_str = inner[i+1:j-1]
+                        expr_tokens = tokenize(expr_str)
+                        new_tokens.append(("STR", "str", line_num))
+                        new_tokens.append(("LPAREN", "(", line_num))
+                        new_tokens.extend(expr_tokens)
+                        new_tokens.append(("RPAREN", ")", line_num))
+                        i = j
+                    else:
+                        start = i
+                        while i < len(inner) and inner[i] != '{':
+                            i += 1
+                        text = inner[start:i]
+                        new_tokens.append(("STRING", '"' + text + '"', line_num))
+                    new_tokens.append(("PLUS", "+", line_num))
+                if new_tokens:
+                    new_tokens.pop()
+                tokens.extend(new_tokens)
+                continue
+
             value = '"' + inner + '"'
         
         tokens.append((kind, value, line_num))

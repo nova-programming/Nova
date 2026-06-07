@@ -131,13 +131,27 @@ def tokenize(src: string) -> list {
 
         if is_digit(ch) == 1 {
             start = i
-            while i < length and is_digit(src[i]) == 1 {
-                i = i + 1
+            if ch == "0" and i + 1 < length and (src[i + 1] == "x" or src[i + 1] == "X") {
+                i = i + 2
+                while i < length and ((src[i] >= "0" and src[i] <= "9") or (src[i] >= "a" and src[i] <= "f") or (src[i] >= "A" and src[i] <= "F")) {
+                    i = i + 1
+                }
             }
-            if i < length and src[i] == "." and i + 1 < length and is_digit(src[i + 1]) == 1 {
-                i = i + 1
+            elif ch == "0" and i + 1 < length and (src[i + 1] == "b" or src[i + 1] == "B") {
+                i = i + 2
+                while i < length and (src[i] == "0" or src[i] == "1") {
+                    i = i + 1
+                }
+            }
+            else {
                 while i < length and is_digit(src[i]) == 1 {
                     i = i + 1
+                }
+                if i < length and src[i] == "." and i + 1 < length and is_digit(src[i + 1]) == 1 {
+                    i = i + 1
+                    while i < length and is_digit(src[i]) == 1 {
+                        i = i + 1
+                    }
                 }
             }
             num_str = ""
