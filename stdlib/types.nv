@@ -1,4 +1,4 @@
-import os_win
+import system
 import lexer
 import parser
 

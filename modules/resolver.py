@@ -11,8 +11,9 @@ from parser.parser import Parser
 
 
 class ModuleResolver:
-    def __init__(self, base_dir=None):
+    def __init__(self, base_dir=None, target_arch="x86_64"):
         self.base_dir = base_dir or os.getcwd()
+        self.target_arch = target_arch
         self.imported = {}  # module_name -> parsed AST (cache)
 
     def resolve(self, module_name, importer_dir=None):
@@ -81,6 +82,10 @@ class ModuleResolver:
         nova_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         stdlib_dir = os.path.join(nova_root, "stdlib")
         search_dirs.append(stdlib_dir)
+        
+        # 4. Target Architecture specific backend directory
+        backend_dir = os.path.join(stdlib_dir, "backend", self.target_arch)
+        search_dirs.append(backend_dir)
 
         for search_dir in search_dirs:
             candidate = os.path.join(search_dir, filename)

@@ -263,25 +263,59 @@ def parse_primary(state: ParserState) -> AstNode {
                 eat_tok(state, "RPAREN")
                 node = method_node
             } else {
-                if next_after.kind == "EQUALS" {
-                    # Field assignment: obj.field = value
-                    eat_tok(state, "EQUALS")
-                    val_node = parse_expr(state)
-                    assign_node = AstNode()
-                    assign_node.line = tok.line
-                    assign_node.kind = "DataFieldAssign"
-                    assign_node.left = node  # instance
-                    assign_node.val_str = prop_tok.val  # field name
-                    assign_node.right = val_node  # value
-                    return assign_node
+                is_ptr = 0
+                if prop_tok.val == "value" { is_ptr = 1 }
+                elif prop_tok.val == "addr" { is_ptr = 1 }
+                elif prop_tok.val == "isValid" { is_ptr = 1 }
+                elif prop_tok.val == "isNull" { is_ptr = 1 }
+                elif prop_tok.val == "bytes" { is_ptr = 1 }
+                elif prop_tok.val == "value_byte" { is_ptr = 1 }
+                elif prop_tok.val == "value_word" { is_ptr = 1 }
+                elif prop_tok.val == "value_dword" { is_ptr = 1 }
+                elif prop_tok.val == "value_qword" { is_ptr = 1 }
+
+                if is_ptr == 1 {
+                    if next_after.kind == "EQUALS" {
+                        # Pointer property assignment: ptr.value = new_val
+                        eat_tok(state, "EQUALS")
+                        val_node = parse_expr(state)
+                        assign_node = AstNode()
+                        assign_node.line = tok.line
+                        assign_node.kind = "PointerAssign"
+                        assign_node.left = node  # instance
+                        assign_node.val_str = prop_tok.val  # field name
+                        assign_node.right = val_node  # value
+                        return assign_node
+                    } else {
+                        # Pointer property access: ptr.value
+                        access_node = AstNode()
+                        access_node.line = tok.line
+                        access_node.kind = "PointerProperty"
+                        access_node.left = node  # instance
+                        access_node.val_str = prop_tok.val  # field name
+                        node = access_node
+                    }
                 } else {
-                    # Field access: obj.field
-                    access_node = AstNode()
-                    access_node.line = tok.line
-                    access_node.kind = "DataFieldAccess"
-                    access_node.left = node  # instance
-                    access_node.val_str = prop_tok.val  # field name
-                    node = access_node
+                    if next_after.kind == "EQUALS" {
+                        # Field assignment: obj.field = value
+                        eat_tok(state, "EQUALS")
+                        val_node = parse_expr(state)
+                        assign_node = AstNode()
+                        assign_node.line = tok.line
+                        assign_node.kind = "DataFieldAssign"
+                        assign_node.left = node  # instance
+                        assign_node.val_str = prop_tok.val  # field name
+                        assign_node.right = val_node  # value
+                        return assign_node
+                    } else {
+                        # Field access: obj.field
+                        access_node = AstNode()
+                        access_node.line = tok.line
+                        access_node.kind = "DataFieldAccess"
+                        access_node.left = node  # instance
+                        access_node.val_str = prop_tok.val  # field name
+                        node = access_node
+                    }
                 }
             }
         } else {

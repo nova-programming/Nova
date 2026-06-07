@@ -68,7 +68,7 @@ def tokenize(code):
             inner = value[1:-1]
             inner = process_escapes(inner)
 
-            if "{" in inner:
+            if "{" in inner and "}" in inner:
                 # String interpolation: "Hello {name}!" → "Hello " + name + "!"
                 new_tokens = []
                 i = 0
@@ -80,12 +80,24 @@ def tokenize(code):
                             if inner[j] == '{': depth += 1
                             elif inner[j] == '}': depth -= 1
                             j += 1
+                        
+                        if depth > 0:
+                            # Unmatched brace, treat as normal text up to end
+                            text = inner[i:]
+                            new_tokens.append(("STRING", '"' + text + '"', line_num))
+                            break
+
                         expr_str = inner[i+1:j-1]
-                        expr_tokens = tokenize(expr_str)
-                        new_tokens.append(("STR", "str", line_num))
-                        new_tokens.append(("LPAREN", "(", line_num))
-                        new_tokens.extend(expr_tokens)
-                        new_tokens.append(("RPAREN", ")", line_num))
+                        if not expr_str.strip():
+                            # Empty {}, treat as normal text
+                            text = inner[i:j]
+                            new_tokens.append(("STRING", '"' + text + '"', line_num))
+                        else:
+                            expr_tokens = tokenize(expr_str)
+                            new_tokens.append(("STR", "str", line_num))
+                            new_tokens.append(("LPAREN", "(", line_num))
+                            new_tokens.extend(expr_tokens)
+                            new_tokens.append(("RPAREN", ")", line_num))
                         i = j
                     else:
                         start = i

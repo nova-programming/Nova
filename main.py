@@ -61,12 +61,12 @@ def run_source(file_path):
     vm.run()
 
 
-def expand_imports(ast, base_dir, resolver=None, visited=None):
+def expand_imports(ast, base_dir, resolver=None, visited=None, target_arch="x86_64"):
     from modules.resolver import ModuleResolver
     from nova_ast.nodes import Import
     import sys
     if resolver is None:
-        resolver = ModuleResolver(base_dir=base_dir)
+        resolver = ModuleResolver(base_dir=base_dir, target_arch=target_arch)
     if visited is None:
         visited = set()
 
@@ -78,7 +78,7 @@ def expand_imports(ast, base_dir, resolver=None, visited=None):
                 try:
                     imported_ast = resolver.resolve(node.module, base_dir)
                     # Recursively expand imports inside the imported file
-                    expanded_ast.extend(expand_imports(imported_ast, base_dir, resolver, visited))
+                    expanded_ast.extend(expand_imports(imported_ast, base_dir, resolver, visited, target_arch))
                 except FileNotFoundError as e:
                     print(e)
                     sys.exit(1)
@@ -87,7 +87,7 @@ def expand_imports(ast, base_dir, resolver=None, visited=None):
     return expanded_ast
 
 
-def compile_native(file_path, debug_mode=0):
+def compile_native(file_path, debug_mode=0, target_arch="x86_64"):
     """Compile a Nova program to a native executable (build mode)."""
     file_path = os.path.abspath(file_path)
     base_dir = os.path.dirname(file_path)
@@ -105,15 +105,21 @@ def compile_native(file_path, debug_mode=0):
         if isinstance(node, Import):
             module_names.add(node.module)
 
-    ast = expand_imports(ast, base_dir)
+    ast = expand_imports(ast, base_dir, target_arch=target_arch)
 
     try:
         TypeInferer().infer(ast)
     except StaticTypeError as e:
         print(f"TypeWarning: {e} (continuing build)")
 
-    from compiler.codegen_x86 import X86Codegen
-    codegen = X86Codegen(ast, module_names=module_names, debug_mode=debug_mode)
+    if target_arch == "x86_64":
+        from compiler.backend.x86_64.codegen import X86_64Codegen
+        codegen = X86_64Codegen(ast, module_names=module_names, debug_mode=debug_mode)
+    else:
+        # Fallback to x86 (32-bit)
+        from compiler.backend.x86.codegen import X86Codegen
+        codegen = X86Codegen(ast, module_names=module_names, debug_mode=debug_mode)
+        
     asm_code = codegen.generate()
 
     asm_file = file_path.rsplit(".", 1)[0] + ".s"
@@ -436,14 +442,27 @@ def main():
 
     debug_mode = 0
     bench_mode = 0
+    target_arch = "x86_64"
     file_path = None
-    for arg in sys.argv[2:]:
+    
+    i = 2
+    while i < len(sys.argv):
+        arg = sys.argv[i]
         if arg in ("-d", "--debug"):
             debug_mode = 1
         elif arg in ("-b", "--bench"):
             bench_mode = 1
+        elif arg == "-arch":
+            if i + 1 < len(sys.argv):
+                target_arch = sys.argv[i+1]
+                i += 1
+            else:
+                print("Error: -arch requires an argument (e.g. x86_64 or arm64)")
+                return
         else:
             file_path = arg
+        i += 1
+
     if file_path is None:
         print_usage()
         return
@@ -454,7 +473,7 @@ def main():
     if command in ("dev", "run"):
         run_source(file_path)
     elif command == "build":
-        compile_native(file_path, debug_mode)
+        compile_native(file_path, debug_mode, target_arch=target_arch)
     else:
         print(f"Unknown command: {command}")
         print_usage()

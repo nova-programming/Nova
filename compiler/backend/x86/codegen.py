@@ -2,10 +2,11 @@ import os
 from nova_ast.nodes import *
 
 class X86Codegen:
-    def __init__(self, ast_nodes, module_names=None, debug_mode=0):
+    def __init__(self, ast_nodes, module_names=None, debug_mode=0, use_crt=False):
         self.ast = ast_nodes
         self.debug_mode = debug_mode
         self.module_names = module_names or []
+        self.use_crt = use_crt
         self.assembly = []
         self.data_section = []
         self.string_literals = {} # string_value -> label_name
@@ -171,25 +172,26 @@ class X86Codegen:
         self.assembly.append("str_fmode_a: .asciz \"a\"")
         self.assembly.append("")
         self.assembly.append(".intel_syntax noprefix")
-        # Win32 API externs (replaces MSVCRT)
         self.assembly.append(".global _main")
-        self.assembly.append(".extern _GetProcessHeap@0")
-        self.assembly.append(".extern _HeapAlloc@12")
-        self.assembly.append(".extern _HeapFree@12")
-        self.assembly.append(".extern _HeapReAlloc@16")
-        self.assembly.append(".extern _GetStdHandle@4")
-        self.assembly.append(".extern _WriteFile@20")
-        self.assembly.append(".extern _ReadFile@20")
-        self.assembly.append(".extern _CreateFileA@28")
-        self.assembly.append(".extern _CloseHandle@4")
-        self.assembly.append(".extern _SetFilePointer@16")
-        self.assembly.append(".extern _FlushFileBuffers@4")
-        self.assembly.append(".extern _ExitProcess@4")
-        self.assembly.append(".extern _WinExec@8")
-        self.assembly.append(".extern _GetCommandLineA@0")
-        self.assembly.append(".extern _GetLastError@0")
-        self.assembly.append(".extern _LoadLibraryA@4")
-        self.assembly.append(".extern _GetProcAddress@8")
+        if not self.use_crt:
+            # Win32 API externs (replaces MSVCRT) — only needed for inline assembly runtime
+            self.assembly.append(".extern _GetProcessHeap@0")
+            self.assembly.append(".extern _HeapAlloc@12")
+            self.assembly.append(".extern _HeapFree@12")
+            self.assembly.append(".extern _HeapReAlloc@16")
+            self.assembly.append(".extern _GetStdHandle@4")
+            self.assembly.append(".extern _WriteFile@20")
+            self.assembly.append(".extern _ReadFile@20")
+            self.assembly.append(".extern _CreateFileA@28")
+            self.assembly.append(".extern _CloseHandle@4")
+            self.assembly.append(".extern _SetFilePointer@16")
+            self.assembly.append(".extern _FlushFileBuffers@4")
+            self.assembly.append(".extern _ExitProcess@4")
+            self.assembly.append(".extern _WinExec@8")
+            self.assembly.append(".extern _GetCommandLineA@0")
+            self.assembly.append(".extern _GetLastError@0")
+            self.assembly.append(".extern _LoadLibraryA@4")
+            self.assembly.append(".extern _GetProcAddress@8")
         # We also need format strings for printing
         self.data_section.append('fmt_int: .asciz "%d\\n"')
 
@@ -372,8 +374,9 @@ class X86Codegen:
         self.assembly.append("    pop ebp")
         self.assembly.append("    ret")
         
-        # Win32 API runtime functions (replaces MSVCRT) — with tree-shaking
-        self._emit_win32_runtime_shaken()
+        # Runtime functions — inline assembly (Win32) or C runtime (cross-platform)
+        if not self.use_crt:
+            self._emit_win32_runtime_shaken()
         
         # Peephole optimization
         self.peephole()
@@ -5060,6 +5063,21 @@ class X86Codegen:
                 self.assembly.append("    pop ebx")
                 self.assembly.append(f"    mov [eax + {i*4}], ecx")
             self.assembly.append("    push ebx")
+        elif isinstance(node, DictLiteral):
+            self.assembly.append("    call _dict_new")
+            self.assembly.append("    push eax")
+            for k, v in zip(node.keys, node.values):
+                self.compile_expr(v)
+                self.compile_expr(k)
+                self.assembly.append("    pop eax")
+                self.assembly.append("    pop ebx")
+                self.assembly.append("    pop ecx")
+                self.assembly.append("    push ecx")
+                self.assembly.append("    push ebx")
+                self.assembly.append("    push eax")
+                self.assembly.append("    push ecx")
+                self.assembly.append("    call _dict_set")
+                self.assembly.append("    add esp, 12")
         elif isinstance(node, MethodCall):
             if self._is_file_expr(node.instance) and node.method_name in ["write", "awrite"]:
                 # .write(content) / .awrite(content)
@@ -5079,7 +5097,7 @@ class X86Codegen:
                 self.assembly.append("    add esp, 4")
                 self.assembly.append("    push 0")  # void return
 
-            elif node.method_name == "get":
+            elif node.method_name == "get" and len(node.args) == 0:
                 self.compile_expr(node.instance)
                 self.assembly.append("    call _api_get_internal")
                 self.assembly.append("    add esp, 4")
@@ -5154,6 +5172,19 @@ class X86Codegen:
                 self.assembly.append("    mov edx, [ebx+8]")
                 self.assembly.append("    mov ecx, [edx + eax*4]")
                 self.assembly.append("    push ecx")
+            elif node.method_name in ("get", "has", "set", "remove", "keys", "values", "items"):
+                n_args = len(node.args)
+                for arg in reversed(node.args):
+                    self.compile_expr(arg)
+                self.compile_expr(node.instance)
+                self.assembly.append("    pop eax")
+                for _ in node.args:
+                    self.assembly.append("    pop ebx")
+                    self.assembly.append("    push ebx")
+                self.assembly.append("    push eax")
+                self.assembly.append(f"    call _dict_{node.method_name}")
+                self.assembly.append(f"    add esp, {(n_args + 1) * 4}")
+                self.assembly.append("    push eax")
             elif isinstance(node.instance, Variable) and node.instance.name in self.module_names:
                 for arg in reversed(node.args):
                     self.compile_expr(arg)

@@ -25,39 +25,44 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             }
         }
         compile_expr(state, node.left)
-        emit(state, "    pop eax")
+        emit(state, "    pop %a")
         reg = find_var_reg(state, node.val_str)
         if reg != "" {
-            emit(state, "    mov " + reg + ", eax")
+            emit(state, "    mov " + reg + ", %a")
         } else {
             offset = find_var_offset(state, node.val_str)
             if offset < 0 {
-                emit(state, "    mov [ebp + " + str(0 - offset) + "], eax")
+                emit(state, "    mov [%b + " + str(0 - offset) + "], %a")
             } else {
-                emit(state, "    mov [ebp - " + str(offset) + "], eax")
+                emit(state, "    mov [%b - " + str(offset) + "], %a")
             }
         }
     }
     if node.kind == "DataFieldAssign" {
         compile_expr(state, node.right)
         compile_expr(state, node.left)
-        emit(state, "    pop edx")
-        emit(state, "    pop eax")
+        emit(state, "    pop %d")
+        emit(state, "    pop %a")
+        struct_name = ""
+        if node.left.inferred_type != 0 and node.left.inferred_type.kind == "struct" {
+            struct_name = node.left.inferred_type.name
+        }
+        prop_off = get_prop_offset(state, struct_name, node.val_str)
+        emit(state, "    mov [%d + " + str(prop_off) + "], %a")
+    }
+    if node.kind == "PointerAssign" {
+        compile_expr(state, node.right)
+        compile_expr(state, node.left)
+        emit(state, "    pop %d")
+        emit(state, "    pop %a")
         if node.val_str == "value_byte" {
-            emit(state, "    mov byte ptr [edx], al")
+            emit(state, "    mov byte ptr [%d], al")
         } else {
             if node.val_str == "value_word" {
-                emit(state, "    mov word ptr [edx], ax")
+                emit(state, "    mov word ptr [%d], ax")
             } else {
                 if node.val_str == "value_dword" or node.val_str == "value" {
-                    emit(state, "    mov [edx], eax")
-                } else {
-                    struct_name = ""
-                    if node.left.inferred_type != 0 and node.left.inferred_type.kind == "struct" {
-                        struct_name = node.left.inferred_type.name
-                    }
-                    prop_off = get_prop_offset(state, struct_name, node.val_str)
-                    emit(state, "    mov [edx + " + str(prop_off) + "], eax")
+                    emit(state, "    mov [%d], %a")
                 }
             }
         }
@@ -66,75 +71,75 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         compile_expr(state, node.cond)
         compile_expr(state, node.right)
         compile_expr(state, node.left)
-        emit(state, "    pop edx")
-        emit(state, "    pop ecx")
-        emit(state, "    pop eax")
-        emit(state, "    cmp ecx, 0")
+        emit(state, "    pop %d")
+        emit(state, "    pop %c")
+        emit(state, "    pop %a")
+        emit(state, "    cmp %c, 0")
         emit(state, "    jl _out_of_bounds")
-        emit(state, "    cmp ecx, [edx]")
+        emit(state, "    cmp %c, [%d]")
         emit(state, "    jge _out_of_bounds")
-        emit(state, "    mov edx, [edx + 8]")
-        emit(state, "    mov [edx + ecx * 4], eax")
+        emit(state, "    mov %d, [%d + 8]")
+        emit(state, "    mov [%d + %c * 4], %a")
     }
     if node.kind == "PrintD" {
         if debug_mode == 1 {
-            emit(state, "    push offset debug_prefix")
+            push_data_label(state, "debug_prefix")
             emit(state, "    call L_write_stdout")
-            emit(state, "    add esp, 4")
+            clean_n(state, 1)
             emit(state, "    push " + str(node.line))
             emit(state, "    call L_write_int")
-            emit(state, "    add esp, 4")
-            emit(state, "    push offset debug_suffix")
+            clean_n(state, 1)
+            push_data_label(state, "debug_suffix")
             emit(state, "    call L_write_stdout")
-            emit(state, "    add esp, 4")
+            clean_n(state, 1)
             compile_expr(state, node.left)
             if is_string_expr(state, node.left) == 1 {
                 emit(state, "    call L_write_stdout")
-                emit(state, "    add esp, 4")
+                clean_n(state, 1)
             } else {
                 if is_float_expr(state, node.left) == 1 {
-                    emit(state, "    push offset fmt_float_pure")
+                    push_data_label(state, "fmt_float_pure")
                 } else {
-                    emit(state, "    push offset fmt_int_pure")
+                    push_data_label(state, "fmt_int_pure")
                 }
                 emit(state, "    call _printf")
-                emit(state, "    add esp, 8")
+                clean_n(state, 2)
             }
             emit(state, "    push 10")
             emit(state, "    call L_write_char")
-            emit(state, "    add esp, 4")
+            clean_n(state, 1)
             emit(state, "    push 0")
             emit(state, "    call _fflush")
-            emit(state, "    add esp, 4")
+            clean_n(state, 1)
         }
     }
     if node.kind == "Print" {
         compile_expr(state, node.left)
         if is_string_expr(state, node.left) == 1 {
-            emit(state, "    push offset fmt_str")
+            push_data_label(state, "fmt_str")
         } else {
             if is_float_expr(state, node.left) == 1 {
-                emit(state, "    push offset fmt_float")
+                push_data_label(state, "fmt_float")
             } else {
-                emit(state, "    push offset fmt_int")
+                push_data_label(state, "fmt_int")
             }
         }
         emit(state, "    call _printf")
-        emit(state, "    add esp, 8")
+        clean_n(state, 2)
         emit(state, "    push 0")
         emit(state, "    call _fflush")
-        emit(state, "    add esp, 4")
+        clean_n(state, 1)
     }
     if node.kind == "Return" {
         compile_expr(state, node.left)
-        emit(state, "    pop eax")
+        emit(state, "    pop %a")
         r = len(state.used_regs) - 1
         while r >= 0 {
             emit(state, "    pop " + state.used_regs[r])
             r = r - 1
         }
-        emit(state, "    mov esp, ebp")
-        emit(state, "    pop ebp")
+        emit(state, "    mov %s, %b")
+        emit(state, "    pop %b")
         emit(state, "    ret")
     }
     if node.kind == "IfElse" {
@@ -144,8 +149,8 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         state.label_count = state.label_count + 1
         
         compile_expr(state, node.cond)
-        emit(state, "    pop eax")
-        emit(state, "    cmp eax, 0")
+        emit(state, "    pop %a")
+        emit(state, "    cmp %a, 0")
         emit(state, "    je " + else_label)
         
         i = 0
@@ -172,8 +177,8 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
 
         emit(state, start_label + ":")
         compile_expr(state, node.cond)
-        emit(state, "    pop eax")
-        emit(state, "    cmp eax, 0")
+        emit(state, "    pop %a")
+        emit(state, "    cmp %a, 0")
         emit(state, "    je " + end_label)
 
         i = 0
@@ -189,9 +194,9 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
     }
     if node.kind == "ForLoop" {
         compile_expr(state, node.left)
-        emit(state, "    pop eax")
+        emit(state, "    pop %a")
         offset = find_var_offset(state, node.val_str)
-        emit(state, "    mov [ebp - " + str(offset) + "], eax")
+        emit(state, "    mov [%b - " + str(offset) + "], %a")
 
         loop_label = next_label(state, "L_for")
         end_label = next_label(state, "L_for_end")
@@ -200,12 +205,12 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         state.loop_end_labels.append(end_label)
 
         emit(state, loop_label + ":")
-        emit(state, "    mov eax, [ebp - " + str(offset) + "]")
-        emit(state, "    push eax")
+        emit(state, "    mov %a, [%b - " + str(offset) + "]")
+        emit(state, "    push %a")
         compile_expr(state, node.right)
-        emit(state, "    pop ebx")
-        emit(state, "    pop eax")
-        emit(state, "    cmp eax, ebx")
+        emit(state, "    pop %x")
+        emit(state, "    pop %a")
+        emit(state, "    cmp %a, %x")
         if node.val_int == 1 {
             emit(state, "    jl " + end_label)
         } else {
@@ -219,15 +224,15 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         }
 
         emit(state, cont_label + ":")
-        emit(state, "    mov eax, [ebp - " + str(offset) + "]")
+        emit(state, "    mov %a, [%b - " + str(offset) + "]")
         compile_expr(state, node.cond)
-        emit(state, "    pop ebx")
+        emit(state, "    pop %x")
         if node.val_int == 1 {
-            emit(state, "    sub eax, ebx")
+            emit(state, "    sub %a, %x")
         } else {
-            emit(state, "    add eax, ebx")
+            emit(state, "    add %a, %x")
         }
-        emit(state, "    mov [ebp - " + str(offset) + "], eax")
+        emit(state, "    mov [%b - " + str(offset) + "], %a")
 
         emit(state, "    jmp " + loop_label)
         emit(state, end_label + ":")
@@ -236,8 +241,8 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
     }
     if node.kind == "ForIn" {
         compile_expr(state, node.left)
-        emit(state, "    sub esp, 4")
-        emit(state, "    mov dword ptr [esp], 0")
+        emit(state, "    sub %s, 4")
+        emit(state, "    mov dword ptr [%s], 0")
         
         loop_label = next_label(state, "L_forin")
         end_label = next_label(state, "L_forin_end")
@@ -245,18 +250,18 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         state.loop_end_labels.append(end_label)
         
         emit(state, loop_label + ":")
-        emit(state, "    mov eax, [esp + 4]")
-        emit(state, "    mov eax, [eax]")
-        emit(state, "    cmp dword ptr [esp], eax")
+        emit(state, "    mov %a, [%s + 4]")
+        emit(state, "    mov %a, [%a]")
+        emit(state, "    cmp dword ptr [%s], %a")
         emit(state, "    jge " + end_label)
         
-        emit(state, "    mov ecx, [esp]")
-        emit(state, "    mov eax, [esp + 4]")
-        emit(state, "    mov eax, [eax + 8]")
-        emit(state, "    mov eax, [eax + ecx*4]")
+        emit(state, "    mov %c, [%s]")
+        emit(state, "    mov %a, [%s + 4]")
+        emit(state, "    mov %a, [%a + 8]")
+        emit(state, "    mov %a, [%a + %c*4]")
         
         var_off = find_var_offset(state, node.val_str)
-        emit(state, "    mov [ebp - " + str(var_off) + "], eax")
+        emit(state, "    mov [%b - " + str(var_off) + "], %a")
         
         i = 0
         while i < len(node.body) {
@@ -264,10 +269,10 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             i = i + 1
         }
         
-        emit(state, "    inc dword ptr [esp]")
+        emit(state, "    inc dword ptr [%s]")
         emit(state, "    jmp " + loop_label)
         emit(state, end_label + ":")
-        emit(state, "    add esp, 8")
+        clean_n(state, 2)
         state.loop_start_labels.pop()
         state.loop_end_labels.pop()
     }
@@ -334,6 +339,6 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
     
     if node.kind == "Call" or node.kind == "MethodCall" {
         compile_expr(state, node)
-        emit(state, "    add esp, 4")
+        clean_n(state, 1)
     }
 }

@@ -1,0 +1,52 @@
+# ============================================================
+# Nova x86-32 Assembler (stdlib/assembler.nv)
+# ============================================================
+# Sub-modules:
+#   assembler_parse.nv  — line/operand parsing, data structures
+#   assembler_encode.nv — instruction encoding
+#   assembler_pass.nv   — pass1 and fixup resolution
+# ============================================================
+
+import assembler_parse
+import assembler_encode
+import assembler_pass
+
+# --- Main Assembly Entry Point ---
+
+def assemble(asm_lines: list) -> list {
+    state = AssemblerState()
+    state.lines = []
+    state.labels = []
+    state.fixups = []
+    state.code = []
+    state.data_bytes = []
+    state.section = 0
+    state.org = 0
+    state.externs = []
+    state.globals = []
+    state.code_count = 0
+    state.data_count = 0
+
+    # Pass 0: Parse all lines
+    print("pass0 lines=" + str(len(asm_lines)))
+    i = 0
+    while i < len(asm_lines) {
+        pl = parse_line(asm_lines[i])
+        state.lines.append(pl)
+        i = i + 1
+    }
+    sys_flush()
+
+    # Encode: collect labels and encode instructions in one pass
+    pass2_encode(state)
+    
+    # Resolve fixups
+    resolve_fixups(state)
+
+    result = []
+    result.append(state.code)
+    result.append(state.data_bytes)
+    result.append(state.labels)
+    result.append(state.fixups)
+    return result
+}

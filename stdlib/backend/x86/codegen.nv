@@ -28,10 +28,20 @@ data CodegenState {
     used_regs: list
     reg_pool: list
     reg_pool_idx: int
+    target: int
+    bp: string
+    sp: string
+    ax: string
+    bx: string
+    cx: string
+    dx: string
+    si: string
+    di: string
 }
 
-def new_codegen() -> CodegenState {
+def new_codegen(tgt: int) -> CodegenState {
     state = CodegenState()
+    state.target = tgt
     state.asm_lines = []
     state.data_lines = []
     state.str_count = 0
@@ -48,14 +58,109 @@ def new_codegen() -> CodegenState {
     state.local_var_regs = []
     state.used_regs = []
     state.reg_pool = []
-    state.reg_pool.append("esi")
-    state.reg_pool.append("edi")
+    if tgt == 0 {
+        state.reg_pool.append("esi")
+        state.reg_pool.append("edi")
+    } else {
+        state.reg_pool.append("r12")
+        state.reg_pool.append("r13")
+    }
     state.reg_pool_idx = 0
+    if tgt == 0 {
+        state.bp = "ebp"
+        state.sp = "esp"
+        state.ax = "eax"
+        state.bx = "ebx"
+        state.cx = "ecx"
+        state.dx = "edx"
+        state.si = "esi"
+        state.di = "edi"
+    } else {
+        state.bp = "rbp"
+        state.sp = "rsp"
+        state.ax = "rax"
+        state.bx = "rbx"
+        state.cx = "rcx"
+        state.dx = "rdx"
+        state.si = "rsi"
+        state.di = "rdi"
+    }
     return state
 }
 
+def is_x64(state: CodegenState) -> int {
+    return state.target
+}
+
+def ptr_size(state: CodegenState) -> int {
+    if state.target == 0 { return 4 }
+    return 8
+}
+
+def reg32(state: CodegenState, r32: string, r64: string) -> string {
+    if state.target == 0 { return r32 }
+    return r64
+}
+
+def struct_field_offset(state: CodegenState, fi: int) -> int {
+    return fi * ptr_size(state)
+}
+
 def emit(state: CodegenState, line: string) {
-    state.asm_lines.append(line)
+    result = ""
+    i = 0
+    while i < len(line) {
+        if i + 1 < len(line) and line[i] == "%" {
+            nextc = line[i + 1]
+            if nextc == "b" {
+                result = result + state.bp
+                i = i + 2
+            } elif nextc == "s" {
+                result = result + state.sp
+                i = i + 2
+            } elif nextc == "a" {
+                result = result + state.ax
+                i = i + 2
+            } elif nextc == "x" {
+                result = result + state.bx
+                i = i + 2
+            } elif nextc == "c" {
+                result = result + state.cx
+                i = i + 2
+            } elif nextc == "d" {
+                result = result + state.dx
+                i = i + 2
+            } elif nextc == "i" {
+                result = result + state.si
+                i = i + 2
+            } elif nextc == "j" {
+                result = result + state.di
+                i = i + 2
+            } else {
+                result = result + line[i]
+                i = i + 1
+            }
+        } else {
+            result = result + line[i]
+            i = i + 1
+        }
+    }
+    state.asm_lines.append(result)
+}
+
+# Push address of a data label (RIP-relative on x86_64, offset on x86)
+def push_data_label(state: CodegenState, label: string) {
+    if is_x64(state) {
+        emit(state, "    lea %a, [rip + " + label + "]")
+        emit(state, "    push %a")
+    } else {
+        emit(state, "    push offset " + label)
+    }
+}
+
+# Clean N pushed values from the stack (each value is ptr_size bytes)
+def clean_n(state: CodegenState, n: int) {
+    emit(state, "    add %s, " + str(n * ptr_size(state)))
 }
 
 def emit_data(state: CodegenState, line: string) {
@@ -123,7 +228,8 @@ def register_var(state: CodegenState, name: string) -> int {
         state.used_regs.append(reg)
         return 0
     } else {
-        state.local_offset = state.local_offset + 4
+        psize = ptr_size(state)
+        state.local_offset = state.local_offset + psize
         state.local_var_names.append(name)
         state.local_vars.append(state.local_offset)
         state.local_var_regs.append("")
@@ -132,19 +238,18 @@ def register_var(state: CodegenState, name: string) -> int {
 }
 
 def get_prop_offset(state: CodegenState, struct_name: string, field_name: string) -> int {
-    # Find struct index
     si = 0
     while si < len(state.struct_names) {
         if state.struct_names[si] == struct_name {
             fi = 0
             while fi < len(state.struct_fields[si]) {
                 if state.struct_fields[si][fi] == field_name {
-                    return fi * 4
+                    return struct_field_offset(state, fi)
                 }
                 fi = fi + 1
             }
             state.struct_fields[si].append(field_name)
-            return fi * 4
+            return struct_field_offset(state, fi)
         }
         si = si + 1
     }
@@ -312,10 +417,14 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     state.used_regs = []
     state.reg_pool_idx = 0
 
+    psize = ptr_size(state)
+    bp = reg32(state, "ebp", "rbp")
+    sp = reg32(state, "esp", "rsp")
+
     p = 0
     while p < len(node.params) {
         param_name = node.params[p]
-        arg_offset = 0 - (8 + p * 4)
+        arg_offset = 0 - (2 * psize + p * psize)
         state.local_var_names.append(param_name)
         state.local_vars.append(arg_offset)
         state.local_var_regs.append("")
@@ -334,10 +443,10 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     }
 
     emit(state, "_" + node.val_str + ":")
-    emit(state, "    push ebp")
-    emit(state, "    mov ebp, esp")
+    emit(state, "    push " + bp)
+    emit(state, "    mov " + bp + ", " + sp)
     if state.local_offset > 0 {
-        emit(state, "    sub esp, " + str(state.local_offset))
+        emit(state, "    sub " + sp + ", " + str(state.local_offset))
     }
     
     r = 0
@@ -357,8 +466,8 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    pop " + state.used_regs[r])
         r = r - 1
     }
-    emit(state, "    mov esp, ebp")
-    emit(state, "    pop ebp")
+    emit(state, "    mov " + sp + ", " + bp)
+    emit(state, "    pop " + bp)
     emit(state, "    ret")
 
     state.local_var_names = old_var_names
@@ -3895,28 +4004,355 @@ def emit_win32_runtime(state) {
     emit(state, "    ret")
 }
 
+# --- x86_64 runtime (uses C library instead of Win32 API) ---
+
+def emit_x86_64_runtime(state) {
+    emit(state, "_sys_open:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov rdi, [rbp + 16]")
+    emit(state, "    mov rsi, [rbp + 24]")
+    emit(state, "    call _fopen")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "")
+    emit(state, "_sys_read:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    push rbx")
+    emit(state, "    sub rsp, 16")
+    emit(state, "    mov ebx, [rbp + 16]")
+    emit(state, "    xor esi, esi")
+    emit(state, "    mov edx, 2")
+    emit(state, "    mov edi, ebx")
+    emit(state, "    call _fseek")
+    emit(state, "    mov edi, ebx")
+    emit(state, "    call _ftell")
+    emit(state, "    mov [rbp - 24], eax")
+    emit(state, "    mov edi, ebx")
+    emit(state, "    xor esi, esi")
+    emit(state, "    xor edx, edx")
+    emit(state, "    call _fseek")
+    emit(state, "    mov edi, [rbp - 24]")
+    emit(state, "    inc edi")
+    emit(state, "    call _malloc")
+    emit(state, "    mov [rbp - 32], rax")
+    emit(state, "    mov rdi, rax")
+    emit(state, "    mov esi, 1")
+    emit(state, "    mov edx, [rbp - 24]")
+    emit(state, "    mov ecx, ebx")
+    emit(state, "    call _fread")
+    emit(state, "    mov rax, [rbp - 32]")
+    emit(state, "    mov ecx, [rbp - 24]")
+    emit(state, "    mov byte ptr [rax + rcx], 0")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbx")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "")
+    emit(state, "_sys_write:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov rdi, [rbp + 16]")
+    emit(state, "    mov rsi, [rbp + 24]")
+    emit(state, "    call _fputs")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "")
+    emit(state, "_sys_write_raw:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    push rbx")
+    emit(state, "    mov rbx, [rbp + 16]")
+    emit(state, "    mov rcx, [rbp + 24]")
+    emit(state, "    mov esi, 1")
+    emit(state, "    mov edx, [rbx]")
+    emit(state, "    lea rdi, [rbx + 16]")
+    emit(state, "    call _fwrite")
+    emit(state, "    pop rbx")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "")
+    emit(state, "_sys_close:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov edi, [rbp + 16]")
+    emit(state, "    call _fclose")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "")
+    emit(state, "_out_of_bounds:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    lea rdi, [rip + L_out_of_bounds_msg]")
+    emit(state, "    xor eax, eax")
+    emit(state, "    call _printf")
+    emit(state, "    mov edi, 1")
+    emit(state, "    call _exit")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "")
+    emit(state, "_exit:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov edi, [rbp + 16]")
+    emit(state, "    call _exit")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "")
+    emit(state, "# --- Standard C library wrappers (stack args -> System V ABI) ---")
+    emit(state, "# On ELF (Linux), these don't conflict with libc (no _ prefix).")
+    emit(state, "# On Mach-O (macOS), libc already has _malloc etc., skip these.")
+    emit(state, "_malloc:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov edi, [rbp + 16]")
+    emit(state, "    call malloc")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_free:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov edi, [rbp + 16]")
+    emit(state, "    call free")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_realloc:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov rdi, [rbp + 16]")
+    emit(state, "    mov esi, [rbp + 24]")
+    emit(state, "    call realloc")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_strlen:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov rdi, [rbp + 16]")
+    emit(state, "    call strlen")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_strcmp:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov rdi, [rbp + 16]")
+    emit(state, "    mov rsi, [rbp + 24]")
+    emit(state, "    call strcmp")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_strcpy:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov rdi, [rbp + 16]")
+    emit(state, "    mov rsi, [rbp + 24]")
+    emit(state, "    call strcpy")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_strcat:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov rdi, [rbp + 16]")
+    emit(state, "    mov rsi, [rbp + 24]")
+    emit(state, "    call strcat")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_strstr:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov rdi, [rbp + 16]")
+    emit(state, "    mov rsi, [rbp + 24]")
+    emit(state, "    call strstr")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_memset:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov rdi, [rbp + 16]")
+    emit(state, "    mov esi, [rbp + 24]")
+    emit(state, "    mov edx, [rbp + 32]")
+    emit(state, "    call memset")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_printf:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov rdi, [rbp + 16]")
+    emit(state, "    mov rsi, [rbp + 24]")
+    emit(state, "    xor eax, eax")
+    emit(state, "    call printf")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_fflush:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov edi, [rbp + 16]")
+    emit(state, "    call fflush")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_sprintf:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov rdi, [rbp + 16]")
+    emit(state, "    mov rsi, [rbp + 24]")
+    emit(state, "    xor eax, eax")
+    emit(state, "    call sprintf")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_fopen:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov rdi, [rbp + 16]")
+    emit(state, "    mov rsi, [rbp + 24]")
+    emit(state, "    call fopen")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_fclose:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov edi, [rbp + 16]")
+    emit(state, "    call fclose")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_fread:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov rdi, [rbp + 16]")
+    emit(state, "    mov esi, [rbp + 24]")
+    emit(state, "    mov edx, [rbp + 32]")
+    emit(state, "    mov ecx, [rbp + 40]")
+    emit(state, "    call fread")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_fwrite:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov rdi, [rbp + 16]")
+    emit(state, "    mov esi, [rbp + 24]")
+    emit(state, "    mov edx, [rbp + 32]")
+    emit(state, "    mov ecx, [rbp + 40]")
+    emit(state, "    call fwrite")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_fputs:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov rdi, [rbp + 16]")
+    emit(state, "    mov rsi, [rbp + 24]")
+    emit(state, "    call fputs")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_fputc:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov edi, [rbp + 16]")
+    emit(state, "    mov esi, [rbp + 24]")
+    emit(state, "    call fputc")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_fseek:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov edi, [rbp + 16]")
+    emit(state, "    mov esi, [rbp + 24]")
+    emit(state, "    mov edx, [rbp + 32]")
+    emit(state, "    call fseek")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_ftell:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov edi, [rbp + 16]")
+    emit(state, "    call ftell")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+    emit(state, "_system:")
+    emit(state, "    push rbp")
+    emit(state, "    mov rbp, rsp")
+    emit(state, "    mov rdi, [rbp + 16]")
+    emit(state, "    call system")
+    emit(state, "    mov rsp, rbp")
+    emit(state, "    pop rbp")
+    emit(state, "    ret")
+}
+
 # --- Main entry point ---
 
-def generate_assembly(ast: list, debug_mode: int) -> list {
-    state = new_codegen()
+def generate_assembly(ast: list, debug_mode: int, tgt: int) -> list {
+    state = new_codegen(tgt)
 
     emit(state, ".intel_syntax noprefix")
     emit(state, ".global _main")
-    emit(state, ".extern GetProcessHeap")
-    emit(state, ".extern HeapAlloc")
-    emit(state, ".extern HeapFree")
-    emit(state, ".extern HeapReAlloc")
-    emit(state, ".extern GetStdHandle")
-    emit(state, ".extern WriteFile")
-    emit(state, ".extern ReadFile")
-    emit(state, ".extern CreateFileA")
-    emit(state, ".extern CloseHandle")
-    emit(state, ".extern _GetFileSize@8")
-    emit(state, ".extern SetFilePointer")
-    emit(state, ".extern FlushFileBuffers")
-    emit(state, ".extern ExitProcess")
-    emit(state, ".extern WinExec")
-    emit(state, ".extern _GetCommandLineA@0")
+    if is_x64(state) == 0 {
+        emit(state, ".extern GetProcessHeap")
+        emit(state, ".extern HeapAlloc")
+        emit(state, ".extern HeapFree")
+        emit(state, ".extern HeapReAlloc")
+        emit(state, ".extern GetStdHandle")
+        emit(state, ".extern WriteFile")
+        emit(state, ".extern ReadFile")
+        emit(state, ".extern CreateFileA")
+        emit(state, ".extern CloseHandle")
+        emit(state, ".extern _GetFileSize@8")
+        emit(state, ".extern SetFilePointer")
+        emit(state, ".extern FlushFileBuffers")
+        emit(state, ".extern ExitProcess")
+        emit(state, ".extern WinExec")
+        emit(state, ".extern _GetCommandLineA@0")
+    } else {
+        emit(state, ".extern _printf")
+        emit(state, ".extern _malloc")
+        emit(state, ".extern _free")
+        emit(state, ".extern _realloc")
+        emit(state, ".extern _fopen")
+        emit(state, ".extern _fclose")
+        emit(state, ".extern _fread")
+        emit(state, ".extern _fwrite")
+        emit(state, ".extern _fputs")
+        emit(state, ".extern _fputc")
+        emit(state, ".extern _fseek")
+        emit(state, ".extern _ftell")
+        emit(state, ".extern _fflush")
+        emit(state, ".extern _exit")
+        emit(state, ".extern _system")
+        emit(state, ".extern _strlen")
+        emit(state, ".extern _strcmp")
+        emit(state, ".extern _strcpy")
+        emit(state, ".extern _strcat")
+        emit(state, ".extern _strstr")
+        emit(state, ".extern _memset")
+        emit(state, ".extern _sprintf")
+    }
+    emit(state, ".extern _dict_new")
+    emit(state, ".extern _dict_get")
+    emit(state, ".extern _dict_set")
+    emit(state, ".extern _dict_has")
+    emit(state, ".extern _dict_remove")
+    emit(state, ".extern _dict_keys")
+    emit(state, ".extern _dict_values")
+    emit(state, ".extern _dict_items")
 
     emit_data(state, "fmt_int: .asciz \"%d\\n\"")
     emit_data(state, "fmt_int_pure: .asciz \"%d\"")
@@ -3927,7 +4363,11 @@ def generate_assembly(ast: list, debug_mode: int) -> list {
     emit_data(state, "debug_suffix: .asciz \"]: \"")
     emit_data(state, "L_out_of_bounds_msg: .asciz \"Index Out Of Bounds\\n\"")
     emit_data(state, "L_realloc_fail_msg: .asciz \"Realloc failed!\\n\"")
-    emit_data(state, "str_const_sys_platform: .asciz \"windows\"")
+    if is_x64(state) == 0 {
+        emit_data(state, "str_const_sys_platform: .asciz \"windows\"")
+    } else {
+        emit_data(state, "str_const_sys_platform: .asciz \"darwin\"")
+    }
     emit_data(state, "str_const_chacha_mem: .asciz \"expand 32-byte k\"")
 
     emit_data(state, "char_strings:")
@@ -3955,8 +4395,8 @@ def generate_assembly(ast: list, debug_mode: int) -> list {
                 j = 0
                 while j < len(node.params) {
                     off = get_prop_offset(state, node.val_str, node.params[j])
-                    if off + 4 > max_off {
-                        max_off = off + 4
+                    if off + ptr_size(state) > max_off {
+                        max_off = off + ptr_size(state)
                     }
                     j = j + 1
                 }
@@ -3990,11 +4430,17 @@ def generate_assembly(ast: list, debug_mode: int) -> list {
         i = i + 1
     }
 
+    bp = reg32(state, "ebp", "rbp")
+    sp = reg32(state, "esp", "rsp")
+
     emit(state, "_main:")
-    emit(state, "    push ebp")
-    emit(state, "    mov ebp, esp")
+    emit(state, "    push " + bp)
+    emit(state, "    mov " + bp + ", " + sp)
+    if is_x64(state) == 1 {
+        emit(state, "    and " + sp + ", -16")
+    }
     if state.local_offset > 0 {
-        emit(state, "    sub esp, " + str(state.local_offset))
+        emit(state, "    sub " + sp + ", " + str(state.local_offset))
     }
     
     r = 0
@@ -4014,89 +4460,172 @@ def generate_assembly(ast: list, debug_mode: int) -> list {
         emit(state, "    pop " + state.used_regs[r])
         r = r - 1
     }
-    emit(state, "    mov esp, ebp")
-    emit(state, "    pop ebp")
+    emit(state, "    mov " + sp + ", " + bp)
+    emit(state, "    pop " + bp)
     emit(state, "    mov eax, 0")
     emit(state, "    ret")
 
-    emit(state, "_concat_strings:")
-    emit(state, "    push ebp")
-    emit(state, "    mov ebp, esp")
-    emit(state, "    push ebx")
-    emit(state, "    push dword ptr [ebp+8]")
-    emit(state, "    call _strlen")
-    emit(state, "    add esp, 4")
-    emit(state, "    mov ebx, eax")
-    emit(state, "    push dword ptr [ebp+12]")
-    emit(state, "    call _strlen")
-    emit(state, "    add esp, 4")
-    emit(state, "    add ebx, eax")
-    emit(state, "    add ebx, 1")
-    emit(state, "    push ebx")
-    emit(state, "    call _malloc")
-    emit(state, "    add esp, 4")
-    emit(state, "    push eax")
-    emit(state, "    push dword ptr [ebp+8]")
-    emit(state, "    push eax")
-    emit(state, "    call _strcpy")
-    emit(state, "    add esp, 8")
-    emit(state, "    pop eax")
-    emit(state, "    push eax")
-    emit(state, "    push dword ptr [ebp+12]")
-    emit(state, "    push eax")
-    emit(state, "    call _strcat")
-    emit(state, "    add esp, 8")
-    emit(state, "    pop eax")
-    emit(state, "    pop ebx")
-    emit(state, "    pop ebp")
-    emit(state, "    ret")
+    if is_x64(state) == 0 {
+        emit(state, "_concat_strings:")
+        emit(state, "    push ebp")
+        emit(state, "    mov ebp, esp")
+        emit(state, "    push ebx")
+        emit(state, "    push dword ptr [ebp+8]")
+        emit(state, "    call _strlen")
+        emit(state, "    add esp, 4")
+        emit(state, "    mov ebx, eax")
+        emit(state, "    push dword ptr [ebp+12]")
+        emit(state, "    call _strlen")
+        emit(state, "    add esp, 4")
+        emit(state, "    add ebx, eax")
+        emit(state, "    add ebx, 1")
+        emit(state, "    push ebx")
+        emit(state, "    call _malloc")
+        emit(state, "    add esp, 4")
+        emit(state, "    push eax")
+        emit(state, "    push dword ptr [ebp+8]")
+        emit(state, "    push eax")
+        emit(state, "    call _strcpy")
+        emit(state, "    add esp, 8")
+        emit(state, "    pop eax")
+        emit(state, "    push eax")
+        emit(state, "    push dword ptr [ebp+12]")
+        emit(state, "    push eax")
+        emit(state, "    call _strcat")
+        emit(state, "    add esp, 8")
+        emit(state, "    pop eax")
+        emit(state, "    pop ebx")
+        emit(state, "    pop ebp")
+        emit(state, "    ret")
+    } else {
+        emit(state, "_concat_strings:")
+        emit(state, "    push rbp")
+        emit(state, "    mov rbp, rsp")
+        emit(state, "    push rbx")
+        emit(state, "    mov rdi, [rbp + 16]")
+        emit(state, "    call _strlen")
+        emit(state, "    mov ebx, eax")
+        emit(state, "    mov rdi, [rbp + 24]")
+        emit(state, "    call _strlen")
+        emit(state, "    add ebx, eax")
+        emit(state, "    inc ebx")
+        emit(state, "    mov edi, ebx")
+        emit(state, "    call _malloc")
+        emit(state, "    push rax")
+        emit(state, "    mov rsi, [rbp + 16]")
+        emit(state, "    mov rdi, rax")
+        emit(state, "    call _strcpy")
+        emit(state, "    pop rax")
+        emit(state, "    push rax")
+        emit(state, "    mov rsi, [rbp + 24]")
+        emit(state, "    mov rdi, rax")
+        emit(state, "    call _strcat")
+        emit(state, "    pop rax")
+        emit(state, "    pop rbx")
+        emit(state, "    pop rbp")
+        emit(state, "    ret")
+    }
 
-    emit(state, "_slice_string:")
-    emit(state, "    push ebp")
-    emit(state, "    mov ebp, esp")
-    emit(state, "    push esi")
-    emit(state, "    push edi")
-    emit(state, "    push ebx")
-    emit(state, "    mov esi, [ebp+8]")
-    emit(state, "    mov ebx, [ebp+12]")
-    emit(state, "    mov ecx, [ebp+16]")
-    emit(state, "    sub ecx, ebx")
-    emit(state, "    cmp ecx, 0")
-    emit(state, "    jge L_slice_alloc")
-    emit(state, "    mov ecx, 0")
-    emit(state, "L_slice_alloc:")
-    emit(state, "    push ecx")
-    emit(state, "    inc ecx")
-    emit(state, "    push ecx")
-    emit(state, "    call _malloc")
-    emit(state, "    add esp, 4")
-    emit(state, "    pop ecx")
-    emit(state, "    mov edi, eax")
-    emit(state, "    add esi, ebx")
-    emit(state, "    push edi")
-    emit(state, "    push ecx")
-    emit(state, "    cmp ecx, 0")
-    emit(state, "    jle L_slice_done")
-    emit(state, "L_slice_copy:")
-    emit(state, "    mov al, [esi]")
-    emit(state, "    mov [edi], al")
-    emit(state, "    inc esi")
-    emit(state, "    inc edi")
-    emit(state, "    dec ecx")
-    emit(state, "    cmp ecx, 0")
-    emit(state, "    jg L_slice_copy")
-    emit(state, "L_slice_done:")
-    emit(state, "    pop ecx")
-    emit(state, "    pop edi")
-    emit(state, "    mov byte ptr [edi + ecx], 0")
-    emit(state, "    mov eax, edi")
-    emit(state, "    pop ebx")
-    emit(state, "    pop edi")
-    emit(state, "    pop esi")
-    emit(state, "    pop ebp")
-    emit(state, "    ret")
+    if is_x64(state) == 0 {
+        emit(state, "_slice_string:")
+        emit(state, "    push ebp")
+        emit(state, "    mov ebp, esp")
+        emit(state, "    push esi")
+        emit(state, "    push edi")
+        emit(state, "    push ebx")
+        emit(state, "    mov esi, [ebp+8]")
+        emit(state, "    mov ebx, [ebp+12]")
+        emit(state, "    mov ecx, [ebp+16]")
+        emit(state, "    sub ecx, ebx")
+        emit(state, "    cmp ecx, 0")
+        emit(state, "    jge L_slice_alloc")
+        emit(state, "    mov ecx, 0")
+        emit(state, "L_slice_alloc:")
+        emit(state, "    push ecx")
+        emit(state, "    inc ecx")
+        emit(state, "    push ecx")
+        emit(state, "    call _malloc")
+        emit(state, "    add esp, 4")
+        emit(state, "    pop ecx")
+        emit(state, "    mov edi, eax")
+        emit(state, "    add esi, ebx")
+        emit(state, "    push edi")
+        emit(state, "    push ecx")
+        emit(state, "    cmp ecx, 0")
+        emit(state, "    jle L_slice_done")
+        emit(state, "L_slice_copy:")
+        emit(state, "    mov al, [esi]")
+        emit(state, "    mov [edi], al")
+        emit(state, "    inc esi")
+        emit(state, "    inc edi")
+        emit(state, "    dec ecx")
+        emit(state, "    cmp ecx, 0")
+        emit(state, "    jg L_slice_copy")
+        emit(state, "L_slice_done:")
+        emit(state, "    pop ecx")
+        emit(state, "    pop edi")
+        emit(state, "    mov byte ptr [edi + ecx], 0")
+        emit(state, "    mov eax, edi")
+        emit(state, "    pop ebx")
+        emit(state, "    pop edi")
+        emit(state, "    pop esi")
+        emit(state, "    pop ebp")
+        emit(state, "    ret")
+    } else {
+        emit(state, "_slice_string:")
+        emit(state, "    push rbp")
+        emit(state, "    mov rbp, rsp")
+        emit(state, "    push rbx")
+        emit(state, "    mov rsi, [rbp + 16]")
+        emit(state, "    mov ebx, [rbp + 24]")
+        emit(state, "    mov ecx, [rbp + 32]")
+        emit(state, "    sub ecx, ebx")
+        emit(state, "    cmp ecx, 0")
+        emit(state, "    jge L_slice_alloc_64")
+        emit(state, "    xor ecx, ecx")
+        emit(state, "L_slice_alloc_64:")
+        emit(state, "    push rcx")
+        emit(state, "    inc ecx")
+        emit(state, "    mov edi, ecx")
+        emit(state, "    call _malloc")
+        emit(state, "    pop rcx")
+        emit(state, "    mov rdi, rax")
+        emit(state, "    add rsi, rbx")
+        emit(state, "    push rdi")
+        emit(state, "    push rcx")
+        emit(state, "    cmp ecx, 0")
+        emit(state, "    jle L_slice_done_64")
+        emit(state, "L_slice_copy_64:")
+        emit(state, "    mov al, [rsi]")
+        emit(state, "    mov [rdi], al")
+        emit(state, "    inc rsi")
+        emit(state, "    inc rdi")
+        emit(state, "    dec ecx")
+        emit(state, "    cmp ecx, 0")
+        emit(state, "    jg L_slice_copy_64")
+        emit(state, "L_slice_done_64:")
+        emit(state, "    pop rcx")
+        emit(state, "    pop rdi")
+        emit(state, "    mov byte ptr [rdi + rcx], 0")
+        emit(state, "    mov rax, rdi")
+        emit(state, "    pop rbx")
+        emit(state, "    pop rbp")
+        emit(state, "    ret")
+    }
 
-    emit_win32_runtime(state)
+    if is_x64(state) == 0 {
+        if state.target == 0 {
+            emit_win32_runtime(state)
+        }
+    } else {
+        emit_x86_64_runtime(state)
+        emit(state, "_sys_platform:")
+        emit(state, "    push rbp")
+        emit(state, "    mov rbp, rsp")
+        emit(state, "    lea rax, [rip + str_const_sys_platform]")
+        emit(state, "    pop rbp")
+        emit(state, "    ret")
+    }
 
     final_asm = []
     i = 0

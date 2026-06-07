@@ -209,13 +209,48 @@ def tokenize(src: string) -> list {
         if i + 1 < length {
             two_char = src[i] + src[i+1]
             switch two_char {
-                case "==" { tok.kind = "EQEQ"; tok.val = two_char; i = i + 2; matched = 2 }
-                case "!=" { tok.kind = "NOTEQ"; tok.val = two_char; i = i + 2; matched = 2 }
-                case "<=" { tok.kind = "LE"; tok.val = two_char; i = i + 2; matched = 2 }
-                case ">=" { tok.kind = "GE"; tok.val = two_char; i = i + 2; matched = 2 }
-                case "->" { tok.kind = "ARROW"; tok.val = two_char; i = i + 2; matched = 2 }
-                case ">>" { tok.kind = "GTGT"; tok.val = two_char; i = i + 2; matched = 2 }
-                case "<<" { tok.kind = "LTLT"; tok.val = two_char; i = i + 2; matched = 2 }
+                case "==" { 
+                    tok.kind = "EQEQ"
+                    tok.val = two_char
+                    i = i + 2
+                    matched = 2 
+                }
+                case "!=" { 
+                    tok.kind = "NOTEQ"
+                    tok.val = two_char
+                    i = i + 2
+                    matched = 2 
+                }
+                case "<=" { 
+                    tok.kind = "LE"
+                    tok.val = two_char
+                    i = i + 2
+                    matched = 2 
+                }
+                case ">=" { 
+                    tok.kind = "GE"
+                    tok.val = two_char
+                    i = i + 2
+                    matched = 2 
+                }
+                case "->" { 
+                    tok.kind = "ARROW"
+                    tok.val = two_char
+                    i = i + 2
+                    matched = 2 
+                }
+                case ">>" { 
+                    tok.kind = "GTGT"
+                    tok.val = two_char
+                    i = i + 2
+                    matched = 2 
+                }
+                case "<<" { 
+                    tok.kind = "LTLT"
+                    tok.val = two_char
+                    i = i + 2
+                    matched = 2 
+                }
             }
         }
 

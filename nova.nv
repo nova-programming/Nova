@@ -1,4 +1,4 @@
-import os_win
+import system
 import compiler
 
 def str_to_int(s: string) -> int {
@@ -47,12 +47,21 @@ if cmd == "build" {
     file_path = ""
     debug_mode = 0
     bench_mode = 0
+    target_arch = "x86_64"
     i = 2
     while i < len(args) {
         if args[i] == "-d" or args[i] == "--debug" {
             debug_mode = 1
         } elif args[i] == "-b" or args[i] == "--bench" {
             bench_mode = 1
+        } elif args[i] == "-arch" {
+            if i + 1 < len(args) {
+                target_arch = args[i + 1]
+                i = i + 1
+            } else {
+                print("Error: -arch requires an argument")
+                sys_exit(1)
+            }
         } else {
             file_path = args[i]
         }
@@ -73,13 +82,13 @@ if cmd == "build" {
     
     start_ticks = 0
     if bench_mode == 1 {
-        start_ticks = os_win.sys_get_tick_count()
+        start_ticks = sys_get_tick_count()
     }
     
-    compile_to_exe(file_path, out_file, debug_mode)
+    compile_to_exe(file_path, out_file, debug_mode, target_arch)
     
     if bench_mode == 1 {
-        end_ticks = os_win.sys_get_tick_count()
+        end_ticks = sys_get_tick_count()
         diff = end_ticks - start_ticks
         print("[Benchmark] Build completed in " + str(diff) + " ms")
     }
@@ -117,7 +126,7 @@ if cmd == "build" {
     out_file = file_path[0 : out_len - 3] + ".bin"
     print("out_file is " + out_file)
     sys_flush()
-    compile_to_bare(file_path, out_file, 0, load_addr, entry_name)
+    compile_to_bare(file_path, out_file, 0, load_addr, entry_name, "x86_64")
     print("Generated flat binary: " + out_file)
 } elif cmd == "assemble-bare" {
     if len(args) < 3 {

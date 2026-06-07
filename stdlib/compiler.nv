@@ -1,4 +1,4 @@
-import os_win
+import system
 import lexer
 import parser
 import types
@@ -16,7 +16,7 @@ def contains(lst: list, item: string) -> int {
     return 0
 }
 
-def resolve_imports(ast: list, visited: list) -> list {
+def resolve_imports(ast: list, visited: list, target_arch: string) -> list {
     expanded = []
     i = 0
     while i < len(ast) {
@@ -30,6 +30,9 @@ def resolve_imports(ast: list, visited: list) -> list {
                     fd = sys_open("stdlib/" + module_name + ".nv", "r")
                 }
                 if fd == 0 {
+                    fd = sys_open("stdlib/backend/" + target_arch + "/" + module_name + ".nv", "r")
+                }
+                if fd == 0 {
                     print("ERROR [Import]: Could not resolve module '" + module_name + "'")
                     print("  -> make sure the file '" + module_name + ".nv' exists in the current directory or stdlib/")
                 } else {
@@ -38,7 +41,7 @@ def resolve_imports(ast: list, visited: list) -> list {
                     print("Tokenizing... " + module_name)
                     tokens = tokenize(source)
                     imported_ast = parse(tokens, module_name + ".nv")
-                    resolved_ast = resolve_imports(imported_ast, visited)
+                    resolved_ast = resolve_imports(imported_ast, visited, target_arch)
                     j = 0
                     while j < len(resolved_ast) {
                         expanded.append(resolved_ast[j])
@@ -54,7 +57,7 @@ def resolve_imports(ast: list, visited: list) -> list {
     return expanded
 }
 
-def compile_file(path: string, debug_mode: int) -> list {
+def compile_file(path: string, debug_mode: int, target_arch: string) -> list {
     print("Reading file: " + path)
     fd = sys_open(path, "r")
     source = sys_read(fd)
@@ -68,7 +71,7 @@ def compile_file(path: string, debug_mode: int) -> list {
     
     print("Resolving imports...")
     visited = []
-    ast = resolve_imports(ast, visited)
+    ast = resolve_imports(ast, visited, target_arch)
 
     print("Type checking...")
     tc = TypeChecker()
@@ -83,7 +86,7 @@ def compile_file(path: string, debug_mode: int) -> list {
 }
 
 def compile_to_file(input_path: string, output_path: string, debug_mode: int) {
-    asm = compile_file(input_path, debug_mode)
+    asm = compile_file(input_path, debug_mode, "x86_64")
     write_lines(asm, output_path)
     print("Compiled: " + input_path + " -> " + output_path)
 }
@@ -130,8 +133,8 @@ def read_lines(path: string) -> list {
     return result
 }
 
-def compile_to_exe(input_path: string, output_path: string, debug_mode: int) {
-    asm = compile_file(input_path, debug_mode)
+def compile_to_exe(input_path: string, output_path: string, debug_mode: int, target_arch: string) {
+    asm = compile_file(input_path, debug_mode, target_arch)
     write_lines(asm, input_path + ".s")
     
     print("Assembling...")
@@ -144,8 +147,8 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int) {
     print("Compiled: " + input_path + " -> " + output_path)
 }
 
-def compile_to_bare(input_path: string, output_path: string, debug_mode: int, load_addr: int, entry_name: string) {
-    asm = compile_file(input_path, debug_mode)
+def compile_to_bare(input_path: string, output_path: string, debug_mode: int, load_addr: int, entry_name: string, target_arch: string) {
+    asm = compile_file(input_path, debug_mode, target_arch)
     write_lines(asm, input_path + ".s")
     
     print("Assembling...")

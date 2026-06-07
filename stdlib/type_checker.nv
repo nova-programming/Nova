@@ -1,4 +1,4 @@
-import os_win
+import system
 import lexer
 import parser
 import types
@@ -42,6 +42,42 @@ def tc_init(tc: TypeChecker) {
     # sys_exit(code: int) -> void
     sys_exit_t = create_func_type([create_scalar_type("int")], create_scalar_type("void"))
     tc_add_func(tc, "sys_exit", sys_exit_t)
+
+    # sys_open(path: string, mode: string) -> int
+    sys_open_t = create_func_type([create_scalar_type("string"), create_scalar_type("string")], create_scalar_type("int"))
+    tc_add_func(tc, "sys_open", sys_open_t)
+
+    # sys_read(fd: int) -> string
+    sys_read_t = create_func_type([create_scalar_type("int")], create_scalar_type("string"))
+    tc_add_func(tc, "sys_read", sys_read_t)
+
+    # sys_write(fd: int, content: any) -> void
+    sys_write_t = create_func_type([create_scalar_type("int"), create_any_type()], create_scalar_type("void"))
+    tc_add_func(tc, "sys_write", sys_write_t)
+
+    # sys_write_raw(fd: int, content: list) -> void
+    sys_write_raw_t = create_func_type([create_scalar_type("int"), create_list_type(create_scalar_type("int"))], create_scalar_type("void"))
+    tc_add_func(tc, "sys_write_raw", sys_write_raw_t)
+
+    # sys_close(fd: int) -> void
+    sys_close_t = create_func_type([create_scalar_type("int")], create_scalar_type("void"))
+    tc_add_func(tc, "sys_close", sys_close_t)
+
+    # sys_platform() -> string
+    sys_platform_t = create_func_type([], create_scalar_type("string"))
+    tc_add_func(tc, "sys_platform", sys_platform_t)
+
+    # sys_flush() -> void
+    sys_flush_t = create_func_type([], create_scalar_type("void"))
+    tc_add_func(tc, "sys_flush", sys_flush_t)
+
+    # sys_get_args() -> list
+    sys_get_args_t = create_func_type([], create_list_type(create_scalar_type("string")))
+    tc_add_func(tc, "sys_get_args", sys_get_args_t)
+
+    # sys_get_tick_count() -> int
+    sys_get_tick_count_t = create_func_type([], create_scalar_type("int"))
+    tc_add_func(tc, "sys_get_tick_count", sys_get_tick_count_t)
 
     # alloc(size: int) -> any
     alloc_t = create_func_type([create_scalar_type("int")], create_any_type())

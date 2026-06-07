@@ -1,0 +1,52 @@
+# ============================================================
+# Nova System Library (stdlib/system.nv)
+# Clean, Cross-Platform OS Abstractions
+# ============================================================
+
+def file_open(path: string, mode: string) -> int {
+    return sys_open(path, mode)
+}
+
+def file_read(fd: int) -> string {
+    return sys_read(fd)
+}
+
+def file_write(fd: int, content) {
+    sys_write(fd, content)
+}
+
+def file_write_raw(fd: int, content: list) {
+    sys_write_raw(fd, content)
+}
+
+def file_close(fd: int) {
+    sys_close(fd)
+}
+
+def system_alloc(size: int) -> int {
+    return sys_alloc(size)
+}
+
+def system_free(ptr: int) {
+    sys_free(ptr)
+}
+
+def platform() -> string {
+    return sys_platform()
+}
+
+def flush() {
+    sys_flush()
+}
+
+def get_args() -> list {
+    return sys_get_args()
+}
+
+def get_tick_count() -> int {
+    return sys_get_tick_count()
+}
+
+def system_exit(code: int) {
+    sys_exit(code)
+}
