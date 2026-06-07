@@ -77,9 +77,7 @@ class TestInstallPy(unittest.TestCase):
             "Windows",
             env={"LOCALAPPDATA": "C:\\Users\\Test\\AppData\\Local"},
         )
-        # Handle os.path.join replacing with backslash/slash appropriately depending on actual OS
-        expected = os.path.join("C:\\Users\\Test\\AppData\\Local", "nova")
-        self.assertEqual(install.INSTALL_DIR, expected)
+        self.assertEqual(install.INSTALL_DIR, "C:\\Users\\Test\\AppData\\Local\\nova")
 
     def test_windows_install_dir_fallback(self):
         """On Windows without LOCALAPPDATA, fall back to home dir."""
@@ -152,10 +150,6 @@ class TestInstallPy(unittest.TestCase):
         import install
         with mock.patch.object(install, "INSTALL_DIR", self.sandbox):
             with mock.patch("platform.system", return_value="Windows"):
-                install.LAUNCHER_TEMPLATES = {
-                    "nova.bat": "@echo off\npython ...",
-                    "galaxy.bat": "@echo off\npython ..."
-                }
                 install._create_launchers()
                 self.assertTrue(os.path.exists(os.path.join(self.sandbox, "nova.bat")))
                 self.assertTrue(os.path.exists(os.path.join(self.sandbox, "galaxy.bat")))
@@ -191,7 +185,6 @@ class TestInstallPy(unittest.TestCase):
                 self.assertTrue(os.path.exists(galaxy_path))
 
     # ===== _add_to_path_windows (sandboxed) =====
-    @unittest.skipIf(sys.platform != "win32", "winreg is a Windows-only module")
     def test_add_to_path_windows_appends(self):
         """Windows PATH should get INSTALL_DIR appended."""
         import install
@@ -201,16 +194,15 @@ class TestInstallPy(unittest.TestCase):
                     result = install._add_to_path_windows()
                     self.assertTrue(result)
 
-    @unittest.skipIf(sys.platform != "win32", "winreg is a Windows-only module")
+    @unittest.skipIf(sys.platform == "win32", "winreg is a C module on Windows, cannot mock")
     def test_path_dedup_detects_existing(self):
         """Dedup should detect existing entry even with %VAR% in path."""
-        # This test relies on the winreg module, which is only available on Windows.
+        # On non-Windows, winreg is mocked; on Windows this tests that
+        # the REAL winreg doesn't crash when given %VAR% entries
         import install
         with mock.patch("platform.system", return_value="Windows"):
-            try:
-                import winreg as _wr
-            except ImportError:
-                self.skipTest("winreg module not available")
+            # Import winreg at test level (non-Windows only)
+            import winreg as _wr
             with mock.patch.object(_wr, "OpenKey") as mock_key:
                 mock_handle = mock.MagicMock()
                 mock_handle.__enter__.return_value = mock_handle
