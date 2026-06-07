@@ -106,7 +106,20 @@
 - `pyproject.toml` console_scripts entry for `pip install`
 - GitHub foundry cross-repo linking (nova-programming/Nova + galaxy-registry)
 
-### Installer PATH Fix (This Session)
+### Code Quality Fixes (This Session — June 2026)
+- **`_sys_write_raw` byte loop → `_fwrite`** (`codegen_x86.py:1555-1623`, `codegen.nv:469-537`): Replaced per-byte `_fputc` loop (150K calls for typical output) with buffer allocation + single `_fwrite` call. Allocates `malloc(length)` buffer, copies all bytes from list into buffer, calls `_fwrite(buf, 1, length, stream)`, then frees buffer. Eliminates 149,999 unnecessary function calls per output file.
+- **`_call_string_builtin` if-chain → dict dispatch** (`vm/machine.py:69-114`): Replaced 9 `if func_name == "..."` blocks with dict dispatch (`_STRING_HANDLERS`), each handler defined as a standalone module-level function. O(1) dispatch instead of O(n) linear scan.
+- **`peephole.py` removed** (`compiler/peephole.py`): Dead file — nothing imported it. Codegen has its own inline `peephole()` method.
+- **`compiler.nv` line-reading/writing dedup** (`stdlib/compiler.nv`): Extracted `write_lines(lines, path)` and `read_lines(path)` helper functions. Eliminated 4 copies of asm-write loop and 2 copies of file-reading + line-splitting logic. `compile_to_file`, `compile_to_exe`, `compile_to_bare`, `assemble_bare_file`, `assemble_link_file` all simplified.
+- **Lexer O(n²) string building fixed** (`stdlib/lexer.nv:185-213`): Replaced char-by-char concatenation in string literal parsing with `str_sub(src, start, i)` — O(n) instead of O(n²).
+- **Double-negative offset bug** (`codegen_x86.py:1812,1858`, `codegen.nv:710,756`): `mov eax, [ebp - -12]` → `mov eax, [ebp + 12]`. Root cause: variable store in Python codegen didn't handle negative offsets.
+- **Dead epilogue blocks removed** (`codegen_x86.py:4284-4440`): 17 dead `pop/pop/mov/pop/ret` sequences eliminated from `_emit_win32_runtime`.
+- **`_is_string_expr()` heuristics cleaned** (`codegen_x86.py:144,146`): Removed hardcoded variable name list (15 names) and field name list (15 names). Now relies solely on `inferred_type` and `struct_defs`.
+- **`string_vars` init fixed** (`codegen_x86.py:__init__`): Moved `self.string_vars = set()` to `__init__`, removed all `getattr(self, 'string_vars', set())` fallback patterns.
+- **Debug print removed** (`codegen_x86.py:get_prop_offset`): Removed `print(f"  REG: {name} -> offset {self.prop_offsets[name]}")`.
+- **Compiler.nv dedup**: 216→170 lines (21% reduction). Total diff: 176 insertions, 368 deletions across 7 files.
+
+### Installer PATH Fix (Previous Session)
 - **Root cause**: `_add_to_path_windows()` wrote PATH to registry + broadcast `WM_SETTINGCHANGE`, but child processes inherit the parent's environment block — they never re-read the registry. So `nova`/`galaxy` remained unavailable even in new terminal tabs until Explorer itself restarted.
 - **`install.py` fix**: After writing registry PATH, also updates `os.environ["PATH"]` so child processes of the installer see the change immediately.
 - **`use_nova.bat` helper**: New batch file in both `install.py` and `install.ps1` that prepends `%~dp0` to the current cmd.exe session's PATH. Created alongside `nova.bat`/`galaxy.bat`.
@@ -115,7 +128,7 @@
   - PowerShell: `$env:PATH = "$env:LOCALAPPDATA\nova;$env:PATH"`
 - **Test fix**: `test_launcher_execution_simulated` updated to skip `use_nova.bat` (helper script, not a python launcher).
 - **Registry cleanup**: Stale unit-test PATH entries (9 `nova-test-*` dirs) cleaned from registry.
-- **All 35 installer tests pass**, 19 galaxy tests pass, `nova build` self-hosted compiler builds successfully.
+- **Website docs updated**: reference.html (enums, switch, dict, hex/bin, string interp, stringlib table) + examples.html (5 new examples). Committed + pushed to both repos on June 7, 2026.
 
 ## Commands Reference
 ```powershell

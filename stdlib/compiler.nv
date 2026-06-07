@@ -84,29 +84,56 @@ def compile_file(path: string, debug_mode: int) -> list {
 
 def compile_to_file(input_path: string, output_path: string, debug_mode: int) {
     asm = compile_file(input_path, debug_mode)
-    fd = sys_open(output_path, "w")
+    write_lines(asm, output_path)
+    print("Compiled: " + input_path + " -> " + output_path)
+}
+
+def write_lines(lines: list, path: string) {
+    fd = sys_open(path, "w")
     i = 0
-    while i < len(asm) {
-        sys_write(fd, asm[i])
+    while i < len(lines) {
+        sys_write(fd, lines[i])
         sys_write(fd, "\n")
         i = i + 1
     }
     sys_close(fd)
-    print("Compiled: " + input_path + " -> " + output_path)
+}
+
+def read_lines(path: string) -> list {
+    print("Reading assembly: " + path)
+    fd = sys_open(path, "r")
+    if fd == 0 {
+        print("ERROR: Could not open file: " + path)
+        return []
+    }
+    content = sys_read(fd)
+    sys_close(fd)
+    result = []
+    start = 0
+    i = 0
+    content_len = len(content)
+    while i < content_len {
+        if content[i] == "\n" or content[i] == "\r" {
+            if i > start {
+                result.append(str_sub(content, start, i))
+            }
+            if content[i] == "\r" and i + 1 < content_len and content[i + 1] == "\n" {
+                i = i + 1
+            }
+            start = i + 1
+        }
+        i = i + 1
+    }
+    if i > start {
+        result.append(str_sub(content, start, i))
+    }
+    return result
 }
 
 def compile_to_exe(input_path: string, output_path: string, debug_mode: int) {
     asm = compile_file(input_path, debug_mode)
+    write_lines(asm, input_path + ".s")
     
-    fd = sys_open(input_path + ".s", "w")
-    i = 0
-    while i < len(asm) {
-        sys_write(fd, asm[i])
-        sys_write(fd, "\n")
-        i = i + 1
-    }
-    sys_close(fd)
-
     print("Assembling...")
     assembled = assemble(asm)
     print("Linking...")
@@ -119,15 +146,7 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int) {
 
 def compile_to_bare(input_path: string, output_path: string, debug_mode: int, load_addr: int, entry_name: string) {
     asm = compile_file(input_path, debug_mode)
-    
-    fd = sys_open(input_path + ".s", "w")
-    i = 0
-    while i < len(asm) {
-        sys_write(fd, asm[i])
-        sys_write(fd, "\n")
-        i = i + 1
-    }
-    sys_close(fd)
+    write_lines(asm, input_path + ".s")
     
     print("Assembling...")
     assembled = assemble(asm)
@@ -140,33 +159,8 @@ def compile_to_bare(input_path: string, output_path: string, debug_mode: int, lo
 }
 
 def assemble_bare_file(asm_path: string, output_path: string, load_addr: int) {
-    print("Reading assembly: " + asm_path)
-    fd = sys_open(asm_path, "r")
-    if fd == 0 {
-        print("ERROR: Could not open file: " + asm_path)
-        return
-    }
-    content = sys_read(fd)
-    sys_close(fd)
-    asm_lines = []
-    start = 0
-    i = 0
-    content_len = len(content)
-    while i < content_len {
-        if content[i] == "\n" or content[i] == "\r" {
-            if i > start {
-                asm_lines.append(str_sub(content, start, i))
-            }
-            if content[i] == "\r" and i + 1 < content_len and content[i + 1] == "\n" {
-                i = i + 1
-            }
-            start = i + 1
-        }
-        i = i + 1
-    }
-    if i > start {
-        asm_lines.append(str_sub(content, start, i))
-    }
+    asm_lines = read_lines(asm_path)
+    if len(asm_lines) == 0 { return }
     
     assembled = assemble(asm_lines)
     print("Linking bare-metal...")
@@ -178,33 +172,8 @@ def assemble_bare_file(asm_path: string, output_path: string, load_addr: int) {
 }
 
 def assemble_link_file(asm_path: string, output_path: string) {
-    print("Reading assembly: " + asm_path)
-    fd = sys_open(asm_path, "r")
-    if fd == 0 {
-        print("ERROR: Could not open file: " + asm_path)
-        return
-    }
-    content = sys_read(fd)
-    sys_close(fd)
-    asm_lines = []
-    start = 0
-    i = 0
-    content_len = len(content)
-    while i < content_len {
-        if content[i] == "\n" or content[i] == "\r" {
-            if i > start {
-                asm_lines.append(str_sub(content, start, i))
-            }
-            if content[i] == "\r" and i + 1 < content_len and content[i + 1] == "\n" {
-                i = i + 1
-            }
-            start = i + 1
-        }
-        i = i + 1
-    }
-    if i > start {
-        asm_lines.append(str_sub(content, start, i))
-    }
+    asm_lines = read_lines(asm_path)
+    if len(asm_lines) == 0 { return }
     
     assembled = assemble(asm_lines)
     print("Linking...")

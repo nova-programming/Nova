@@ -67,49 +67,9 @@ class VirtualMachine:
         return bytearray(self._to_str(val).encode('utf-8'))
 
     def _call_string_builtin(self, func_name, args):
-        if func_name == "split":
-            s = self._to_str(args[0])
-            delim = self._to_str(args[1]) if len(args) > 1 else " "
-            parts = s.split(delim)
-            result = [bytearray(p.encode('utf-8')) for p in parts]
-            self.stack.append(result)
-            return True
-        if func_name == "join":
-            lst = args[0]
-            delim = self._to_str(args[1]) if len(args) > 1 else ""
-            result = delim.join(self._to_str(x) for x in lst)
-            self.stack.append(bytearray(result.encode('utf-8')))
-            return True
-        if func_name == "trim":
-            s = self._to_str(args[0])
-            self.stack.append(bytearray(s.strip().encode('utf-8')))
-            return True
-        if func_name == "contains":
-            s = self._to_str(args[0])
-            sub = self._to_str(args[1])
-            self.stack.append(1 if sub in s else 0)
-            return True
-        if func_name == "replace":
-            s = self._to_str(args[0])
-            old = self._to_str(args[1]) if len(args) > 1 else ""
-            new = self._to_str(args[2]) if len(args) > 2 else ""
-            self.stack.append(bytearray(s.replace(old, new).encode('utf-8')))
-            return True
-        if func_name == "to_upper":
-            self.stack.append(bytearray(self._to_str(args[0]).upper().encode('utf-8')))
-            return True
-        if func_name == "to_lower":
-            self.stack.append(bytearray(self._to_str(args[0]).lower().encode('utf-8')))
-            return True
-        if func_name == "starts_with":
-            s = self._to_str(args[0])
-            prefix = self._to_str(args[1])
-            self.stack.append(1 if s.startswith(prefix) else 0)
-            return True
-        if func_name == "ends_with":
-            s = self._to_str(args[0])
-            suffix = self._to_str(args[1])
-            self.stack.append(1 if s.endswith(suffix) else 0)
+        handler = _STRING_HANDLERS.get(func_name)
+        if handler:
+            handler(self, args)
             return True
         return False
 
@@ -719,3 +679,49 @@ class VirtualMachine:
                     break # Exit VM
             else:
                 raise Exception(f"Unknown opcode: {opcode}")
+
+def _string_split(m, args):
+    s = m._to_str(args[0])
+    delim = m._to_str(args[1]) if len(args) > 1 else " "
+    m.stack.append([bytearray(p.encode('utf-8')) for p in s.split(delim)])
+
+def _string_join(m, args):
+    lst = args[0]
+    delim = m._to_str(args[1]) if len(args) > 1 else ""
+    m.stack.append(bytearray(delim.join(m._to_str(x) for x in lst).encode('utf-8')))
+
+def _string_trim(m, args):
+    m.stack.append(bytearray(m._to_str(args[0]).strip().encode('utf-8')))
+
+def _string_contains(m, args):
+    m.stack.append(1 if m._to_str(args[1]) in m._to_str(args[0]) else 0)
+
+def _string_replace(m, args):
+    s = m._to_str(args[0])
+    old = m._to_str(args[1]) if len(args) > 1 else ""
+    new = m._to_str(args[2]) if len(args) > 2 else ""
+    m.stack.append(bytearray(s.replace(old, new).encode('utf-8')))
+
+def _string_to_upper(m, args):
+    m.stack.append(bytearray(m._to_str(args[0]).upper().encode('utf-8')))
+
+def _string_to_lower(m, args):
+    m.stack.append(bytearray(m._to_str(args[0]).lower().encode('utf-8')))
+
+def _string_starts_with(m, args):
+    m.stack.append(1 if m._to_str(args[0]).startswith(m._to_str(args[1])) else 0)
+
+def _string_ends_with(m, args):
+    m.stack.append(1 if m._to_str(args[0]).endswith(m._to_str(args[1])) else 0)
+
+_STRING_HANDLERS = {
+    "split": _string_split,
+    "join": _string_join,
+    "trim": _string_trim,
+    "contains": _string_contains,
+    "replace": _string_replace,
+    "to_upper": _string_to_upper,
+    "to_lower": _string_to_lower,
+    "starts_with": _string_starts_with,
+    "ends_with": _string_ends_with,
+}

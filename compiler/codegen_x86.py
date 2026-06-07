@@ -16,11 +16,12 @@ class X86Codegen:
         self.loop_labels = [] # stack of (start_label, end_label)
         self.prop_offsets = {}
         self.struct_defs = {}
+        self.string_vars = set()
+        self.func_returns = {}
 
     def get_prop_offset(self, name):
         if name not in self.prop_offsets:
             self.prop_offsets[name] = len(self.prop_offsets) * 4
-            print(f"  REG: {name} -> offset {self.prop_offsets[name]}")
         return self.prop_offsets[name]
 
     def get_struct_prop_offset(self, struct_name, field_name):
@@ -114,32 +115,23 @@ class X86Codegen:
         if inferred == 'string':
             return True
         if isinstance(node, Variable):
-            string_vars = getattr(self, 'string_vars', set())
-            if node.name in string_vars: return True
-            if node.name in ["path", "file", "cmd", "line", "token", "source", "out_path", "file_path", "out_file", "arg_str"]: return True
+            if node.name in self.string_vars: return True
             return False
         if isinstance(node, BinOp) and node.op == '+':
             return self._is_string_expr(node.left) or self._is_string_expr(node.right)
         if isinstance(node, Call):
-            # Check if function returns string based on pre-populated func_returns
-            if hasattr(self, 'func_returns') and node.name in self.func_returns:
+            if node.name in self.func_returns:
                 return self.func_returns[node.name] == 'string'
-            # Also hardcode some stdlib functions if not found
             if node.name in ['str', 'trim', 'str_sub', '_sys_extract_arg', 'sys_read', 'sys_platform']:
                 return True
             return False  # Can't determine statically
         if isinstance(node, ArrayIndex):
             return self._is_string_expr(node.base)
         if isinstance(node, DataFieldAccess):
-            # Trust struct_defs over hardcoded lists if available
-            if hasattr(self, 'struct_defs') and self.struct_defs:
-                for struct_def in self.struct_defs.values():
-                    for field in struct_def.fields:
-                        if field[0] == node.field_name and field[1] == 'string':
-                            return True
-            else:
-                if node.field_name in ['val_str', 'kind', 'name', 'directive', 'label', 'mnemonic', 'dir_arg', 'raw', 'target', 'val', 'cond', 'field_name']:
-                    return True
+            for struct_def in self.struct_defs.values():
+                for field in struct_def.fields:
+                    if field[0] == node.field_name and field[1] == 'string':
+                        return True
         if isinstance(node, StrConvert):
             return self.is_leaf_expr(node.value)
         if isinstance(node, Slice):
@@ -1470,9 +1462,6 @@ class X86Codegen:
         self.assembly.append("mov esp, ebp")
         self.assembly.append("pop ebp")
         self.assembly.append("ret")
-        self.assembly.append("mov esp, ebp")
-        self.assembly.append("pop ebp")
-        self.assembly.append("ret")
         self.assembly.append("_sys_read:")
         self.assembly.append("push ebp")
         self.assembly.append("mov ebp, esp")
@@ -1548,11 +1537,6 @@ class X86Codegen:
         self.assembly.append("mov esp, ebp")
         self.assembly.append("pop ebp")
         self.assembly.append("ret")
-        self.assembly.append("pop edi")
-        self.assembly.append("pop esi")
-        self.assembly.append("mov esp, ebp")
-        self.assembly.append("pop ebp")
-        self.assembly.append("ret")
         self.assembly.append("_sys_write:")
         self.assembly.append("push ebp")
         self.assembly.append("mov ebp, esp")
@@ -1574,64 +1558,45 @@ class X86Codegen:
         self.assembly.append("sub esp, 4")
         self.assembly.append("push esi")
         self.assembly.append("push edi")
-        self.assembly.append("# line 28")
-        self.assembly.append("# line 29")
+        # get bytearray length
         self.assembly.append("mov eax, [ebp + 12]")
-        self.assembly.append("push eax")
-        self.assembly.append("pop eax")
-        self.assembly.append("mov eax, [eax]")
-        self.assembly.append("push eax")
-        self.assembly.append("pop eax")
-        self.assembly.append("mov esi, eax")
-        self.assembly.append("# line 30")
-        self.assembly.append("push 0")
-        self.assembly.append("pop eax")
-        self.assembly.append("mov edi, eax")
-        self.assembly.append("# line 31")
-        self.assembly.append("L_SYS_loop_1:")
-        self.assembly.append("mov ebx, esi")
-        self.assembly.append("mov eax, edi")
-        self.assembly.append("cmp eax, ebx")
-        self.assembly.append("setl al")
-        self.assembly.append("movzx eax, al")
-        self.assembly.append("push eax")
-        self.assembly.append("pop eax")
-        self.assembly.append("cmp eax, 0")
-        self.assembly.append("je L_SYS_loop_end_2")
-        self.assembly.append("# line 32")
-        self.assembly.append("mov eax, edi")
-        self.assembly.append("push eax")
-        self.assembly.append("mov eax, [ebp + 12]")
-        self.assembly.append("push eax")
-        self.assembly.append("pop edx")
-        self.assembly.append("pop ecx")
-        self.assembly.append("cmp ecx, 0")
-        self.assembly.append("jl _out_of_bounds")
-        self.assembly.append("cmp ecx, [edx]")
-        self.assembly.append("jge _out_of_bounds")
-        self.assembly.append("mov eax, [edx + 8]")
-        self.assembly.append("mov eax, [eax + ecx*4]")
-        self.assembly.append("push eax")
-        self.assembly.append("pop eax")
+        self.assembly.append("mov esi, [eax]")
+        # allocate buffer: malloc(length)
+        self.assembly.append("push esi")
+        self.assembly.append("call _malloc")
+        self.assembly.append("add esp, 4")
         self.assembly.append("mov [ebp - 4], eax")
-        self.assembly.append("# line 33")
+        # copy bytes from list to buffer
+        self.assembly.append("mov edi, 0")
+        self.assembly.append("L_SYS_copy_loop:")
+        self.assembly.append("cmp edi, esi")
+        self.assembly.append("jge L_SYS_copy_done")
+        # load bytearray[edi] with bounds check
+        self.assembly.append("mov eax, [ebp + 12]")
+        self.assembly.append("cmp edi, [eax]")
+        self.assembly.append("jl L_SYS_bounds_ok")
+        self.assembly.append("jmp _out_of_bounds")
+        self.assembly.append("L_SYS_bounds_ok:")
+        self.assembly.append("mov eax, [eax + 8]")
+        self.assembly.append("mov eax, [eax + edi*4]")
+        # store low byte into buffer[edi]
+        self.assembly.append("mov ecx, [ebp - 4]")
+        self.assembly.append("mov [ecx + edi], al")
+        self.assembly.append("inc edi")
+        self.assembly.append("jmp L_SYS_copy_loop")
+        self.assembly.append("L_SYS_copy_done:")
+        # _fwrite(buf, 1, length, stream)
         self.assembly.append("mov eax, [ebp + 8]")
         self.assembly.append("push eax")
-        self.assembly.append("mov eax, [ebp - 4]")
-        self.assembly.append("push eax")
-        self.assembly.append("call _fputc")
-        self.assembly.append("add esp, 8")
-        self.assembly.append("push eax")
-        self.assembly.append("pop eax")
-        self.assembly.append("# line 34")
-        self.assembly.append("mov ebx, 1")
-        self.assembly.append("mov eax, edi")
-        self.assembly.append("add eax, ebx")
-        self.assembly.append("push eax")
-        self.assembly.append("pop eax")
-        self.assembly.append("mov edi, eax")
-        self.assembly.append("jmp L_SYS_loop_1")
-        self.assembly.append("L_SYS_loop_end_2:")
+        self.assembly.append("push esi")
+        self.assembly.append("push 1")
+        self.assembly.append("push dword ptr [ebp - 4]")
+        self.assembly.append("call _fwrite")
+        self.assembly.append("add esp, 16")
+        # free buffer
+        self.assembly.append("push dword ptr [ebp - 4]")
+        self.assembly.append("call _free")
+        self.assembly.append("add esp, 4")
         self.assembly.append("pop edi")
         self.assembly.append("pop esi")
         self.assembly.append("mov esp, ebp")
@@ -1664,9 +1629,6 @@ class X86Codegen:
         self.assembly.append("mov esp, ebp")
         self.assembly.append("pop ebp")
         self.assembly.append("ret")
-        self.assembly.append("mov esp, ebp")
-        self.assembly.append("pop ebp")
-        self.assembly.append("ret")
         self.assembly.append("_sys_free:")
         self.assembly.append("push ebp")
         self.assembly.append("mov ebp, esp")
@@ -1685,9 +1647,6 @@ class X86Codegen:
         self.assembly.append("# line 56")
         self.assembly.append("push offset str_const_sys_platform")
         self.assembly.append("pop eax")
-        self.assembly.append("mov esp, ebp")
-        self.assembly.append("pop ebp")
-        self.assembly.append("ret")
         self.assembly.append("mov esp, ebp")
         self.assembly.append("pop ebp")
         self.assembly.append("ret")
@@ -1735,9 +1694,6 @@ class X86Codegen:
         self.assembly.append("# line 63")
         self.assembly.append("push 0")
         self.assembly.append("pop eax")
-        self.assembly.append("mov esp, ebp")
-        self.assembly.append("pop ebp")
-        self.assembly.append("ret")
         self.assembly.append("mov esp, ebp")
         self.assembly.append("pop ebp")
         self.assembly.append("ret")
@@ -1809,7 +1765,7 @@ class X86Codegen:
         self.assembly.append("sub eax, ebx")
         self.assembly.append("push eax")
         self.assembly.append("pop eax")
-        self.assembly.append("mov [ebp - -12], eax")
+        self.assembly.append("mov [ebp + 12], eax")
         self.assembly.append("# line 79")
         self.assembly.append("mov ebx, 0")
         self.assembly.append("mov eax, [ebp + 12]")
@@ -1855,7 +1811,7 @@ class X86Codegen:
         self.assembly.append("sub eax, ebx")
         self.assembly.append("push eax")
         self.assembly.append("pop eax")
-        self.assembly.append("mov [ebp - -12], eax")
+        self.assembly.append("mov [ebp + 12], eax")
         self.assembly.append("jmp L_SYS_end_12")
         self.assembly.append("L_SYS_else_11:")
         self.assembly.append("L_SYS_end_12:")
@@ -1931,11 +1887,6 @@ class X86Codegen:
         self.assembly.append("mov eax, esi")
         self.assembly.append("push eax")
         self.assembly.append("pop eax")
-        self.assembly.append("pop edi")
-        self.assembly.append("pop esi")
-        self.assembly.append("mov esp, ebp")
-        self.assembly.append("pop ebp")
-        self.assembly.append("ret")
         self.assembly.append("pop edi")
         self.assembly.append("pop esi")
         self.assembly.append("mov esp, ebp")
@@ -2235,11 +2186,6 @@ class X86Codegen:
         self.assembly.append("mov esp, ebp")
         self.assembly.append("pop ebp")
         self.assembly.append("ret")
-        self.assembly.append("pop edi")
-        self.assembly.append("pop esi")
-        self.assembly.append("mov esp, ebp")
-        self.assembly.append("pop ebp")
-        self.assembly.append("ret")
         self.assembly.append("_sys_system:")
         self.assembly.append("push ebp")
         self.assembly.append("mov ebp, esp")
@@ -2261,10 +2207,6 @@ class X86Codegen:
         self.assembly.append("mov eax, esi")
         self.assembly.append("push eax")
         self.assembly.append("pop eax")
-        self.assembly.append("pop esi")
-        self.assembly.append("mov esp, ebp")
-        self.assembly.append("pop ebp")
-        self.assembly.append("ret")
         self.assembly.append("pop esi")
         self.assembly.append("mov esp, ebp")
         self.assembly.append("pop ebp")
@@ -2306,9 +2248,6 @@ class X86Codegen:
         self.assembly.append("mov esp, ebp")
         self.assembly.append("pop ebp")
         self.assembly.append("ret")
-        self.assembly.append("mov esp, ebp")
-        self.assembly.append("pop ebp")
-        self.assembly.append("ret")
         self.assembly.append("_square:")
         self.assembly.append("push ebp")
         self.assembly.append("mov ebp, esp")
@@ -2318,9 +2257,6 @@ class X86Codegen:
         self.assembly.append("imul eax, ebx")
         self.assembly.append("push eax")
         self.assembly.append("pop eax")
-        self.assembly.append("mov esp, ebp")
-        self.assembly.append("pop ebp")
-        self.assembly.append("ret")
         self.assembly.append("mov esp, ebp")
         self.assembly.append("pop ebp")
         self.assembly.append("ret")
@@ -2339,9 +2275,6 @@ class X86Codegen:
         self.assembly.append("imul eax, ebx")
         self.assembly.append("push eax")
         self.assembly.append("pop eax")
-        self.assembly.append("mov esp, ebp")
-        self.assembly.append("pop ebp")
-        self.assembly.append("ret")
         self.assembly.append("mov esp, ebp")
         self.assembly.append("pop ebp")
         self.assembly.append("ret")
@@ -2377,9 +2310,6 @@ class X86Codegen:
         self.assembly.append("mov esp, ebp")
         self.assembly.append("pop ebp")
         self.assembly.append("ret")
-        self.assembly.append("mov esp, ebp")
-        self.assembly.append("pop ebp")
-        self.assembly.append("ret")
         self.assembly.append("_max_of:")
         self.assembly.append("push ebp")
         self.assembly.append("mov ebp, esp")
@@ -2410,9 +2340,6 @@ class X86Codegen:
         self.assembly.append("mov esp, ebp")
         self.assembly.append("pop ebp")
         self.assembly.append("ret")
-        self.assembly.append("mov esp, ebp")
-        self.assembly.append("pop ebp")
-        self.assembly.append("ret")
         self.assembly.append("_min_of:")
         self.assembly.append("push ebp")
         self.assembly.append("mov ebp, esp")
@@ -2440,9 +2367,6 @@ class X86Codegen:
         self.assembly.append("mov eax, [ebp + 12]")
         self.assembly.append("push eax")
         self.assembly.append("pop eax")
-        self.assembly.append("mov esp, ebp")
-        self.assembly.append("pop ebp")
-        self.assembly.append("ret")
         self.assembly.append("mov esp, ebp")
         self.assembly.append("pop ebp")
         self.assembly.append("ret")
@@ -2486,18 +2410,12 @@ class X86Codegen:
         self.assembly.append("mov esp, ebp")
         self.assembly.append("pop ebp")
         self.assembly.append("ret")
-        self.assembly.append("mov esp, ebp")
-        self.assembly.append("pop ebp")
-        self.assembly.append("ret")
         self.assembly.append("__chacha_mem:")
         self.assembly.append("push ebp")
         self.assembly.append("mov ebp, esp")
         self.assembly.append("# line 44")
         self.assembly.append("push offset str_const_chacha_mem")
         self.assembly.append("pop eax")
-        self.assembly.append("mov esp, ebp")
-        self.assembly.append("pop ebp")
-        self.assembly.append("ret")
         self.assembly.append("mov esp, ebp")
         self.assembly.append("pop ebp")
         self.assembly.append("ret")
@@ -4293,11 +4211,6 @@ class X86Codegen:
         self.assembly.append("mov esp, ebp")
         self.assembly.append("pop ebp")
         self.assembly.append("ret")
-        self.assembly.append("pop edi")
-        self.assembly.append("pop esi")
-        self.assembly.append("mov esp, ebp")
-        self.assembly.append("pop ebp")
-        self.assembly.append("ret")
     def scan_vars(self, node):
         """Pre-scan statements for assignments to reserve stack space for local variables"""
         if isinstance(node, Assignment):
@@ -4352,7 +4265,7 @@ class X86Codegen:
         # Save function arguments in local_vars map
         # Under cdecl: ebp + 8 is 1st arg, ebp + 12 is 2nd, etc.
         old_local_vars = self.local_vars.copy()
-        old_string_vars = getattr(self, 'string_vars', set()).copy()
+        old_string_vars = self.string_vars.copy()
         self.local_vars = {}
         self.string_vars = set()
         for i, param in enumerate(fn.params):
@@ -4400,11 +4313,12 @@ class X86Codegen:
             offset = self.local_vars[node.name]
             if isinstance(offset, str):
                 self.assembly.append(f"    mov {offset}, eax")
+            elif offset < 0:
+                self.assembly.append(f"    mov [ebp + {-offset}], eax")
             else:
                 self.assembly.append(f"    mov [ebp - {offset}], eax")
             # Track if this variable holds a string
             if self._is_string_expr(node.value):
-                self.string_vars = getattr(self, 'string_vars', set())
                 self.string_vars.add(node.name)
         elif isinstance(node, DataFieldAssign):
             self.compile_expr(node.value)
