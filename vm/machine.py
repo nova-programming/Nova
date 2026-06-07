@@ -397,7 +397,7 @@ class VirtualMachine:
                         continue
                     else:
                         raise Exception(f"len() not defined for {val.class_name}")
-                elif isinstance(val, (str, bytearray, list)):
+                elif isinstance(val, (str, bytearray, list, dict)):
                     self.stack.append(len(val))
                 else:
                     raise Exception("len() applied to invalid type")
@@ -521,6 +521,17 @@ class VirtualMachine:
                         if isinstance(k, bytearray):
                             k = k.decode('utf-8')
                         self.stack.append(k in instance)
+                    elif method_name == "get":
+                        k = args[0]
+                        if isinstance(k, bytearray):
+                            k = k.decode('utf-8')
+                        self.stack.append(instance.get(k, 0))
+                    elif method_name == "set":
+                        k = args[0]
+                        if isinstance(k, bytearray):
+                            k = k.decode('utf-8')
+                        instance[k] = args[1]
+                        self.stack.append(0)
                     elif method_name == "remove":
                         k = args[0]
                         if isinstance(k, bytearray):
@@ -533,6 +544,12 @@ class VirtualMachine:
                         self.stack.append(keys)
                     elif method_name == "values":
                         self.stack.append(list(instance.values()))
+                    elif method_name == "items":
+                        items = []
+                        for k, v in instance.items():
+                            items.append(bytearray(k.encode('utf-8')) if isinstance(k, str) else k)
+                            items.append(v)
+                        self.stack.append(items)
                     else:
                         raise Exception(f"Dict method {method_name} not supported")
                     continue

@@ -49,6 +49,8 @@ TOKEN_SPEC = [
     ("FREE",     r"free\b"),
     ("HAS",      r"has\b"),
     ("ELIF",     r"elif\b"),
+    ("SWITCH",   r"switch\b"),
+    ("CASE",     r"case\b"),
 
     # Directives
     ("RAW",      r"@raw"),
@@ -60,6 +62,7 @@ TOKEN_SPEC = [
     ("TYPE_BOOL",   r"bool\b"),
     ("TYPE_STRING", r"string\b"),
     ("CONST",       r"const\b"),
+    ("ENUM",        r"enum\b"),
     ("STR",         r"str\b"),
 
     # Identifiers

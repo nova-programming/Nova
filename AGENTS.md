@@ -42,6 +42,18 @@
 - **`_fopen` "wb" mode bug** (`codegen_x86.py:1222`): `_fopen` used `_strcmp` to match mode strings against "w", "w+", "r+", "a" but NOT "wb". `sys_open(path, "wb")` fell through to default read mode (OPEN_EXISTING/GENERIC_READ), so the PE output file was never created. Fixed by checking first char of mode string instead of exact match — handles all mode variants (w, wb, w+, w+b, r, rb, r+, a, ab, etc.).
 - **`_fputs` HANDLE dereference bug** (`codegen_x86.py:1272-1273`, `codegen.nv:3824-3825`): `_fputs` executed `mov eax, [ebp + 12]; push dword ptr [eax]` — dereferencing the HANDLE as if it were a pointer to a HANDLE. `_fputc` and `_fwrite` correctly passed the HANDLE directly. This caused `STATUS_ACCESS_VIOLATION` (0xC0000005) when `compile_to_exe` called `sys_write(fd, string)` during assembly file output. Fixed by changing to `push dword ptr [ebp + 12]` (direct HANDLE, no dereference).
 - **Result**: `nova.exe build <file.nv>` now works end-to-end. Full self-hosted bootstrap: reads source → tokenizes → parses → type-checks → generates assembly → writes `.s` file → assembles → links → produces working PE executable. Both `nova.exe assemble-link` and `nova.exe build` commands are functional.
+
+### Language Features (This Session — June 2026)
+- **Switch/match**: `switch expr { case val { body } else { body } }` syntax, desugars at parse time to if-elif-else chain. No AST/codegen changes needed. Both Python parser (`parser/parser.py:755-777`) and self-hosted parser (`stdlib/parser.nv:978-1032`) implement this.
+- **HashMap/Dictionary**: Existing `{"key": val}` literal syntax enhanced with `get(key)`, `set(key, val)`, `items()` methods + `len()` for dict. Dict literal parsing added to self-hosted `parser.nv` (interleaved key-value pairs in `args` list). Works in `nova dev` (VM); native codegen emits placeholder comment + `push 0`.
+- **VM dict methods** (`vm/machine.py:518-552`): `has`, `get`, `set`, `remove`, `keys`, `values`, `items` — all backed by Python `dict`.
+- **Dict in codegen** (`stdlib/codegen_expr.nv:1063-1074`): `node_to_asm` formats dicts, `compile_expr` emits placeholder for native.
+
+### Self-Hosted Compiler Refactoring (This Session)
+- **`match_keyword` → `switch`** (`stdlib/lexer.nv:32-82`): Replaced 49-line if-chain with single switch statement covering all 44 Nova keywords
+- **Two-char operator matching → `switch`** (`stdlib/lexer.nv:225-242`): `==`, `!=`, `<=`, `>=`, `->`, `>>`, `<<` matched via switch instead of 7 separate if-blocks
+- **Single-char operator matching → `switch`** (`stdlib/lexer.nv:248-272`): 22 operator characters (+, -, *, /, %, =, &, |, ^, ~, <, >, (, ), {, }, [, ], ,, :, ., ;) matched via switch
+- **`parse_primary` → `elif` chain** (`stdlib/parser.nv:57-274`): Flattened deeply nested `} else { if ... }` pyramid spanning 200+ lines into clean flat `if/elif/else` chain. Every token type (NUMBER, STRING, TRUE, FALSE, LBRACK, LBRACE, LEN, STR, SIZEOF, OPENF, READ, WRITE, CLOSE, ALLOC, FREE, IDENT, LPAREN, SELF, RBRACE, COMMA) has its own elif branch
 - **Cross-drive relpath fix** (`main.py:131-136`): `os.path.relpath()` raises `ValueError` when source and destination are on different Windows drives (e.g., GCC on C:, project on D:). Caught exception and falls back to absolute paths.
 
 ### Compiler Codegen Fixes (Previous Session)

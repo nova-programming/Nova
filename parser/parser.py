@@ -368,6 +368,7 @@ class Parser:
                                         "WHILE", "IF", "ELSE", "ELIF", "IN", "TO",
                                         "STEP", "DOWNTO", "AND", "OR", "NOT", "HAS",
                                         "AS", "CONST", "DEF", "SIZEOF", "OPENF",
+                                        "SWITCH", "CASE",
                                         "TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING",
                                         "TRUE", "FALSE"):
                     prop = self.eat(tok[0])[1]
@@ -448,6 +449,19 @@ class Parser:
 
     # ---------------- STATEMENTS ----------------
 
+    def parse_enum(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
+        self.eat("ENUM")
+        name = self.eat("IDENT")[1]
+        self.eat("LBRACE")
+        variants = []
+        while self.current() and self.current()[0] == "IDENT":
+            variants.append(self.eat("IDENT")[1])
+            if self.current() and self.current()[0] == "COMMA":
+                self.eat("COMMA")
+        self.eat("RBRACE")
+        return EnumDef(name, variants, line=line)
+
     def parse_class(self):
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("CLASS")
@@ -488,6 +502,8 @@ class Parser:
         kind = token[0]
         line = token[2] if len(token) > 2 else 0
 
+        if kind == "ENUM":
+            return self.parse_enum()
         if kind == "CLASS":
             return self.parse_class()
         if kind == "IMPORT":
@@ -526,6 +542,8 @@ class Parser:
             return CloseFile(fd, line=line)
         if kind == "IF":
             return self.parse_if()
+        if kind == "SWITCH":
+            return self.parse_switch()
         if kind == "WHILE":
             return self.parse_while()
         if kind == "RETURN":
@@ -711,6 +729,35 @@ class Parser:
             return self.parse_block()
         return []
 
+    def parse_switch(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
+        self.eat("SWITCH")
+        expr = self.parse_expr()
+        self.eat("LBRACE")
+        cases = []
+        else_body = []
+        while self.current() and self.current()[0] not in ("RBRACE", "EOF"):
+            if self.current()[0] == "CASE":
+                self.eat("CASE")
+                case_expr = self.parse_expr()
+                case_body = self.parse_block()
+                cases.append((case_expr, case_body))
+            elif self.current()[0] == "ELSE":
+                self.eat("ELSE")
+                else_body = self.parse_block()
+            else:
+                break
+        self.eat("RBRACE")
+        # Desugar: build if-elif-else chain from last case to first
+        current_else = else_body
+        for case_expr, case_body in reversed(cases):
+            cond = Compare(expr, "==", case_expr, line=line)
+            current_else = [IfElse(cond, case_body, current_else, line=line)]
+        if not cases:
+            return else_body[0] if else_body else None
+        # current_else is [IfElse(...)] — return the node
+        return current_else[0]
+
     def parse_while(self):
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("WHILE")
@@ -727,4 +774,23 @@ class Parser:
             stmt = self.parse_statement()
             if stmt:
                 program.append(stmt)
-        return program
+        # Desugar enums into const assignments
+        return _desugar_enums(program)
+
+
+def _desugar_enums(program):
+    """Convert EnumDef nodes into const integer assignments."""
+    result = []
+    for node in program:
+        if isinstance(node, EnumDef):
+            for i, variant in enumerate(node.variants):
+                const_name = f"{node.name}_{variant}"
+                result.append(Assignment(
+                    Variable(const_name, type_name="int", line=node.line),
+                    Number(i, line=node.line),
+                    is_const=True,
+                    line=node.line
+                ))
+        else:
+            result.append(node)
+    return result

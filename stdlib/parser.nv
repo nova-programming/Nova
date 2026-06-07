@@ -76,180 +76,161 @@ def parse_primary(state: ParserState) -> AstNode {
             node.is_float = 0
             node.val_int = atoi(tok.val)
         }
-    } else {
-        if tok.kind == "STRING" {
-            eat_tok(state, "STRING")
-            node.kind = "String"
-            node.val_str = tok.val
-        } else {
-            if tok.kind == "TRUE" {
-                eat_tok(state, "TRUE")
-                node.kind = "Boolean"
-                node.val_int = 1
-            } else {
-                if tok.kind == "FALSE" {
-                    eat_tok(state, "FALSE")
-                    node.kind = "Boolean"
-                    node.val_int = 0
-                } else {
-                    if tok.kind == "LBRACK" {
-                        eat_tok(state, "LBRACK")
-                        node.kind = "ListLiteral"
-                        node.args = []
-                        check = current_tok(state)
-                        if check.kind != "RBRACK" {
-                            node.args.append(parse_expr(state))
-                            check = current_tok(state)
-                            while check.kind == "COMMA" {
-                                eat_tok(state, "COMMA")
-                                node.args.append(parse_expr(state))
-                                check = current_tok(state)
-                            }
-                        }
-                        eat_tok(state, "RBRACK")
-                    } else {
-                        if tok.kind == "LEN" {
-                        eat_tok(state, "LEN")
-                        eat_tok(state, "LPAREN")
-                        node.kind = "Len"
-                        node.left = parse_expr(state)
-                        eat_tok(state, "RPAREN")
-                    } else {
-                        if tok.kind == "STR" {
-                            eat_tok(state, "STR")
-                            eat_tok(state, "LPAREN")
-                            node.kind = "StrConvert"
-                            node.left = parse_expr(state)
-                            eat_tok(state, "RPAREN")
-                        } else {
-                            if tok.kind == "SIZEOF" {
-                                eat_tok(state, "SIZEOF")
-                                eat_tok(state, "LPAREN")
-                                node.kind = "SizeOf"
-                                node.left = parse_expr(state)
-                                eat_tok(state, "RPAREN")
-                            } else {
-                                if tok.kind == "OPENF" {
-                                    eat_tok(state, "OPENF")
-                                    eat_tok(state, "LPAREN")
-                                    path_node = parse_expr(state)
-                                    
-                                    mode_node = AstNode()
-                                    mode_node.kind = "String"
-                                    mode_node.val_str = "r"
-                                    
-                                    check_comma = current_tok(state)
-                                    if check_comma.kind == "COMMA" {
-                                        eat_tok(state, "COMMA")
-                                        mode_node = parse_expr(state)
-                                    }
-                                    
-                                    eat_tok(state, "RPAREN")
-                                    node.kind = "Openf"
-                                    node.left = path_node
-                                    node.right = mode_node
-                                } else {
-                                    if tok.kind == "READ" {
-                                        eat_tok(state, "READ")
-                                        eat_tok(state, "LPAREN")
-                                        node.kind = "ReadFile"
-                                        node.left = parse_expr(state)
-                                        eat_tok(state, "RPAREN")
-                                    } else {
-                                        if tok.kind == "WRITE" {
-                                            eat_tok(state, "WRITE")
-                                            eat_tok(state, "LPAREN")
-                                            fd_node = parse_expr(state)
-                                            eat_tok(state, "COMMA")
-                                            content_node = parse_expr(state)
-                                            eat_tok(state, "RPAREN")
-                                            node.kind = "WriteFile"
-                                            node.left = fd_node
-                                            node.right = content_node
-                                        } else {
-                                            if tok.kind == "CLOSE" {
-                                                eat_tok(state, "CLOSE")
-                                                eat_tok(state, "LPAREN")
-                                                node.kind = "CloseFile"
-                                                node.left = parse_expr(state)
-                                                eat_tok(state, "RPAREN")
-                                            } else {
-                                                if tok.kind == "ALLOC" {
-                                                    eat_tok(state, "ALLOC")
-                                                    eat_tok(state, "LPAREN")
-                                                    node.kind = "Alloc"
-                                                    node.left = parse_expr(state)
-                                                    eat_tok(state, "RPAREN")
-                                                } else {
-                                                    if tok.kind == "FREE" {
-                                                        eat_tok(state, "FREE")
-                                                        eat_tok(state, "LPAREN")
-                                                        node.kind = "Free"
-                                                        node.left = parse_expr(state)
-                                                        eat_tok(state, "RPAREN")
-                                                    } else {
-                                                        if tok.kind == "IDENT" {
-                                                            eat_tok(state, "IDENT")
-                                                            next_tok = current_tok(state)
-                                                            if next_tok.kind == "LPAREN" {
-                                                                eat_tok(state, "LPAREN")
-                                                                node.kind = "Call"
-                                                                node.val_str = tok.val
-                                                                node.args = []
-                                                                check = current_tok(state)
-                                                                if check.kind != "RPAREN" {
-                                                                    node.args.append(parse_expr(state))
-                                                                    check = current_tok(state)
-                                                                    while check.kind == "COMMA" {
-                                                                        eat_tok(state, "COMMA")
-                                                                        node.args.append(parse_expr(state))
-                                                                        check = current_tok(state)
-                                                                    }
-                                                                }
-                                                                eat_tok(state, "RPAREN")
-                                                            } else {
-                                                                node.kind = "Variable"
-                                                                node.val_str = tok.val
-                                                            }
-                                                        } else {
-                                                            if tok.kind == "LPAREN" {
-                                                                eat_tok(state, "LPAREN")
-                                                                node = parse_expr(state)
-                                                                eat_tok(state, "RPAREN")
-                                                            } else {
-                                                                if tok.kind == "SELF" {
-                                                                    eat_tok(state, "SELF")
-                                                                    node.kind = "Self"
-                                                                } else {
-                                                                    if tok.kind == "RBRACE" {
-                                                                        eat_tok(state, "RBRACE")
-                                                                        node.kind = "NONE"
-                                                                    } else {
-                                                                        if tok.kind == "COMMA" {
-                                                                            eat_tok(state, "COMMA")
-                                                                            node.kind = "Variable"
-                                                                            node.val_str = ","
-                                                                        } else {
-                                                                        errors.err("Syntax", state.filename, tok.line, "unexpected token: " + tok.kind, "this token does not belong here — check for misplaced operators, missing expressions, or extra punctuation")
-                                                                        state.pos = state.pos + 1
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            }
-                        }
-                    }
-                }
+    } elif tok.kind == "STRING" {
+        eat_tok(state, "STRING")
+        node.kind = "String"
+        node.val_str = tok.val
+    } elif tok.kind == "TRUE" {
+        eat_tok(state, "TRUE")
+        node.kind = "Boolean"
+        node.val_int = 1
+    } elif tok.kind == "FALSE" {
+        eat_tok(state, "FALSE")
+        node.kind = "Boolean"
+        node.val_int = 0
+    } elif tok.kind == "LBRACK" {
+        eat_tok(state, "LBRACK")
+        node.kind = "ListLiteral"
+        node.args = []
+        check = current_tok(state)
+        if check.kind != "RBRACK" {
+            node.args.append(parse_expr(state))
+            check = current_tok(state)
+            while check.kind == "COMMA" {
+                eat_tok(state, "COMMA")
+                node.args.append(parse_expr(state))
+                check = current_tok(state)
             }
         }
+        eat_tok(state, "RBRACK")
+    } elif tok.kind == "LBRACE" {
+        eat_tok(state, "LBRACE")
+        node.kind = "DictLiteral"
+        node.args = []
+        check = current_tok(state)
+        if check.kind != "RBRACE" {
+            node.args.append(parse_expr(state))
+            eat_tok(state, "COLON")
+            node.args.append(parse_expr(state))
+            check = current_tok(state)
+            while check.kind == "COMMA" {
+                eat_tok(state, "COMMA")
+                node.args.append(parse_expr(state))
+                eat_tok(state, "COLON")
+                node.args.append(parse_expr(state))
+                check = current_tok(state)
+            }
+        }
+        eat_tok(state, "RBRACE")
+    } elif tok.kind == "LEN" {
+        eat_tok(state, "LEN")
+        eat_tok(state, "LPAREN")
+        node.kind = "Len"
+        node.left = parse_expr(state)
+        eat_tok(state, "RPAREN")
+    } elif tok.kind == "STR" {
+        eat_tok(state, "STR")
+        eat_tok(state, "LPAREN")
+        node.kind = "StrConvert"
+        node.left = parse_expr(state)
+        eat_tok(state, "RPAREN")
+    } elif tok.kind == "SIZEOF" {
+        eat_tok(state, "SIZEOF")
+        eat_tok(state, "LPAREN")
+        node.kind = "SizeOf"
+        node.left = parse_expr(state)
+        eat_tok(state, "RPAREN")
+    } elif tok.kind == "OPENF" {
+        eat_tok(state, "OPENF")
+        eat_tok(state, "LPAREN")
+        path_node = parse_expr(state)
+        mode_node = AstNode()
+        mode_node.kind = "String"
+        mode_node.val_str = "r"
+        
+        check_comma = current_tok(state)
+        if check_comma.kind == "COMMA" {
+            eat_tok(state, "COMMA")
+            mode_node = parse_expr(state)
+        }
+        eat_tok(state, "RPAREN")
+        node.kind = "Openf"
+        node.left = path_node
+        node.right = mode_node
+    } elif tok.kind == "READ" {
+        eat_tok(state, "READ")
+        eat_tok(state, "LPAREN")
+        node.kind = "ReadFile"
+        node.left = parse_expr(state)
+        eat_tok(state, "RPAREN")
+    } elif tok.kind == "WRITE" {
+        eat_tok(state, "WRITE")
+        eat_tok(state, "LPAREN")
+        fd_node = parse_expr(state)
+        eat_tok(state, "COMMA")
+        content_node = parse_expr(state)
+        eat_tok(state, "RPAREN")
+        node.kind = "WriteFile"
+        node.left = fd_node
+        node.right = content_node
+    } elif tok.kind == "CLOSE" {
+        eat_tok(state, "CLOSE")
+        eat_tok(state, "LPAREN")
+        node.kind = "CloseFile"
+        node.left = parse_expr(state)
+        eat_tok(state, "RPAREN")
+    } elif tok.kind == "ALLOC" {
+        eat_tok(state, "ALLOC")
+        eat_tok(state, "LPAREN")
+        node.kind = "Alloc"
+        node.left = parse_expr(state)
+        eat_tok(state, "RPAREN")
+    } elif tok.kind == "FREE" {
+        eat_tok(state, "FREE")
+        eat_tok(state, "LPAREN")
+        node.kind = "Free"
+        node.left = parse_expr(state)
+        eat_tok(state, "RPAREN")
+    } elif tok.kind == "IDENT" {
+        eat_tok(state, "IDENT")
+        next_tok = current_tok(state)
+        if next_tok.kind == "LPAREN" {
+            eat_tok(state, "LPAREN")
+            node.kind = "Call"
+            node.val_str = tok.val
+            node.args = []
+            check = current_tok(state)
+            if check.kind != "RPAREN" {
+                node.args.append(parse_expr(state))
+                check = current_tok(state)
+                while check.kind == "COMMA" {
+                    eat_tok(state, "COMMA")
+                    node.args.append(parse_expr(state))
+                    check = current_tok(state)
+                }
+            }
+            eat_tok(state, "RPAREN")
+        } else {
+            node.kind = "Variable"
+            node.val_str = tok.val
+        }
+    } elif tok.kind == "LPAREN" {
+        eat_tok(state, "LPAREN")
+        node = parse_expr(state)
+        eat_tok(state, "RPAREN")
+    } elif tok.kind == "SELF" {
+        eat_tok(state, "SELF")
+        node.kind = "Self"
+    } elif tok.kind == "RBRACE" {
+        eat_tok(state, "RBRACE")
+        node.kind = "NONE"
+    } elif tok.kind == "COMMA" {
+        eat_tok(state, "COMMA")
+        node.kind = "Variable"
+        node.val_str = ","
+    } else {
+        errors.err("Syntax", state.filename, tok.line, "unexpected token: " + tok.kind, "this token does not belong here — check for misplaced operators, missing expressions, or extra punctuation")
+        state.pos = state.pos + 1
     }
     
     # Handle array index, property access, or dot/method access
@@ -603,6 +584,10 @@ def parse_statement(state: ParserState) -> AstNode {
         node.else_body = else_body
         return node
     }
+
+    if tok.kind == "SWITCH" {
+        return parse_switch(state, stmt_line)
+    }
     
     if tok.kind == "WHILE" {
         eat_tok(state, "WHILE")
@@ -909,6 +894,10 @@ def parse_statement(state: ParserState) -> AstNode {
         return node
     }
 
+    if tok.kind == "ENUM" {
+        return parse_enum_def(state, stmt_line)
+    }
+
     # Assignment or standalone expr
     is_const = 0
     if tok.kind == "CONST" {
@@ -963,6 +952,116 @@ def parse_export(state: ParserState) -> list {
     return names
 }
 
+def parse_switch(state: ParserState, stmt_line: int) -> AstNode {
+    eat_tok(state, "SWITCH")
+    expr = parse_expr(state)
+    eat_tok(state, "LBRACE")
+    case_exprs = []
+    case_bodies = []
+    else_body = []
+    
+    check = current_tok(state)
+    while check.kind != "RBRACE" and check.kind != "EOF" {
+        if check.kind == "CASE" {
+            eat_tok(state, "CASE")
+            case_exprs.append(parse_expr(state))
+            case_bodies.append(parse_block(state))
+        } elif check.kind == "ELSE" {
+            eat_tok(state, "ELSE")
+            else_body = parse_block(state)
+        } else {
+            break
+        }
+        check = current_tok(state)
+    }
+    eat_tok(state, "RBRACE")
+    
+    if len(case_exprs) == 0 {
+        if len(else_body) > 0 { return else_body[0] }
+        node = AstNode()
+        node.line = stmt_line
+        node.kind = "NONE"
+        return node
+    }
+    
+    i = len(case_exprs) - 1
+    current_else = else_body
+    while i >= 0 {
+        cond_node = AstNode()
+        cond_node.line = stmt_line
+        cond_node.kind = "Compare"
+        cond_node.val_str = "=="
+        cond_node.left = expr
+        cond_node.right = case_exprs[i]
+        
+        if_node = AstNode()
+        if_node.line = stmt_line
+        if_node.kind = "IfElse"
+        if_node.cond = cond_node
+        if_node.body = case_bodies[i]
+        if_node.else_body = current_else
+        
+        current_else = [if_node]
+        i = i - 1
+    }
+    
+    return current_else[0]
+}
+
+def parse_enum_def(state: ParserState, stmt_line: int) -> AstNode {
+    eat_tok(state, "ENUM")
+    name = eat_tok(state, "IDENT").val
+    eat_tok(state, "LBRACE")
+    variants = []
+    check = current_tok(state)
+    while check.kind != "RBRACE" and check.kind != "EOF" {
+        v = eat_tok(state, "IDENT").val
+        variants.append(v)
+        check = current_tok(state)
+        if check.kind == "COMMA" {
+            eat_tok(state, "COMMA")
+            check = current_tok(state)
+        }
+    }
+    eat_tok(state, "RBRACE")
+    node = AstNode()
+    node.line = stmt_line
+    node.kind = "EnumDef"
+    node.val_str = name
+    node.params = variants
+    return node
+}
+
+def desugar_enums(program: list) -> list {
+    result = []
+    i = 0
+    while i < len(program) {
+        node = program[i]
+        if node.kind == "EnumDef" {
+            j = 0
+            while j < len(node.params) {
+                const_name = node.val_str + "_" + node.params[j]
+                assign = AstNode()
+                assign.line = node.line
+                assign.kind = "Assignment"
+                assign.val_str = const_name
+                assign.val_int = 1  # is_const = true
+                num_node = AstNode()
+                num_node.line = node.line
+                num_node.kind = "Number"
+                num_node.val_int = j
+                assign.left = num_node
+                result.append(assign)
+                j = j + 1
+            }
+        } else {
+            result.append(node)
+        }
+        i = i + 1
+    }
+    return result
+}
+
 def parse(tokens: list, filename: string) -> list {
     state = ParserState()
     state.tokens = tokens
@@ -982,7 +1081,7 @@ def parse(tokens: list, filename: string) -> list {
         }
     }
     
-    return program
+    return desugar_enums(program)
 }
 
 # --- Utility: atoi ---

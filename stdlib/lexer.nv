@@ -30,50 +30,55 @@ def is_whitespace(ch: string) -> int {
 }
 
 def match_keyword(word: string) -> string {
-    if word == "def" { return "DEF" }
-    if word == "if" { return "IF" }
-    if word == "else" { return "ELSE" }
-    if word == "while" { return "WHILE" }
-    if word == "for" { return "FOR" }
-    if word == "to" { return "TO" }
-    if word == "downto" { return "DOWNTO" }
-    if word == "step" { return "STEP" }
-    if word == "break" { return "BREAK" }
-    if word == "continue" { return "CONTINUE" }
-    if word == "return" { return "RETURN" }
-    if word == "const" { return "CONST" }
-    if word == "class" { return "CLASS" }
-    if word == "data" { return "DATA" }
-    if word == "import" { return "IMPORT" }
-    if word == "as" { return "AS" }
-    if word == "export" { return "EXPORT" }
-    if word == "alloc" { return "ALLOC" }
-    if word == "free" { return "FREE" }
-    if word == "sizeof" { return "SIZEOF" }
-    if word == "len" { return "LEN" }
-    if word == "str" { return "STR" }
-    if word == "self" { return "SELF" }
-    if word == "printd" { return "PRINTD" }
-    if word == "print" { return "PRINT" }
-    if word == "openf" { return "OPENF" }
-    if word == "api" { return "API" }
-    if word == "open" { return "OPEN" }
-    if word == "read" { return "READ" }
-    if word == "write" { return "WRITE" }
-    if word == "close" { return "CLOSE" }
-    if word == "and" { return "AND" }
-    if word == "or" { return "OR" }
-    if word == "not" { return "NOT" }
-    if word == "has" { return "HAS" }
-    if word == "in" { return "IN" }
-    if word == "elif" { return "ELIF" }
-    if word == "true" { return "TRUE" }
-    if word == "false" { return "FALSE" }
-    if word == "int" { return "TYPE_INT" }
-    if word == "float" { return "TYPE_FLOAT" }
-    if word == "bool" { return "TYPE_BOOL" }
-    if word == "string" { return "TYPE_STRING" }
-    return "IDENT"
+    switch word {
+        case "def" { return "DEF" }
+        case "if" { return "IF" }
+        case "else" { return "ELSE" }
+        case "elif" { return "ELIF" }
+        case "switch" { return "SWITCH" }
+        case "case" { return "CASE" }
+        case "while" { return "WHILE" }
+        case "for" { return "FOR" }
+        case "to" { return "TO" }
+        case "downto" { return "DOWNTO" }
+        case "step" { return "STEP" }
+        case "break" { return "BREAK" }
+        case "continue" { return "CONTINUE" }
+        case "return" { return "RETURN" }
+        case "const" { return "CONST" }
+        case "enum" { return "ENUM" }
+        case "class" { return "CLASS" }
+        case "data" { return "DATA" }
+        case "import" { return "IMPORT" }
+        case "as" { return "AS" }
+        case "export" { return "EXPORT" }
+        case "alloc" { return "ALLOC" }
+        case "free" { return "FREE" }
+        case "sizeof" { return "SIZEOF" }
+        case "len" { return "LEN" }
+        case "str" { return "STR" }
+        case "self" { return "SELF" }
+        case "printd" { return "PRINTD" }
+        case "print" { return "PRINT" }
+        case "openf" { return "OPENF" }
+        case "api" { return "API" }
+        case "open" { return "OPEN" }
+        case "read" { return "READ" }
+        case "write" { return "WRITE" }
+        case "close" { return "CLOSE" }
+        case "and" { return "AND" }
+        case "or" { return "OR" }
+        case "not" { return "NOT" }
+        case "has" { return "HAS" }
+        case "in" { return "IN" }
+        case "true" { return "TRUE" }
+        case "false" { return "FALSE" }
+        case "int" { return "TYPE_INT" }
+        case "float" { return "TYPE_FLOAT" }
+        case "bool" { return "TYPE_BOOL" }
+        case "string" { return "TYPE_STRING" }
+        else { return "IDENT" }
+    }
 }
 
 def tokenize(src: string) -> list {
@@ -219,74 +224,43 @@ def tokenize(src: string) -> list {
 
         if i + 1 < length {
             two_char = src[i] + src[i+1]
-            if two_char == "==" {
-                tok.kind = "EQEQ"
-                tok.val = two_char
-                i = i + 2
-                matched = 2
-            }
-            if two_char == "!=" {
-                tok.kind = "NOTEQ"
-                tok.val = two_char
-                i = i + 2
-                matched = 2
-            }
-            if two_char == "<=" {
-                tok.kind = "LE"
-                tok.val = two_char
-                i = i + 2
-                matched = 2
-            }
-            if two_char == ">=" {
-                tok.kind = "GE"
-                tok.val = two_char
-                i = i + 2
-                matched = 2
-            }
-            if two_char == "->" {
-                tok.kind = "ARROW"
-                tok.val = two_char
-                i = i + 2
-                matched = 2
-            }
-            if two_char == ">>" {
-                tok.kind = "GTGT"
-                tok.val = two_char
-                i = i + 2
-                matched = 2
-            }
-            if two_char == "<<" {
-                tok.kind = "LTLT"
-                tok.val = two_char
-                i = i + 2
-                matched = 2
+            switch two_char {
+                case "==" { tok.kind = "EQEQ"; tok.val = two_char; i = i + 2; matched = 2 }
+                case "!=" { tok.kind = "NOTEQ"; tok.val = two_char; i = i + 2; matched = 2 }
+                case "<=" { tok.kind = "LE"; tok.val = two_char; i = i + 2; matched = 2 }
+                case ">=" { tok.kind = "GE"; tok.val = two_char; i = i + 2; matched = 2 }
+                case "->" { tok.kind = "ARROW"; tok.val = two_char; i = i + 2; matched = 2 }
+                case ">>" { tok.kind = "GTGT"; tok.val = two_char; i = i + 2; matched = 2 }
+                case "<<" { tok.kind = "LTLT"; tok.val = two_char; i = i + 2; matched = 2 }
             }
         }
 
         if matched == 1 {
             tok.val = ch
-            if ch == "+" { tok.kind = "PLUS" }
-            if ch == "-" { tok.kind = "MINUS" }
-            if ch == "*" { tok.kind = "STAR" }
-            if ch == "/" { tok.kind = "SLASH" }
-            if ch == "%" { tok.kind = "PERCENT" }
-            if ch == "=" { tok.kind = "EQUALS" }
-            if ch == "&" { tok.kind = "AMPERSAND" }
-            if ch == "|" { tok.kind = "PIPE" }
-            if ch == "^" { tok.kind = "CARET" }
-            if ch == "~" { tok.kind = "TILDE" }
-            if ch == "<" { tok.kind = "LT" }
-            if ch == ">" { tok.kind = "GT" }
-            if ch == "(" { tok.kind = "LPAREN" }
-            if ch == ")" { tok.kind = "RPAREN" }
-            if ch == "{" { tok.kind = "LBRACE" }
-            if ch == "}" { tok.kind = "RBRACE" }
-            if ch == "[" { tok.kind = "LBRACK" }
-            if ch == "]" { tok.kind = "RBRACK" }
-            if ch == "," { tok.kind = "COMMA" }
-            if ch == ":" { tok.kind = "COLON" }
-            if ch == "." { tok.kind = "DOT" }
-            if ch == ";" { tok.kind = "SEMICOLON" }
+            switch ch {
+                case "+" { tok.kind = "PLUS" }
+                case "-" { tok.kind = "MINUS" }
+                case "*" { tok.kind = "STAR" }
+                case "/" { tok.kind = "SLASH" }
+                case "%" { tok.kind = "PERCENT" }
+                case "=" { tok.kind = "EQUALS" }
+                case "&" { tok.kind = "AMPERSAND" }
+                case "|" { tok.kind = "PIPE" }
+                case "^" { tok.kind = "CARET" }
+                case "~" { tok.kind = "TILDE" }
+                case "<" { tok.kind = "LT" }
+                case ">" { tok.kind = "GT" }
+                case "(" { tok.kind = "LPAREN" }
+                case ")" { tok.kind = "RPAREN" }
+                case "{" { tok.kind = "LBRACE" }
+                case "}" { tok.kind = "RBRACE" }
+                case "[" { tok.kind = "LBRACK" }
+                case "]" { tok.kind = "RBRACK" }
+                case "," { tok.kind = "COMMA" }
+                case ":" { tok.kind = "COLON" }
+                case "." { tok.kind = "DOT" }
+                case ";" { tok.kind = "SEMICOLON" }
+            }
             i = i + 1
         }
         

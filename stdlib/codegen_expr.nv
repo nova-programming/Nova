@@ -815,6 +815,10 @@ def compile_expr(state: CodegenState, node: AstNode) {
         }
         emit(state, "    push ebx")
     }
+    if node.kind == "DictLiteral" {
+        emit(state, "    ; DictLiteral not yet supported in native codegen")
+        emit(state, "    push 0 ; placeholder")
+    }
     if node.kind == "ArrayIndex" {
         is_str = 0
         if is_string_expr(state, node.left) == 1 {
@@ -1058,6 +1062,17 @@ def node_to_asm(state: CodegenState, node: AstNode) -> string {
             i = i + 1
         }
         result = result + "]"
+        return result
+    }
+    if node.kind == "DictLiteral" {
+        result = "{"
+        i = 0
+        while i < len(node.args) {
+            if i > 0 { result = result + ", " }
+            result = result + node_to_asm(state, node.args[i]) + ": " + node_to_asm(state, node.args[i + 1])
+            i = i + 2
+        }
+        result = result + "}"
         return result
     }
     if node.kind == "String" { return node.val_str }

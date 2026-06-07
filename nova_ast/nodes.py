@@ -347,6 +347,14 @@ class StrConvert:
     def __repr__(self):
         return f"StrConvert({self.target})"
 
+class EnumDef:
+    def __init__(self, name, variants, line=0):
+        self.line = line
+        self.name = name
+        self.variants = variants
+    def __repr__(self):
+        return f"EnumDef('{self.name}', {self.variants})"
+
 class ClassDef:
     def __init__(self, name, methods, fields, line=0):
         self.line = line
