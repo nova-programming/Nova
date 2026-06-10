@@ -163,9 +163,9 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64"):
     if not gcc_path:
         print()
         print("  [FAIL] GCC not found.")
-        print("  Nova build requires GCC/MinGW to link native executables.")
+        print("  Nova build requires a C compiler to link native executables.")
         print()
-        print("  To install GCC:")
+        print("  To install a C compiler:")
         if os.name == "nt":
             print("    Option 1: Download w64devkit from https://github.com/skeeto/w64devkit")
             print("    Option 2: Install MinGW-w64 from https://winlibs.com")
@@ -180,11 +180,50 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64"):
         print()
         sys.exit(1)
     
-    cmd = [gcc_path, asm_file, "-o", exe_file, "-mconsole", "-lkernel32", "-Wl,--heap=67108864"]
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    runtime_c = os.path.join(script_dir, "runtime.c")
+    runtime_o = os.path.join(script_dir, "runtime.o")
+    needs_runtime = target_arch in ("x86_64", "arm64")
+    is_macos = sys.platform == "darwin"
+    
+    cmd = [gcc_path, asm_file, "-o", exe_file]
+    
+    if os.name == "nt":
+        if target_arch == "x86":
+            cmd += ["-m32", "-mconsole", "-lkernel32", "-Wl,--heap=67108864"]
+        else:
+            cmd += ["-mconsole", "-lkernel32"]
+    else:
+        if is_macos:
+            if target_arch == "arm64":
+                cmd += ["-arch", "arm64"]
+            cmd += ["-Wl,-no_compact_unwind"]
+        else:
+            cmd += ["-no-pie"]
+    
+    if needs_runtime and os.path.exists(runtime_c):
+        # Always recompile runtime.c to avoid stale object file issues
+        if os.path.exists(runtime_o):
+            os.remove(runtime_o)
+        rt_cmd = [gcc_path, "-c", runtime_c, "-o", runtime_o]
+        if is_macos:
+            rt_cmd += ["-D", "MACOS"]
+            if target_arch == "arm64":
+                rt_cmd += ["-arch", "arm64"]
+        elif os.name != "nt":
+            rt_cmd += ["-D", "LINUX_WRAP"]
+        else:
+            rt_cmd += ["-mno-red-zone"]
+        if target_arch == "x86" and os.name == "nt":
+            rt_cmd += ["-m32"]
+        subprocess.run(rt_cmd, capture_output=True, text=True)
+        if os.path.exists(runtime_o):
+            cmd += [runtime_o]
+    
     print(f"Running command: {' '.join(cmd)}")
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0:
-        print("GCC Compilation Failed:")
+        print("Compilation Failed:")
         print(res.stderr)
         sys.exit(1)
     print(f"Successfully compiled native executable: {exe_file}")

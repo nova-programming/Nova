@@ -32,7 +32,7 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         } else {
             offset = find_var_offset(state, node.val_str)
             if offset < 0 {
-                emit(state, "    mov [%b + " + str(0 - offset) + "], %a")
+                emit(state, "    mov [%b - " + str(0 - offset) + "], %a")
             } else {
                 emit(state, "    mov [%b - " + str(offset) + "], %a")
             }
@@ -74,12 +74,17 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    pop %d")
         emit(state, "    pop %c")
         emit(state, "    pop %a")
-        emit(state, "    cmp %c, 0")
+        emit(state, "    cmp ecx, 0")
         emit(state, "    jl _out_of_bounds")
-        emit(state, "    cmp %c, [%d]")
+        emit(state, "    cmp ecx, dword ptr [%d]")
         emit(state, "    jge _out_of_bounds")
-        emit(state, "    mov %d, [%d + 8]")
-        emit(state, "    mov [%d + %c * 4], %a")
+        ptr_sz = ptr_size(state)
+        emit(state, "    lea %x, [%d + 16]")
+        if ptr_sz == 8 {
+            emit(state, "    mov [%x + %c*8], %a")
+        } else {
+            emit(state, "    mov [%x + %c*4], %a")
+        }
     }
     if node.kind == "PrintD" {
         if debug_mode == 1 {
@@ -241,7 +246,9 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
     }
     if node.kind == "ForIn" {
         compile_expr(state, node.left)
-        emit(state, "    sub %s, 4")
+        
+        ptr_sz = ptr_size(state)
+        emit(state, "    sub %s, " + str(ptr_sz))
         emit(state, "    mov dword ptr [%s], 0")
         
         loop_label = next_label(state, "L_forin")
@@ -250,15 +257,18 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         state.loop_end_labels.append(end_label)
         
         emit(state, loop_label + ":")
-        emit(state, "    mov %a, [%s + 4]")
-        emit(state, "    mov %a, [%a]")
-        emit(state, "    cmp dword ptr [%s], %a")
+        emit(state, "    mov %d, [%s + " + str(ptr_sz) + "]")
+        emit(state, "    mov eax, dword ptr [%d]")
+        emit(state, "    cmp dword ptr [%s], eax")
         emit(state, "    jge " + end_label)
         
-        emit(state, "    mov %c, [%s]")
-        emit(state, "    mov %a, [%s + 4]")
-        emit(state, "    mov %a, [%a + 8]")
-        emit(state, "    mov %a, [%a + %c*4]")
+        emit(state, "    mov eax, dword ptr [%s]")
+        emit(state, "    lea %x, [%d + 16]")
+        if ptr_sz == 8 {
+            emit(state, "    mov %a, [%x + %a*8]")
+        } else {
+            emit(state, "    mov %a, [%x + %a*4]")
+        }
         
         var_off = find_var_offset(state, node.val_str)
         emit(state, "    mov [%b - " + str(var_off) + "], %a")
@@ -269,7 +279,9 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             i = i + 1
         }
         
-        emit(state, "    inc dword ptr [%s]")
+        emit(state, "    mov eax, dword ptr [%s]")
+        emit(state, "    inc eax")
+        emit(state, "    mov dword ptr [%s], eax")
         emit(state, "    jmp " + loop_label)
         emit(state, end_label + ":")
         clean_n(state, 2)

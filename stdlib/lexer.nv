@@ -14,10 +14,9 @@ def is_digit(ch: string) -> int {
 }
 
 def is_alpha(ch: string) -> int {
-    if ch == "_" { return 1 }
-    if ch == "@" { return 1 }
     if "a" <= ch and ch <= "z" { return 1 }
     if "A" <= ch and ch <= "Z" { return 1 }
+    if ch == "_" { return 1 }
     return 0
 }
 
@@ -82,14 +81,26 @@ def match_keyword(word: string) -> string {
 }
 
 def tokenize(src: string) -> list {
+    print("tok: enter")
+    sys_flush()
     tokens = []
     i = 0
+    print("tok: calling len")
+    sys_flush()
     length = len(src)
+    print("tok: len = " + str(length))
+    sys_flush()
     line_num = 1
 
     while i < length {
+        print("loop top")
+        sys_flush()
         ch = src[i]
+        print("got ch")
+        sys_flush()
 
+        print("chk @")
+        sys_flush()
         if ch == "@" {
             if i + 6 < length {
                 if src[i + 1] == "e" and src[i + 2] == "x" and src[i + 3] == "p" and src[i + 4] == "o" and src[i + 5] == "r" and src[i + 6] == "t" {
@@ -115,6 +126,8 @@ def tokenize(src: string) -> list {
             }
         }
 
+        print("chk ws")
+        sys_flush()
         if is_whitespace(ch) == 1 {
             if ch == "\n" {
                 line_num = line_num + 1
@@ -123,6 +136,8 @@ def tokenize(src: string) -> list {
             continue
         }
 
+        print("chk #")
+        sys_flush()
         if ch == "#" {
             while i < length and src[i] != "\n" {
                 i = i + 1
@@ -134,15 +149,25 @@ def tokenize(src: string) -> list {
             continue
         }
 
+        print("chk digit")
+        sys_flush()
         if is_digit(ch) == 1 {
             start = i
-            if ch == "0" and i + 1 < length and (src[i + 1] == "x" or src[i + 1] == "X") {
+            is_hex = 0
+            is_bin = 0
+            if ch == "0" {
+                if i + 1 < length {
+                    if src[i + 1] == "x" or src[i + 1] == "X" { is_hex = 1 }
+                    if src[i + 1] == "b" or src[i + 1] == "B" { is_bin = 1 }
+                }
+            }
+            if is_hex == 1 {
                 i = i + 2
                 while i < length and ((src[i] >= "0" and src[i] <= "9") or (src[i] >= "a" and src[i] <= "f") or (src[i] >= "A" and src[i] <= "F")) {
                     i = i + 1
                 }
             }
-            elif ch == "0" and i + 1 < length and (src[i + 1] == "b" or src[i + 1] == "B") {
+            elif is_bin == 1 {
                 i = i + 2
                 while i < length and (src[i] == "0" or src[i] == "1") {
                     i = i + 1
@@ -152,10 +177,16 @@ def tokenize(src: string) -> list {
                 while i < length and is_digit(src[i]) == 1 {
                     i = i + 1
                 }
-                if i < length and src[i] == "." and i + 1 < length and is_digit(src[i + 1]) == 1 {
-                    i = i + 1
-                    while i < length and is_digit(src[i]) == 1 {
-                        i = i + 1
+                if i < length {
+                    if src[i] == "." {
+                        if i + 1 < length {
+                            if is_digit(src[i + 1]) == 1 {
+                                i = i + 1
+                                while i < length and is_digit(src[i]) == 1 {
+                                    i = i + 1
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -166,6 +197,7 @@ def tokenize(src: string) -> list {
             tokens.append(tok)
             continue
         }
+
 
         if is_alpha(ch) == 1 {
             start = i

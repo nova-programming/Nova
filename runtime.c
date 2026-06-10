@@ -1,25 +1,98 @@
 #if defined(_WIN32)
-/* Windows: use Win32 API directly — no CRT headers needed, no name conflicts */
+/* Windows: use Win32 API directly — no CRT headers needed, no name conflicts.
+ * All runtime functions use Win32 API so CRT linkage is optional. */
+
+/* SysV ABI attribute — Nova x86_64 codegen uses System V AMD64 calling convention
+ * (args: rdi, rsi, rdx, rcx, r8, r9) while Windows uses Microsoft x64 ABI
+ * (args: rcx, rdx, r8, r9). This attribute makes the compiler generate SysV-convention
+ * entry/exit so the assembly's call sites work on both Linux and Windows. */
+#if defined(__x86_64__)
+#define SYSCALL __attribute__((sysv_abi))
+#else
+#define SYSCALL
+#endif
+
+/* On x86 (32-bit), MinGW adds _ prefix to C symbols automatically, matching the
+ * assembly's references to _printf, _malloc, etc.
+ * On x64, MinGW does NOT add _ prefix. The x86_64 codegen still emits _printf
+ * (for Linux/macOS compatibility), so on x64 we must define with explicit _ prefix.
+ * Using STR_PFX, on x64 we define _strlen/_malloc etc. which don't conflict with
+ * system headers that declare strlen/malloc (without underscore). */
+#if defined(_WIN64)
+#define STR_PFX(name) _##name
+#else
+#define STR_PFX(name) name
+#endif
+
+/* On x64 Windows, stdlib.h (indirectly included by windows.h) declares _exit with
+ * __cdecl, which conflicts with our SYSCALL (sysv_abi) _exit definition.
+ * We suppress _exit declarations before including windows.h, then undefine. */
+#if defined(_WIN64)
+#define _exit(...) /* suppress stdlib.h _exit declaration */
+#endif
+
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <stdarg.h>
 #include <stdint.h>
+#include <stdarg.h>
 
-/* Memory: use CRT's malloc/free/realloc (available via default msvcrt link) */
+#if defined(_WIN64)
+#undef _exit
+#endif
 
-/* Declare CRT vsprintf — available via default msvcrt link */
-int __cdecl vsprintf(char *, const char *, va_list);
+/* All runtime functions are SYSCALL to match the Nova codegen calling convention.
+ * Inside the function body, Win32 API calls use the default Windows convention —
+ * the compiler handles the ABI translation at call sites automatically. */
 
-int printf(const char *fmt, ...) {
-    char buf[4096]; int n;
-    va_list ap; va_start(ap, fmt);
-    n = vsprintf(buf, fmt, ap); va_end(ap);
+/* Minimal printf: handles %s, %d, %% for Nova codegen.
+ * Uses SysV ABI variadic args directly (read from registers) to avoid MinGW
+ * va_start/va_arg incompatibility with __attribute__((sysv_abi)). */
+SYSCALL int STR_PFX(printf)(const char *fmt, ...) {
     HANDLE h = GetStdHandle(-11);
-    DWORD wn; WriteFile(h, buf, n, &wn, 0);
-    return n;
+    DWORD wn;
+    int written = 0;
+    /* Read variadic args from SysV register: arg2 in rsi */
+    void *arg_s = 0;
+    asm("movq %%rsi, %0" : "=r"(arg_s) : :);
+    while (*fmt) {
+        if (*fmt == '%') {
+            fmt++;
+            switch (*fmt) {
+                case 's': {
+                    const char *s = (const char*)arg_s;
+                    if (s) { int n = lstrlenA(s); WriteFile(h, s, n, &wn, 0); written += n; }
+                    break;
+                }
+                case 'd': {
+                    char buf[32];
+                    int val = (int)(long long)arg_s;
+                    int neg = 0, pos = 30, dlen;
+                    buf[31] = 0;
+                    if (val < 0) { neg = 1; val = -val; }
+                    do { buf[pos--] = '0' + (val % 10); val /= 10; } while (val);
+                    if (neg) buf[pos--] = '-';
+                    pos++;
+                    dlen = 31 - pos;
+                    WriteFile(h, buf + pos, dlen, &wn, 0);
+                    written += dlen;
+                    break;
+                }
+                case '%': {
+                    WriteFile(h, "%", 1, &wn, 0); written++;
+                    break;
+                }
+                default: break;
+            }
+        } else {
+            WriteFile(h, fmt, 1, &wn, 0);
+            written++;
+        }
+        fmt++;
+    }
+    return written;
 }
 
-int fopen(const char *path, const char *mode) {
+SYSCALL int STR_PFX(fopen)(const char *path, const char *mode) {
     HANDLE h; DWORD access, disp;
     if (*mode == 'w') { access = 0x40000000; disp = 2; }
     else if (*mode == 'a') { access = 0xC0000000; disp = 4; }
@@ -27,24 +100,241 @@ int fopen(const char *path, const char *mode) {
     h = CreateFileA(path, access, 0, 0, disp, 0x80, 0);
     if (h == INVALID_HANDLE_VALUE) return 0;
     if (*mode == 'a') SetFilePointer(h, 0, 0, 2);
-    return (intptr_t)h;
+    return (int)(intptr_t)h;
 }
-int fclose(int s) { return CloseHandle((HANDLE)(intptr_t)s) ? 0 : -1; }
-int fread(void *b, int sz, int c, int s) { DWORD n; ReadFile((HANDLE)(intptr_t)s, b, sz*c, &n, 0); return n; }
-int fwrite(const void *b, int sz, int c, int s) { DWORD n; WriteFile((HANDLE)(intptr_t)s, b, sz*c, &n, 0); return n; }
-int fputs(const char *str, int s) { int n = lstrlenA(str); fwrite(str, 1, n, s); return n; }
-int fputc(int c, int s) { char ch = c; fwrite(&ch, 1, 1, s); return c; }
-int fseek(int s, long o, int w) { return SetFilePointer((HANDLE)(intptr_t)s, o, 0, w) == -1 ? -1 : 0; }
-long ftell(int s) { return SetFilePointer((HANDLE)(intptr_t)s, 0, 0, 1); }
-int fflush(int s) { if (s) FlushFileBuffers((HANDLE)(intptr_t)s); return 0; }
-void exit(int c) { ExitProcess(c); }
-int system(const char *c) { return (int)WinExec(c, 1); }
+SYSCALL int STR_PFX(fclose)(int s) { return CloseHandle((HANDLE)(intptr_t)s) ? 0 : -1; }
+SYSCALL int STR_PFX(fread)(void *b, int sz, int c, int s) { DWORD n; ReadFile((HANDLE)(intptr_t)s, b, sz*c, &n, 0); return n; }
+SYSCALL int STR_PFX(fwrite)(const void *b, int sz, int c, int s) { DWORD n; WriteFile((HANDLE)(intptr_t)s, b, sz*c, &n, 0); return n; }
+SYSCALL int STR_PFX(fputs)(const char *str, int s) { int n = lstrlenA(str); STR_PFX(fwrite)(str, 1, n, s); return n; }
+SYSCALL int STR_PFX(fputc)(int c, int s) { char ch = c; STR_PFX(fwrite)(&ch, 1, 1, s); return c; }
+SYSCALL int STR_PFX(fseek)(int s, long o, int w) { return SetFilePointer((HANDLE)(intptr_t)s, o, 0, w) == -1 ? -1 : 0; }
+SYSCALL long STR_PFX(ftell)(int s) { return SetFilePointer((HANDLE)(intptr_t)s, 0, 0, 1); }
+SYSCALL int STR_PFX(fflush)(int s) { if (s) FlushFileBuffers((HANDLE)(intptr_t)s); return 0; }
+SYSCALL void STR_PFX(exit)(int c) { ExitProcess(c); }
+SYSCALL int STR_PFX(system)(const char *c) { return (int)WinExec(c, 1); }
 
-unsigned int strlen(const char *s) { return lstrlenA(s); }
-int strcmp(const char *a, const char *b) { return lstrcmpA(a, b); }
-char *strcpy(char *d, const char *s) { return lstrcpyA(d, s); }
-char *strcat(char *d, const char *s) { return lstrcatA(d, s); }
-void *memset(void *p, int c, unsigned int n) { FillMemory(p, n, c); return p; }
+/* String/memory functions — manual implementations to avoid ABI transition bugs */
+SYSCALL unsigned int STR_PFX(strlen)(const char *s) {
+    unsigned int n = 0;
+    while (s[n]) n++;
+    return n;
+}
+SYSCALL int STR_PFX(strcmp)(const char *a, const char *b) { return lstrcmpA(a, b); }
+SYSCALL char *STR_PFX(strcpy)(char *d, const char *s) { return lstrcpyA(d, s); }
+SYSCALL char *STR_PFX(strcat)(char *d, const char *s) { return lstrcatA(d, s); }
+SYSCALL void *STR_PFX(memset)(void *p, int c, unsigned int n) {
+    unsigned char *b = (unsigned char*)p;
+    while (n--) *b++ = (unsigned char)c;
+    return p;
+}
+SYSCALL void *STR_PFX(memcpy)(void *d, const void *s, unsigned int n) {
+    unsigned char *bd = (unsigned char*)d;
+    const unsigned char *bs = (const unsigned char*)s;
+    while (n--) *bd++ = *bs++;
+    return d;
+}
+
+/* Memory functions via Win32 Heap API (no CRT dependency).
+ * Note: HeapReAlloc does not zero memory like realloc; fine for Nova's usage. */
+static HANDLE _nova_heap = 0;
+SYSCALL void *STR_PFX(malloc)(unsigned int s) {
+    if (!_nova_heap) _nova_heap = GetProcessHeap();
+    return HeapAlloc(_nova_heap, 0, s);
+}
+SYSCALL void STR_PFX(free)(void *p) {
+    if (p) { if (!_nova_heap) _nova_heap = GetProcessHeap(); HeapFree(_nova_heap, 0, p); }
+}
+SYSCALL void *STR_PFX(realloc)(void *p, unsigned int s) {
+    if (!_nova_heap) _nova_heap = GetProcessHeap();
+    return HeapReAlloc(_nova_heap, 0, p, s);
+}
+
+/* strstr — we may not need it but define for completeness */
+SYSCALL char *STR_PFX(strstr)(const char *h, const char *n) {
+    if (!*n) return (char*)h;
+    while (*h) {
+        const char *a = h, *b = n;
+        while (*a && *b && *a == *b) { a++; b++; }
+        if (!*b) return (char*)h;
+        h++;
+    }
+    return 0;
+}
+
+/* Custom sprintf that handles %d and basic floats, respecting SysV ABI registers */
+SYSCALL int STR_PFX(sprintf)(char *b, const char *fmt, ...) {
+    long long arg_d = 0;
+    asm("movq %%rdx, %0" : "=r"(arg_d) : :);
+    
+    char *out = b;
+    while (*fmt) {
+        if (*fmt == '%') {
+            fmt++;
+            if (*fmt == 'd') {
+                char buf[32];
+                long long val = arg_d;
+                int neg = 0, pos = 30;
+                buf[31] = 0;
+                if (val < 0) { neg = 1; val = -val; }
+                do { buf[pos--] = '0' + (val % 10); val /= 10; } while (val);
+                if (neg) buf[pos--] = '-';
+                pos++;
+                while (buf[pos]) *out++ = buf[pos++];
+            } else if (*fmt == 'f') {
+                /* floats are passed in xmm0 */
+                double arg_f = 0.0;
+                asm("movsd %%xmm0, %0" : "=m"(arg_f) : : "memory");
+                
+                long long val = (long long)arg_f;
+                int neg = 0;
+                if (arg_f < 0.0) { neg = 1; val = -val; arg_f = -arg_f; }
+                if (neg) *out++ = '-';
+                
+                char buf[32];
+                int pos = 30;
+                buf[31] = 0;
+                do { buf[pos--] = '0' + (val % 10); val /= 10; } while (val);
+                pos++;
+                while (buf[pos]) *out++ = buf[pos++];
+                
+                *out++ = '.';
+                double frac = arg_f - (double)(long long)arg_f;
+                for (int i = 0; i < 6; i++) {
+                    frac *= 10.0;
+                    int digit = (int)frac;
+                    *out++ = '0' + digit;
+                    frac -= digit;
+                }
+            } else {
+                *out++ = *fmt;
+            }
+        } else {
+            *out++ = *fmt;
+        }
+        fmt++;
+    }
+    *out = 0;
+    return out - b;
+}
+/* Out-of-bounds handler */
+SYSCALL void STR_PFX(out_of_bounds)(void) {
+    STR_PFX(printf)("Index Out Of Bounds\n");
+    STR_PFX(exit)(1);
+}
+
+/* ============== Nova sys_* runtime ============== */
+/* Called by x86_64 codegen with SysV ABI (args in rdi, rsi, rdx, rcx, r8, r9). */
+
+SYSCALL int STR_PFX(sys_open)(const char *path, const char *mode) {
+    HANDLE h; DWORD access, disp;
+    if (*mode == 'w') { access = 0x40000000; disp = 2; }
+    else if (*mode == 'a') { access = 0xC0000000; disp = 4; }
+    else { access = 0x80000000; disp = 3; }
+    h = CreateFileA(path, access, 0, 0, disp, 0x80, 0);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    if (*mode == 'a') SetFilePointer(h, 0, 0, 2);
+    return (int)(intptr_t)h;
+}
+
+SYSCALL int STR_PFX(sys_write)(int fd, const char *str) {
+    return STR_PFX(fputs)(str, fd);
+}
+
+SYSCALL int STR_PFX(sys_write_raw)(int fd, void *novabuf) {
+    /* Nova raw buffer: [count:4][capacity:4][data_ptr:4] on x86, 8-byte ptrs on x64.
+     * For x64 layout: [count:4][pad:4][capacity:8][data_ptr:8] */
+    int *count = (int*)novabuf;
+    void **data = (void**)((char*)novabuf + 16);
+    return STR_PFX(fwrite)(*data, 1, *count, fd);
+}
+
+SYSCALL int STR_PFX(sys_close)(int fd) {
+    return CloseHandle((HANDLE)(intptr_t)fd) ? 0 : -1;
+}
+
+SYSCALL void *STR_PFX(sys_alloc)(unsigned int size) {
+    return STR_PFX(malloc)(size);
+}
+
+SYSCALL void STR_PFX(sys_free)(void *ptr) {
+    STR_PFX(free)(ptr);
+}
+
+SYSCALL const char *STR_PFX(sys_platform)(void) {
+    return "windows";
+}
+
+SYSCALL int STR_PFX(sys_flush)(int fd) {
+    if (fd) FlushFileBuffers((HANDLE)(intptr_t)fd);
+    return 0;
+}
+
+SYSCALL void *STR_PFX(sys_get_args)(void) {
+    char *cmd = GetCommandLineA();
+    int argc = 0, in = 0, in_quote = 0;
+    char *p = cmd;
+    while (*p) {
+        if (*p == '"') in_quote = !in_quote;
+        else if (*p == ' ' && !in_quote) in = 0;
+        else if (!in) { argc++; in = 1; }
+        p++;
+    }
+    int cap = argc < 4 ? 4 : argc;
+    void *list = HeapAlloc(GetProcessHeap(), 0, 16 + cap * 8);
+    if (!list) return 0;
+    STR_PFX(memset)(list, 0, 16 + cap * 8);
+    *(int*)list = argc;
+    *(int*)((char*)list + 8) = 16 + cap * 8;
+    long long *data = (long long*)((char*)list + 16);
+    
+    p = cmd; in = 0; in_quote = 0; int idx = 0;
+    char *buf = HeapAlloc(GetProcessHeap(), 0, STR_PFX(strlen)(cmd) + 1);
+    int bidx = 0;
+    while (*p) {
+        if (*p == '"') {
+            in_quote = !in_quote;
+            if (!in) { in = 1; bidx = 0; }
+        } else if (*p == ' ' && !in_quote) {
+            if (in) {
+                buf[bidx] = 0;
+                char *s = HeapAlloc(GetProcessHeap(), 0, bidx + 1);
+                if (s) STR_PFX(strcpy)(s, buf);
+                data[idx++] = (long long)(intptr_t)s;
+                in = 0;
+            }
+        } else {
+            if (!in) { in = 1; bidx = 0; }
+            buf[bidx++] = *p;
+        }
+        p++;
+    }
+    if (in) {
+        buf[bidx] = 0;
+        char *s = HeapAlloc(GetProcessHeap(), 0, bidx + 1);
+        if (s) STR_PFX(strcpy)(s, buf);
+        data[idx++] = (long long)(intptr_t)s;
+    }
+    HeapFree(GetProcessHeap(), 0, buf);
+    return list;
+}
+
+SYSCALL unsigned int STR_PFX(sys_get_tick_count)(void) {
+    return GetTickCount();
+}
+
+SYSCALL void STR_PFX(sys_exit)(int code) {
+    ExitProcess(code);
+}
+
+/* ============== Entry point bridge for Windows x64 ============== */
+/* MinGW x64 CRT expects main() (no _ prefix). Nova codegen emits _main (with _ prefix
+ * for Linux compatibility). This bridge lets CRT startup find the entry point. */
+#if defined(_WIN64)
+int main(void) {
+    extern int _main(void);
+    return _main();
+}
+#endif
 
 #elif defined(LINUX_WRAP) || defined(MACOS)
 /* Linux: libc exports without underscore (printf, not _printf).
@@ -99,20 +389,14 @@ int _sprintf(char *b, const char *fmt, ...) {
 #endif /* defined(LINUX_WRAP) */
 #endif /* defined(_WIN32) / defined(LINUX_WRAP) || defined(MACOS) */
 
-/* ============== Out-of-bounds handler =========== */
-void out_of_bounds(void) {
-    printf("Index Out Of Bounds\n");
-    exit(1);
-}
-#if defined(LINUX_WRAP)
-void _out_of_bounds(void) { out_of_bounds(); }
-#endif
-
 /* ==================== Dict runtime functions (all platforms) ==================== */
-/* Forward declarations to avoid -Wimplicit-function-declaration on Windows */
-void *malloc(size_t);
-void free(void *);
-void *memset(void *, int, size_t);
+/* Forward declarations for dict functions (Linux/macOS need these since malloc/free/memset
+ * aren't defined yet. On Windows they're already defined above.) */
+#if !defined(_WIN32)
+SYSCALL void *malloc(size_t);
+SYSCALL void free(void *);
+SYSCALL void *memset(void *, int, size_t);
+#endif
 /* strcmp, strlen, strcpy are defined above on Windows, in <string.h> on macOS/Linux */
 /* Dict layout (24 bytes): [count:4][pad/capacity:4][keys_ptr:8][values_ptr:8] */
 
@@ -162,7 +446,7 @@ static void _dg(void *d) {
     *(int*)((char*)d + 4) = nc;
 }
 
-void *dict_new(void) {
+SYSCALL void *dict_new(void) {
     void *d = malloc(24);
     if (!d) return 0;
     int cap = 8;
@@ -178,13 +462,13 @@ void *dict_new(void) {
     return d;
 }
 
-int dict_has(void *d, const char *key) {
+SYSCALL int dict_has(void *d, const char *key) {
     int cap = *(int*)((char*)d + 4);
     char **keys = *(char***)((char*)d + 8);
     return _df(keys, cap, key) >= 0 ? 1 : 0;
 }
 
-intptr_t dict_get(void *d, const char *key) {
+SYSCALL intptr_t dict_get(void *d, const char *key) {
     int cap = *(int*)((char*)d + 4);
     char **keys = *(char***)((char*)d + 8);
     intptr_t *values = *(intptr_t**)((char*)d + 16);
@@ -192,7 +476,7 @@ intptr_t dict_get(void *d, const char *key) {
     return idx >= 0 ? values[idx] : 0;
 }
 
-void dict_set(void *d, const char *key, intptr_t value) {
+SYSCALL void dict_set(void *d, const char *key, intptr_t value) {
     int count = *(int*)d;
     int cap = *(int*)((char*)d + 4);
     char **keys = *(char***)((char*)d + 8);
@@ -216,7 +500,7 @@ void dict_set(void *d, const char *key, intptr_t value) {
     *(int*)d = count + 1;
 }
 
-void dict_remove(void *d, const char *key) {
+SYSCALL void dict_remove(void *d, const char *key) {
     int cap = *(int*)((char*)d + 4);
     char **keys = *(char***)((char*)d + 8);
     intptr_t *values = *(intptr_t**)((char*)d + 16);
@@ -235,7 +519,7 @@ static int _dc(void *d) {
 /* Return Nova list of key strings (deep-copied).
  * Nova list header: [count:4][capacity:4][data_ptr:4] (12 bytes total)
  * Data is a separate malloc'd buffer at [data_ptr]. */
-void *dict_keys(void *d) {
+SYSCALL void *dict_keys(void *d) {
     int cap = *(int*)((char*)d + 4);
     char **keys = *(char***)((char*)d + 8);
     int n = _dc(d);
@@ -260,7 +544,7 @@ void *dict_keys(void *d) {
     return list;
 }
 
-void *dict_values(void *d) {
+SYSCALL void *dict_values(void *d) {
     int cap = *(int*)((char*)d + 4);
     char **keys = *(char***)((char*)d + 8);
     intptr_t *values = *(intptr_t**)((char*)d + 16);
@@ -282,7 +566,7 @@ void *dict_values(void *d) {
     return list;
 }
 
-void *dict_items(void *d) {
+SYSCALL void *dict_items(void *d) {
     int cap = *(int*)((char*)d + 4);
     char **keys = *(char***)((char*)d + 8);
     intptr_t *values = *(intptr_t**)((char*)d + 16);
@@ -312,6 +596,16 @@ void *dict_items(void *d) {
 
 #if defined(LINUX_WRAP)
 /* Linux ELF: no underscore prefix. Assembly calls _dict_new but C function is dict_new. */
+void *_dict_new(void) { return dict_new(); }
+int _dict_has(void *d, const char *k) { return dict_has(d, k); }
+intptr_t _dict_get(void *d, const char *k) { return dict_get(d, k); }
+void _dict_set(void *d, const char *k, intptr_t v) { dict_set(d, k, v); }
+void _dict_remove(void *d, const char *k) { dict_remove(d, k); }
+void *_dict_keys(void *d) { return dict_keys(d); }
+void *_dict_values(void *d) { return dict_values(d); }
+void *_dict_items(void *d) { return dict_items(d); }
+#elif defined(_WIN64)
+/* Windows x64: MinGW doesn't add _ prefix. Same wrapper approach as Linux. */
 void *_dict_new(void) { return dict_new(); }
 int _dict_has(void *d, const char *k) { return dict_has(d, k); }
 intptr_t _dict_get(void *d, const char *k) { return dict_get(d, k); }

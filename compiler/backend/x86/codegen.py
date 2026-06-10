@@ -19,7 +19,8 @@ class X86Codegen:
         self.struct_defs = {}
         self.string_vars = set()
         self.func_returns = {}
-
+        self._reg_pool = []
+ 
     def get_prop_offset(self, name):
         if name not in self.prop_offsets:
             self.prop_offsets[name] = len(self.prop_offsets) * 4
@@ -166,6 +167,292 @@ class X86Codegen:
         escaped = escaped.replace('\t', '\\t')
         self.data_section.append(f'{label}: .asciz "{escaped}"')
         return label
+
+    # --- Register allocator for expression evaluation ---
+    _REGS_32 = ['eax', 'ecx', 'edx', 'ebx']
+
+    def _r32(self, reg):
+        return reg
+
+    def _r8(self, reg32):
+        return {'eax': 'al', 'ecx': 'cl', 'edx': 'dl', 'ebx': 'bl'}.get(reg32)
+
+    def _alloc_reg(self):
+        if not self._reg_pool:
+            self._reg_pool = list(self._REGS_32)
+        if not self._reg_pool:
+            return None
+        return self._reg_pool.pop(0)
+
+    def _free_reg(self, reg):
+        if reg not in self._reg_pool:
+            self._reg_pool.append(reg)
+
+    def _free_all(self):
+        self._reg_pool = list(self._REGS_32)
+
+    def _expr_has_call(self, node):
+        if isinstance(node, Call):
+            return True
+        if isinstance(node, BinOp):
+            return self._expr_has_call(node.left) or self._expr_has_call(node.right)
+        if isinstance(node, UnaryOp):
+            return self._expr_has_call(node.value)
+        if isinstance(node, Compare):
+            return self._expr_has_call(node.left) or self._expr_has_call(node.right)
+        return False
+
+    def _compile_expr_to_reg(self, node):
+        if isinstance(node, Number):
+            reg = self._alloc_reg()
+            if isinstance(node.value, float):
+                import struct
+                bits = struct.unpack('<I', struct.pack('<f', node.value))[0]
+                self.assembly.append(f"    mov {reg}, {bits}")
+            else:
+                self.assembly.append(f"    mov {reg}, {node.value}")
+            return reg
+        elif isinstance(node, Boolean):
+            reg = self._alloc_reg()
+            self.assembly.append(f"    mov {reg}, {1 if node.value else 0}")
+            return reg
+        elif isinstance(node, String):
+            reg = self._alloc_reg()
+            label = self.add_string_literal(node.value)
+            self.assembly.append(f"    lea {reg}, [offset {label}]")
+            return reg
+        elif isinstance(node, Variable):
+            reg = self._alloc_reg()
+            offset = self.local_vars[node.name]
+            if isinstance(offset, str):
+                self.assembly.append(f"    mov {reg}, {offset}")
+            elif offset < 0:
+                self.assembly.append(f"    mov {reg}, [ebp + {-offset}]")
+            else:
+                self.assembly.append(f"    mov {reg}, [ebp - {offset}]")
+            return reg
+        elif isinstance(node, UnaryOp):
+            in_reg = self._compile_expr_to_reg(node.value)
+            if node.op == "-":
+                self.assembly.append(f"    neg {in_reg}")
+            elif node.op == "not":
+                self.assembly.append(f"    cmp {in_reg}, 0")
+                r8 = self._r8(in_reg)
+                if r8 is None:
+                    self.assembly.append(f"    mov eax, {in_reg}")
+                    self._free_reg(in_reg)
+                    if 'eax' in self._reg_pool:
+                        self._reg_pool.remove('eax')
+                    self.assembly.append("    cmp eax, 0")
+                    self.assembly.append("    sete al")
+                    self.assembly.append("    movzx eax, al")
+                    return 'eax'
+                else:
+                    self.assembly.append(f"    sete {r8}")
+                    self.assembly.append(f"    movzx {in_reg}, {r8}")
+            return in_reg
+        elif isinstance(node, BinOp):
+            return self._compile_binop_to_reg(node)
+        elif isinstance(node, Compare):
+            return self._compile_compare_to_reg(node)
+        self.compile_expr(node)
+        reg = self._alloc_reg()
+        self.assembly.append(f"    pop {reg}")
+        return reg
+
+    def _compile_binop_to_reg(self, node):
+        if node.op == "and":
+            label_false = self.next_label("and_false")
+            label_end = self.next_label("and_end")
+            result_reg = self._alloc_reg()
+            lr = self._compile_expr_to_reg(node.left)
+            self.assembly.append(f"    cmp {lr}, 0")
+            self.assembly.append(f"    je {label_false}")
+            self._free_reg(lr)
+            rr = self._compile_expr_to_reg(node.right)
+            self.assembly.append(f"    cmp {rr}, 0")
+            self.assembly.append(f"    je {label_false}")
+            self._free_reg(rr)
+            self.assembly.append(f"    mov {result_reg}, 1")
+            self.assembly.append(f"    jmp {label_end}")
+            self.assembly.append(f"{label_false}:")
+            self.assembly.append(f"    mov {result_reg}, 0")
+            self.assembly.append(f"{label_end}:")
+            return result_reg
+        elif node.op == "or":
+            label_true = self.next_label("or_true")
+            label_end = self.next_label("or_end")
+            result_reg = self._alloc_reg()
+            lr = self._compile_expr_to_reg(node.left)
+            self.assembly.append(f"    cmp {lr}, 0")
+            self.assembly.append(f"    jne {label_true}")
+            self._free_reg(lr)
+            rr = self._compile_expr_to_reg(node.right)
+            self.assembly.append(f"    cmp {rr}, 0")
+            self.assembly.append(f"    jne {label_true}")
+            self._free_reg(rr)
+            self.assembly.append(f"    mov {result_reg}, 0")
+            self.assembly.append(f"    jmp {label_end}")
+            self.assembly.append(f"{label_true}:")
+            self.assembly.append(f"    mov {result_reg}, 1")
+            self.assembly.append(f"{label_end}:")
+            return result_reg
+        elif self._is_float_expr(node.left) or self._is_float_expr(node.right):
+            self.compile_expr(node.left)
+            self.compile_expr(node.right)
+            self.assembly.append("    fld dword ptr [esp + 4]")
+            self.assembly.append("    fld dword ptr [esp]")
+            if node.op == "+":      self.assembly.append("    faddp st(1), st(0)")
+            elif node.op == "-":    self.assembly.append("    fsubp st(1), st(0)")
+            elif node.op == "*":    self.assembly.append("    fmulp st(1), st(0)")
+            elif node.op == "/":    self.assembly.append("    fdivp st(1), st(0)")
+            else:                   self.assembly.append("    faddp st(1), st(0)")
+            self.assembly.append("    add esp, 8")
+            self.assembly.append("    sub esp, 4")
+            self.assembly.append("    fstp dword ptr [esp]")
+            reg = self._alloc_reg()
+            self.assembly.append(f"    pop {reg}")
+            return reg
+        elif node.op == "+" and (self._is_string_expr(node.left) or self._is_string_expr(node.right)):
+            self.compile_expr(node.left)
+            self.compile_expr(node.right)
+            self.assembly.append("    pop ebx")
+            self.assembly.append("    pop eax")
+            self.assembly.append("    push ebx")
+            self.assembly.append("    push eax")
+            self.assembly.append("    call _concat_strings")
+            self.assembly.append("    add esp, 8")
+            reg = self._alloc_reg()
+            self.assembly.append(f"    mov {reg}, eax")
+            return reg
+        else:
+            left_reg = self._compile_expr_to_reg(node.left)
+            _save = self._expr_has_call(node.right)
+            if _save:
+                self.assembly.append(f"    push {left_reg}")
+            right_reg = self._compile_expr_to_reg(node.right)
+            if _save:
+                self.assembly.append(f"    pop {left_reg}")
+            if node.op == "+":
+                self.assembly.append(f"    add {left_reg}, {right_reg}")
+            elif node.op == "-":
+                self.assembly.append(f"    sub {left_reg}, {right_reg}")
+            elif node.op == "*":
+                self.assembly.append(f"    imul {left_reg}, {right_reg}")
+            elif node.op == "/" or node.op == "%":
+                if left_reg != "eax":
+                    self.assembly.append(f"    mov eax, {left_reg}")
+                    self._free_reg(left_reg)
+                    left_reg = "eax"
+                if right_reg == "edx":
+                    self.assembly.append("    mov ecx, edx")
+                    right_reg = "ecx"
+                self.assembly.append("    cdq")
+                self.assembly.append(f"    idiv {right_reg}")
+                if node.op == "/":
+                    if left_reg != "eax":
+                        self.assembly.append(f"    mov {left_reg}, eax")
+                else:
+                    self.assembly.append(f"    mov {left_reg}, edx")
+            elif node.op == "&":
+                self.assembly.append(f"    and {left_reg}, {right_reg}")
+            elif node.op == "<<":
+                self.assembly.append(f"    mov ecx, {right_reg}")
+                self.assembly.append(f"    shl {left_reg}, cl")
+            elif node.op == ">>":
+                self.assembly.append(f"    mov ecx, {right_reg}")
+                self.assembly.append(f"    sar {left_reg}, cl")
+            self._free_reg(right_reg)
+            return left_reg
+
+    def _compile_compare_to_reg(self, node):
+        is_float_cmp = self._is_float_expr(node.left) or self._is_float_expr(node.right)
+        left_is_str = self._is_string_expr(node.left) or getattr(node.left, 'inferred_type', None) == 'string'
+        right_is_str = self._is_string_expr(node.right) or getattr(node.right, 'inferred_type', None) == 'string'
+        is_str_cmp = False
+        if left_is_str or right_is_str:
+            left_is_zero = isinstance(node.left, Number) and node.left.value == 0
+            right_is_zero = isinstance(node.right, Number) and node.right.value == 0
+            if not ((left_is_str and right_is_zero) or (right_is_str and left_is_zero)):
+                is_str_cmp = True
+
+        if is_float_cmp:
+            self.compile_expr(node.left)
+            self.compile_expr(node.right)
+            self.assembly.append("    fld dword ptr [esp]")
+            self.assembly.append("    fld dword ptr [esp + 4]")
+            self.assembly.append("    add esp, 8")
+            self.assembly.append("    fucomip st(0), st(1)")
+            self.assembly.append("    fstp st(0)")
+            self.assembly.append("    pushf")
+            self.assembly.append("    pop eax")
+            if node.op == "==":
+                self.assembly.append("    and eax, 64")
+                self.assembly.append("    cmp eax, 0")
+            elif node.op == "!=":
+                self.assembly.append("    and eax, 64")
+                self.assembly.append("    cmp eax, 0")
+            elif node.op == "<":
+                self.assembly.append("    and eax, 1")
+                self.assembly.append("    cmp eax, 1")
+            elif node.op == ">":
+                self.assembly.append("    and eax, 65")
+                self.assembly.append("    cmp eax, 0")
+            elif node.op == "<=":
+                self.assembly.append("    and eax, 65")
+                self.assembly.append("    cmp eax, 0")
+            elif node.op == ">=":
+                self.assembly.append("    and eax, 1")
+                self.assembly.append("    cmp eax, 0")
+            bool_jcc_map = {"==": "jne", "!=": "je", "<": "je", ">": "je", "<=": "jne", ">=": "je"}
+            jcc = bool_jcc_map[node.op]
+            label_true = self.next_label("L_cmp_true")
+            label_end = self.next_label("L_cmp_end")
+            reg = self._alloc_reg()
+            self.assembly.append(f"    {jcc} {label_true}")
+            self.assembly.append(f"    mov {reg}, 0")
+            self.assembly.append(f"    jmp {label_end}")
+            self.assembly.append(f"{label_true}:")
+            self.assembly.append(f"    mov {reg}, 1")
+            self.assembly.append(f"{label_end}:")
+            return reg
+        elif is_str_cmp:
+            self.compile_expr(node.left)
+            self.compile_expr(node.right)
+            self.assembly.append("    call _strcmp")
+            self.assembly.append("    add esp, 8")
+            reg = self._alloc_reg()
+            self.assembly.append(f"    mov {reg}, eax")
+            self.assembly.append(f"    cmp {reg}, 0")
+            setcc_map = {"==": "sete", "!=": "setne", "<": "setl", ">": "setg", "<=": "setle", ">=": "setge"}
+            r8 = self._r8(reg)
+            if r8 is None:
+                self.assembly.append("    mov eax, 0")
+                self.assembly.append(f"    {setcc_map[node.op]} al")
+                self.assembly.append(f"    mov {reg}, eax")
+            else:
+                self.assembly.append(f"    {setcc_map[node.op]} {r8}")
+                self.assembly.append(f"    movzx {reg}, {r8}")
+            return reg
+        else:
+            left_reg = self._compile_expr_to_reg(node.left)
+            right_reg = self._compile_expr_to_reg(node.right)
+            self.assembly.append(f"    cmp {left_reg}, {right_reg}")
+            self._free_reg(right_reg)
+            setcc_map = {"==": "sete", "!=": "setne", "<": "setl", "<=": "setle", ">": "setg", ">=": "setge"}
+            r8 = self._r8(left_reg)
+            if r8 is None:
+                self.assembly.append(f"    mov eax, {left_reg}")
+                self._free_reg(left_reg)
+                if 'eax' in self._reg_pool:
+                    self._reg_pool.remove('eax')
+                self.assembly.append(f"    {setcc_map[node.op]} al")
+                self.assembly.append("    movzx eax, al")
+                return 'eax'
+            else:
+                self.assembly.append(f"    {setcc_map[node.op]} {r8}")
+                self.assembly.append(f"    movzx {left_reg}, {r8}")
+                return left_reg
 
     def generate(self):
         # Initial headers
@@ -4650,222 +4937,17 @@ class X86Codegen:
                 self.assembly.append(f"    mov eax, [ebp - {offset}]")
             self.assembly.append("    push eax")
         elif isinstance(node, BinOp):
-            if node.op == "and":
-                label_false = self.next_label("and_false")
-                label_end = self.next_label("and_end")
-                self.compile_expr(node.left)
-                self.assembly.append("    pop eax")
-                self.assembly.append("    cmp eax, 0")
-                self.assembly.append(f"    je {label_false}")
-                self.compile_expr(node.right)
-                self.assembly.append("    pop eax")
-                self.assembly.append("    cmp eax, 0")
-                self.assembly.append(f"    je {label_false}")
-                self.assembly.append("    push 1")
-                self.assembly.append(f"    jmp {label_end}")
-                self.assembly.append(f"{label_false}:")
-                self.assembly.append("    push 0")
-                self.assembly.append(f"{label_end}:")
-                return
-            elif node.op == "or":
-                label_true = self.next_label("or_true")
-                label_end = self.next_label("or_end")
-                self.compile_expr(node.left)
-                self.assembly.append("    pop eax")
-                self.assembly.append("    cmp eax, 0")
-                self.assembly.append(f"    jne {label_true}")
-                self.compile_expr(node.right)
-                self.assembly.append("    pop eax")
-                self.assembly.append("    cmp eax, 0")
-                self.assembly.append(f"    jne {label_true}")
-                self.assembly.append("    push 0")
-                self.assembly.append(f"    jmp {label_end}")
-                self.assembly.append(f"{label_true}:")
-                self.assembly.append("    push 1")
-                self.assembly.append(f"{label_end}:")
-                return
-
-            left_leaf = self.is_leaf_expr(node.left)
-            right_leaf = self.is_leaf_expr(node.right)
-            all_leaf = left_leaf and right_leaf
-            is_float_op = self._is_float_expr(node.left) or self._is_float_expr(node.right)
-            if is_float_op:
-                self.compile_expr(node.left)
-                self.compile_expr(node.right)
-                self.assembly.append("    fld dword ptr [esp + 4]")
-                self.assembly.append("    fld dword ptr [esp]")
-                if node.op == "+":
-                    self.assembly.append("    faddp st(1), st(0)")
-                elif node.op == "-":
-                    self.assembly.append("    fsubp st(1), st(0)")
-                elif node.op == "*":
-                    self.assembly.append("    fmulp st(1), st(0)")
-                elif node.op == "/":
-                    self.assembly.append("    fdivp st(1), st(0)")
-                else:
-                    self.assembly.append("    faddp st(1), st(0)")
-                self.assembly.append("    add esp, 8")
-                self.assembly.append("    sub esp, 4")
-                self.assembly.append("    fstp dword ptr [esp]")
-            elif all_leaf and node.op == "+" and (self._is_string_expr(node.left) or self._is_string_expr(node.right)):
-                self.compile_expr(node.left)
-                self.compile_expr(node.right)
-                self.assembly.append("    pop ebx")
-                self.assembly.append("    pop eax")
-            elif all_leaf:
-                self.compile_leaf_to_reg(node.right, 'ebx')
-                self.compile_leaf_to_reg(node.left, 'eax')
-                if node.op == "+":
-                    self.assembly.append("    add eax, ebx")
-                elif node.op == "-":
-                    self.assembly.append("    sub eax, ebx")
-                elif node.op == "*":
-                    self.assembly.append("    imul eax, ebx")
-                elif node.op == "/":
-                    self.assembly.append("    cdq")
-                    self.assembly.append("    idiv ebx")
-                elif node.op == "%":
-                    self.assembly.append("    cdq")
-                    self.assembly.append("    idiv ebx")
-                    self.assembly.append("    mov eax, edx")
-                elif node.op == "&":
-                    self.assembly.append("    and eax, ebx")
-                elif node.op == "<<":
-                    self.assembly.append("    mov ecx, ebx")
-                    self.assembly.append("    shl eax, cl")
-                elif node.op == ">>":
-                    self.assembly.append("    mov ecx, ebx")
-                    self.assembly.append("    sar eax, cl")
-                self.assembly.append("    push eax")
-            else:
-                self.compile_expr(node.left)
-                self.compile_expr(node.right)
-                self.assembly.append("    pop ebx")
-                self.assembly.append("    pop eax")
-                if node.op == "+":
-                    is_str = self._is_string_expr(node.left) or self._is_string_expr(node.right)
-                    if is_str:
-                        self.assembly.append("    push ebx")
-                        self.assembly.append("    push eax")
-                        self.assembly.append("    call _concat_strings")
-                        self.assembly.append("    add esp, 8")
-                    else:
-                        self.assembly.append("    add eax, ebx")
-                elif node.op == "-":
-                    self.assembly.append("    sub eax, ebx")
-                elif node.op == "*":
-                    self.assembly.append("    imul eax, ebx")
-                elif node.op == "/":
-                    self.assembly.append("    cdq")
-                    self.assembly.append("    idiv ebx")
-                elif node.op == "%":
-                    self.assembly.append("    cdq")
-                    self.assembly.append("    idiv ebx")
-                    self.assembly.append("    mov eax, edx")
-                elif node.op == "&":
-                    self.assembly.append("    and eax, ebx")
-                elif node.op == "<<":
-                    self.assembly.append("    mov ecx, ebx")
-                    self.assembly.append("    shl eax, cl")
-                elif node.op == ">>":
-                    self.assembly.append("    mov ecx, ebx")
-                    self.assembly.append("    sar eax, cl")
-                self.assembly.append("    push eax")
+            reg = self._compile_binop_to_reg(node)
+            self.assembly.append(f"    push {reg}")
+            self._free_reg(reg)
         elif isinstance(node, UnaryOp):
-            self.compile_expr(node.value)
-            self.assembly.append("    pop eax")
-            if node.op == "-":
-                self.assembly.append("    neg eax")
-            elif node.op == "not":
-                self.assembly.append("    cmp eax, 0")
-                self.assembly.append("    sete al")
-                self.assembly.append("    movzx eax, al")
-            self.assembly.append("    push eax")
+            reg = self._compile_expr_to_reg(node)
+            self.assembly.append(f"    push {reg}")
+            self._free_reg(reg)
         elif isinstance(node, Compare):
-            left_leaf = self.is_leaf_expr(node.left)
-            right_leaf = self.is_leaf_expr(node.right)
-            all_leaf = left_leaf and right_leaf
-            is_float_cmp = self._is_float_expr(node.left) or self._is_float_expr(node.right)
-            
-            if is_float_cmp:
-                self.compile_expr(node.left)
-                self.compile_expr(node.right)
-                self.assembly.append("    fld dword ptr [esp]")
-                self.assembly.append("    fld dword ptr [esp + 4]")
-                self.assembly.append("    add esp, 8")
-                self.assembly.append("    fucomip st(0), st(1)")
-                self.assembly.append("    fstp st(0)")
-                self.assembly.append("    pushf")
-                self.assembly.append("    pop eax")
-            elif all_leaf:
-                self.compile_leaf_to_reg(node.right, 'ebx')
-                self.compile_leaf_to_reg(node.left, 'eax')
-            else:
-                self.compile_expr(node.left)
-                self.compile_expr(node.right)
-                self.assembly.append("    pop ebx")
-                self.assembly.append("    pop eax")
-            
-            # Determine if this is a string comparison based on type info
-            left_type = getattr(node.left, 'inferred_type', 'any')
-            right_type = getattr(node.right, 'inferred_type', 'any')
-            left_is_str = self._is_string_expr(node.left) or left_type == 'string'
-            right_is_str = self._is_string_expr(node.right) or right_type == 'string'
-            is_str_cmp = False
-            if left_is_str or right_is_str:
-                left_is_zero = isinstance(node.left, Number) and node.left.value == 0
-                right_is_zero = isinstance(node.right, Number) and node.right.value == 0
-                if (left_is_str and right_is_zero) or (right_is_str and left_is_zero):
-                    is_str_cmp = False
-                else:
-                    is_str_cmp = True
-            
-            if is_float_cmp:
-                # fucomip sets ZF=1 if equal, CF=1 if below; eax holds pushed flags
-                if node.op == "==":
-                    self.assembly.append("    and eax, 64")
-                    self.assembly.append("    cmp eax, 0")
-                elif node.op == "!=":
-                    self.assembly.append("    and eax, 64")
-                    self.assembly.append("    cmp eax, 0")
-                elif node.op == "<":
-                    self.assembly.append("    and eax, 1")
-                    self.assembly.append("    cmp eax, 1")
-                elif node.op == ">":
-                    self.assembly.append("    and eax, 65")
-                    self.assembly.append("    cmp eax, 0")
-                elif node.op == "<=":
-                    self.assembly.append("    and eax, 65")
-                    self.assembly.append("    cmp eax, 0")
-                elif node.op == ">=":
-                    self.assembly.append("    and eax, 1")
-                    self.assembly.append("    cmp eax, 0")
-                
-                bool_jcc_map = {"==": "jne", "!=": "je", "<": "je", ">": "je", "<=": "jne", ">=": "je"}
-                jcc = bool_jcc_map[node.op]
-                label_true = self.next_label("L_cmp_true")
-                label_end = self.next_label("L_cmp_end")
-                self.assembly.append(f"    {jcc} {label_true}")
-                self.assembly.append("    push 0")
-                self.assembly.append(f"    jmp {label_end}")
-                self.assembly.append(f"{label_true}:")
-                self.assembly.append("    push 1")
-                self.assembly.append(f"{label_end}:")
-            else:
-                setcc_map = {"==": "sete", "!=": "setne", "<": "setl", "<=": "setle", ">": "setg", ">=": "setge"}
-                if node.op == "has":
-                    self.assembly.append("    cmp eax, 0")
-                elif is_str_cmp:
-                    self.assembly.append("    push ebx")
-                    self.assembly.append("    push eax")
-                    self.assembly.append("    call _strcmp")
-                    self.assembly.append("    add esp, 8")
-                    self.assembly.append("    cmp eax, 0")
-                else:
-                    self.assembly.append("    cmp eax, ebx")
-                self.assembly.append(f"    {setcc_map[node.op]} al")
-                self.assembly.append("    movzx eax, al")
-                self.assembly.append("    push eax")
+            reg = self._compile_compare_to_reg(node)
+            self.assembly.append(f"    push {reg}")
+            self._free_reg(reg)
         elif isinstance(node, Call):
             if node.name in self.struct_defs:
                 # Compute struct size from max prop_offset + 4

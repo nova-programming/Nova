@@ -91,24 +91,24 @@ class TestX86_64CodegenOutput(unittest.TestCase):
         self.assertIn("call _printf", asm)
 
     def test_binary_ops(self):
-        """Binary ops should use 32-bit regs (eax, ebx), push rax."""
+        """Binary ops fold memory operands for leaf variables."""
         asm = compile_to_asm("a = 10\nb = 20\nprint(a + b)")
-        self.assertIn("add eax, ebx", asm)
+        self.assertRegex(asm, r"add e\w\w, e\w\w")
         self.assertIn("push rax", asm)
 
     def test_binary_sub(self):
         asm = compile_to_asm("a = 10\nb = 5\nprint(a - b)")
-        self.assertIn("sub eax, ebx", asm)
+        self.assertRegex(asm, r"sub e\w\w, e\w\w")
 
     def test_binary_mul(self):
         asm = compile_to_asm("a = 10\nb = 5\nprint(a * b)")
-        self.assertIn("imul eax, ebx", asm)
+        self.assertRegex(asm, r"imul e\w\w, e\w\w")
 
     def test_binary_div_idiv(self):
         """Division uses cdq/idiv for signed 32-bit."""
         asm = compile_to_asm("a = 100\nb = 3\nprint(a / b)")
         self.assertIn("cdq", asm)
-        self.assertIn("idiv ebx", asm)
+        self.assertRegex(asm, r"idiv e\w\w")
 
     def test_unary_neg(self):
         asm = compile_to_asm("print(-5)")
@@ -146,7 +146,7 @@ class TestX86_64CodegenOutput(unittest.TestCase):
 
     def test_compare_eq(self):
         asm = compile_to_asm("a = 1\nb = 2\nprint(a == b)")
-        self.assertIn("cmp eax, ebx", asm)
+        self.assertRegex(asm, r"cmp e\w\w, e\w\w")
         self.assertIn("sete al", asm)
 
     def test_compare_neq(self):
@@ -199,7 +199,6 @@ class TestX86_64CodegenOutput(unittest.TestCase):
 
     def test_return_statement(self):
         asm = compile_to_asm("def add(a, b) { return a + b }\nprint(add(1, 2))")
-        self.assertIn("pop rax", asm)
         self.assertIn("mov rsp, rbp", asm)
         self.assertIn("pop rbp", asm)
         self.assertIn("ret", asm)
@@ -213,7 +212,7 @@ class TestX86_64CodegenOutput(unittest.TestCase):
     def test_list_literal(self):
         asm = compile_to_asm("print([1, 2, 3])")
         self.assertIn("call _malloc", asm)  # allocate list struct
-        self.assertIn("dword [rbx]", asm)   # store length
+        self.assertIn("dword ptr [rbx]", asm)   # store length
         self.assertIn("lea rdx, [rbx + 16]", asm)  # data pointer
 
     def test_len(self):

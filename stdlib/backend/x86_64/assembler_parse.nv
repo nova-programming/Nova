@@ -116,6 +116,22 @@ def reg_code(name: string) -> int {
     if name == "ebp" { return 5 }
     if name == "esi" { return 6 }
     if name == "edi" { return 7 }
+    if name == "rax" { return 0 }
+    if name == "rcx" { return 1 }
+    if name == "rdx" { return 2 }
+    if name == "rbx" { return 3 }
+    if name == "rsp" { return 4 }
+    if name == "rbp" { return 5 }
+    if name == "rsi" { return 6 }
+    if name == "rdi" { return 7 }
+    if name == "r8"  { return 8 }
+    if name == "r9"  { return 9 }
+    if name == "r10" { return 10 }
+    if name == "r11" { return 11 }
+    if name == "r12" { return 12 }
+    if name == "r13" { return 13 }
+    if name == "r14" { return 14 }
+    if name == "r15" { return 15 }
     if name == "al" { return 0 }
     if name == "cl" { return 1 }
     if name == "bl" { return 3 }
@@ -132,6 +148,38 @@ def is_32bit_reg(name: string) -> int {
     if name == "ebp" { return 1 }
     if name == "esi" { return 1 }
     if name == "edi" { return 1 }
+    return 0
+}
+
+def is_64bit_reg(name: string) -> int {
+    if name == "rax" { return 1 }
+    if name == "rcx" { return 1 }
+    if name == "rdx" { return 1 }
+    if name == "rbx" { return 1 }
+    if name == "rsp" { return 1 }
+    if name == "rbp" { return 1 }
+    if name == "rsi" { return 1 }
+    if name == "rdi" { return 1 }
+    if name == "r8"  { return 1 }
+    if name == "r9"  { return 1 }
+    if name == "r10" { return 1 }
+    if name == "r11" { return 1 }
+    if name == "r12" { return 1 }
+    if name == "r13" { return 1 }
+    if name == "r14" { return 1 }
+    if name == "r15" { return 1 }
+    return 0
+}
+
+def has_rex_bit(name: string) -> int {
+    n = reg_code(name)
+    if n >= 8 { return 1 }
+    return 0
+}
+
+def rex_bit(name: string) -> int {
+    n = reg_code(name)
+    if n >= 8 { return 1 }
     return 0
 }
 
@@ -177,6 +225,7 @@ data AssemblerState {
 data OperandInfo {
     kind: string
     reg: int
+    width: int
     imm_val: int
     mem_base: int
     mem_index: int
@@ -354,6 +403,7 @@ def parse_operand(op_str: string) -> OperandInfo {
     info.mem_disp = 0
     info.label = ""
     info.imm_val = 0
+    info.width = 0
     op_str = trim(op_str)
 
     if len(op_str) >= 10 {
@@ -380,11 +430,19 @@ def parse_operand(op_str: string) -> OperandInfo {
         return info
     }
 
+    if is_64bit_reg(op_str) == 1 {
+        info.kind = "reg"
+        info.reg = reg_code(op_str)
+        info.width = 64
+        return info
+    }
     if is_32bit_reg(op_str) == 1 or op_str == "al" or op_str == "cl" or op_str == "bl" or op_str == "dl" {
         info.kind = "reg"
         info.reg = reg_code(op_str)
         if op_str == "al" or op_str == "cl" or op_str == "bl" or op_str == "dl" {
             info.kind = "reg8"
+        } else {
+            info.width = 32
         }
         return info
     }

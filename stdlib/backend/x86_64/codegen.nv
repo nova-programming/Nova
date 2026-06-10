@@ -4502,6 +4502,11 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int) -> list {
         emit(state, "    push rbp")
         emit(state, "    mov rbp, rsp")
         emit(state, "    push rbx")
+        emit(state, "    sub rsp, 40")  # align stack (8 + 40 = 48) -> unaligned?! No! push rbp (aligned), push rbx (unaligned). We need 8 bytes to align. So sub rsp, 40 makes it unaligned. Wait.
+        # Wait, if push rbp aligns it, push rbx unaligns it.
+        # To align it, we need to subtract an odd multiple of 8. 8, 24, 40.
+        # 40 is an odd multiple of 8! (40 / 8 = 5).
+        # So sub rsp, 40 ALIGNS IT! And provides 40 bytes.
         emit(state, "    mov rdi, [rbp + 16]")
         emit(state, "    call _strlen")
         emit(state, "    mov ebx, eax")
@@ -4511,16 +4516,16 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int) -> list {
         emit(state, "    inc ebx")
         emit(state, "    mov edi, ebx")
         emit(state, "    call _malloc")
-        emit(state, "    push rax")
+        emit(state, "    mov [rsp], rax")  # use shadow space to save rax safely
         emit(state, "    mov rsi, [rbp + 16]")
         emit(state, "    mov rdi, rax")
         emit(state, "    call _strcpy")
-        emit(state, "    pop rax")
-        emit(state, "    push rax")
+        emit(state, "    mov rax, [rsp]")
         emit(state, "    mov rsi, [rbp + 24]")
         emit(state, "    mov rdi, rax")
         emit(state, "    call _strcat")
-        emit(state, "    pop rax")
+        emit(state, "    mov rax, [rsp]")
+        emit(state, "    add rsp, 40")
         emit(state, "    pop rbx")
         emit(state, "    pop rbp")
         emit(state, "    ret")

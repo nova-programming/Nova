@@ -63,10 +63,41 @@
 
 ### GCC Bundling (This Session)
 - **`main.py`**: New `_find_gcc()` — checks bundled `gcc/bin/gcc.exe` first, then system PATH. Clear platform-specific install instructions when missing. Cross-drive `relpath` fix.
+- **`main.py`**: Force-delete stale `runtime.o` before recompiling `runtime.c` to prevent silent stale-object linking that crashed `_printf`
+
+### x86_64 Native Compilation Fix (This Session — June 2026)
+- **Root cause**: `nova.exe` crashed with `STATUS_ACCESS_VIOLATION` on startup because `_printf`/`_sys_get_args` from a stale `runtime.o` had debug markers and incomplete quote handling
+- **Quote handling**: `_sys_get_args` in `runtime.c` now tracks `in_quote` state — paths with spaces (e.g. `D:\...\Random Topic Practice\...`) are parsed as single args instead of being split into 4 tokens
+- **Runtime recompile fix**: `main.py:204-214` now deletes existing `runtime.o` before recompiling `runtime.c`, guaranteeing the linker always gets fresh object code
+- **Result**: `python main.py build nova.nv` produces a working `nova.exe` that correctly prints usage message (exit 0) and processes `build` subcommand
 - **`install.ps1`**: Downloads portable winlibs MinGW-w64 (~130MB) into `<InstallDir>/gcc/` if `gcc` not on PATH. Handles silent extraction of the `.zip` archive.
 - **`install.py`**: Same GCC bundling logic — downloads winlibs on Windows, warns with package manager instructions on Unix.
 - **`install.sh`**: Detects GCC presence after extraction, warns if missing with platform-specific install commands.
 - **`nova build` auto-fallback**: Tries `nova.exe assemble-link` first (verifies output exists), falls back to system/bundled GCC.
+
+### Local Variable / Parameter Layout Overlap Bug Fixed (This Session — June 2026)
+- **Root cause**: Local variables were assigned positive offsets (8, 16, 24…) but saved parameters used negative offsets (-16, -24, -32…). Both accessed via `[rbp - N]` — they silently overlapped. Example: `compile_file` stored `path` at `[rbp - 16]`, then `source = sys_read(fd)` overwrote `[rbp - 16]` with the file contents, destroying `path`.
+- **Fix**: Added `local_var_base = 16 + n_params * 8` shift. Local var offsets now start above saved parameter area, preventing overlap. Applied in both Python codegen (`codegen.py:scan_vars`) and self-hosted codegen (`codegen.nv:register_var`).
+- **Files changed** (4 files, ~30 lines):
+  - `compiler/backend/x86_64/codegen.py`: `scan_vars` offset shift (+base), `_main` local_var_base=32, init `self.local_var_base=16`
+  - `stdlib/backend/x86_64/codegen.nv`: Added `local_var_base` to `CodegenState`, `register_var` shift, `compile_function` save/restore + `sub rsp` adjustment
+- **Result**: `python main.py build hello.nv` now produces working `hello.exe`. `nova.exe` reaches tokenization phase when building.
+
+### Debug Prints Removed from runtime.c
+- `main()` wrapper (`runtime.c:330-338`) had `WriteFile(h, "1\n", ...)`, `WriteFile(h, "2\n", ...)`, `WriteFile(h, "3a\n", ...)` debug prints around `_main()` call. Removed — these caused "1\n2\n" prefix on all output (no functional purpose).
+
+### `_printf` `%d` Reads Wrong Register (This Session — June 2026)
+- **Root cause**: `_printf` in `runtime.c:56-57` read `%s` from `rsi` (2nd SysV reg = first variadic arg) but `%d` from `rdx` (3rd SysV reg = second variadic arg). The codegen always passes the value in `rsi` (since `printf(fmt, value)` only ever has one variadic arg), so `%d` read uninitialized garbage from `rdx`.
+- **Symptoms**: `print(len(s))` printed garbage (e.g. `1684949248`) while `print(s[0])` printed `"H"` correctly. All `%d` format outputs were corrupt; `%s` worked fine.
+- **Fix** (`runtime.c:67-69`): Changed `%d` handler to read from `arg_s` (= `rsi`) instead of `arg_d` (`rdx`). Unified both handlers to use the single `arg_s` source.
+- **`_sprintf` NOT affected**: Its signature `sprintf(buf, fmt, ...)` puts fmt in `rsi` (arg2) and first variadic arg in `rdx` (arg3) — so reading `%d` from `rdx` was correct there.
+- **Self-hosted codegen NOT affected**: It uses a stack-based `_printf` wrapper that reads args from `[rbp+16/24]` and delegates to CRT `printf`, bypassing the register confusion entirely.
+
+### `-mno-red-zone` for SYSCALL Functions
+- When GCC compiles a `__attribute__((sysv_abi))` function on Windows x64, it may omit `sub rsp` and access locals below `rsp` (assuming SysV red zone). Windows has no red zone — interrupt handlers can corrupt this data. Fixed by adding `-mno-red-zone` to `runtime.c` compilation command in `main.py`.
+
+### Remaining Issue
+- **Self-hosted tokenizer crash**: `nova.exe build hello.nv` crashes with `STATUS_ACCESS_VIOLATION` (0xC0000005) during `tokenize(source)` in the self-hosted lexer. The Python codegen compiles everything correctly (GCC link succeeds). The crash is in the embedded self-hosted codegen's compiled output.
 
 ### Version Bump
 - **NOVA_VERSION**: `0.5.0` → `0.6.0`

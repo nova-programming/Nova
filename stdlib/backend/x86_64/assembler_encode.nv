@@ -25,6 +25,28 @@ def append_imm32(state, val: int) {
     }
 }
 
+
+
+# --- REX Prefix Helpers (x86-64) ---
+
+def mask_reg(r: int) -> int {
+    return r & 7
+}
+
+def build_rex(w: int, r: int, x: int, b: int) -> int {
+    val = 64
+    if w == 1 { val = val + 8 }
+    if r == 1 { val = val + 4 }
+    if x == 1 { val = val + 2 }
+    if b == 1 { val = val + 1 }
+    return val
+}
+
+def emit_rex(state, w: int, r: int, x: int, b: int) {
+    val = build_rex(w, r, x, b)
+    if val > 64 { state.code.append(val) }
+}
+
 # --- ModR/M Encoding ---
 
 def encode_modrm_mem(state, mem: OperandInfo, reg_field: int) {
@@ -200,21 +222,25 @@ def append_label_ref(state, name: string, size: int) {
 def encode_alu_imm(state, reg_field: int, ops: list) {
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
-
+    w = 0
+    if op1.width == 64 { w = 1 }
     if op1.kind == "reg" {
         if op2.kind == "offset" {
+            emit_rex(state, w, 0, 0, rex_bit(ops[0]))
             state.code.append(129)
-            state.code.append(build_modrm(3, reg_field, op1.reg))
+            state.code.append(build_modrm(3, reg_field, mask_reg(op1.reg)))
             append_label_ref(state, op2.label, 5)
             return
         }
         if op2.imm_val >= -128 and op2.imm_val <= 127 {
+            emit_rex(state, w, 0, 0, rex_bit(ops[0]))
             state.code.append(131)
-            state.code.append(build_modrm(3, reg_field, op1.reg))
+            state.code.append(build_modrm(3, reg_field, mask_reg(op1.reg)))
             state.code.append(byte_mask(op2.imm_val))
         } else {
+            emit_rex(state, w, 0, 0, rex_bit(ops[0]))
             state.code.append(129)
-            state.code.append(build_modrm(3, reg_field, op1.reg))
+            state.code.append(build_modrm(3, reg_field, mask_reg(op1.reg)))
             append_imm32(state, op2.imm_val)
         }
     }
@@ -227,49 +253,50 @@ def encode_mov(state, ops: list) {
     op2 = parse_operand(ops[1])
 
     if op1.kind == "reg" and op2.kind == "imm" {
-        state.code.append(184 + op1.reg)
+        state.code.append(184 + mask_reg(op1.reg))
         append_imm32(state, op2.imm_val)
         return
     }
 
     if op1.kind == "reg" and op2.kind == "offset" {
-        state.code.append(184 + op1.reg)
+        state.code.append(184 + mask_reg(op1.reg))
         append_label_ref(state, op2.label, 5)
         return
     }
 
     if op1.kind == "reg" and op2.kind == "reg" {
         state.code.append(137)
-        state.code.append(build_modrm(3, op2.reg, op1.reg))
+        state.code.append(build_modrm(3, mask_reg(op2.reg), mask_reg(op1.reg)))
         return
     }
 
     if op1.kind == "mem" and op2.kind == "reg" {
         state.code.append(137)
-        encode_modrm_mem_reg(state, op1, op2.reg)
+        encode_modrm_mem_reg(state, op1, mask_reg(op2.reg))
         return
     }
 
     if op1.kind == "reg" and op2.kind == "mem" {
         state.code.append(139)
-        encode_modrm_mem_reg(state, op2, op1.reg)
+        encode_modrm_mem_reg(state, op2, mask_reg(op1.reg))
         return
     }
 
     if op1.kind == "reg8" and op2.kind == "mem" {
         state.code.append(138)
         if op2.mem_index >= 0 {
-            encode_modrm_sib_reg(state, op2, op1.reg)
+            encode_modrm_sib_reg(state, op2, mask_reg(op1.reg))
         } else {
-            encode_modrm_mem(state, op2, op1.reg)
+            encode_modrm_mem(state, op2, mask_reg(op1.reg))
         }
         return
     }
 
     if op1.kind == "reg" and op2.kind == "reg8" {
+        emit_rex(state, 0, rex_bit(ops[0]), 0, 0)
         state.code.append(15)
         state.code.append(182)
-        state.code.append(build_modrm(3, op1.reg, reg_code(ops[1])))
+        state.code.append(build_modrm(3, mask_reg(op1.reg), mask_reg(reg_code(ops[1]))))
         return
     }
 
@@ -300,7 +327,7 @@ def encode_mov(state, ops: list) {
         if op1.mem_index >= 0 {
             encode_modrm_sib_reg(state, op1, op2.reg)
         } else {
-            encode_modrm_mem(state, op1, op2.reg)
+            encode_modrm_mem(state, op1, mask_reg(op2.reg))
         }
         return
     }
@@ -320,7 +347,7 @@ def encode_mov(state, ops: list) {
 
     if op1.kind == "reg" and op2.kind == "mem" and op2.mem_index >= 0 {
         state.code.append(139)
-        encode_modrm_sib_reg(state, op2, op1.reg)
+        encode_modrm_sib_reg(state, op2, mask_reg(op1.reg))
         return
     }
 }
@@ -329,7 +356,8 @@ def encode_push(state, ops: list) {
     op = parse_operand(ops[0])
 
     if op.kind == "reg" {
-        state.code.append(80 + op.reg)
+        emit_rex(state, 0, 0, 0, rex_bit(ops[0]))
+        state.code.append(80 + mask_reg(op.reg))
         return
     }
 
@@ -355,7 +383,8 @@ def encode_push(state, ops: list) {
 def encode_pop(state, ops: list) {
     op = parse_operand(ops[0])
     if op.kind == "reg" {
-        state.code.append(88 + op.reg)
+        emit_rex(state, 0, 0, 0, rex_bit(ops[0]))
+        state.code.append(88 + mask_reg(op.reg))
     }
 }
 
@@ -425,8 +454,11 @@ def encode_add(state, ops: list) {
     op2 = parse_operand(ops[1])
 
     if op1.kind == "reg" and op2.kind == "reg" {
+        w = 0
+        if op1.width == 64 or op2.width == 64 { w = 1 }
+        emit_rex(state, w, rex_bit(ops[1]), 0, rex_bit(ops[0]))
         state.code.append(1)
-        state.code.append(build_modrm(3, op2.reg, op1.reg))
+        state.code.append(build_modrm(3, mask_reg(op2.reg), mask_reg(op1.reg)))
         return
     }
     if op1.kind == "reg" and op2.kind == "imm" {
@@ -439,25 +471,31 @@ def encode_add(state, ops: list) {
     }
     if op1.kind == "reg8" and op2.kind == "imm" {
         state.code.append(128)
-        state.code.append(build_modrm(3, 0, op1.reg))
+        state.code.append(build_modrm(3, 0, mask_reg(op1.reg)))
         state.code.append(byte_mask(op2.imm_val))
         return
     }
     if op1.kind == "reg" and op2.kind == "mem" {
+        w = 0
+        if op1.width == 64 { w = 1 }
+        emit_rex(state, w, rex_bit(ops[0]), 0, 0)
         state.code.append(3)
         if op2.mem_index >= 0 {
-            encode_modrm_sib_reg(state, op2, op1.reg)
+            encode_modrm_sib_reg(state, op2, mask_reg(op1.reg))
         } else {
-            encode_modrm_mem_reg(state, op2, op1.reg)
+            encode_modrm_mem_reg(state, op2, mask_reg(op1.reg))
         }
         return
     }
     if op1.kind == "mem" and op2.kind == "reg" {
+        w = 0
+        if op2.width == 64 { w = 1 }
+        emit_rex(state, w, rex_bit(ops[1]), 0, 0)
         state.code.append(1)
         if op1.mem_index >= 0 {
-            encode_modrm_sib_reg(state, op1, op2.reg)
+            encode_modrm_sib_reg(state, op1, mask_reg(op2.reg))
         } else {
-            encode_modrm_mem_reg(state, op1, op2.reg)
+            encode_modrm_mem_reg(state, op1, mask_reg(op2.reg))
         }
         return
     }
@@ -505,25 +543,34 @@ def encode_jnz(state, ops: list) {
 }
 def encode_not(state, ops: list) {
     op = parse_operand(ops[0])
+    w = 0
+    if op.width == 64 { w = 1 }
+    emit_rex(state, w, 0, 0, rex_bit(ops[0]))
     state.code.append(247)
-    state.code.append(build_modrm(3, 2, op.reg))
+    state.code.append(build_modrm(3, 2, mask_reg(op.reg)))
 }
 def encode_div(state, ops: list) {
     op = parse_operand(ops[0])
+    w = 0
+    if op.width == 64 { w = 1 }
+    emit_rex(state, w, 0, 0, rex_bit(ops[0]))
     state.code.append(247)
-    state.code.append(build_modrm(3, 6, op.reg))
+    state.code.append(build_modrm(3, 6, mask_reg(op.reg)))
 }
 def encode_movsx(state, ops: list) {
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
+    w = 0
+    if op1.width == 64 { w = 1 }
+    emit_rex(state, w, 0, 0, rex_bit(ops[0]))
     state.code.append(15)
     state.code.append(190)
     if op2.kind == "reg8" {
-        state.code.append(build_modrm(3, op1.reg, op2.reg))
+        state.code.append(build_modrm(3, mask_reg(op1.reg), mask_reg(op2.reg)))
         return
     }
     if op2.kind == "mem" {
-        encode_modrm_mem(state, op2, op1.reg)
+        encode_modrm_mem(state, op2, mask_reg(op1.reg))
         return
     }
 }
@@ -531,13 +578,16 @@ def encode_test(state, ops: list) {
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
     if op1.kind == "reg" and op2.kind == "reg" {
-        state.code.append(133)
-        state.code.append(build_modrm(3, op2.reg, op1.reg))
+                w = 0
+        if op1.width == 64 or op2.width == 64 { w = 1 }
+        emit_rex(state, w, rex_bit(ops[1]), 0, rex_bit(ops[0]))
+state.code.append(133)
+        state.code.append(build_modrm(3, mask_reg(op2.reg), mask_reg(op1.reg)))
         return
     }
     if op1.kind == "reg8" and op2.kind == "reg8" {
         state.code.append(132)
-        state.code.append(build_modrm(3, op2.reg, op1.reg))
+        state.code.append(build_modrm(3, mask_reg(op2.reg), mask_reg(op1.reg)))
         return
     }
 }
@@ -546,8 +596,11 @@ def encode_sub(state, ops: list) {
     op2 = parse_operand(ops[1])
 
     if op1.kind == "reg" and op2.kind == "reg" {
-        state.code.append(41)
-        state.code.append(build_modrm(3, op2.reg, op1.reg))
+                w = 0
+        if op1.width == 64 or op2.width == 64 { w = 1 }
+        emit_rex(state, w, rex_bit(ops[1]), 0, rex_bit(ops[0]))
+state.code.append(41)
+        state.code.append(build_modrm(3, mask_reg(op2.reg), mask_reg(op1.reg)))
         return
     }
     if op1.kind == "reg" and op2.kind == "imm" {
@@ -559,20 +612,23 @@ def encode_sub(state, ops: list) {
         return
     }
     if op1.kind == "reg" and op2.kind == "mem" {
+        w = 0
+        if op1.width == 64 { w = 1 }
+        emit_rex(state, w, 0, 0, rex_bit(ops[0]))
         state.code.append(43)
         if op2.mem_index >= 0 {
-            encode_modrm_sib_reg(state, op2, op1.reg)
+            encode_modrm_sib_reg(state, op2, mask_reg(op1.reg))
         } else {
-            encode_modrm_mem(state, op2, op1.reg)
+            encode_modrm_mem(state, op2, mask_reg(op1.reg))
         }
         return
     }
     if op1.kind == "reg8" and op2.kind == "mem" {
         state.code.append(42)
         if op2.mem_index >= 0 {
-            encode_modrm_sib_reg(state, op2, op1.reg)
+            encode_modrm_sib_reg(state, op2, mask_reg(op1.reg))
         } else {
-            encode_modrm_mem(state, op2, op1.reg)
+            encode_modrm_mem(state, op2, mask_reg(op1.reg))
         }
         return
     }
@@ -582,25 +638,31 @@ def encode_cmp(state, ops: list) {
     op2 = parse_operand(ops[1])
 
     if op1.kind == "reg" and op2.kind == "reg" {
-        state.code.append(57)
-        state.code.append(build_modrm(3, op2.reg, op1.reg))
+                w = 0
+        if op1.width == 64 or op2.width == 64 { w = 1 }
+        emit_rex(state, w, rex_bit(ops[1]), 0, rex_bit(ops[0]))
+state.code.append(57)
+        state.code.append(build_modrm(3, mask_reg(op2.reg), mask_reg(op1.reg)))
         return
     }
     if op1.kind == "mem" and op2.kind == "reg" {
+        w = 0
+        if op2.width == 64 { w = 1 }
+        emit_rex(state, w, rex_bit(ops[1]), 0, 0)
         state.code.append(57)
         if op1.mem_index >= 0 {
-            encode_modrm_sib_reg(state, op1, op2.reg)
+            encode_modrm_sib_reg(state, op1, mask_reg(op2.reg))
         } else {
-            encode_modrm_mem(state, op1, op2.reg)
+            encode_modrm_mem(state, op1, mask_reg(op2.reg))
         }
         return
     }
     if op1.kind == "reg" and op2.kind == "mem" {
         state.code.append(59)
         if op2.mem_index >= 0 {
-            encode_modrm_sib_reg(state, op2, op1.reg)
+            encode_modrm_sib_reg(state, op2, mask_reg(op1.reg))
         } else {
-            encode_modrm_mem(state, op2, op1.reg)
+            encode_modrm_mem(state, op2, mask_reg(op1.reg))
         }
         return
     }
@@ -618,7 +680,7 @@ def encode_cmp(state, ops: list) {
             state.code.append(byte_mask(op2.imm_val))
         } else {
             state.code.append(128)
-            state.code.append(build_modrm(3, 7, op1.reg))
+            state.code.append(build_modrm(3, 7, mask_reg(op1.reg)))
             state.code.append(byte_mask(op2.imm_val))
         }
         return
@@ -626,9 +688,9 @@ def encode_cmp(state, ops: list) {
     if op1.kind == "reg8" and op2.kind == "mem" {
         state.code.append(58)
         if op2.mem_index >= 0 {
-            encode_modrm_sib_reg(state, op2, op1.reg)
+            encode_modrm_sib_reg(state, op2, mask_reg(op1.reg))
         } else {
-            encode_modrm_mem(state, op2, op1.reg)
+            encode_modrm_mem(state, op2, mask_reg(op1.reg))
         }
         return
     }
@@ -657,27 +719,37 @@ def encode_cmp(state, ops: list) {
 def encode_imul(state, ops: list) {
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
+    w = 0
+    if op1.width == 64 { w = 1 }
+    emit_rex(state, w, rex_bit(ops[1]), 0, rex_bit(ops[0]))
     state.code.append(15)
     state.code.append(175)
-    state.code.append(build_modrm(3, op1.reg, op2.reg))
+    state.code.append(build_modrm(3, mask_reg(op1.reg), mask_reg(op2.reg)))
 }
 
 def encode_idiv(state, ops: list) {
     op = parse_operand(ops[0])
+    w = 0
+    if op.width == 64 { w = 1 }
+    emit_rex(state, w, 0, 0, rex_bit(ops[0]))
     state.code.append(247)
-    state.code.append(build_modrm(3, 7, op.reg))
+    state.code.append(build_modrm(3, 7, mask_reg(op.reg)))
 }
 
 def encode_neg(state, ops: list) {
     op = parse_operand(ops[0])
+    w = 0
+    if op.width == 64 { w = 1 }
+    emit_rex(state, w, 0, 0, rex_bit(ops[0]))
     state.code.append(247)
-    state.code.append(build_modrm(3, 3, op.reg))
+    state.code.append(build_modrm(3, 3, mask_reg(op.reg)))
 }
 
 def encode_inc(state, ops: list) {
     op = parse_operand(ops[0])
     if op.kind == "reg" {
-        state.code.append(64 + op.reg)
+        emit_rex(state, 0, 0, 0, rex_bit(ops[0]))
+        state.code.append(64 + mask_reg(op.reg))
         return
     }
     if op.kind == "mem" and str_contains(ops[0], "dword ptr") == 1 {
@@ -694,7 +766,8 @@ def encode_inc(state, ops: list) {
 def encode_dec(state, ops: list) {
     op = parse_operand(ops[0])
     if op.kind == "reg" {
-        state.code.append(72 + op.reg)
+        emit_rex(state, 0, 0, 0, rex_bit(ops[0]))
+        state.code.append(72 + mask_reg(op.reg))
         return
     }
     if op.kind == "mem" and str_contains(ops[0], "dword ptr") == 1 {
@@ -711,30 +784,40 @@ def encode_dec(state, ops: list) {
 def encode_rol(state, ops: list) {
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
+    w = 0
+    if op1.width == 64 { w = 1 }
+    emit_rex(state, w, 0, 0, rex_bit(ops[0]))
     state.code.append(193)
-    state.code.append(build_modrm(3, 0, op1.reg))
+    state.code.append(build_modrm(3, 0, mask_reg(op1.reg)))
     state.code.append(byte_mask(op2.imm_val))
 }
 
 def encode_ror(state, ops: list) {
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
+    w = 0
+    if op1.width == 64 { w = 1 }
+    emit_rex(state, w, 0, 0, rex_bit(ops[0]))
     state.code.append(193)
-    state.code.append(build_modrm(3, 1, op1.reg))
+    state.code.append(build_modrm(3, 1, mask_reg(op1.reg)))
     state.code.append(byte_mask(op2.imm_val))
 }
 
 def encode_shl(state, ops: list) {
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
+    w = 0
+    if op1.width == 64 { w = 1 }
     if op2.reg == 1 {
         # shl r32, cl: opcode 0xD3, modrm reg=4
+        emit_rex(state, w, 0, 0, rex_bit(ops[0]))
         state.code.append(211)
-        state.code.append(build_modrm(3, 4, op1.reg))
+        state.code.append(build_modrm(3, 4, mask_reg(op1.reg)))
     } else {
         # shl r32, imm8: opcode 0xC1
+        emit_rex(state, w, 0, 0, rex_bit(ops[0]))
         state.code.append(193)
-        state.code.append(build_modrm(3, 4, op1.reg))
+        state.code.append(build_modrm(3, 4, mask_reg(op1.reg)))
         state.code.append(byte_mask(op2.imm_val))
     }
 }
@@ -744,63 +827,73 @@ def encode_shl(state, ops: list) {
 # --- SETCC ---
 def encode_sete(state, ops: list) {
     op = parse_operand(ops[0])
+    emit_rex(state, 0, 0, 0, rex_bit(ops[0]))
     state.code.append(15)
     state.code.append(148)
-    state.code.append(build_modrm(3, 0, op.reg))
+    state.code.append(build_modrm(3, 0, mask_reg(op.reg)))
 }
 
 def encode_setne(state, ops: list) {
     op = parse_operand(ops[0])
+    emit_rex(state, 0, 0, 0, rex_bit(ops[0]))
     state.code.append(15)
     state.code.append(149)
-    state.code.append(build_modrm(3, 0, op.reg))
+    state.code.append(build_modrm(3, 0, mask_reg(op.reg)))
 }
 
 def encode_setl(state, ops: list) {
     op = parse_operand(ops[0])
+    emit_rex(state, 0, 0, 0, rex_bit(ops[0]))
     state.code.append(15)
     state.code.append(156)
-    state.code.append(build_modrm(3, 0, op.reg))
+    state.code.append(build_modrm(3, 0, mask_reg(op.reg)))
 }
 
 def encode_setge(state, ops: list) {
     op = parse_operand(ops[0])
+    emit_rex(state, 0, 0, 0, rex_bit(ops[0]))
     state.code.append(15)
     state.code.append(157)
-    state.code.append(build_modrm(3, 0, op.reg))
+    state.code.append(build_modrm(3, 0, mask_reg(op.reg)))
 }
 
 def encode_setle(state, ops: list) {
     op = parse_operand(ops[0])
+    emit_rex(state, 0, 0, 0, rex_bit(ops[0]))
     state.code.append(15)
     state.code.append(158)
-    state.code.append(build_modrm(3, 0, op.reg))
+    state.code.append(build_modrm(3, 0, mask_reg(op.reg)))
 }
 
 def encode_setg(state, ops: list) {
     op = parse_operand(ops[0])
+    emit_rex(state, 0, 0, 0, rex_bit(ops[0]))
     state.code.append(15)
     state.code.append(159)
-    state.code.append(build_modrm(3, 0, op.reg))
+    state.code.append(build_modrm(3, 0, mask_reg(op.reg)))
 }
 
 def encode_movzx(state, ops: list) {
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
+    w = 0
+    if op1.width == 64 { w = 1 }
     if str_contains(ops[1], "word ptr") == 1 {
+        emit_rex(state, w, 0, 0, rex_bit(ops[0]))
         state.code.append(15)
         state.code.append(183)
     } else {
+        emit_rex(state, w, 0, 0, rex_bit(ops[0]))
         state.code.append(15)
         state.code.append(182)
     }
 
     if op2.kind == "reg8" {
-        state.code.append(build_modrm(3, op1.reg, op2.reg))
+        state.code.append(build_modrm(3, mask_reg(op1.reg), mask_reg(op2.reg)))
         return
     }
     if op2.kind == "mem" {
-        encode_modrm_mem(state, op2, op1.reg)
+        encode_modrm_mem(state, op2, mask_reg(op1.reg))
         return
     }
 }
@@ -809,8 +902,11 @@ def encode_and(state, ops: list) {
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
     if op1.kind == "reg" and op2.kind == "reg" {
-        state.code.append(33)
-        state.code.append(build_modrm(3, op2.reg, op1.reg))
+                w = 0
+        if op1.width == 64 or op2.width == 64 { w = 1 }
+        emit_rex(state, w, rex_bit(ops[1]), 0, rex_bit(ops[0]))
+state.code.append(33)
+        state.code.append(build_modrm(3, mask_reg(op2.reg), mask_reg(op1.reg)))
         return
     }
     if op1.kind == "reg" and op2.kind == "imm" {
@@ -834,8 +930,11 @@ def encode_or(state, ops: list) {
         encode_alu_imm(state, 1, ops)
         return
     }
+    w = 0
+    if op1.width == 64 or op2.width == 64 { w = 1 }
+    emit_rex(state, w, rex_bit(ops[1]), 0, rex_bit(ops[0]))
     state.code.append(9)
-    state.code.append(build_modrm(3, op2.reg, op1.reg))
+    state.code.append(build_modrm(3, mask_reg(op2.reg), mask_reg(op1.reg)))
 }
 
 # --- LEA ---
@@ -844,6 +943,9 @@ def encode_lea(state, ops: list) {
     # lea r32, m: opcode 0x8D
     op_dst = parse_operand(ops[0])
     op_src = parse_operand(ops[1])
+    w = 0
+    if op_dst.width == 64 { w = 1 }
+    emit_rex(state, w, 0, 0, rex_bit(ops[0]))
     state.code.append(141)
     if op_src.mem_index >= 0 and op_src.mem_base >= 0 {
         encode_modrm_sib_reg(state, op_src, op_dst.reg)
@@ -867,21 +969,36 @@ def encode_xor(state, ops: list) {
     # xor r32, r/m32: opcode 0x33
     op1 = parse_operand(ops[0])
     op2 = parse_operand(ops[1])
+    w = 0
+    if op1.width == 64 or op2.width == 64 { w = 1 }
+    emit_rex(state, w, rex_bit(ops[1]), 0, rex_bit(ops[0]))
     state.code.append(51)
     if op2.reg >= 0 {
-        state.code.append(build_modrm(3, op1.reg, op2.reg))
+        state.code.append(build_modrm(3, mask_reg(op1.reg), mask_reg(op2.reg)))
     } else {
-        encode_modrm_mem_reg(state, op2, op1.reg)
+        encode_modrm_mem_reg(state, op2, mask_reg(op1.reg))
     }
 }
 
 # --- SAR ---
 
 def encode_sar(state, ops: list) {
-    # sar r32, cl: opcode 0xD3, modrm reg=7
     op1 = parse_operand(ops[0])
-    state.code.append(211)
-    state.code.append(build_modrm(3, 7, op1.reg))
+    op2 = parse_operand(ops[1])
+    w = 0
+    if op1.width == 64 { w = 1 }
+    if op2.reg == 1 {
+        # sar r32, cl: opcode 0xD3, modrm reg=7
+        emit_rex(state, w, 0, 0, rex_bit(ops[0]))
+        state.code.append(211)
+        state.code.append(build_modrm(3, 7, mask_reg(op1.reg)))
+    } else {
+        # sar r32, imm8: opcode 0xC1
+        emit_rex(state, w, 0, 0, rex_bit(ops[0]))
+        state.code.append(193)
+        state.code.append(build_modrm(3, 7, mask_reg(op1.reg)))
+        state.code.append(byte_mask(op2.imm_val))
+    }
 }
 
 
@@ -904,7 +1021,7 @@ def encode_fstp(state, ops: list) {
     }
     if op1.kind == "st" {
         state.code.append(221)
-        state.code.append(216 + op1.reg)
+        state.code.append(216 + mask_reg(op1.reg))
         return
     }
 }
