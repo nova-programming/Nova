@@ -47,13 +47,10 @@
 /* Minimal printf: handles %s, %d, %% for Nova codegen.
  * Uses SysV ABI variadic args directly (read from registers) to avoid MinGW
  * va_start/va_arg incompatibility with __attribute__((sysv_abi)). */
-SYSCALL int STR_PFX(printf)(const char *fmt, ...) {
+SYSCALL int STR_PFX(printf)(const char *fmt, const void *arg_s) {
     HANDLE h = GetStdHandle(-11);
     DWORD wn;
     int written = 0;
-    /* Read variadic args from SysV register: arg2 in rsi */
-    void *arg_s = 0;
-    asm("movq %%rsi, %0" : "=r"(arg_s) : :);
     while (*fmt) {
         if (*fmt == '%') {
             fmt++;
@@ -162,10 +159,7 @@ SYSCALL char *STR_PFX(strstr)(const char *h, const char *n) {
 }
 
 /* Custom sprintf that handles %d and basic floats, respecting SysV ABI registers */
-SYSCALL int STR_PFX(sprintf)(char *b, const char *fmt, ...) {
-    long long arg_d = 0;
-    asm("movq %%rdx, %0" : "=r"(arg_d) : :);
-    
+SYSCALL int STR_PFX(sprintf)(char *b, const char *fmt, long long arg_d) {
     char *out = b;
     while (*fmt) {
         if (*fmt == '%') {
@@ -218,113 +212,12 @@ SYSCALL int STR_PFX(sprintf)(char *b, const char *fmt, ...) {
 }
 /* Out-of-bounds handler */
 SYSCALL void STR_PFX(out_of_bounds)(void) {
-    STR_PFX(printf)("Index Out Of Bounds\n");
+    STR_PFX(printf)("Index Out Of Bounds\n", 0);
     STR_PFX(exit)(1);
 }
 
 /* ============== Nova sys_* runtime ============== */
-/* Called by x86_64 codegen with SysV ABI (args in rdi, rsi, rdx, rcx, r8, r9). */
-
-SYSCALL int STR_PFX(sys_open)(const char *path, const char *mode) {
-    HANDLE h; DWORD access, disp;
-    if (*mode == 'w') { access = 0x40000000; disp = 2; }
-    else if (*mode == 'a') { access = 0xC0000000; disp = 4; }
-    else { access = 0x80000000; disp = 3; }
-    h = CreateFileA(path, access, 0, 0, disp, 0x80, 0);
-    if (h == INVALID_HANDLE_VALUE) return 0;
-    if (*mode == 'a') SetFilePointer(h, 0, 0, 2);
-    return (int)(intptr_t)h;
-}
-
-SYSCALL int STR_PFX(sys_write)(int fd, const char *str) {
-    return STR_PFX(fputs)(str, fd);
-}
-
-SYSCALL int STR_PFX(sys_write_raw)(int fd, void *novabuf) {
-    /* Nova raw buffer: [count:4][capacity:4][data_ptr:4] on x86, 8-byte ptrs on x64.
-     * For x64 layout: [count:4][pad:4][capacity:8][data_ptr:8] */
-    int *count = (int*)novabuf;
-    void **data = (void**)((char*)novabuf + 16);
-    return STR_PFX(fwrite)(*data, 1, *count, fd);
-}
-
-SYSCALL int STR_PFX(sys_close)(int fd) {
-    return CloseHandle((HANDLE)(intptr_t)fd) ? 0 : -1;
-}
-
-SYSCALL void *STR_PFX(sys_alloc)(unsigned int size) {
-    return STR_PFX(malloc)(size);
-}
-
-SYSCALL void STR_PFX(sys_free)(void *ptr) {
-    STR_PFX(free)(ptr);
-}
-
-SYSCALL const char *STR_PFX(sys_platform)(void) {
-    return "windows";
-}
-
-SYSCALL int STR_PFX(sys_flush)(int fd) {
-    if (fd) FlushFileBuffers((HANDLE)(intptr_t)fd);
-    return 0;
-}
-
-SYSCALL void *STR_PFX(sys_get_args)(void) {
-    char *cmd = GetCommandLineA();
-    int argc = 0, in = 0, in_quote = 0;
-    char *p = cmd;
-    while (*p) {
-        if (*p == '"') in_quote = !in_quote;
-        else if (*p == ' ' && !in_quote) in = 0;
-        else if (!in) { argc++; in = 1; }
-        p++;
-    }
-    int cap = argc < 4 ? 4 : argc;
-    void *list = HeapAlloc(GetProcessHeap(), 0, 16 + cap * 8);
-    if (!list) return 0;
-    STR_PFX(memset)(list, 0, 16 + cap * 8);
-    *(int*)list = argc;
-    *(int*)((char*)list + 8) = 16 + cap * 8;
-    long long *data = (long long*)((char*)list + 16);
-    
-    p = cmd; in = 0; in_quote = 0; int idx = 0;
-    char *buf = HeapAlloc(GetProcessHeap(), 0, STR_PFX(strlen)(cmd) + 1);
-    int bidx = 0;
-    while (*p) {
-        if (*p == '"') {
-            in_quote = !in_quote;
-            if (!in) { in = 1; bidx = 0; }
-        } else if (*p == ' ' && !in_quote) {
-            if (in) {
-                buf[bidx] = 0;
-                char *s = HeapAlloc(GetProcessHeap(), 0, bidx + 1);
-                if (s) STR_PFX(strcpy)(s, buf);
-                data[idx++] = (long long)(intptr_t)s;
-                in = 0;
-            }
-        } else {
-            if (!in) { in = 1; bidx = 0; }
-            buf[bidx++] = *p;
-        }
-        p++;
-    }
-    if (in) {
-        buf[bidx] = 0;
-        char *s = HeapAlloc(GetProcessHeap(), 0, bidx + 1);
-        if (s) STR_PFX(strcpy)(s, buf);
-        data[idx++] = (long long)(intptr_t)s;
-    }
-    HeapFree(GetProcessHeap(), 0, buf);
-    return list;
-}
-
-SYSCALL unsigned int STR_PFX(sys_get_tick_count)(void) {
-    return GetTickCount();
-}
-
-SYSCALL void STR_PFX(sys_exit)(int code) {
-    ExitProcess(code);
-}
+/* Removed: sys_open, sys_write, etc. are now implemented natively in Nova os_* modules. */
 
 /* ============== Entry point bridge for Windows x64 ============== */
 /* MinGW x64 CRT expects main() (no _ prefix). Nova codegen emits _main (with _ prefix
@@ -596,22 +489,22 @@ SYSCALL void *dict_items(void *d) {
 
 #if defined(LINUX_WRAP)
 /* Linux ELF: no underscore prefix. Assembly calls _dict_new but C function is dict_new. */
-void *_dict_new(void) { return dict_new(); }
-int _dict_has(void *d, const char *k) { return dict_has(d, k); }
-intptr_t _dict_get(void *d, const char *k) { return dict_get(d, k); }
-void _dict_set(void *d, const char *k, intptr_t v) { dict_set(d, k, v); }
-void _dict_remove(void *d, const char *k) { dict_remove(d, k); }
-void *_dict_keys(void *d) { return dict_keys(d); }
-void *_dict_values(void *d) { return dict_values(d); }
-void *_dict_items(void *d) { return dict_items(d); }
+SYSCALL void *_dict_new(void) { return dict_new(); }
+SYSCALL int _dict_has(void *d, const char *k) { return dict_has(d, k); }
+SYSCALL intptr_t _dict_get(void *d, const char *k) { return dict_get(d, k); }
+SYSCALL void _dict_set(void *d, const char *k, intptr_t v) { dict_set(d, k, v); }
+SYSCALL void _dict_remove(void *d, const char *k) { dict_remove(d, k); }
+SYSCALL void *_dict_keys(void *d) { return dict_keys(d); }
+SYSCALL void *_dict_values(void *d) { return dict_values(d); }
+SYSCALL void *_dict_items(void *d) { return dict_items(d); }
 #elif defined(_WIN64)
 /* Windows x64: MinGW doesn't add _ prefix. Same wrapper approach as Linux. */
-void *_dict_new(void) { return dict_new(); }
-int _dict_has(void *d, const char *k) { return dict_has(d, k); }
-intptr_t _dict_get(void *d, const char *k) { return dict_get(d, k); }
-void _dict_set(void *d, const char *k, intptr_t v) { dict_set(d, k, v); }
-void _dict_remove(void *d, const char *k) { dict_remove(d, k); }
-void *_dict_keys(void *d) { return dict_keys(d); }
-void *_dict_values(void *d) { return dict_values(d); }
-void *_dict_items(void *d) { return dict_items(d); }
+SYSCALL void *_dict_new(void) { return dict_new(); }
+SYSCALL int _dict_has(void *d, const char *k) { return dict_has(d, k); }
+SYSCALL intptr_t _dict_get(void *d, const char *k) { return dict_get(d, k); }
+SYSCALL void _dict_set(void *d, const char *k, intptr_t v) { dict_set(d, k, v); }
+SYSCALL void _dict_remove(void *d, const char *k) { dict_remove(d, k); }
+SYSCALL void *_dict_keys(void *d) { return dict_keys(d); }
+SYSCALL void *_dict_values(void *d) { return dict_values(d); }
+SYSCALL void *_dict_items(void *d) { return dict_items(d); }
 #endif

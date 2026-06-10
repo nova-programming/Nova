@@ -215,6 +215,12 @@ class TestX86_64CodegenOutput(unittest.TestCase):
         self.assertIn("dword ptr [rbx]", asm)   # store length
         self.assertIn("lea rdx, [rbx + 16]", asm)  # data pointer
 
+    def test_dict_literal(self):
+        asm = compile_to_asm('d = {"a": 1}\nprint(d.get("a"))')
+        self.assertIn("call _dict_new", asm)
+        self.assertIn("call _dict_set", asm)
+        self.assertIn("call _dict_get", asm)
+
     def test_len(self):
         asm = compile_to_asm('print(len("abc"))')
         self.assertIn("call _strlen", asm)

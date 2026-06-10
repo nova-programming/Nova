@@ -107,6 +107,8 @@ class X86_64Codegen:
         if isinstance(node, Call):
             if node.name in self.func_returns and self.func_returns[node.name] == 'string':
                 return True
+        if isinstance(node, MethodCall):
+            if node.method_name in ["platform", "file_read", "read", "read_all"]: return True
         if isinstance(node, ArrayIndex):
             base_type = getattr(node.base, 'inferred_type', 'any')
             if base_type == 'string' or self._is_string_expr(node.base):
@@ -251,7 +253,6 @@ class X86_64Codegen:
         self._emit_slice_string()
 
         self._emit_out_of_bounds()
-        self._emit_sys_read()
 
         self.peephole()
 
@@ -346,50 +347,6 @@ class X86_64Codegen:
         self.assembly.append("    call _exit")
         self.assembly.append("    add rsp, 32")
 
-    def _emit_sys_read(self):
-        """_sys_read(fd in edi) → read entire file, return malloc'd buffer in rax."""
-        self.assembly.append("_sys_read:")
-        self.assembly.append("    push rbp")
-        self.assembly.append("    mov rbp, rsp")
-        self.assembly.append("    push rbx")
-        self.assembly.append("    sub rsp, 16")
-        self.assembly.append("    mov ebx, edi")
-        self.assembly.append("    xor esi, esi")
-        self.assembly.append("    mov edx, 2")
-        self.assembly.append("    sub rsp, 32")
-        self.assembly.append("    call _fseek")
-        self.assembly.append("    add rsp, 32")
-        self.assembly.append("    mov edi, ebx")
-        self.assembly.append("    sub rsp, 32")
-        self.assembly.append("    call _ftell")
-        self.assembly.append("    add rsp, 32")
-        self.assembly.append("    mov [rbp - 24], eax")
-        self.assembly.append("    mov edi, ebx")
-        self.assembly.append("    xor esi, esi")
-        self.assembly.append("    xor edx, edx")
-        self.assembly.append("    sub rsp, 32")
-        self.assembly.append("    call _fseek")
-        self.assembly.append("    add rsp, 32")
-        self.assembly.append("    mov edi, [rbp - 24]")
-        self.assembly.append("    inc edi")
-        self.assembly.append("    sub rsp, 32")
-        self.assembly.append("    call _malloc")
-        self.assembly.append("    add rsp, 32")
-        self.assembly.append("    mov [rbp - 32], rax")
-        self.assembly.append("    mov rdi, rax")
-        self.assembly.append("    mov esi, 1")
-        self.assembly.append("    mov edx, [rbp - 24]")
-        self.assembly.append("    mov ecx, ebx")
-        self.assembly.append("    sub rsp, 32")
-        self.assembly.append("    call _fread")
-        self.assembly.append("    add rsp, 32")
-        self.assembly.append("    mov rax, [rbp - 32]")
-        self.assembly.append("    mov ecx, [rbp - 24]")
-        self.assembly.append("    mov byte ptr [rax + rcx], 0")
-        self.assembly.append("    mov rsp, rbp")
-        self.assembly.append("    pop rbx")
-        self.assembly.append("    pop rbp")
-        self.assembly.append("    ret")
 
     def scan_vars(self, node):
         if isinstance(node, Assignment):
@@ -741,6 +698,8 @@ class X86_64Codegen:
             for line in node.body:
                 if isinstance(line, str):
                     self.assembly.append(line)
+                elif type(line).__name__ == "String":
+                    self.assembly.append(line.value)
                 else:
                     self.compile_stmt(line)
         elif isinstance(node, CloseFile):
@@ -1276,6 +1235,10 @@ class X86_64Codegen:
                 self._ensure_aligned()
                 self.assembly.append(f"    call _dict_{node.method_name}")
                 self.assembly.append("    push rax")
+            else:
+                call_node = Call(node.method_name, node.args)
+                call_node.line = node.line
+                self.compile_expr(call_node)
         elif isinstance(node, Len):
             if self._is_string_expr(node.target):
                 self.compile_expr(node.target)

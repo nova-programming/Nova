@@ -61,12 +61,14 @@ def run_source(file_path):
     vm.run()
 
 
-def expand_imports(ast, base_dir, resolver=None, visited=None, target_arch="x86_64"):
+def expand_imports(ast, base_dir, resolver=None, visited=None, target_arch="x86_64", target_os=None):
     from modules.resolver import ModuleResolver
     from nova_ast.nodes import Import
     import sys
+    if target_os is None:
+        target_os = "macos" if sys.platform == "darwin" else ("windows" if sys.platform == "win32" else "linux")
     if resolver is None:
-        resolver = ModuleResolver(base_dir=base_dir, target_arch=target_arch)
+        resolver = ModuleResolver(base_dir=base_dir, target_arch=target_arch, target_os=target_os)
     if visited is None:
         visited = set()
 
@@ -78,7 +80,7 @@ def expand_imports(ast, base_dir, resolver=None, visited=None, target_arch="x86_
                 try:
                     imported_ast = resolver.resolve(node.module, base_dir)
                     # Recursively expand imports inside the imported file
-                    expanded_ast.extend(expand_imports(imported_ast, base_dir, resolver, visited, target_arch))
+                    expanded_ast.extend(expand_imports(imported_ast, base_dir, resolver, visited, target_arch, target_os))
                 except FileNotFoundError as e:
                     print(e)
                     sys.exit(1)
@@ -87,7 +89,7 @@ def expand_imports(ast, base_dir, resolver=None, visited=None, target_arch="x86_
     return expanded_ast
 
 
-def compile_native(file_path, debug_mode=0, target_arch="x86_64"):
+def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None):
     """Compile a Nova program to a native executable (build mode)."""
     file_path = os.path.abspath(file_path)
     base_dir = os.path.dirname(file_path)
@@ -105,7 +107,10 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64"):
         if isinstance(node, Import):
             module_names.add(node.module)
 
-    ast = expand_imports(ast, base_dir, target_arch=target_arch)
+    if target_os is None:
+        target_os = "macos" if sys.platform == "darwin" else ("windows" if sys.platform == "win32" else "linux")
+
+    ast = expand_imports(ast, base_dir, target_arch=target_arch, target_os=target_os)
 
     try:
         TypeInferer().infer(ast)
@@ -502,6 +507,13 @@ def main():
             else:
                 print("Error: -arch requires an argument (e.g. x86_64 or arm64)")
                 return
+        elif arg == "--os":
+            if i + 1 < len(sys.argv):
+                target_os = sys.argv[i+1]
+                i += 1
+            else:
+                print("Error: --os requires an argument (e.g. windows, linux, macos)")
+                return
         else:
             file_path = arg
         i += 1
@@ -516,7 +528,8 @@ def main():
     if command in ("dev", "run"):
         run_source(file_path)
     elif command == "build":
-        compile_native(file_path, debug_mode, target_arch=target_arch)
+        target_os_arg = locals().get("target_os")
+        compile_native(file_path, debug_mode, target_arch=target_arch, target_os=target_os_arg)
     else:
         print(f"Unknown command: {command}")
         print_usage()

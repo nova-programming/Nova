@@ -99,8 +99,9 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             clean_n(state, 1)
             compile_expr(state, node.left)
             if is_string_expr(state, node.left) == 1 {
-                emit(state, "    call L_write_stdout")
-                clean_n(state, 1)
+                push_data_label(state, "fmt_str")
+                emit(state, "    call _printf")
+                clean_n(state, 2)
             } else {
                 if is_float_expr(state, node.left) == 1 {
                     push_data_label(state, "fmt_float_pure")
@@ -111,7 +112,7 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
                 clean_n(state, 2)
             }
             emit(state, "    push 10")
-            emit(state, "    call L_write_char")
+            emit(state, "    call _fputc")
             clean_n(state, 1)
             emit(state, "    push 0")
             emit(state, "    call _fflush")
@@ -329,20 +330,24 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
                 i = i + 1
             }
             first = line_nodes[0]
-            if first.kind == "Variable" and is_asm_mnemonic(state, first.val_str) == 1 {
-                asm_line = "    "
-                k = 0
-                while k < len(line_nodes) {
-                    asm_line = asm_line + node_to_asm(state, line_nodes[k])
-                    if k < len(line_nodes) - 1 { asm_line = asm_line + " " }
-                    k = k + 1
-                }
-                emit(state, asm_line)
+            if len(line_nodes) == 1 and first.kind == "String" {
+                emit(state, first.val_str)
             } else {
-                k = 0
-                while k < len(line_nodes) {
-                    compile_stmt(state, line_nodes[k], debug_mode)
-                    k = k + 1
+                if first.kind == "Variable" and is_asm_mnemonic(state, first.val_str) == 1 {
+                    asm_line = "    "
+                    k = 0
+                    while k < len(line_nodes) {
+                        asm_line = asm_line + node_to_asm(state, line_nodes[k])
+                        if k < len(line_nodes) - 1 { asm_line = asm_line + " " }
+                        k = k + 1
+                    }
+                    emit(state, asm_line)
+                } else {
+                    k = 0
+                    while k < len(line_nodes) {
+                        compile_stmt(state, line_nodes[k], debug_mode)
+                        k = k + 1
+                    }
                 }
             }
             j = j + 1

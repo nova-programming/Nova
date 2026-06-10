@@ -453,7 +453,6 @@ class Arm64Codegen:
         self._emit_concat_strings()
         self._emit_slice_string()
         self._emit_out_of_bounds()
-        self._emit_sys_read()
 
         self.peephole()
 
@@ -511,7 +510,7 @@ class Arm64Codegen:
         self.assembly.append("    ldr w2, [sp, #24]")
         self.assembly.append("    ldr x0, [fp, #16]")
         self.assembly.append("    ldr w1, [fp, #24]")
-        self.assembly.append("    add x0, x0, x1")
+        self.assembly.append("    add x0, x0, w1")
         self.assembly.append("    ldr x1, [sp, #16]")
         self.assembly.append("    str x1, [sp, #8]")
         self.assembly.append("    str w2, [sp, #40]")
@@ -543,40 +542,6 @@ class Arm64Codegen:
         self.assembly.append("    bl _printf")
         self.assembly.append("    mov w0, #1")
         self.assembly.append("    bl _exit")
-
-    def _emit_sys_read(self):
-        self.assembly.append("_sys_read:")
-        self.assembly.append("    stp fp, lr, [sp, #-16]!")
-        self.assembly.append("    mov fp, sp")
-        self.assembly.append("    sub sp, sp, #32")
-        self.assembly.append("    str x19, [sp, #16]")
-        self.assembly.append("    mov w19, w0")
-        self.assembly.append("    mov x0, x19")
-        self.assembly.append("    mov x1, #0")
-        self.assembly.append("    mov x2, #2")
-        self.assembly.append("    bl _fseek")
-        self.assembly.append("    mov x0, x19")
-        self.assembly.append("    bl _ftell")
-        self.assembly.append("    str w0, [sp, #8]")
-        self.assembly.append("    mov x0, x19")
-        self.assembly.append("    mov x1, #0")
-        self.assembly.append("    mov x2, #0")
-        self.assembly.append("    bl _fseek")
-        self.assembly.append("    ldr w0, [sp, #8]")
-        self.assembly.append("    add w0, w0, #1")
-        self.assembly.append("    bl _malloc")
-        self.assembly.append("    str x0, [sp, #24]")
-        self.assembly.append("    ldr w2, [sp, #8]")
-        self.assembly.append("    mov x1, #1")
-        self.assembly.append("    mov x3, x19")
-        self.assembly.append("    bl _fread")
-        self.assembly.append("    ldr x0, [sp, #24]")
-        self.assembly.append("    ldr w1, [sp, #8]")
-        self.assembly.append("    strb wzr, [x0, x1]")
-        self.assembly.append("    ldr x19, [sp, #16]")
-        self.assembly.append("    mov sp, fp")
-        self.assembly.append("    ldp fp, lr, [sp], #16")
-        self.assembly.append("    ret")
 
     def scan_vars(self, node):
         if isinstance(node, Assignment):
@@ -886,6 +851,7 @@ class Arm64Codegen:
         elif isinstance(node, RawBlock):
             for line in node.body:
                 if isinstance(line, str): self.assembly.append(line)
+                elif type(line).__name__ == "String": self.assembly.append(line.value)
                 else: self.compile_stmt(line)
         else:
             self.compile_expr(node)
@@ -1158,6 +1124,10 @@ class Arm64Codegen:
                     self.assembly.append("    ldr x2, [sp], #16")
                 self.assembly.append(f"    bl _dict_{node.method_name}")
                 self.assembly.append("    str x0, [sp, #-16]!")
+            else:
+                call_node = Call(node.method_name, node.args)
+                call_node.line = node.line
+                self.compile_expr(call_node)
         elif isinstance(node, Len):
             if self._is_string_expr(node.target):
                 self.compile_expr(node.target)

@@ -11,9 +11,10 @@ from parser.parser import Parser
 
 
 class ModuleResolver:
-    def __init__(self, base_dir=None, target_arch="x86_64"):
+    def __init__(self, base_dir=None, target_arch="x86_64", target_os="windows"):
         self.base_dir = base_dir or os.getcwd()
         self.target_arch = target_arch
+        self.target_os = target_os
         self.imported = {}  # module_name -> parsed AST (cache)
 
     def resolve(self, module_name, importer_dir=None):
@@ -67,6 +68,9 @@ class ModuleResolver:
             2. Relative to the project base directory
             3. In the stdlib/ directory relative to the Nova installation
         """
+        if module_name == "os_impl":
+            module_name = f"os_{self.target_os}"
+
         filename = f"{module_name}.nv"
 
         search_dirs = []

@@ -4880,7 +4880,9 @@ class X86Codegen:
             
             for l, stmts in sorted(lines.items()):
                 first = stmts[0]
-                if isinstance(first, Variable) and first.name in asm_mnemonics:
+                if len(stmts) == 1 and type(first).__name__ == "String":
+                    self.assembly.append(first.value)
+                elif isinstance(first, Variable) and first.name in asm_mnemonics:
                     def stringify(n):
                         if isinstance(n, Variable): return n.name
                         if isinstance(n, Number): return str(n.value)
@@ -5261,19 +5263,15 @@ class X86Codegen:
                 self.compile_expr(node.instance)
                 self.assembly.append("    pop eax")
                 for _ in node.args:
-                    self.assembly.append("    pop ebx")
                     self.assembly.append("    push ebx")
                 self.assembly.append("    push eax")
                 self.assembly.append(f"    call _dict_{node.method_name}")
                 self.assembly.append(f"    add esp, {(n_args + 1) * 4}")
                 self.assembly.append("    push eax")
-            elif isinstance(node.instance, Variable) and node.instance.name in self.module_names:
-                for arg in reversed(node.args):
-                    self.compile_expr(arg)
-                self.assembly.append(f"    call _{node.method_name}")
-                if len(node.args) > 0:
-                    self.assembly.append(f"    add esp, {len(node.args) * 4}")
-                self.assembly.append("    push eax")
+        elif isinstance(node.instance, Variable):
+            call_node = Call(node.method_name, node.args)
+            call_node.line = node.line
+            self.compile_expr(call_node)
         elif isinstance(node, Len):
             self.compile_expr(node.target)
             is_str = self._is_string_expr(node.target)
