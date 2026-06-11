@@ -102,7 +102,7 @@ def win_ReadFile(fd: int, buf: int, size: int) -> int {
     return res
 }
 
-def win_set_string_null(s: string, size: int) {
+def win_set_string_null(s: int, size: int) {
     @raw {
         "    mov rax, [rbp - 8]"
         "    mov rcx, [rbp - 16]"
@@ -110,7 +110,7 @@ def win_set_string_null(s: string, size: int) {
     }
 }
 
-def sys_read(fd: int) -> string {
+def sys_read(fd: int) {
     size = win_GetFileSize(fd)
     buf = sys_alloc(size + 1)
     win_ReadFile(fd, buf, size)

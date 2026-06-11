@@ -79,6 +79,8 @@ def resolve_type_annotation(annotation_str):
     if annotation_str.startswith("list[") and annotation_str.endswith("]"):
         inner = annotation_str[5:-1]
         return ListType(resolve_type_annotation(inner))
+    if annotation_str == "list":
+        return ListType(AnyType())
         
     mapping = {
         "int": IntType,

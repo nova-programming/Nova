@@ -25,7 +25,7 @@ def sys_open(path: string, mode: string) -> int {
     return res
 }
 
-def sys_read(fd: int) -> string {
+def sys_read(fd: int) {
     return ""
 }
 

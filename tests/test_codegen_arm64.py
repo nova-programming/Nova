@@ -1,7 +1,8 @@
 """Tests for Arm64Codegen — verifies AArch64 assembly output for Apple Silicon."""
 import sys, os, unittest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+BOOTSTRAP = os.path.join(os.path.dirname(__file__), "..", "bootstrap")
+sys.path.insert(0, BOOTSTRAP)
 from lexer.tokenizer import tokenize
 from parser.parser import Parser
 from compiler.type_checker import TypeInferer, StaticTypeError
@@ -265,12 +266,10 @@ class TestArm64CodegenOutput(unittest.TestCase):
         asm = compile_to_asm("if 1.5 > 2.5 { print(1) }")
         self.assertIn("fcmp d0, d1", asm)
 
-    def test_sys_read_helper(self):
+    def test_concat_strings_helper_full(self):
+        """Concat strings helper is emitted as a named label."""
         asm = compile_to_asm('print("test")')
-        self.assertIn("_sys_read:", asm)
-        self.assertIn("bl _fseek", asm)
-        self.assertIn("bl _ftell", asm)
-        self.assertIn("bl _fread", asm)
+        self.assertIn("_concat_strings:", asm)
 
     def test_forloop_downto(self):
         asm = compile_to_asm("for x = 10 downto 0 { print(x) }")

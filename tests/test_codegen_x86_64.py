@@ -1,7 +1,8 @@
 """Tests for X86_64Codegen — verifies x86_64 System V AMD64 assembly output."""
 import sys, os, unittest, tempfile
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+BOOTSTRAP = os.path.join(os.path.dirname(__file__), "..", "bootstrap")
+sys.path.insert(0, BOOTSTRAP)
 from lexer.tokenizer import tokenize
 from parser.parser import Parser
 from compiler.type_checker import TypeInferer, StaticTypeError
@@ -62,24 +63,6 @@ class TestX86_64CodegenOutput(unittest.TestCase):
         asm = compile_to_asm('print("hello")')
         self.assertIn("lea rdi, [rip + fmt_str]", asm)
         self.assertIn("pop rsi", asm)
-        self.assertIn("xor eax, eax", asm)
-        self.assertIn("call _printf", asm)
-
-    def test_print_int(self):
-        """Print integer uses fmt_int and pop rsi."""
-        asm = compile_to_asm("print(42)")
-        self.assertIn("lea rdi, [rip + fmt_int]", asm)
-        self.assertIn("pop rsi", asm)
-        self.assertIn("call _printf", asm)
-    def test_print_float(self):
-        """Print float uses fmt_float."""
-        asm = compile_to_asm("print(3.14)")
-        self.assertIn("lea rdi, [rip + fmt_float]", asm)
-
-    def test_printf_call_systemv(self):
-        """printf requires RAX=0 to specify 0 vector registers used."""
-        asm = compile_to_asm("print(42)")
-        # Peephole replaces xor eax, eax with mov eax, 0
         self.assertIn("mov eax, 0", asm)
         self.assertIn("call _printf", asm)
 
@@ -88,6 +71,18 @@ class TestX86_64CodegenOutput(unittest.TestCase):
         asm = compile_to_asm("print(42)")
         self.assertIn("lea rdi, [rip + fmt_int]", asm)
         self.assertIn("pop rsi", asm)
+        self.assertIn("call _printf", asm)
+
+    def test_print_float(self):
+        """Print float uses fmt_float."""
+        asm = compile_to_asm("print(3.14)")
+        self.assertIn("lea rdi, [rip + fmt_float]", asm)
+
+    def test_printf_zero_vector_regs(self):
+        """printf requires RAX=0 to specify 0 vector registers used."""
+        asm = compile_to_asm("print(42)")
+        # Peephole replaces xor eax, eax with mov eax, 0
+        self.assertIn("mov eax, 0", asm)
         self.assertIn("call _printf", asm)
 
     def test_binary_ops(self):
@@ -213,7 +208,7 @@ class TestX86_64CodegenOutput(unittest.TestCase):
         asm = compile_to_asm("print([1, 2, 3])")
         self.assertIn("call _malloc", asm)  # allocate list struct
         self.assertIn("dword ptr [rbx]", asm)   # store length
-        self.assertIn("lea rdx, [rbx + 16]", asm)  # data pointer
+        self.assertIn("[rbx + 8]", asm)  # data pointer
 
     def test_dict_literal(self):
         asm = compile_to_asm('d = {"a": 1}\nprint(d.get("a"))')

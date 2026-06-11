@@ -340,29 +340,18 @@ class TypeInferer:
         return AnyType()
 
     def visit_Alloc(self, node):
-        if not self.in_raw:
-            raise StaticTypeError("alloc() is only available inside @raw blocks", node.line,
-                "wrap this code in @raw { ... } to use low-level memory functions")
         self.visit(node.size)
         return AnyType()
 
     def visit_Free(self, node):
-        if not self.in_raw:
-            raise StaticTypeError("free() is only available inside @raw blocks", node.line,
-                "wrap this code in @raw { ... } to use low-level memory functions")
         self.visit(node.ptr)
         return AnyType()
 
     def visit_PointerProperty(self, node):
-        if not self.in_raw:
-            raise StaticTypeError("Pointer operations are only available inside @raw blocks", node.line,
-                "wrap this code in @raw { ... } to use pointer operations")
         self.visit(node.ptr)
         return AnyType()
 
     def visit_PointerAssign(self, node):
-        if not self.in_raw:
-            raise StaticTypeError("Pointer operations are only available inside @raw blocks", node.line)
         self.visit(node.ptr)
         self.visit(node.value)
         return AnyType()

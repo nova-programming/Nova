@@ -102,7 +102,7 @@ class TestInstallPy(unittest.TestCase):
         self.assertIn("galaxy.bat", install.LAUNCHER_TEMPLATES)
         nova_bat = install.LAUNCHER_TEMPLATES["nova.bat"]
         self.assertIn("python", nova_bat)
-        self.assertIn("main.py", nova_bat)
+        self.assertIn("bootstrap\\main.py", nova_bat)
 
     def test_unix_launcher_templates(self):
         """Unix launchers should use 'python' shebang (not python3)."""
@@ -112,13 +112,13 @@ class TestInstallPy(unittest.TestCase):
         nova_launcher = install.LAUNCHER_TEMPLATES["nova"]
         self.assertNotIn("python3", nova_launcher.split("\n")[0])
         self.assertIn("python", nova_launcher.split("\n")[0])
-        self.assertIn("from main import main", nova_launcher)
+        self.assertIn("from bootstrap.main import main", nova_launcher)
 
     # ===== _should_extract =====
     def test_should_extract_allowed_root_files(self):
-        """Only main.py, _galaxy.py, nova.nv should be extracted from root."""
+        """Only _galaxy.py, nova.nv should be extracted from root."""
         import install
-        self.assertTrue(install._should_extract("main.py"))
+        self.assertFalse(install._should_extract("main.py"))
         self.assertTrue(install._should_extract("_galaxy.py"))
         self.assertTrue(install._should_extract("nova.nv"))
         self.assertFalse(install._should_extract("README.md"))
@@ -135,7 +135,7 @@ class TestInstallPy(unittest.TestCase):
     def test_should_extract_reject_hidden(self):
         """__pycache__ directories should never be extracted."""
         import install
-        self.assertFalse(install._should_extract("compiler/__pycache__/codegen.cpython-312.pyc"))
+        self.assertFalse(install._should_extract("stdlib/compiler/__pycache__/codegen.cpython-312.pyc"))
 
     def test_should_extract_reject_unknown(self):
         """Unknown top-level dirs should not be extracted."""
@@ -250,18 +250,19 @@ class TestInstallPy(unittest.TestCase):
         """_should_extract should match the exact file list we need."""
         import install
         test_cases = [
-            ("main.py", True),
+            ("main.py", False),
             ("_galaxy.py", True),
             ("nova.nv", True),
-            ("compiler/codegen_x86.py", True),
-            ("stdlib/codegen.nv", True),
-            ("nova_ast/__init__.py", True),
-            ("vm/engine.py", True),
-            ("modules/resolver.py", True),
+            ("bootstrap/main.py", True),
+            ("stdlib/compiler/backend/x86_64/codegen.py", True),
+            ("stdlib/lexer.nv", True),
+            ("stdlib/lexer/tokenizer.py", True),
+            ("stdlib/parser/parser.py", True),
+            ("galaxy/__init__.py", True),
             ("README.md", False),
             ("install.py", False),
             (".github/workflows/release.yml", False),
-            ("compiler/__pycache__/codegen.cpython-312.pyc", False),
+            ("stdlib/compiler/__pycache__/codegen.cpython-312.pyc", False),
         ]
         for path, expected in test_cases:
             with self.subTest(path=path):
@@ -361,7 +362,7 @@ class TestInstallPs1(unittest.TestCase):
         """Should create nova.bat and galaxy.bat launchers."""
         self.assertIn("nova.bat", self.content)
         self.assertIn("galaxy.bat", self.content)
-        self.assertIn("main.py", self.content)
+        self.assertIn("bootstrap\\main.py", self.content)
         self.assertIn("_galaxy.py", self.content)
 
     def test_notify_only_via_process_scope(self):

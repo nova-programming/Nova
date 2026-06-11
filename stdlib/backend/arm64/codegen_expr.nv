@@ -1,5 +1,7 @@
 # ============================================================
-# Code Generator: Expression Compi
+# Code Generator: Expression Compilation (ARM64/A64)
+# ============================================================
+
 def float_str_to_hex(s: string) -> int {
     sign = 0
     i = 0
@@ -49,9 +51,6 @@ def float_str_to_hex(s: string) -> int {
     if int_part == 0 {
         if frac_part == 0 {
             if sign == 1 {
-                # Nova treats 2147483648 as -2147483648 internally if signed, but it works
-                # We can also return 0x80000000 by returning 2147483648
-                # But to avoid overflow warnings, we can just return it
                 return 2147483648
             }
             return 0
@@ -88,7 +87,6 @@ def float_str_to_hex(s: string) -> int {
             }
             mask = mask - 1
             
-            # int_part % (mask + 1)
             mask_plus = mask + 1
             int_rem = int_part - ((int_part / mask_plus) * mask_plus)
             
@@ -155,7 +153,6 @@ def float_str_to_hex(s: string) -> int {
             }
         }
         
-        # rounding
         rem = rem * 2
         bit2 = rem / frac_div
         if bit2 == 1 {
@@ -219,7 +216,6 @@ def float_str_to_hex(s: string) -> int {
             }
         }
         
-        # rounding
         rem = rem * 2
         bit5 = rem / frac_div
         if bit5 == 1 {
@@ -272,7 +268,7 @@ def float_str_to_hex(s: string) -> int {
 }
 
 # ============================================================
-# Code Generator: Expression Compilation
+# Code Generator: Expression Compilation (ARM64/A64)
 # ============================================================
 
 def is_leaf_expr(state: CodegenState, node: AstNode) -> int {
@@ -302,9 +298,9 @@ def compile_leaf_to_reg(state: CodegenState, node: AstNode, reg_name: string) {
             offset = find_var_offset(state, node.val_str)
             if offset < 0 {
                 abs_off = 0 - offset
-                emit(state, "    mov " + reg_name + ", [%b - " + str(abs_off) + "]")
+                emit(state, "    ldr " + reg_name + ", [%b, #-" + str(abs_off) + "]")
             } else {
-                emit(state, "    mov " + reg_name + ", [%b - " + str(offset) + "]")
+                emit(state, "    ldr " + reg_name + ", [%b, #-" + str(offset) + "]")
             }
         }
     }
@@ -326,17 +322,18 @@ def compile_expr(state: CodegenState, node: AstNode) {
         push_data_label(state, label)
     }
     if node.kind == "Boolean" {
-        emit(state, "    push " + str(node.val_int))
+        emit(state, "    mov %a, " + str(node.val_int))
+        emit(state, "    str %a, [sp, #-16]!")
     }
     if node.kind == "Variable" {
         reg = find_var_reg(state, node.val_str)
         if reg != "" {
-            emit(state, "    push " + reg)
+            emit(state, "    str " + reg + ", [sp, #-16]!")
         } else {
             offset = find_var_offset(state, node.val_str)
             if offset < 0 {
                 abs_off = 0 - offset
-                emit(state, "    mov %a, [%b - " + str(abs_off) + "]")
+                emit(state, "    ldr %a, [%b, #-" + str(abs_off) + "]")
             } else {
                 emit(state, "    ldr %a, [%b, #-" + str(offset) + "]")
             }
@@ -348,8 +345,8 @@ def compile_expr(state: CodegenState, node: AstNode) {
             end_lbl = next_label(state, "L_and_end")
             compile_expr(state, node.left)
             emit(state, "    ldr %a, [sp], #16")
-            emit(state, "    cmp x0, 0")
-            emit(state, "    je " + end_lbl)
+            emit(state, "    cmp x0, #0")
+            emit(state, "    b.eq " + end_lbl)
             compile_expr(state, node.right)
             emit(state, "    ldr %a, [sp], #16")
             emit(state, end_lbl + ":")
@@ -359,8 +356,8 @@ def compile_expr(state: CodegenState, node: AstNode) {
                 end_lbl = next_label(state, "L_or_end")
                 compile_expr(state, node.left)
                 emit(state, "    ldr %a, [sp], #16")
-                emit(state, "    cmp x0, 0")
-                emit(state, "    jne " + end_lbl)
+                emit(state, "    cmp x0, #0")
+                emit(state, "    b.ne " + end_lbl)
                 compile_expr(state, node.right)
                 emit(state, "    ldr %a, [sp], #16")
                 emit(state, end_lbl + ":")
@@ -385,65 +382,49 @@ def compile_expr(state: CodegenState, node: AstNode) {
                     if node.val_str == ">=" { is_cmp2 = 1 }
                     
                     if is_cmp2 == 1 {
-                        emit(state, "    fld dword ptr [esp]")
-                        emit(state, "    fld dword ptr [esp + 4]")
+                        emit(state, "    ldr d1, [sp]")
+                        emit(state, "    ldr d0, [sp, #16]")
                         clean_n(state, 2)
-                        emit(state, "    fucomip st(0), st(1)")
-                        emit(state, "    fstp st(0)")
-                        emit(state, "    pushf")
-                        emit(state, "    ldr %a, [sp], #16")
+                        emit(state, "    fcmp d0, d1")
                         
                         label_true2 = next_label(state, "L_fcmp_true")
                         label_end2 = next_label(state, "L_fcmp_end")
                         
                         if node.val_str == "==" {
-                            emit(state, "    and x0, 64")
-                            emit(state, "    cmp x0, 0")
-                            emit(state, "    jne " + label_true2)
+                            emit(state, "    b.eq " + label_true2)
                         }
                         if node.val_str == "!=" {
-                            emit(state, "    and x0, 64")
-                            emit(state, "    cmp x0, 0")
-                            emit(state, "    je " + label_true2)
+                            emit(state, "    b.ne " + label_true2)
                         }
                         if node.val_str == "<" {
-                            emit(state, "    and x0, 1")
-                            emit(state, "    cmp x0, 1")
-                            emit(state, "    je " + label_true2)
+                            emit(state, "    b.lt " + label_true2)
                         }
                         if node.val_str == ">" {
-                            emit(state, "    and x0, 65")
-                            emit(state, "    cmp x0, 0")
-                            emit(state, "    je " + label_true2)
+                            emit(state, "    b.gt " + label_true2)
                         }
                         if node.val_str == "<=" {
-                            emit(state, "    and x0, 65")
-                            emit(state, "    cmp x0, 0")
-                            emit(state, "    jne " + label_true2)
+                            emit(state, "    b.le " + label_true2)
                         }
                         if node.val_str == ">=" {
-                            emit(state, "    and x0, 1")
-                            emit(state, "    cmp x0, 0")
-                            emit(state, "    je " + label_true2)
+                            emit(state, "    b.ge " + label_true2)
                         }
                         
-                        emit(state, "    mov x0, 0
-        emit(state, "    str x0, [sp, #-16]!")")
-                        emit(state, "    jmp " + label_end2)
+                        emit(state, "    mov %a, 0")
+                        emit(state, "    str %a, [sp, #-16]!")
+                        emit(state, "    b " + label_end2)
                         emit(state, label_true2 + ":")
-                        emit(state, "    mov x0, 1
-        emit(state, "    str x0, [sp, #-16]!")")
+                        emit(state, "    mov %a, 1")
+                        emit(state, "    str %a, [sp, #-16]!")
                         emit(state, label_end2 + ":")
                     } else {
-                        emit(state, "    fld dword ptr [esp + 4]")
-                        emit(state, "    fld dword ptr [esp]")
-                        if node.val_str == "+" { emit(state, "    faddp st(1), st(0)") }
-                        if node.val_str == "-" { emit(state, "    fsubp st(1), st(0)") }
-                        if node.val_str == "*" { emit(state, "    fmulp st(1), st(0)") }
-                        if node.val_str == "/" { emit(state, "    fdivp st(1), st(0)") }
+                        emit(state, "    ldr d1, [sp, #16]")
+                        emit(state, "    ldr d0, [sp]")
+                        if node.val_str == "+" { emit(state, "    fadd d0, d0, d1") }
+                        if node.val_str == "-" { emit(state, "    fsub d0, d0, d1") }
+                        if node.val_str == "*" { emit(state, "    fmul d0, d0, d1") }
+                        if node.val_str == "/" { emit(state, "    fdiv d0, d0, d1") }
                         clean_n(state, 2)
-                        emit(state, "    sub esp, 4")
-                        emit(state, "    fstp dword ptr [esp]")
+                        emit(state, "    str d0, [sp, #-16]!")
                     }
                 } else {
                     all_leaf = left_leaf + right_leaf
@@ -459,7 +440,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
                     } else {
                         compile_expr(state, node.left)
                         compile_expr(state, node.right)
-                        emit(state, "    pop %x")
+                        emit(state, "    ldr %x, [sp], #16")
                         emit(state, "    ldr %a, [sp], #16")
                     }
                     
@@ -484,95 +465,91 @@ def compile_expr(state: CodegenState, node: AstNode) {
                     label_end = next_label(state, "L_cmp_end")
 
                     if node.val_str == "has" {
-                        emit(state, "    push %x")
+                        emit(state, "    str %x, [sp, #-16]!")
                         emit(state, "    str %a, [sp, #-16]!")
                         emit_call(state, "_strstr", 2)
-                        emit(state, "    cmp x0, 0")
-                        emit(state, "    jne " + label_true)
+                        emit(state, "    cmp x0, #0")
+                        emit(state, "    b.ne " + label_true)
                     } else {
                         if is_str_cmp == 1 {
-                            emit(state, "    push %x")
+                            emit(state, "    str %x, [sp, #-16]!")
                             emit(state, "    str %a, [sp, #-16]!")
                             emit_call(state, "_strcmp", 2)
-                            emit(state, "    cmp x0, 0")
+                            emit(state, "    cmp x0, #0")
                         } else {
                             emit(state, "    cmp x0, x1")
                         }
 
                         if node.val_str == "==" {
-                            emit(state, "    je " + label_true)
+                            emit(state, "    b.eq " + label_true)
                         }
                         if node.val_str == "!=" {
-                            emit(state, "    jne " + label_true)
+                            emit(state, "    b.ne " + label_true)
                         }
                         if node.val_str == "<" {
-                            emit(state, "    jl " + label_true)
+                            emit(state, "    b.lt " + label_true)
                         }
                         if node.val_str == "<=" {
-                            emit(state, "    jle " + label_true)
+                            emit(state, "    b.le " + label_true)
                         }
                         if node.val_str == ">" {
-                            emit(state, "    jg " + label_true)
+                            emit(state, "    b.gt " + label_true)
                         }
                         if node.val_str == ">=" {
-                            emit(state, "    jge " + label_true)
+                            emit(state, "    b.ge " + label_true)
                         }
                     }
 
-                    emit(state, "    mov x0, 0
-        emit(state, "    str x0, [sp, #-16]!")")
-                    emit(state, "    jmp " + label_end)
+                    emit(state, "    mov %a, 0")
+                    emit(state, "    str %a, [sp, #-16]!")
+                    emit(state, "    b " + label_end)
                     emit(state, label_true + ":")
-                    emit(state, "    mov x0, 1
-        emit(state, "    str x0, [sp, #-16]!")")
+                    emit(state, "    mov %a, 1")
+                    emit(state, "    str %a, [sp, #-16]!")
                     emit(state, label_end + ":")
                 } else {
                     if node.val_str == "+" {
                         if is_string_expr(state, node.left) == 1 {
-                            emit(state, "    push %x")
+                            emit(state, "    str %x, [sp, #-16]!")
                             emit(state, "    str %a, [sp, #-16]!")
                             emit_call(state, "_concat_strings", 2)
                         } else {
                             if is_string_expr(state, node.right) == 1 {
-                                emit(state, "    push %x")
+                                emit(state, "    str %x, [sp, #-16]!")
                                 emit(state, "    str %a, [sp, #-16]!")
                                 emit_call(state, "_concat_strings", 2)
                             } else {
-                                emit(state, "    add x0, x1")
+                                emit(state, "    add x0, x0, x1")
                             }
                         }
                     }
                     if node.val_str == "-" {
-                        emit(state, "    sub x0, x1")
+                        emit(state, "    sub x0, x0, x1")
                     }
                     if node.val_str == "*" {
-                        emit(state, "    imul x0, x1")
+                        emit(state, "    mul x0, x0, x1")
                     }
                     if node.val_str == "/" {
-                        emit(state, "    cdq")
-                        emit(state, "    idiv x1")
+                        emit(state, "    sdiv x0, x0, x1")
                     }
                     if node.val_str == "%" {
-                        emit(state, "    cdq")
-                        emit(state, "    idiv x1")
-                        emit(state, "    mov x0, x3")
+                        emit(state, "    sdiv x2, x0, x1")
+                        emit(state, "    msub x0, x2, x1, x0")
                     }
                     if node.val_str == "&" {
-                        emit(state, "    and x0, x1")
+                        emit(state, "    and x0, x0, x1")
                     }
                     if node.val_str == ">>" {
-                        emit(state, "    mov x2, x1")
-                        emit(state, "    sar x0, cl")
+                        emit(state, "    asr x0, x0, x1")
                     }
                     if node.val_str == "<<" {
-                        emit(state, "    mov x2, x1")
-                        emit(state, "    shl x0, cl")
+                        emit(state, "    lsl x0, x0, x1")
                     }
                     if node.val_str == "|" {
-                        emit(state, "    or x0, x1")
+                        emit(state, "    orr x0, x0, x1")
                     }
                     if node.val_str == "^" {
-                        emit(state, "    xor x0, x1")
+                        emit(state, "    eor x0, x0, x1")
                     }
                     emit(state, "    str %a, [sp, #-16]!")
                 }
@@ -599,7 +576,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
             } else {
                 compile_expr(state, node.left)
                 compile_expr(state, node.right)
-                emit(state, "    pop %x")
+                emit(state, "    ldr %x, [sp], #16")
                 emit(state, "    ldr %a, [sp], #16")
             }
             
@@ -611,79 +588,63 @@ def compile_expr(state: CodegenState, node: AstNode) {
         if right_str == 1 and node.left.kind == "Number" and node.left.val_int == 0 { is_str_cmp = 0 }
 
         if is_float_op == 1 {
-            emit(state, "    fld dword ptr [esp]")
-            emit(state, "    fld dword ptr [esp + 4]")
+            emit(state, "    ldr d1, [sp]")
+            emit(state, "    ldr d0, [sp, #16]")
             clean_n(state, 2)
-            emit(state, "    fucomip st(0), st(1)")
-            emit(state, "    fstp st(0)")
-            emit(state, "    pushf")
-            emit(state, "    ldr %a, [sp], #16")
+            emit(state, "    fcmp d0, d1")
             label_true = next_label(state, "L_cmp_true")
             label_end = next_label(state, "L_cmp_end")
             if node.val_str == "==" {
-                emit(state, "    and x0, 64")
-                emit(state, "    cmp x0, 0")
-                emit(state, "    jne " + label_true)
+                emit(state, "    b.eq " + label_true)
             }
             if node.val_str == "!=" {
-                emit(state, "    and x0, 64")
-                emit(state, "    cmp x0, 0")
-                emit(state, "    je " + label_true)
+                emit(state, "    b.ne " + label_true)
             }
             if node.val_str == "<" {
-                emit(state, "    and x0, 1")
-                emit(state, "    cmp x0, 1")
-                emit(state, "    je " + label_true)
+                emit(state, "    b.lt " + label_true)
             }
             if node.val_str == ">" {
-                emit(state, "    and x0, 65")
-                emit(state, "    cmp x0, 0")
-                emit(state, "    je " + label_true)
+                emit(state, "    b.gt " + label_true)
             }
             if node.val_str == "<=" {
-                emit(state, "    and x0, 65")
-                emit(state, "    cmp x0, 0")
-                emit(state, "    jne " + label_true)
+                emit(state, "    b.le " + label_true)
             }
             if node.val_str == ">=" {
-                emit(state, "    and x0, 1")
-                emit(state, "    cmp x0, 0")
-                emit(state, "    je " + label_true)
+                emit(state, "    b.ge " + label_true)
             }
-            emit(state, "    mov x0, 0
-        emit(state, "    str x0, [sp, #-16]!")")
-            emit(state, "    jmp " + label_end)
+            emit(state, "    mov %a, 0")
+            emit(state, "    str %a, [sp, #-16]!")
+            emit(state, "    b " + label_end)
             emit(state, label_true + ":")
-            emit(state, "    mov x0, 1
-        emit(state, "    str x0, [sp, #-16]!")")
+            emit(state, "    mov %a, 1")
+            emit(state, "    str %a, [sp, #-16]!")
             emit(state, label_end + ":")
         } else {
             if node.val_str == "has" {
-                emit(state, "    push %x")
+                emit(state, "    str %x, [sp, #-16]!")
                 emit(state, "    str %a, [sp, #-16]!")
                 emit_call(state, "_strstr", 2)
-                emit(state, "    cmp x0, 0")
-                setcc = "setne"
+                emit(state, "    cmp x0, #0")
+                emit(state, "    cset w0, ne")
+                emit(state, "    str %a, [sp, #-16]!")
             } else {
                 if is_str_cmp == 1 {
-                    emit(state, "    push %x")
+                    emit(state, "    str %x, [sp, #-16]!")
                     emit(state, "    str %a, [sp, #-16]!")
                     emit_call(state, "_strcmp", 2)
-                    emit(state, "    cmp x0, 0")
+                    emit(state, "    cmp x0, #0")
                 } else {
                     emit(state, "    cmp x0, x1")
                 }
 
-                if node.val_str == "==" { setcc = "sete" }
-                if node.val_str == "!=" { setcc = "setne" }
-                if node.val_str == "<" { setcc = "setl" }
-                if node.val_str == "<=" { setcc = "setle" }
-                if node.val_str == ">" { setcc = "setg" }
-                if node.val_str == ">=" { setcc = "setge" }
+                if node.val_str == "==" { emit(state, "    cset w0, eq") }
+                if node.val_str == "!=" { emit(state, "    cset w0, ne") }
+                if node.val_str == "<" { emit(state, "    cset w0, lt") }
+                if node.val_str == "<=" { emit(state, "    cset w0, le") }
+                if node.val_str == ">" { emit(state, "    cset w0, gt") }
+                if node.val_str == ">=" { emit(state, "    cset w0, ge") }
+                emit(state, "    str %a, [sp, #-16]!")
             }
-            emit(state, "    " + setcc + " al")
-            emit(state, "    movzx x0, al")
-            emit(state, "    str %a, [sp, #-16]!")
         }
         }
     }
@@ -691,15 +652,16 @@ def compile_expr(state: CodegenState, node: AstNode) {
         compile_expr(state, node.left)
         emit(state, "    ldr %a, [sp], #16")
         if node.val_str == "-" {
-            emit(state, "    neg x0")
+            emit(state, "    neg x0, x0")
         }
         if node.val_str == "not" {
-            emit(state, "    cmp x0, 0")
-            emit(state, "    sete al")
-            emit(state, "    movzx x0, al")
+            emit(state, "    cmp x0, #0")
+            emit(state, "    cset w0, eq")
+            emit(state, "    str %a, [sp, #-16]!")
+            return
         }
         if node.val_str == "~" {
-            emit(state, "    not x0")
+            emit(state, "    mvn x0, x0")
         }
         emit(state, "    str %a, [sp, #-16]!")
     }
@@ -711,35 +673,33 @@ def compile_expr(state: CodegenState, node: AstNode) {
             struct_name = node.left.inferred_type.name
         }
         offset = get_prop_offset(state, struct_name, node.val_str)
-        emit(state, "    mov %a, [%d + " + str(offset) + "]")
+        emit(state, "    ldr %a, [%d, #" + str(offset) + "]")
         emit(state, "    str %a, [sp, #-16]!")
     }
     if node.kind == "PointerProperty" {
         compile_expr(state, node.left)
         emit(state, "    ldr %d, [sp], #16")
         if node.val_str == "value_byte" {
-            emit(state, "    xor x0, x0")
-            emit(state, "    mov al, byte ptr [x3]")
+            emit(state, "    mov x0, x3")
+            emit(state, "    ldrb w0, [x0]")
         } else {
             if node.val_str == "value_word" {
-                emit(state, "    xor x0, x0")
-                emit(state, "    mov ax, word ptr [x3]")
+                emit(state, "    mov x0, x3")
+                emit(state, "    ldrh w0, [x0]")
             } else {
                 if node.val_str == "value_dword" or node.val_str == "value" {
-                    emit(state, "    mov %a, [%d]")
+                    emit(state, "    ldr %a, [%d]")
                 } else {
                     if node.val_str == "addr" {
-                        emit(state, "    mov x0, x3")
+                        emit(state, "    mov %a, %d")
                     } else {
                         if node.val_str == "isValid" {
-                            emit(state, "    xor x0, x0")
-                            emit(state, "    cmp x3, 0")
-                            emit(state, "    setne al")
+                            emit(state, "    cmp %d, #0")
+                            emit(state, "    cset w0, ne")
                         } else {
                             if node.val_str == "isNull" {
-                                emit(state, "    xor x0, x0")
-                                emit(state, "    cmp x3, 0")
-                                emit(state, "    sete al")
+                                emit(state, "    cmp %d, #0")
+                                emit(state, "    cset w0, eq")
                             }
                         }
                     }
@@ -759,8 +719,8 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    str %a, [sp, #-16]!")
     }
     if node.kind == "Openf" {
-        emit(state, "    mov x0, 1
-        emit(state, "    str x0, [sp, #-16]!")2")
+        emit(state, "    mov %a, 12")
+        emit(state, "    str %a, [sp, #-16]!")
         emit_call(state, "_malloc", 1)
         emit(state, "    str %a, [sp, #-16]!")
         
@@ -775,16 +735,16 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    ldr %d, [sp], #16")
         emit(state, "    ldr %c, [sp], #16")
         
-        emit(state, "    mov x1, [esp]")
-        emit(state, "    mov [x1 + 8], x2")
+        emit(state, "    ldr x1, [sp]")
+        emit(state, "    str x2, [x1, #8]")
         
         emit(state, "    str %d, [sp, #-16]!")
         emit(state, "    str %c, [sp, #-16]!")
         emit_call(state, "_fopen", 2)
         
-        emit(state, "    pop %x")
-        emit(state, "    mov [x1], x0")
-        emit(state, "    push %x")
+        emit(state, "    ldr %x, [sp], #16")
+        emit(state, "    str x0, [x1]")
+        emit(state, "    str %x, [sp, #-16]!")
     }
     if node.kind == "ListLiteral" {
         cap = len(node.args)
@@ -796,11 +756,14 @@ def compile_expr(state: CodegenState, node: AstNode) {
             total_sz = req_sz
         }
         
-        emit(state, "    push " + str(total_sz))
+        emit(state, "    mov %a, " + str(total_sz))
+        emit(state, "    str %a, [sp, #-16]!")
         emit_call(state, "_malloc", 1)
         
-        emit(state, "    mov dword ptr [%a], " + str(len(node.args)))
-        emit(state, "    mov dword ptr [%a+8], " + str(total_sz))
+        emit(state, "    mov w1, " + str(len(node.args)))
+        emit(state, "    str w1, [%a]")
+        emit(state, "    mov w1, " + str(total_sz))
+        emit(state, "    str w1, [%a, #8]")
         emit(state, "    str %a, [sp, #-16]!")
         
         idx_list = 0
@@ -811,16 +774,17 @@ def compile_expr(state: CodegenState, node: AstNode) {
             
             data_off = 16 + (idx_list * ptr_sz)
             if ptr_sz == 8 {
-                emit(state, "    mov [%a + " + str(data_off) + "], rcx")
+                emit(state, "    str %c, [%a, #" + str(data_off) + "]")
             } else {
-                emit(state, "    mov [%a + " + str(data_off) + "], x2")
+                emit(state, "    str w0, [%a, #" + str(data_off) + "]")
             }
             emit(state, "    str %a, [sp, #-16]!")
             idx_list = idx_list + 1
         }
     }
     if node.kind == "DictLiteral" {
-        emit_call(state, "_dict_new", 0)        emit(state, "    str %a, [sp, #-16]!")
+        emit_call(state, "_dict_new", 0)
+        emit(state, "    str %a, [sp, #-16]!")
         i = 0
         while i < len(node.args) {
             value = node.args[i + 1]
@@ -828,10 +792,10 @@ def compile_expr(state: CodegenState, node: AstNode) {
             compile_expr(state, value)
             compile_expr(state, key)
             emit(state, "    ldr %a, [sp], #16")
-            emit(state, "    pop %x")
+            emit(state, "    ldr %x, [sp], #16")
             emit(state, "    ldr %c, [sp], #16")
             emit(state, "    str %c, [sp, #-16]!")
-            emit(state, "    push %x")
+            emit(state, "    str %x, [sp, #-16]!")
             emit(state, "    str %a, [sp, #-16]!")
             emit(state, "    str %c, [sp, #-16]!")
             emit_call(state, "_dict_set", 3)
@@ -854,58 +818,64 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    ldr %d, [sp], #16")
         emit(state, "    ldr %c, [sp], #16")
         if is_str == 1 {
-            emit(state, "    movzx x0, byte ptr [%d + %c]")
-            emit(state, "    shl x0, 1")
-            emit(state, "    mov %c, %a")
-            if is_x64(state) == 1 {
-                emit(state, "    lea %a, [rip + char_strings]")
-            } else {
-                emit(state, "    lea %a, [char_strings]")
-            }
+            emit(state, "    ldrb w0, [%d, %c]")
+            emit(state, "    lsl w0, w0, #1")
+            emit(state, "    lsl %c, %c, #1")
+            emit(state, "    adrp %a, char_strings")
+            emit(state, "    add %a, %a, :lo12:char_strings")
             emit(state, "    add %a, %a, %c")
             emit(state, "    str %a, [sp, #-16]!")
         } else {
             ptr_sz = ptr_size(state)
-            emit(state, "    lea %a, [%d + 16]")
+            emit(state, "    ldr %d, [%d, #8]")
             if ptr_sz == 8 {
-                emit(state, "    mov %a, [%a + %c*8]")
+                emit(state, "    ldr %a, [%d, %c, lsl #3]")
             } else {
-                emit(state, "    mov %a, [%a + %c*4]")
+                emit(state, "    ldr %a, [%d, %c, lsl #2]")
             }
             emit(state, "    str %a, [sp, #-16]!")
         }
         return
     }
+    if node.kind == "Slice" {
+        compile_expr(state, node.cond)
+        compile_expr(state, node.right)
+        compile_expr(state, node.left)
+        emit(state, "    ldr %x, [sp], #16")
+        emit(state, "    ldr %c, [sp], #16")
+        emit(state, "    ldr %d, [sp], #16")
+        emit(state, "    str %d, [sp, #-16]!")
+        emit(state, "    str %c, [sp, #-16]!")
+        emit(state, "    str %x, [sp, #-16]!")
+        emit_call(state, "_slice_string", 3)
+        emit(state, "    str %a, [sp, #-16]!")
+        return
+    }
     if node.kind == "StrConvert" {
         compile_expr(state, node.left)
-        emit(state, "    pop %x")
+        emit(state, "    ldr %x, [sp], #16")
         if is_float_expr(state, node.left) == 1 {
-            emit(state, "    push 32")
+            emit(state, "    mov %a, 32")
         } else {
-            emit(state, "    mov x0, 1
-        emit(state, "    str x0, [sp, #-16]!")6")
+            emit(state, "    mov %a, 16")
         }
+        emit(state, "    str %a, [sp, #-16]!")
         emit_call(state, "_malloc", 1)
         
-        # Buffer is in %a
-        emit(state, "    str %a, [sp, #-16]!")  # Save buffer pointer to return it later
+        emit(state, "    str %a, [sp, #-16]!")
         
-        # Push arguments for sprintf in reverse order: value, format, buffer
-        emit(state, "    push %x")  # arg 3: value
+        emit(state, "    str %x, [sp, #-16]!")
         if is_float_expr(state, node.left) == 1 {
             push_data_label(state, "fmt_float_pure")
         } else {
             push_data_label(state, "fmt_int_pure")
         }
-        emit(state, "    str %a, [sp, #-16]!")  # arg 2: format
+        emit(state, "    str %a, [sp, #-16]!")
         
-        emit(state, "    mov %c, [esp + 8]") # Fetch saved buffer pointer
-        emit(state, "    str %c, [sp, #-16]!")  # arg 1: buffer
+        emit(state, "    ldr %c, [sp, #16]")
+        emit(state, "    str %c, [sp, #-16]!")
         
         emit_call(state, "_sprintf", 3)
-        
-        # Buffer pointer is already pushed on the stack before the args, 
-        # so it's now at the top of the stack!
         return
     }
     if node.kind == "Len" {
@@ -927,7 +897,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    str %a, [sp, #-16]!")
         } else {
             emit(state, "    ldr %a, [sp], #16")
-            emit(state, "    mov x0, dword ptr [%a]")
+            emit(state, "    ldr w0, [%a]")
             emit(state, "    str %a, [sp, #-16]!")
         }
     }
@@ -935,59 +905,59 @@ def compile_expr(state: CodegenState, node: AstNode) {
         if node.val_str == "append" {
             compile_expr(state, node.args[0])
             compile_expr(state, node.left)
-            emit(state, "    pop %x")
+            emit(state, "    ldr %x, [sp], #16")
             emit(state, "    ldr %c, [sp], #16")
             ptr_sz = ptr_size(state)
-            emit(state, "    mov x0, dword ptr [%x]")
-            emit(state, "    mov x3, x0")
-            emit(state, "    add x3, 1")
+            emit(state, "    ldr w0, [%x]")
+            emit(state, "    mov w3, w0")
+            emit(state, "    add w3, w3, #1")
             if ptr_sz == 8 {
-                emit(state, "    shl x3, 3")
+                emit(state, "    lsl x3, x3, #3")
             } else {
-                emit(state, "    shl x3, 2")
+                emit(state, "    lsl x3, x3, #2")
             }
-            emit(state, "    add x3, 16")
-            emit(state, "    mov esi, dword ptr [%x+8]")
-            emit(state, "    cmp x3, esi")
+            emit(state, "    add x3, x3, #16")
+            emit(state, "    ldr w1, [%x, #8]")
+            emit(state, "    cmp x3, x1")
             no_realloc = next_label(state, "L_no_realloc")
-            emit(state, "    jle " + no_realloc)
+            emit(state, "    b.le " + no_realloc)
             
-            emit(state, "    shl esi, 1")
-            emit(state, "    push %x")
+            emit(state, "    lsl w1, w1, #1")
+            emit(state, "    str %x, [sp, #-16]!")
             emit(state, "    str %c, [sp, #-16]!")
-            emit(state, "    push %i")
-            emit(state, "    push %x")
+            emit(state, "    str %i, [sp, #-16]!")
+            emit(state, "    str %x, [sp, #-16]!")
             emit_call(state, "_realloc", 2)
             emit(state, "    ldr %c, [sp], #16")
-            emit(state, "    pop %x")
+            emit(state, "    ldr %x, [sp], #16")
             emit(state, "    mov %x, %a")
-            emit(state, "    mov dword ptr [%x+8], esi")
+            emit(state, "    str w1, [%x, #8]")
             
             emit(state, no_realloc + ":")
-            emit(state, "    mov x0, dword ptr [%x]")
-            emit(state, "    lea %d, [%x + 16]")
+            emit(state, "    ldr w0, [%x]")
+            emit(state, "    add %d, %x, #16")
             if ptr_sz == 8 {
-                emit(state, "    mov [%d + %a*8], %c")
+                emit(state, "    str %c, [%d, x0, lsl #3]")
             } else {
-                emit(state, "    mov [%d + %a*4], %c")
+                emit(state, "    str w0, [%d, x0, lsl #2]")
             }
-            emit(state, "    add x0, 1")
-            emit(state, "    mov dword ptr [%x], x0")
-            emit(state, "    mov x0, 0
-        emit(state, "    str x0, [sp, #-16]!")")
+            emit(state, "    add w0, w0, #1")
+            emit(state, "    str w0, [%x]")
+            emit(state, "    mov %a, 0")
+            emit(state, "    str %a, [sp, #-16]!")
         }
         if node.val_str == "pop" {
             compile_expr(state, node.left)
-            emit(state, "    pop %x")
+            emit(state, "    ldr %x, [sp], #16")
             ptr_sz = ptr_size(state)
-            emit(state, "    mov x0, dword ptr [%x]")
-            emit(state, "    sub x0, 1")
-            emit(state, "    mov dword ptr [%x], x0")
-            emit(state, "    lea %d, [%x + 16]")
+            emit(state, "    ldr w0, [%x]")
+            emit(state, "    sub w0, w0, #1")
+            emit(state, "    str w0, [%x]")
+            emit(state, "    add %d, %x, #16")
             if ptr_sz == 8 {
-                emit(state, "    mov %c, [%d + %a*8]")
+                emit(state, "    ldr %c, [%d, x0, lsl #3]")
             } else {
-                emit(state, "    mov %c, [%d + %a*4]")
+                emit(state, "    ldr %c, [%d, x0, lsl #2]")
             }
             emit(state, "    str %c, [sp, #-16]!")
         }
@@ -995,8 +965,8 @@ def compile_expr(state: CodegenState, node: AstNode) {
             compile_expr(state, node.args[0])
             compile_expr(state, node.left)
             emit(state, "    ldr %a, [sp], #16")
-            emit(state, "    pop %x")
-            emit(state, "    push %x")
+            emit(state, "    ldr %x, [sp], #16")
+            emit(state, "    str %x, [sp, #-16]!")
             emit(state, "    str %a, [sp, #-16]!")
             emit_call(state, "_dict_get", 2)
             emit(state, "    str %a, [sp, #-16]!")
@@ -1006,10 +976,10 @@ def compile_expr(state: CodegenState, node: AstNode) {
             compile_expr(state, node.args[0])
             compile_expr(state, node.left)
             emit(state, "    ldr %a, [sp], #16")
-            emit(state, "    pop %x")
+            emit(state, "    ldr %x, [sp], #16")
             emit(state, "    ldr %c, [sp], #16")
             emit(state, "    str %c, [sp, #-16]!")
-            emit(state, "    push %x")
+            emit(state, "    str %x, [sp, #-16]!")
             emit(state, "    str %a, [sp, #-16]!")
             emit_call(state, "_dict_set", 3)
             emit(state, "    str %a, [sp, #-16]!")
@@ -1018,8 +988,8 @@ def compile_expr(state: CodegenState, node: AstNode) {
             compile_expr(state, node.args[0])
             compile_expr(state, node.left)
             emit(state, "    ldr %a, [sp], #16")
-            emit(state, "    pop %x")
-            emit(state, "    push %x")
+            emit(state, "    ldr %x, [sp], #16")
+            emit(state, "    str %x, [sp, #-16]!")
             emit(state, "    str %a, [sp, #-16]!")
             emit_call(state, "_dict_has", 2)
             emit(state, "    str %a, [sp, #-16]!")
@@ -1028,8 +998,8 @@ def compile_expr(state: CodegenState, node: AstNode) {
             compile_expr(state, node.args[0])
             compile_expr(state, node.left)
             emit(state, "    ldr %a, [sp], #16")
-            emit(state, "    pop %x")
-            emit(state, "    push %x")
+            emit(state, "    ldr %x, [sp], #16")
+            emit(state, "    str %x, [sp, #-16]!")
             emit(state, "    str %a, [sp, #-16]!")
             emit_call(state, "_dict_remove", 2)
             emit(state, "    str %a, [sp, #-16]!")
@@ -1050,7 +1020,6 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    str %a, [sp, #-16]!")
         }
         if str_eq(node.val_str, "append") == 0 and str_eq(node.val_str, "pop") == 0 and str_eq(node.val_str, "get") == 0 and str_eq(node.val_str, "set") == 0 and str_eq(node.val_str, "has") == 0 and str_eq(node.val_str, "remove") == 0 and str_eq(node.val_str, "keys") == 0 and str_eq(node.val_str, "values") == 0 and str_eq(node.val_str, "items") == 0 {
-            # Standard module bl (e.g. errors.err)
             i = len(node.args) - 1
             while i >= 0 {
                 compile_expr(state, node.args[i])
@@ -1080,7 +1049,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
                 emit(state, "    str %a, [sp, #-16]!")
             } else {
                 emit(state, "    ldr %a, [sp], #16")
-                emit(state, "    mov x0, dword ptr [%a]")
+                emit(state, "    ldr w0, [%a]")
                 emit(state, "    str %a, [sp, #-16]!")
             }
             return
@@ -1095,36 +1064,35 @@ def compile_expr(state: CodegenState, node: AstNode) {
         
         if node.val_str == "str" {
             compile_expr(state, node.args[0])
-            emit(state, "    pop %x")
+            emit(state, "    ldr %x, [sp], #16")
             if is_float_expr(state, node.args[0]) == 1 {
-                emit(state, "    push 32")
+                emit(state, "    mov %a, 32")
             } else {
-                emit(state, "    mov x0, 1
-        emit(state, "    str x0, [sp, #-16]!")6")
+                emit(state, "    mov %a, 16")
             }
+            emit(state, "    str %a, [sp, #-16]!")
             emit_call(state, "_malloc", 1)
             
-            emit(state, "    str %a, [sp, #-16]!")  # Save buffer pointer
+            emit(state, "    str %a, [sp, #-16]!")
             
-            emit(state, "    push %x")  # arg 3: value
+            emit(state, "    str %x, [sp, #-16]!")
             if is_float_expr(state, node.args[0]) == 1 {
                 push_data_label(state, "fmt_float_pure")
             } else {
                 push_data_label(state, "fmt_int_pure")
             }
-            emit(state, "    str %a, [sp, #-16]!")  # arg 2: format
+            emit(state, "    str %a, [sp, #-16]!")
             
             ptr_sz = ptr_size(state)
             if ptr_sz == 8 {
-                emit(state, "    mov %c, [%s + 16]")
+                emit(state, "    ldr %c, [%s, #16]")
             } else {
-                emit(state, "    mov %c, [%s + 8]")
+                emit(state, "    ldr %c, [%s, #8]")
             }
-            emit(state, "    str %c, [sp, #-16]!")  # arg 1: buffer
+            emit(state, "    str %c, [sp, #-16]!")
             
             emit_call(state, "_sprintf", 3)
             
-            # The saved buffer pointer is now at top of stack, perfect.
             return
         }
         
@@ -1140,7 +1108,8 @@ def compile_expr(state: CodegenState, node: AstNode) {
         }
         
         if is_struct == 1 {
-            emit(state, "    push " + str(struct_size))
+            emit(state, "    mov %a, " + str(struct_size))
+            emit(state, "    str %a, [sp, #-16]!")
             emit_call(state, "_malloc", 1)
             emit(state, "    str %a, [sp, #-16]!")
         } else {
@@ -1157,7 +1126,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
 }
 
 def is_asm_mnemonic(state: CodegenState, name: string) -> int {
-    mnemonics = ["inc", "dec", "mov", "add", "sub", "cmp", "jmp", "je", "jne", "jl", "jle", "jg", "jge", "jz", "jnz", "push", "pop", "pushf", "popf", "call", "ret", "lea", "xor", "and", "or", "shl", "shr", "rol", "ror", "movzx", "movsx", "test", "neg", "idiv", "imul", "div", "not", "rep", "repnz", "cdq", "fld", "fstp", "fadd", "faddp", "fsub", "fsubp", "fmul", "fmulp", "fdiv", "fdivp", "fist", "fst", "fchs", "fucomip", "fcomip", "fild", "fistp", "lahf", "sahf", "nop", "hlt", "jns", "jae", "syscall", "fldcw", "fnstcw", "cld", "std", "stc", "clc", "cmc", "int3", "leave", "movsd"]
+    mnemonics = ["inc", "dec", "mov", "add", "sub", "cmp", "b", "b.eq", "b.ne", "b.lt", "b.le", "b.gt", "b.ge", "b.eq", "b.ne", "bl", "ret", "adrp", "add", "ldr", "str", "stp", "ldp", "ldrb", "strb", "ldrh", "strh", "lsl", "lsr", "asr", "eor", "orr", "and", "mvn", "neg", "sdiv", "mul", "msub", "cset", "cinc", "fcmp", "fadd", "fsub", "fmul", "fdiv", "fcvt", "nop", "svc", "stur", "ldur", "cbz", "cbnz", "tbz", "tbnz"]
     i = 0
     while i < len(mnemonics) {
         if mnemonics[i] == name { return 1 }

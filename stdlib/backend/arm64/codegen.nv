@@ -134,6 +134,34 @@ def emit_data(state: CodegenState, line: string) {
     state.data_lines.append(line)
 }
 
+def push_data_label(state: CodegenState, label: string) {
+    emit(state, "    adrp x0, " + label + "@PAGE")
+    emit(state, "    add x0, x0, :lo12:" + label)
+    emit(state, "    str x0, [sp, #-16]!")
+}
+
+def is_float_expr(state: CodegenState, node: AstNode) -> int {
+    if node.kind == "Number" and node.is_float == 1 {
+        return 1
+    }
+    if node.kind == "Variable" {
+        if node.inferred_type != 0 and node.inferred_type.kind == "scalar" and node.inferred_type.name == "float" {
+            return 1
+        }
+    }
+    if node.kind == "BinOp" {
+        if is_float_expr(state, node.left) == 1 or is_float_expr(state, node.right) == 1 {
+            return 1
+        }
+    }
+    if node.kind == "UnaryOp" {
+        if is_float_expr(state, node.left) == 1 {
+            return 1
+        }
+    }
+    return 0
+}
+
 def next_label(state: CodegenState, prefix: string) -> string {
     state.label_count = state.label_count + 1
     return prefix + "_" + str(state.label_count)
@@ -382,12 +410,67 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
 }
 
 def generate_assembly(ast: list, debug_mode: int) -> list {
-    state = new_codegen(1) # ARM64 target
+    state = new_codegen(1)
 
     emit(state, ".text")
-    
     emit(state, ".global _main")
-    
+    emit(state, ".extern _printf")
+    emit(state, ".extern _malloc")
+    emit(state, ".extern _free")
+    emit(state, ".extern _realloc")
+    emit(state, ".extern _fopen")
+    emit(state, ".extern _fclose")
+    emit(state, ".extern _fread")
+    emit(state, ".extern _fwrite")
+    emit(state, ".extern _fputs")
+    emit(state, ".extern _fputc")
+    emit(state, ".extern _fseek")
+    emit(state, ".extern _ftell")
+    emit(state, ".extern _fflush")
+    emit(state, ".extern _exit")
+    emit(state, ".extern _system")
+    emit(state, ".extern _strlen")
+    emit(state, ".extern _strcmp")
+    emit(state, ".extern _strcpy")
+    emit(state, ".extern _strcat")
+    emit(state, ".extern _strstr")
+    emit(state, ".extern _memset")
+    emit(state, ".extern _sprintf")
+    emit(state, ".extern _memcpy")
+    emit(state, ".extern _dict_new")
+    emit(state, ".extern _dict_get")
+    emit(state, ".extern _dict_set")
+    emit(state, ".extern _dict_has")
+    emit(state, ".extern _dict_remove")
+    emit(state, ".extern _dict_keys")
+    emit(state, ".extern _dict_values")
+    emit(state, ".extern _dict_items")
+
+    emit_data(state, "fmt_int: .asciz \"%d\\n\"")
+    emit_data(state, "fmt_int_pure: .asciz \"%d\"")
+    emit_data(state, "fmt_str: .asciz \"%s\\n\"")
+    emit_data(state, "fmt_float: .asciz \"%f\\n\"")
+    emit_data(state, "fmt_float_pure: .asciz \"%f\"")
+    emit_data(state, "debug_prefix: .asciz \"debug - [line \"")
+    emit_data(state, "debug_suffix: .asciz \"]: \"")
+    emit_data(state, "L_out_of_bounds_msg: .asciz \"Index Out Of Bounds\\n\"")
+    emit_data(state, "L_realloc_fail_msg: .asciz \"Realloc failed!\\n\"")
+    emit_data(state, "str_fmode_a: .asciz \"a\"")
+    emit_data(state, "str_fmode_w: .asciz \"w\"")
+    emit_data(state, "str_fmode_r: .asciz \"r\"")
+    emit_data(state, "str_fmode_rw: .asciz \"r+\"")
+    emit_data(state, "str_fmode_wp: .asciz \"w+\"")
+    emit_data(state, "str_const_sys_platform: .asciz \"arm64\"")
+    emit_data(state, "str_const_chacha_mem: .asciz \"expand 32-byte k\"")
+
+    emit_data(state, "char_strings:")
+    char_idx = 0
+    while char_idx < 256 {
+        emit_data(state, "    .byte " + str(char_idx))
+        emit_data(state, "    .byte 0")
+        char_idx = char_idx + 1
+    }
+
     i = 0
     while i < len(ast) {
         node = ast[i]
@@ -399,21 +482,149 @@ def generate_assembly(ast: list, debug_mode: int) -> list {
         i = i + 1
     }
 
+    functions = []
+    top_level = []
     i = 0
     while i < len(ast) {
         node = ast[i]
         if node.kind == "Function" {
-            compile_function(state, node, debug_mode)
+            functions.append(node)
         } elif node.kind == "StructDef" {
             pass
         } else {
-            print("Warning: Skipping global node kind " + node.kind)
+            top_level.append(node)
         }
         i = i + 1
     }
 
-    # Add OS specific runtime for arm64 if needed, but they are imported directly now via os_linux.nv / os_macos.nv
-    
+    i_f = 0
+    while i_f < len(functions) {
+        compile_function(state, functions[i_f], debug_mode)
+        i_f = i_f + 1
+    }
+
+    state.local_var_names = []
+    state.local_vars = []
+    state.local_var_regs = []
+    state.local_offset = 0
+    state.used_regs = []
+    state.reg_pool_idx = 0
+
+    i = 0
+    while i < len(top_level) {
+        scan_vars(state, top_level[i])
+        i = i + 1
+    }
+
+    emit(state, "_main:")
+    emit(state, "    stp fp, lr, [sp, #-16]!")
+    emit(state, "    mov fp, sp")
+    if state.local_offset > 0 {
+        emit(state, "    sub sp, sp, #" + str(state.local_offset))
+    }
+
+    r = 0
+    while r < len(state.used_regs) {
+        emit(state, "    str " + state.used_regs[r] + ", [sp, #-16]!")
+        r = r + 1
+    }
+
+    i = 0
+    while i < len(top_level) {
+        compile_stmt(state, top_level[i], debug_mode)
+        i = i + 1
+    }
+
+    r = len(state.used_regs) - 1
+    while r >= 0 {
+        emit(state, "    ldr " + state.used_regs[r] + ", [sp], #16")
+        r = r - 1
+    }
+    emit(state, "    mov sp, fp")
+    emit(state, "    ldp fp, lr, [sp], #16")
+    emit(state, "    mov x0, #0")
+    emit(state, "    ret")
+
+    emit(state, "_concat_strings:")
+    emit(state, "    stp fp, lr, [sp, #-16]!")
+    emit(state, "    mov fp, sp")
+    emit(state, "    stp x19, x20, [sp, #-16]!")
+    emit(state, "    stp x21, x22, [sp, #-16]!")
+    emit(state, "    mov x19, x0")
+    emit(state, "    mov x20, x1")
+    emit(state, "    bl _strlen")
+    emit(state, "    mov x22, x0")
+    emit(state, "    mov x0, x20")
+    emit(state, "    bl _strlen")
+    emit(state, "    add x0, x0, x22")
+    emit(state, "    add x0, x0, #1")
+    emit(state, "    bl _malloc")
+    emit(state, "    mov x21, x0")
+    emit(state, "    mov x0, x21")
+    emit(state, "    mov x1, x19")
+    emit(state, "    bl _strcpy")
+    emit(state, "    mov x0, x21")
+    emit(state, "    mov x1, x20")
+    emit(state, "    bl _strcat")
+    emit(state, "    mov x0, x21")
+    emit(state, "    ldp x21, x22, [sp], #16")
+    emit(state, "    ldp x19, x20, [sp], #16")
+    emit(state, "    mov sp, fp")
+    emit(state, "    ldp fp, lr, [sp], #16")
+    emit(state, "    ret")
+
+    emit(state, "_slice_string:")
+    emit(state, "    stp fp, lr, [sp, #-16]!")
+    emit(state, "    mov fp, sp")
+    emit(state, "    stp x19, x20, [sp, #-16]!")
+    emit(state, "    stp x21, x22, [sp, #-16]!")
+    emit(state, "    mov x19, x0")
+    emit(state, "    mov x20, x1")
+    emit(state, "    mov x21, x2")
+    emit(state, "    sub x22, x21, x20")
+    emit(state, "    cmp x22, #0")
+    emit(state, "    csel x22, x22, xzr, ge")
+    emit(state, "    mov x0, x22")
+    emit(state, "    add x0, x0, #1")
+    emit(state, "    bl _malloc")
+    emit(state, "    mov x21, x0")
+    emit(state, "    cmp x22, #0")
+    emit(state, "    b.le L_slice_done")
+    emit(state, "    add x19, x19, x20")
+    emit(state, "    mov x0, x21")
+    emit(state, "    mov x1, x19")
+    emit(state, "    mov x2, x22")
+    emit(state, "    bl _memcpy")
+    emit(state, "L_slice_done:")
+    emit(state, "    strb wzr, [x21, x22]")
+    emit(state, "    mov x0, x21")
+    emit(state, "    ldp x21, x22, [sp], #16")
+    emit(state, "    ldp x19, x20, [sp], #16")
+    emit(state, "    mov sp, fp")
+    emit(state, "    ldp fp, lr, [sp], #16")
+    emit(state, "    ret")
+
+    emit(state, "_out_of_bounds:")
+    emit(state, "    stp fp, lr, [sp, #-16]!")
+    emit(state, "    mov fp, sp")
+    emit(state, "    adrp x0, L_out_of_bounds_msg@PAGE")
+    emit(state, "    add x0, x0, :lo12:L_out_of_bounds_msg")
+    emit(state, "    bl _printf")
+    emit(state, "    mov x0, #1")
+    emit(state, "    bl _exit")
+    emit(state, "    mov sp, fp")
+    emit(state, "    ldp fp, lr, [sp], #16")
+    emit(state, "    ret")
+
+    emit(state, "_sys_platform:")
+    emit(state, "    stp fp, lr, [sp, #-16]!")
+    emit(state, "    mov fp, sp")
+    emit(state, "    adrp x0, str_const_sys_platform@PAGE")
+    emit(state, "    add x0, x0, :lo12:str_const_sys_platform")
+    emit(state, "    mov sp, fp")
+    emit(state, "    ldp fp, lr, [sp], #16")
+    emit(state, "    ret")
+
     result = []
     i = 0
     while i < len(state.asm_lines) {
