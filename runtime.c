@@ -217,7 +217,33 @@ SYSCALL void STR_PFX(out_of_bounds)(void) {
 }
 
 /* ============== Nova sys_* runtime ============== */
-/* Removed: sys_open, sys_write, etc. are now implemented natively in Nova os_* modules. */
+SYSCALL int STR_PFX(sys_open)(const char *path, const char *mode) { return STR_PFX(fopen)(path, mode); }
+SYSCALL int STR_PFX(sys_close)(int s) { return STR_PFX(fclose)(s); }
+SYSCALL char *STR_PFX(sys_read)(int s) {
+    long len;
+    char *buf;
+    STR_PFX(fseek)(s, 0, 2);
+    len = STR_PFX(ftell)(s);
+    STR_PFX(fseek)(s, 0, 0);
+    buf = (char *)STR_PFX(malloc)(len + 1);
+    STR_PFX(fread)(buf, 1, len, s);
+    buf[len] = '\0';
+    return buf;
+}
+SYSCALL int STR_PFX(sys_write)(int s, const char *str) { return STR_PFX(fputs)(str, s); }
+SYSCALL int STR_PFX(sys_write_raw)(int s, void *arr) {
+    int *iarr = (int*)arr;
+    int len = iarr[0];
+    char *data = (char*)arr + 16;
+    return STR_PFX(fwrite)(data, 1, len, s);
+}
+SYSCALL void *STR_PFX(sys_alloc)(int sz) { return STR_PFX(malloc)(sz); }
+SYSCALL void STR_PFX(sys_free)(void *p) { STR_PFX(free)(p); }
+SYSCALL void STR_PFX(sys_exit)(int c) { STR_PFX(exit)(c); }
+SYSCALL int STR_PFX(sys_system)(const char *c) { return STR_PFX(system)(c); }
+SYSCALL int STR_PFX(sys_flush)(int s) { return STR_PFX(fflush)(s); }
+SYSCALL const char *STR_PFX(sys_platform)(void) { return "windows"; }
+SYSCALL int STR_PFX(sys_get_tick_count)(void) { return (int)GetTickCount(); }
 
 /* ============== Entry point bridge for Windows x64 ============== */
 /* MinGW x64 CRT expects main() (no _ prefix). Nova codegen emits _main (with _ prefix
@@ -416,13 +442,13 @@ SYSCALL void *dict_keys(void *d) {
     int cap = *(int*)((char*)d + 4);
     char **keys = *(char***)((char*)d + 8);
     int n = _dc(d);
-    void *list = malloc(12);
+    void *list = malloc(16);
     if (!list) return 0;
-    void *data = malloc((size_t)n * 4);
+    void *data = malloc((size_t)n * sizeof(intptr_t));
     if (!data) { free(list); return 0; }
     *(int*)list = n;
     *(int*)((char*)list + 4) = n;
-    *(int*)((char*)list + 8) = (int)(intptr_t)data;
+    *(intptr_t*)((char*)list + 8) = (intptr_t)data;
     int out = 0;
     for (int i = 0; i < cap; i++) {
         if (keys[i]) {
@@ -430,7 +456,7 @@ SYSCALL void *dict_keys(void *d) {
             size_t sl = strlen(keys[i]) + 1;
             char *copy = (char*)malloc(sl);
             if (copy) { strcpy(copy, keys[i]); }
-            *(int*)((char*)data + out * 4) = (int)(intptr_t)(copy ? copy : keys[i]);
+            *(intptr_t*)((char*)data + out * sizeof(intptr_t)) = (intptr_t)(copy ? copy : keys[i]);
             out++;
         }
     }
@@ -442,17 +468,17 @@ SYSCALL void *dict_values(void *d) {
     char **keys = *(char***)((char*)d + 8);
     intptr_t *values = *(intptr_t**)((char*)d + 16);
     int n = _dc(d);
-    void *list = malloc(12);
+    void *list = malloc(16);
     if (!list) return 0;
-    void *data = malloc((size_t)n * 4);
+    void *data = malloc((size_t)n * sizeof(intptr_t));
     if (!data) { free(list); return 0; }
     *(int*)list = n;
     *(int*)((char*)list + 4) = n;
-    *(int*)((char*)list + 8) = (int)(intptr_t)data;
+    *(intptr_t*)((char*)list + 8) = (intptr_t)data;
     int out = 0;
     for (int i = 0; i < cap; i++) {
         if (keys[i]) {
-            *(int*)((char*)data + out * 4) = (int)values[i];
+            *(intptr_t*)((char*)data + out * sizeof(intptr_t)) = (intptr_t)values[i];
             out++;
         }
     }
@@ -464,13 +490,13 @@ SYSCALL void *dict_items(void *d) {
     char **keys = *(char***)((char*)d + 8);
     intptr_t *values = *(intptr_t**)((char*)d + 16);
     int n = _dc(d);
-    void *list = malloc(12);
+    void *list = malloc(16);
     if (!list) return 0;
-    void *data = malloc((size_t)n * 2 * 4);
+    void *data = malloc((size_t)n * 2 * sizeof(intptr_t));
     if (!data) { free(list); return 0; }
     *(int*)list = n * 2;
     *(int*)((char*)list + 4) = n * 2;
-    *(int*)((char*)list + 8) = (int)(intptr_t)data;
+    *(intptr_t*)((char*)list + 8) = (intptr_t)data;
     int out = 0;
     for (int i = 0; i < cap; i++) {
         if (keys[i]) {
@@ -478,9 +504,9 @@ SYSCALL void *dict_items(void *d) {
             size_t sl = strlen(keys[i]) + 1;
             char *copy = (char*)malloc(sl);
             if (copy) { strcpy(copy, keys[i]); }
-            *(int*)((char*)data + out * 4) = (int)(intptr_t)(copy ? copy : keys[i]);
+            *(intptr_t*)((char*)data + out * sizeof(intptr_t)) = (intptr_t)(copy ? copy : keys[i]);
             out++;
-            *(int*)((char*)data + out * 4) = (int)values[i];
+            *(intptr_t*)((char*)data + out * sizeof(intptr_t)) = (intptr_t)values[i];
             out++;
         }
     }
@@ -497,6 +523,25 @@ SYSCALL void _dict_remove(void *d, const char *k) { dict_remove(d, k); }
 SYSCALL void *_dict_keys(void *d) { return dict_keys(d); }
 SYSCALL void *_dict_values(void *d) { return dict_values(d); }
 SYSCALL void *_dict_items(void *d) { return dict_items(d); }
+SYSCALL void *STR_PFX(sys_get_args)(void) {
+    extern int __nova_argc;
+    extern char **__nova_argv;
+    int n = __nova_argc;
+    void *list = malloc(16);
+    if (!list) return 0;
+    void *data = malloc((size_t)n * sizeof(intptr_t));
+    if (!data) { free(list); return 0; }
+    *(int*)list = n;
+    *(int*)((char*)list + 4) = n;
+    *(intptr_t*)((char*)list + 8) = (intptr_t)data;
+    for (int i = 0; i < n; i++) {
+        size_t sl = strlen(__nova_argv[i]) + 1;
+        char *copy = (char*)malloc(sl);
+        if (copy) strcpy(copy, __nova_argv[i]);
+        *(intptr_t*)((char*)data + i * sizeof(intptr_t)) = (intptr_t)(copy ? copy : __nova_argv[i]);
+    }
+    return list;
+}
 #elif defined(_WIN64)
 /* Windows x64: MinGW doesn't add _ prefix. Same wrapper approach as Linux. */
 SYSCALL void *_dict_new(void) { return dict_new(); }
@@ -507,4 +552,23 @@ SYSCALL void _dict_remove(void *d, const char *k) { dict_remove(d, k); }
 SYSCALL void *_dict_keys(void *d) { return dict_keys(d); }
 SYSCALL void *_dict_values(void *d) { return dict_values(d); }
 SYSCALL void *_dict_items(void *d) { return dict_items(d); }
+SYSCALL void *__sys_get_args(void) {
+    extern int __argc;
+    extern char **__argv;
+    int n = __argc;
+    void *list = malloc(16);
+    if (!list) return 0;
+    void *data = malloc((size_t)n * sizeof(intptr_t));
+    if (!data) { free(list); return 0; }
+    *(int*)list = n;
+    *(int*)((char*)list + 4) = n;
+    *(intptr_t*)((char*)list + 8) = (intptr_t)data;
+    for (int i = 0; i < n; i++) {
+        size_t sl = strlen(__argv[i]) + 1;
+        char *copy = (char*)malloc(sl);
+        if (copy) strcpy(copy, __argv[i]);
+        *(intptr_t*)((char*)data + i * sizeof(intptr_t)) = (intptr_t)(copy ? copy : __argv[i]);
+    }
+    return list;
+}
 #endif

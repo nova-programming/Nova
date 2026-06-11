@@ -52,3 +52,9 @@ def get_tick_count() -> int {
 def system_exit(code: int) {
     os_impl.sys_exit(code)
 }
+
+
+def system_exec(cmd: string) {
+    os_impl.sys_system(cmd)
+}
+

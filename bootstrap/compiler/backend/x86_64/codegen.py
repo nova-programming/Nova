@@ -91,7 +91,7 @@ class X86_64Codegen:
         return f"{prefix}_{self.label_count}"
 
     def _is_float_expr(self, node):
-        if getattr(node, 'inferred_type', None) == 'float':
+        if str(getattr(node, 'inferred_type', '')) == 'float':
             return True
         if isinstance(node, Number) and isinstance(node.value, float):
             return True
@@ -101,7 +101,7 @@ class X86_64Codegen:
         if isinstance(node, String): return True
         if isinstance(node, Variable) and node.name in self.string_vars: return True
         inferred = getattr(node, 'inferred_type', None)
-        if inferred == 'string': return True
+        if str(inferred) == 'string': return True
         if isinstance(node, BinOp) and node.op == '+':
             return self._is_string_expr(node.left) or self._is_string_expr(node.right)
         if isinstance(node, Call):
@@ -111,28 +111,28 @@ class X86_64Codegen:
             if node.method_name in ["platform", "file_read", "read", "read_all"]: return True
         if isinstance(node, ArrayIndex):
             base_type = getattr(node.base, 'inferred_type', 'any')
-            if base_type == 'string' or self._is_string_expr(node.base):
+            if str(base_type) == 'string' or self._is_string_expr(node.base):
                 return True
             if isinstance(node.base, DataFieldAccess) and node.base.field_name in ['struct_names', 'prop_names', 'local_var_names']:
                 return False
-            return base_type == 'string' or self._is_string_expr(node.base)
+            return str(base_type) == 'string' or self._is_string_expr(node.base)
         if isinstance(node, DataFieldAccess):
             inferred = getattr(node, 'inferred_type', None)
-            if inferred == 'string': return True
-            if node.instance and hasattr(node.instance, 'inferred_type') and node.instance.inferred_type == 'string':
+            if str(inferred) == 'string': return True
+            if node.instance and hasattr(node.instance, 'inferred_type') and str(node.instance.inferred_type) == 'string':
                 return True
             if node.instance and node.instance in self.string_vars:
                 return True
         if isinstance(node, StrConvert): return True
         if isinstance(node, Slice):
             base_type = getattr(node.base, 'inferred_type', None)
-            if base_type == 'string': return True
+            if str(base_type) == 'string': return True
         return False
 
     def _is_file_expr(self, node):
         if isinstance(node, Openf): return True
         if isinstance(node, OpenFile): return True
-        return getattr(node, 'inferred_type', None) == 'file'
+        return str(getattr(node, 'inferred_type', '')) == 'file'
 
     def add_string_literal(self, value):
         if value not in self.string_literals:
@@ -296,9 +296,11 @@ class X86_64Codegen:
         self.assembly.append("    push rbp")
         self.assembly.append("    mov rbp, rsp")
         self.assembly.append("    push rbx")
-        self.assembly.append("    mov rsi, [rbp + 16]")
-        self.assembly.append("    mov ebx, [rbp + 24]")
-        self.assembly.append("    mov ecx, [rbp + 32]")
+        self.assembly.append("    push r12")
+        self.assembly.append("    mov r12, rdi") # base string
+        self.assembly.append("    mov ebx, esi") # start index
+        self.assembly.append("    mov ecx, edx") # end index
+        self.assembly.append("    mov rsi, r12")
         self.assembly.append("    sub ecx, ebx")
         self.assembly.append("    cmp ecx, 0")
         self.assembly.append("    jge L_slice_alloc_64")
@@ -307,9 +309,12 @@ class X86_64Codegen:
         self.assembly.append("    push rcx")
         self.assembly.append("    inc ecx")
         self.assembly.append("    mov edi, ecx")
+        self.assembly.append("    mov r13, rsp")
+        self.assembly.append("    and rsp, -16")
         self.assembly.append("    sub rsp, 32")
         self.assembly.append("    call _malloc")
         self.assembly.append("    add rsp, 32")
+        self.assembly.append("    mov rsp, r13")
         self.assembly.append("    pop rcx")
         self.assembly.append("    mov rdi, rax")
         self.assembly.append("    add rsi, rbx")
@@ -330,6 +335,7 @@ class X86_64Codegen:
         self.assembly.append("    pop rdi")
         self.assembly.append("    mov byte ptr [rdi + rcx], 0")
         self.assembly.append("    mov rax, rdi")
+        self.assembly.append("    pop r12")
         self.assembly.append("    pop rbx")
         self.assembly.append("    pop rbp")
         self.assembly.append("    ret")
@@ -643,7 +649,7 @@ class X86_64Codegen:
                 self.assembly.append(f"    mov ecx, {offset}")
             else:
                 self.assembly.append(f"    mov ecx, [rbp - {offset}]")
-            self.assembly.append(f"    mov eax, [rax + rcx*4]")
+            self.assembly.append(f"    mov rax, [rax + rcx*8]")
             if isinstance(offset, str):
                 pass
             else:
@@ -686,7 +692,8 @@ class X86_64Codegen:
             self.assembly.append("    jl _out_of_bounds")
             self.assembly.append("    cmp ecx, [rbx]")
             self.assembly.append("    jge _out_of_bounds")
-            self.assembly.append("    mov [rbx + rcx*8 + 16], rax")
+            self.assembly.append("    mov rdi, [rbx + 8]")
+            self.assembly.append("    mov [rdi + rcx*8], rax")
         elif isinstance(node, WriteFile):
             self.compile_expr(node.content)
             self.compile_expr(node.file)
@@ -895,8 +902,8 @@ class X86_64Codegen:
                 self.assembly.append("    pushf")
                 self.assembly.append("    pop rax")
             elif all_leaf:
-                self.compile_leaf_to_reg(node.right, 'ebx')
-                self.compile_leaf_to_reg(node.left, 'eax')
+                self.compile_leaf_to_reg(node.right, 'rbx')
+                self.compile_leaf_to_reg(node.left, 'rax')
             else:
                 self.compile_expr(node.left)
                 self.compile_expr(node.right)
@@ -905,8 +912,8 @@ class X86_64Codegen:
 
             left_type = getattr(node.left, 'inferred_type', 'any')
             right_type = getattr(node.right, 'inferred_type', 'any')
-            left_is_str = self._is_string_expr(node.left) or left_type == 'string'
-            right_is_str = self._is_string_expr(node.right) or right_type == 'string'
+            left_is_str = self._is_string_expr(node.left) or str(left_type) == 'string'
+            right_is_str = self._is_string_expr(node.right) or str(right_type) == 'string'
             is_str_cmp = False
             if left_is_str or right_is_str:
                 left_is_zero = isinstance(node.left, Number) and node.left.value == 0
@@ -1043,7 +1050,7 @@ class X86_64Codegen:
                 raise Exception(f"[line {getattr(node, 'line', '?')}] Property {node.property} not supported in native codegen")
         elif isinstance(node, ArrayIndex):
             base_type = getattr(node.base, 'inferred_type', 'any')
-            is_str = self._is_string_expr(node.base) or base_type == 'string'
+            is_str = self._is_string_expr(node.base) or str(base_type) == 'string'
             if isinstance(node.base, DataFieldAccess) and node.base.field_name in ['struct_names', 'prop_names', 'local_var_names']:
                 is_str = False
             self.compile_expr(node.index)
@@ -1053,15 +1060,17 @@ class X86_64Codegen:
             if is_str:
                 self.assembly.append("    movzx eax, byte ptr [rdx + rcx]")
                 self.assembly.append("    shl eax, 1")
+                self.assembly.append("    mov rcx, rax")
                 self.assembly.append("    lea rax, [rip + char_strings]")
-                self.assembly.append("    add rax, rax")
+                self.assembly.append("    add rax, rcx")
                 self.assembly.append("    push rax")
             else:
                 self.assembly.append("    cmp ecx, 0")
                 self.assembly.append("    jl _out_of_bounds")
                 self.assembly.append("    cmp ecx, [rdx]")
                 self.assembly.append("    jge _out_of_bounds")
-                self.assembly.append("    mov rax, [rdx + rcx*8 + 16]")
+                self.assembly.append("    mov rdi, [rdx + 8]")
+                self.assembly.append("    mov rax, [rdi + rcx*8]")
                 self.assembly.append("    push rax")
         elif isinstance(node, ApiRequest):
             self.compile_expr(node.url)
@@ -1109,23 +1118,32 @@ class X86_64Codegen:
             self.assembly.append("    push rax")
         elif isinstance(node, ListLiteral):
             n = len(node.elements)
-            list_size = 16 + n * 8
-            self.assembly.append(f"    mov edi, {list_size}")
+            req_cap = 16 if n == 0 else n * 8
+            self.assembly.append("    mov edi, 16")
             self._ensure_aligned()
             self.assembly.append("    sub rsp, 32")
             self.assembly.append("    call _malloc")
             self.assembly.append("    add rsp, 32")
-            self.assembly.append("    push rax")
-            self.assembly.append("    pop rbx")
-            self.assembly.append("    push rbx")
+            self.assembly.append("    push rax") # push list struct
+            self.assembly.append(f"    mov edi, {req_cap}")
+            self._ensure_aligned()
+            self.assembly.append("    sub rsp, 32")
+            self.assembly.append("    call _malloc")
+            self.assembly.append("    add rsp, 32")
+            self.assembly.append("    pop rbx") # rbx = list struct
+            self.assembly.append("    push rbx") # save list struct for expression result
             self.assembly.append(f"    mov dword ptr [rbx], {n}")
-            self.assembly.append(f"    mov dword ptr [rbx + 8], {list_size}")
-            self.assembly.append("    lea rdx, [rbx + 16]")
+            self.assembly.append(f"    mov dword ptr [rbx + 4], {req_cap}")
+            self.assembly.append("    mov [rbx + 8], rax") # rax is data buffer
             for i, elem in enumerate(node.elements):
+                self.assembly.append("    push rbx")
                 self.compile_expr(elem)
-                self.assembly.append("    pop rax")
+                self.assembly.append("    pop rax") # rax = elem
+                self.assembly.append("    pop rbx") # rbx = list struct
+                self.assembly.append("    mov rdx, [rbx + 8]") # rdx = data buffer
                 self.assembly.append(f"    mov [rdx + {i*8}], rax")
-            self.assembly.append("    push rbx")
+            self.assembly.append("    pop rax")
+            self.assembly.append("    push rax")
         elif isinstance(node, DictLiteral):
             self._ensure_aligned()
             self.assembly.append("    sub rsp, 32")
@@ -1151,39 +1169,43 @@ class X86_64Codegen:
                 self.compile_expr(node.args[0])
                 self.compile_expr(node.instance)
                 self.assembly.append("    pop rbx")
-                self.assembly.append("    pop rax")
-                self.assembly.append("    mov ecx, [rbx]")
-                self.assembly.append("    inc ecx")
-                self.assembly.append("    mov [rbx], ecx")
-                self.assembly.append("    mov edx, [rbx + 8]")
-                self.assembly.append("    cmp ecx, edx")
+                self.assembly.append("    pop rcx")
+                self.assembly.append("    mov eax, dword ptr [rbx]")
+                self.assembly.append("    mov edx, eax")
+                self.assembly.append("    add edx, 1")
+                self.assembly.append("    shl edx, 3")
+                self.assembly.append("    mov esi, dword ptr [rbx+4]")
+                self.assembly.append("    cmp edx, esi")
                 lbl = self.next_label("L_append_no_realloc")
-                self.assembly.append(f"    jl {lbl}")
-                self.assembly.append("    push rbx")
-                self.assembly.append("    push rax")
-                self.assembly.append("    push rbx")
-                self.assembly.append("    imul edx, 2")
-                self.assembly.append("    mov edi, edx")
+                self.assembly.append(f"    jle {lbl}")
+                self.assembly.append("    shl esi, 1")
+                self.assembly.append("    push rcx")
+                self.assembly.append("    push rsi")
+                self.assembly.append("    mov rdi, [rbx + 8]")
+                self.assembly.append("    mov rsi, rsi")
                 self._ensure_aligned()
+                self.assembly.append("    sub rsp, 32")
                 self.assembly.append("    call _realloc")
-                self.assembly.append("    pop rbx")
-                self.assembly.append("    mov [rbx + 8], edx")
-                self.assembly.append("    lea rdx, [rax + 16]")
-                self.assembly.append("    mov rbx, rax")
-                self.assembly.append("    pop rax")
-                self.assembly.append("    pop rbx")
+                self.assembly.append("    add rsp, 32")
+                self.assembly.append("    pop rsi")
+                self.assembly.append("    pop rcx")
+                self.assembly.append("    mov [rbx + 8], rax")
+                self.assembly.append("    mov dword ptr [rbx+4], esi")
                 self.assembly.append(f"{lbl}:")
-                self.assembly.append("    lea rdx, [rbx + 16]")
-                self.assembly.append("    dec ecx")
-                self.assembly.append(f"    mov [rdx + rcx*8], rax")
+                self.assembly.append("    mov eax, dword ptr [rbx]")
+                self.assembly.append("    mov rdi, [rbx + 8]")
+                self.assembly.append("    mov [rdi + rax*8], rcx")
+                self.assembly.append("    add eax, 1")
+                self.assembly.append("    mov dword ptr [rbx], eax")
+                self.assembly.append("    push rax")
             elif node.method_name == "pop":
                 self.compile_expr(node.instance)
                 self.assembly.append("    pop rbx")
                 self.assembly.append("    mov ecx, [rbx]")
                 self.assembly.append("    dec ecx")
                 self.assembly.append("    mov [rbx], ecx")
-                self.assembly.append("    lea rdx, [rbx + 16]")
-                self.assembly.append("    mov rax, [rdx + rcx*8]")
+                self.assembly.append("    mov rdi, [rbx + 8]")
+                self.assembly.append("    mov rax, [rdi + rcx*8]")
                 self.assembly.append("    push rax")
             elif node.method_name == "open" or node.method_name == "open_append":
                 self.compile_expr(node.args[0])

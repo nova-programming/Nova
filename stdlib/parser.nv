@@ -55,19 +55,35 @@ def eat_tok(state: ParserState, expected_kind: string) -> Token {
 # ---------------- EXPRESSIONS ----------------
 
 def parse_primary(state: ParserState) -> AstNode {
+    print("pp: enter")
+    sys_flush()
     tok = current_tok(state)
+    print("pp: tok=" + tok.kind)
+    sys_flush()
     node = AstNode()
     node.line = tok.line
     
     if tok.kind == "NUMBER" {
+        print("pp: NUMBER branch")
+        sys_flush()
         eat_tok(state, "NUMBER")
+        print("pp: ate NUMBER")
+        sys_flush()
         node.kind = "Number"
         has_dot = 0
         ci = 0
+        print("pp: val=" + tok.val)
+        sys_flush()
+        print("pp: val len=" + str(len(tok.val)))
+        sys_flush()
         while ci < len(tok.val) {
+            print("pp: ci=" + str(ci))
+            sys_flush()
             if tok.val[ci] == "." { has_dot = 1 }
             ci = ci + 1
         }
+        print("pp: dot loop done")
+        sys_flush()
         if has_dot == 1 {
             node.is_float = 1
             node.val_str = tok.val
@@ -76,6 +92,8 @@ def parse_primary(state: ParserState) -> AstNode {
             node.is_float = 0
             node.val_int = atoi(tok.val)
         }
+        print("pp: NUMBER done")
+        sys_flush()
     } elif tok.kind == "STRING" {
         eat_tok(state, "STRING")
         node.kind = "String"
@@ -391,6 +409,8 @@ def parse_primary(state: ParserState) -> AstNode {
 }
 
 def parse_unary(state: ParserState) -> AstNode {
+    print("pu: enter")
+    sys_flush()
     tok = current_tok(state)
     if tok.kind == "MINUS" or tok.kind == "NOT" or tok.kind == "TILDE" {
         eat_tok(state, tok.kind)
@@ -404,6 +424,8 @@ def parse_unary(state: ParserState) -> AstNode {
 }
 
 def parse_mul(state: ParserState) -> AstNode {
+    print("pm: enter")
+    sys_flush()
     left = parse_unary(state)
     loop = 1
     while loop == 1 {
@@ -437,6 +459,8 @@ def parse_mul(state: ParserState) -> AstNode {
 }
 
 def parse_add(state: ParserState) -> AstNode {
+    print("pa: enter")
+    sys_flush()
     left = parse_mul(state)
     loop = 1
     while loop == 1 {
@@ -467,6 +491,8 @@ def parse_add(state: ParserState) -> AstNode {
 }
 
 def parse_compare(state: ParserState) -> AstNode {
+    print("pc: enter")
+    sys_flush()
     left = parse_add(state)
     loop = 1
     while loop == 1 {
@@ -488,6 +514,8 @@ def parse_compare(state: ParserState) -> AstNode {
 }
 
 def parse_logic(state: ParserState) -> AstNode {
+    print("pl: enter")
+    sys_flush()
     left = parse_compare(state)
     loop = 1
     while loop == 1 {
@@ -509,6 +537,8 @@ def parse_logic(state: ParserState) -> AstNode {
 }
 
 def parse_expr(state: ParserState) -> AstNode {
+    print("pe: enter")
+    sys_flush()
     return parse_logic(state)
 }
 
@@ -578,8 +608,14 @@ def parse_block(state: ParserState) -> list {
 }
 
 def parse_statement(state: ParserState) -> AstNode {
+    print("ps: enter")
+    sys_flush()
     tok = current_tok(state)
+    print("ps: got tok")
+    sys_flush()
     stmt_line = tok.line
+    print("ps: kind=" + tok.kind)
+    sys_flush()
     
     if tok.kind == "PRINTD" {
         eat_tok(state, "PRINTD")
@@ -594,14 +630,26 @@ def parse_statement(state: ParserState) -> AstNode {
     }
 
     if tok.kind == "PRINT" {
+        print("ps: eating PRINT")
+        sys_flush()
         eat_tok(state, "PRINT")
+        print("ps: eating LPAREN")
+        sys_flush()
         eat_tok(state, "LPAREN")
+        print("ps: calling parse_expr")
+        sys_flush()
         expr = parse_expr(state)
+        print("ps: eating RPAREN")
+        sys_flush()
         eat_tok(state, "RPAREN")
+        print("ps: creating node")
+        sys_flush()
         node = AstNode()
         node.line = stmt_line
         node.kind = "Print"
         node.left = expr
+        print("ps: returning Print node")
+        sys_flush()
         return node
     }
     
@@ -1097,24 +1145,40 @@ def desugar_enums(program: list) -> list {
 }
 
 def parse(tokens: list, filename: string) -> list {
+    print("parse: creating state")
+    sys_flush()
     state = ParserState()
+    print("parse: state created")
+    sys_flush()
     state.tokens = tokens
     state.pos = 0
     state.filename = filename
     program = []
+    print("parse: starting loop, tokens=" + str(len(tokens)))
+    sys_flush()
     
     loop = 1
     while loop == 1 {
+        print("parse: loop iter pos=" + str(state.pos))
+        sys_flush()
         tok = current_tok(state)
+        print("parse: got tok kind=" + tok.kind)
+        sys_flush()
         if current_tok(state).kind == "EOF" {
             break
         }
+        print("parse: calling parse_statement")
+        sys_flush()
         stmt = parse_statement(state)
+        print("parse: statement kind=" + stmt.kind)
+        sys_flush()
         if stmt.kind != "NONE" {
             program.append(stmt)
         }
     }
     
+    print("parse: loop done, desugaring")
+    sys_flush()
     return desugar_enums(program)
 }
 

@@ -14,45 +14,56 @@
     "    .extern GetTickCount"
     "    .extern FlushFileBuffers"
     "    .extern SetFilePointer"
+    "    .extern GetLastError"
 }
 
 def sys_open(path: string, mode: string) -> int {
-    res = -1
-    if mode == "r" {
+    res = 0
+    if mode == "r" or mode == "rb" {
         @raw {
             "    mov rcx, [rbp - 8]"
             "    mov rdx, 0x80000000"
             "    mov r8, 1"
             "    xor r9, r9"
-            "    sub rsp, 48"
+            "    sub rsp, 64"
             "    mov qword ptr [rsp + 32], 3"
             "    mov qword ptr [rsp + 40], 128"
             "    mov qword ptr [rsp + 48], 0"
             "    call CreateFileA"
-            "    add rsp, 48"
+            "    add rsp, 64"
+            "    cmp rax, -1"
+            "    jne L_sys_open_r_ok"
+            "    xor rax, rax"
+            "L_sys_open_r_ok:"
             "    mov [rbp - 24], rax"
+            "    mov r12, rax"
         }
     }
-    if mode == "w" {
+    if mode == "w" or mode == "wb" {
         @raw {
             "    mov rcx, [rbp - 8]"
             "    mov rdx, 0x40000000"
             "    mov r8, 0"
             "    xor r9, r9"
-            "    sub rsp, 48"
+            "    sub rsp, 64"
             "    mov qword ptr [rsp + 32], 2"
             "    mov qword ptr [rsp + 40], 128"
             "    mov qword ptr [rsp + 48], 0"
             "    call CreateFileA"
-            "    add rsp, 48"
+            "    add rsp, 64"
+            "    cmp rax, -1"
+            "    jne L_sys_open_w_ok"
+            "    xor rax, rax"
+            "L_sys_open_w_ok:"
             "    mov [rbp - 24], rax"
+            "    mov r12, rax"
         }
     }
     return res
 }
 
-def sys_read(fd: int) -> string {
-    size = 0
+def win_GetFileSize(fd: int) -> int {
+    res = 0
     @raw {
         "    mov rcx, [rbp - 8]"
         "    xor rdx, rdx"
@@ -60,56 +71,143 @@ def sys_read(fd: int) -> string {
         "    call GetFileSize"
         "    add rsp, 32"
         "    mov [rbp - 16], rax"
+        "    mov r12, rax"
     }
-    buf = sys_alloc(size + 1)
-    bytes_read = 0
+    return res
+}
+
+def win_ReadFile(fd: int, buf: int, size: int) -> int {
+    res = 0
     @raw {
         "    mov rcx, [rbp - 8]"
-        "    mov rdx, [rbp - 24]"
-        "    mov r8, [rbp - 16]"
-        "    lea r9, [rbp - 32]"
+        "    cmp rcx, 0"
+        "    jne L_win_read_ready"
+        "    mov rcx, -10"
+        "    sub rsp, 32"
+        "    call GetStdHandle"
+        "    add rsp, 32"
+        "    mov rcx, rax"
+        "L_win_read_ready:"
+        "    mov rdx, [rbp - 16]"
+        "    mov r8, [rbp - 24]"
         "    sub rsp, 48"
+        "    lea r9, [rsp + 40]"
         "    mov qword ptr [rsp + 32], 0"
         "    call ReadFile"
+        "    mov rax, [rsp + 40]"
         "    add rsp, 48"
-        "    mov rax, [rbp - 24]"
+        "    mov [rbp - 32], rax"
+        "    mov r12, rax"
+    }
+    return res
+}
+
+def win_set_string_null(s: string, size: int) {
+    @raw {
+        "    mov rax, [rbp - 8]"
         "    mov rcx, [rbp - 16]"
         "    mov byte ptr [rax + rcx], 0"
     }
+}
+
+def sys_read(fd: int) -> string {
+    size = win_GetFileSize(fd)
+    buf = sys_alloc(size + 1)
+    win_ReadFile(fd, buf, size)
+    win_set_string_null(buf, size)
     return buf
 }
 
-def sys_write(fd: int, content: string) {
-    bytes_written = 0
+def win_WriteFile(fd: int, buf: int, size: int) -> int {
+    res = 0
     @raw {
-        "    mov rdi, [rbp - 16]"
+        "    mov rcx, [rbp - 8]"
+        "    cmp rcx, 1"
+        "    jne L_win_write_not_stdout"
+        "    mov rcx, -11"
+        "    sub rsp, 32"
+        "    call GetStdHandle"
+        "    add rsp, 32"
+        "    mov rcx, rax"
+        "    jmp L_win_write_ready"
+        "L_win_write_not_stdout:"
+        "    cmp rcx, 2"
+        "    jne L_win_write_ready"
+        "    mov rcx, -12"
+        "    sub rsp, 32"
+        "    call GetStdHandle"
+        "    add rsp, 32"
+        "    mov rcx, rax"
+        "L_win_write_ready:"
+        "    mov rdx, [rbp - 16]"
+        "    mov r8, [rbp - 24]"
+        "    sub rsp, 48"
+        "    lea r9, [rsp + 40]"
+        "    mov qword ptr [rsp + 32], 0"
+        "    call WriteFile"
+        "    mov rax, [rsp + 40]"
+        "    add rsp, 48"
+        "    mov [rbp - 32], rax"
+        "    mov r12, rax"
+    }
+    return res
+}
+
+def win_string_ptr(s: string) -> int {
+    res = 0
+    @raw {
+        "    mov rax, [rbp - 8]"
+        "    mov [rbp - 16], rax"
+        "    mov r12, rax"
+    }
+    return res
+}
+
+def win_string_len(s: string) -> int {
+    res = 0
+    @raw {
+        "    mov rdi, [rbp - 8]"
         "    sub rsp, 32"
         "    call _strlen"
         "    add rsp, 32"
-        "    mov r8, rax"           # length
-        "    mov rcx, [rbp - 8]"    # fd
-        "    mov rdx, [rbp - 16]"   # string pointer
-        "    lea r9, [rbp - 24]"    # bytes_written ptr
-        "    sub rsp, 48"
-        "    mov qword ptr [rsp + 32], 0"
-        "    call WriteFile"
-        "    add rsp, 48"
+        "    mov [rbp - 16], rax"
+        "    mov r12, rax"
     }
+    return res
+}
+
+def sys_write(fd: int, content: string) {
+    ptr = win_string_ptr(content)
+    size = win_string_len(content)
+    win_WriteFile(fd, ptr, size)
+}
+
+def win_list_ptr(ls: list) -> int {
+    res = 0
+    @raw {
+        "    mov rax, [rbp - 8]"
+        "    add rax, 16"
+        "    mov [rbp - 16], rax"
+        "    mov r12, rax"
+    }
+    return res
+}
+
+def win_list_len(ls: list) -> int {
+    res = 0
+    @raw {
+        "    mov rdx, [rbp - 8]"
+        "    mov rax, [rdx]"
+        "    mov [rbp - 16], rax"
+        "    mov r12, rax"
+    }
+    return res
 }
 
 def sys_write_raw(fd: int, content: list) {
-    bytes_written = 0
-    @raw {
-        "    mov rcx, [rbp - 8]"
-        "    mov rdx, [rbp - 16]"
-        "    mov r8, [rdx]"
-        "    add rdx, 16"
-        "    lea r9, [rbp - 24]"
-        "    sub rsp, 48"
-        "    mov qword ptr [rsp + 32], 0"
-        "    call WriteFile"
-        "    add rsp, 48"
-    }
+    ptr = win_list_ptr(content)
+    size = win_list_len(content)
+    win_WriteFile(fd, ptr, size)
 }
 
 def sys_close(fd: int) {
@@ -122,20 +220,21 @@ def sys_close(fd: int) {
 }
 
 def sys_alloc(size: int) -> int {
-    ptr = 0
+    res = 0
     @raw {
         "    sub rsp, 32"
         "    call GetProcessHeap"
         "    add rsp, 32"
         "    mov rcx, rax"
-        "    mov rdx, 8" # HEAP_ZERO_MEMORY
+        "    mov rdx, 8"
         "    mov r8, [rbp - 8]"
         "    sub rsp, 32"
         "    call HeapAlloc"
         "    add rsp, 32"
         "    mov [rbp - 16], rax"
+        "    mov r12, rax"
     }
-    return ptr
+    return res
 }
 
 def sys_free(ptr: int) {
@@ -156,9 +255,13 @@ def sys_platform() -> string {
     return "windows"
 }
 
-def sys_flush(fd: int) {
+def sys_flush() {
     @raw {
-        "    mov rcx, [rbp - 8]"
+        "    mov rcx, -11"
+        "    sub rsp, 32"
+        "    call GetStdHandle"
+        "    add rsp, 32"
+        "    mov rcx, rax"
         "    sub rsp, 32"
         "    call FlushFileBuffers"
         "    add rsp, 32"
@@ -166,8 +269,15 @@ def sys_flush(fd: int) {
 }
 
 def sys_get_args() -> list {
-    # Stub
-    return []
+    res = []
+    @raw {
+        "    sub rsp, 32"
+        "    call __sys_get_args"
+        "    add rsp, 32"
+        "    mov [rbp - 8], rax"
+        "    mov r12, rax"
+    }
+    return res
 }
 
 def sys_get_tick_count() -> int {
@@ -176,7 +286,8 @@ def sys_get_tick_count() -> int {
         "    sub rsp, 32"
         "    call GetTickCount"
         "    add rsp, 32"
-        "    mov [rbp - 16], rax"
+        "    mov [rbp - 8], rax"
+        "    mov r12, rax"
     }
     return res
 }
@@ -185,7 +296,18 @@ def sys_exit(code: int) {
     @raw {
         "    mov rcx, [rbp - 8]"
         "    sub rsp, 32"
-        "    call ExitProcess"
+        "    call _exit"
         "    add rsp, 32"
     }
 }
+
+
+def sys_system(cmd: string) {
+    @raw {
+        "    mov rcx, [rbp - 8]"
+        "    sub rsp, 32"
+        "    call _system"
+        "    add rsp, 32"
+    }
+}
+

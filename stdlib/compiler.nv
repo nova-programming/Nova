@@ -61,8 +61,10 @@ def resolve_imports(ast: list, visited: list, target_arch: string) -> list {
 
 def compile_file(path: string, debug_mode: int, target_arch: string) -> list {
     print("Reading file: " + path)
+    print("path len = " + str(len(path)))
     print("sys_open")
     fd = sys_open(path, "r")
+    print("fd = " + str(fd))
     print("sys_read")
     source = sys_read(fd)
     print("sys_close")
@@ -97,7 +99,9 @@ def compile_file(path: string, debug_mode: int, target_arch: string) -> list {
     tc_check(tc, ast)
 
     print("Generating assembly...")
-    asm = generate_assembly(ast, debug_mode)
+    is_x64 = 0
+    if target_arch == "x86_64" { is_x64 = 1 }
+    asm = generate_assembly(ast, debug_mode, is_x64)
 
     print("Compilation finished.")
     return asm
@@ -158,15 +162,21 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
     asm = compile_file(input_path, debug_mode, target_arch)
     write_lines(asm, input_path + ".s")
     
-    print("Assembling...")
-    assembled = assemble(asm)
-    print("Linking...")
-    exe_bytes = link(assembled)
-    fd = sys_open(output_path, "wb")
-    sys_write_raw(fd, exe_bytes)
-    print("sys_close")
-    sys_close(fd)
-    print("Compiled: " + input_path + " -> " + output_path)
+    if target_arch == "x86_64" {
+        print("Using GCC to assemble and link...")
+        system.system_exec("gcc\\bin\\gcc.exe " + input_path + ".s -o " + output_path + " -mconsole -lkernel32 runtime.o")
+        print("Compiled: " + input_path + " -> " + output_path)
+    } else {
+        print("Assembling...")
+        assembled = assemble(asm)
+        print("Linking...")
+        exe_bytes = link(assembled)
+        fd = sys_open(output_path, "wb")
+        sys_write_raw(fd, exe_bytes)
+        print("sys_close")
+        sys_close(fd)
+        print("Compiled: " + input_path + " -> " + output_path)
+    }
 }
 
 def compile_to_bare(input_path: string, output_path: string, debug_mode: int, load_addr: int, entry_name: string, target_arch: string) {

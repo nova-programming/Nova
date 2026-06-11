@@ -23,7 +23,7 @@ NOVA_RELEASE_BASE = "https://github.com/nova-programming/Nova/releases/download"
 ALLOWED_UPDATE_FILES = {"main.py", "_galaxy.py", "nova.nv"}
 ALLOWED_UPDATE_DIRS = {"compiler", "parser", "lexer", "nova_ast", "vm", "stdlib", "modules", "tools", "galaxy"}
 
-BUNDLED_GCC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gcc")
+BUNDLED_GCC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gcc")
 
 def _find_gcc():
     """Find GCC: bundled dir first, then system PATH."""
@@ -185,9 +185,9 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
         print()
         sys.exit(1)
     
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    runtime_c = os.path.join(script_dir, "runtime.c")
-    runtime_o = os.path.join(script_dir, "runtime.o")
+    nova_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    runtime_c = os.path.join(nova_root, "runtime.c")
+    runtime_o = os.path.join(nova_root, "runtime.o")
     needs_runtime = target_arch in ("x86_64", "arm64")
     is_macos = sys.platform == "darwin"
     

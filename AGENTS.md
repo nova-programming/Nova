@@ -181,3 +181,9 @@ galaxy update              # Update Galaxy CLI
 galaxy upgrade [pkg]       # Update installed packages
 galaxy publish             # Publish to registry
 ```
+### Phase 2: ARM64 Backend Parity & Self-Hosting Fixes (Current Session)
+- **Unified Call Emission (emit_call)**: Refactored call-site emission in self-hosted compiler backends (stdlib/backend/x86_64/codegen.nv, rm64/codegen.nv, codegen_expr.nv) to use a unified emit_call(func_name, arg_count) function instead of raw emit("call X") or emit("bl X"). This fixes stack alignment and parameter passing for SysV (x86_64) and AAPCS64 (arm64).
+- **Automated Refactoring**: Wrote ix_calls.py to auto-migrate hardcoded string calls in codegen_expr.nv to emit_call syntax using regex.
+- **ARM64 OS Abstractions**: Implemented stdlib/backend/arm64/os_linux.nv and stdlib/backend/arm64/os_macos.nv using raw inline assembly (@raw) to execute native svc 0 (Linux AArch64) and svc 0x80 (macOS Apple Silicon) system calls (openat/open, read, write, close, mmap, fsync, exit). Parameter registers x0-x5 properly loaded from p relative stack slots.
+- **Verified Execution**: Built an x86_64 
+ova.exe (using the Python bootstrap) which then successfully cross-compiled hello.nv into an arm64 binary (hello.exe) utilizing the updated ARM64 generation logic.

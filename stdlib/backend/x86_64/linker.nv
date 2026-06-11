@@ -242,6 +242,51 @@ def apply_relocs(code: list, fixups: list, labels: list, text_rva: int, data_rva
     }
 }
 
+# Helper: determine which DLL a symbol belongs to
+def is_kernel32_func(name: string) -> int {
+    if name == "GetProcessHeap" { return 1 }
+    if name == "HeapAlloc" { return 1 }
+    if name == "HeapFree" { return 1 }
+    if name == "HeapReAlloc" { return 1 }
+    if name == "GetStdHandle" { return 1 }
+    if name == "WriteFile" { return 1 }
+    if name == "ReadFile" { return 1 }
+    if name == "CreateFileA" { return 1 }
+    if name == "CloseHandle" { return 1 }
+    if name == "GetFileSize" { return 1 }
+    if name == "SetFilePointer" { return 1 }
+    if name == "FlushFileBuffers" { return 1 }
+    if name == "ExitProcess" { return 1 }
+    if name == "WinExec" { return 1 }
+    if name == "GetCommandLineA" { return 1 }
+    if name == "GetTickCount" { return 1 }
+    if name == "VirtualAlloc" { return 1 }
+    if name == "VirtualFree" { return 1 }
+    return 0
+}
+
+def strip_name(raw_name: string) -> string {
+    actual_name = raw_name
+    # Strip leading underscores
+    while len(actual_name) > 0 and char_code(actual_name[0]) == 95 {
+        actual_name = str_sub(actual_name, 1, len(actual_name))
+    }
+    # Strip @N stdcall decoration
+    at_idx = -1
+    k = 0
+    while k < len(actual_name) {
+        if char_code(actual_name[k]) == 64 {
+            at_idx = k
+            break
+        }
+        k = k + 1
+    }
+    if at_idx >= 0 {
+        actual_name = str_sub(actual_name, 0, at_idx)
+    }
+    return actual_name
+}
+
 # The main link function
 def link(sections: list) -> list {
     # sections is [code, data, labels, fixups]
@@ -254,105 +299,154 @@ def link(sections: list) -> list {
     file_align = 512      # 0x200
     image_base = 4194304  # 0x400000
     
-    # 1. Collect imports (undefined labels) - all routed to kernel32.dll
-    dll_names = []
+    # 1. Collect imports, categorized by DLL
+    kernel32_imports = []
+    msvcrt_imports = []
+    all_import_names = []     # flat list of (stripped) names
+    all_import_dll_idx = []   # 0 = kernel32, 1 = msvcrt
+    
     i = 0
     while i < len(labels) {
         if labels[i].defined == 0 {
-            actual_name = labels[i].name
-              print("UNRESOLVED: " + actual_name)
-            while len(actual_name) > 0 and char_code(actual_name[0]) == 95 {
-                actual_name = str_sub(actual_name, 1, len(actual_name))
-            }
-            # Strip @N stdcall decoration
-            at_idx = -1
-            k = 0
-            while k < len(actual_name) {
-                if char_code(actual_name[k]) == 64 {
-                    at_idx = k
+            actual_name = strip_name(labels[i].name)
+            # Check if already collected
+            already = 0
+            j = 0
+            while j < len(all_import_names) {
+                if str_eq(all_import_names[j], actual_name) == 1 {
+                    already = 1
                     break
                 }
-                k = k + 1
+                j = j + 1
             }
-            if at_idx >= 0 {
-                actual_name = str_sub(actual_name, 0, at_idx)
+            if already == 0 {
+                all_import_names.append(actual_name)
+                if is_kernel32_func(actual_name) == 1 {
+                    all_import_dll_idx.append(0)
+                    kernel32_imports.append(actual_name)
+                } else {
+                    all_import_dll_idx.append(1)
+                    msvcrt_imports.append(actual_name)
+                }
             }
-            
-            dll_names.append(actual_name)
         }
         i = i + 1
     }
     
-    import_names = dll_names
+    num_k32 = len(kernel32_imports)
+    num_msvcrt = len(msvcrt_imports)
     num_dlls = 0
-    if len(dll_names) > 0 { num_dlls = 1 }
+    if num_k32 > 0 { num_dlls = num_dlls + 1 }
+    if num_msvcrt > 0 { num_dlls = num_dlls + 1 }
+    num_total_imports = len(all_import_names)
     
     # 2. Layout RVAs
     headers_size = 512
     text_rva = align_up(headers_size, section_align)
     
-    # Generate jump thunks for imports and append to code section
-    num_imports = len(import_names)
-    text_size_with_thunks = len(code) + (num_imports * 6)
+    text_size_with_thunks = len(code) + (num_total_imports * 6)
     data_rva = text_rva + align_up(text_size_with_thunks, section_align)
     idata_rva = data_rva + align_up(len(data_sec), section_align)
     
-    dll_name_len = 13 # "kernel32.dll"
-    
+    # Import directory: (num_dlls + 1) descriptors * 20 bytes each
     descriptors_size = (num_dlls + 1) * 20
-    ilt_total_size = (len(dll_names) + 1) * 4
+    
+    # ILT for kernel32: (num_k32 + 1) * 4 entries
+    # ILT for msvcrt:   (num_msvcrt + 1) * 4 entries
+    ilt_k32_size = 0
+    ilt_msvcrt_size = 0
+    if num_k32 > 0 { ilt_k32_size = (num_k32 + 1) * 4 }
+    if num_msvcrt > 0 { ilt_msvcrt_size = (num_msvcrt + 1) * 4 }
+    ilt_total = ilt_k32_size + ilt_msvcrt_size
+    
+    # IAT mirrors ILT
+    iat_total = ilt_total
     
     ilt_rva = idata_rva + descriptors_size
-    iat_rva = ilt_rva + ilt_total_size
-    dll_names_rva = iat_rva + ilt_total_size
-    dll_name_rva = dll_names_rva
-    hint_name_table_rva = dll_name_rva + dll_name_len
+    iat_rva = ilt_rva + ilt_total
+    names_rva = iat_rva + iat_total
     
-    iat_offsets = []
-    i = 0
-    while i < len(dll_names) {
-        iat_offsets.append(i * 4)
-        i = i + 1
+    # DLL name strings
+    k32_name_rva = names_rva
+    k32_name_len = 13  # "kernel32.dll\0"
+    msvcrt_name_rva = k32_name_rva + k32_name_len
+    msvcrt_name_len = 11  # "msvcrt.dll\0"
+    hint_table_rva = msvcrt_name_rva + msvcrt_name_len
+    # Pad to even
+    if hint_table_rva % 2 != 0 { hint_table_rva = hint_table_rva + 1 }
+    
+    # Build hint-name entries for kernel32
+    hint_name_bytes_k32 = []
+    hint_rvas_k32 = []
+    ik = 0
+    while ik < num_k32 {
+        curr_rva = hint_table_rva + len(hint_name_bytes_k32)
+        hint_rvas_k32.append(curr_rva)
+        append_u16(hint_name_bytes_k32, 0)
+        append_string_bytes(hint_name_bytes_k32, kernel32_imports[ik])
+        hint_name_bytes_k32.append(0)
+        if len(hint_name_bytes_k32) % 2 != 0 { hint_name_bytes_k32.append(0) }
+        ik = ik + 1
     }
     
-    # Generate jump thunks
+    # Build hint-name entries for msvcrt
+    hint_name_bytes_msvcrt = []
+    hint_rvas_msvcrt = []
+    hint_msvcrt_base_rva = hint_table_rva + len(hint_name_bytes_k32)
+    im = 0
+    while im < num_msvcrt {
+        curr_rva = hint_msvcrt_base_rva + len(hint_name_bytes_msvcrt)
+        hint_rvas_msvcrt.append(curr_rva)
+        append_u16(hint_name_bytes_msvcrt, 0)
+        append_string_bytes(hint_name_bytes_msvcrt, msvcrt_imports[im])
+        hint_name_bytes_msvcrt.append(0)
+        if len(hint_name_bytes_msvcrt) % 2 != 0 { hint_name_bytes_msvcrt.append(0) }
+        im = im + 1
+    }
+    
+    # Compute IAT offsets for each import (relative to iat_rva)
+    # kernel32 IAT is at iat_rva, msvcrt IAT is at iat_rva + ilt_k32_size
+    iat_k32_base = iat_rva
+    iat_msvcrt_base = iat_rva + ilt_k32_size
+    
+    # Build a lookup from import name -> absolute IAT entry address
+    # For kernel32 imports: iat_k32_base + idx * 4
+    # For msvcrt imports:   iat_msvcrt_base + idx * 4
+    
+    # 3. Generate jump thunks for each unresolved label
     i = 0
     while i < len(labels) {
         if labels[i].defined == 0 {
-            actual_name = labels[i].name
-              print("UNRESOLVED: " + actual_name)
-            if len(actual_name) > 0 and char_code(actual_name[0]) == 95 {
-                actual_name = str_sub(actual_name, 1, len(actual_name))
-            }
+            actual_name = strip_name(labels[i].name)
             
-            # Strip @N stdcall decoration
-            at_idx = -1
-            k = 0
-            while k < len(actual_name) {
-                if char_code(actual_name[k]) == 64 {
-                    at_idx = k
-                    break
+            entry_abs_addr = 0
+            if is_kernel32_func(actual_name) == 1 {
+                # Find index in kernel32_imports
+                idx = 0
+                j = 0
+                while j < num_k32 {
+                    if str_eq(kernel32_imports[j], actual_name) == 1 {
+                        idx = j
+                        break
+                    }
+                    j = j + 1
                 }
-                k = k + 1
-            }
-            if at_idx >= 0 {
-                actual_name = str_sub(actual_name, 0, at_idx)
-            }
-            
-            idx = 0
-            j = 0
-            while j < len(import_names) {
-                if str_eq(import_names[j], actual_name) == 1 {
-                    idx = j
-                    break
+                entry_abs_addr = image_base + iat_k32_base + idx * 4
+            } else {
+                # Find index in msvcrt_imports
+                idx = 0
+                j = 0
+                while j < num_msvcrt {
+                    if str_eq(msvcrt_imports[j], actual_name) == 1 {
+                        idx = j
+                        break
+                    }
+                    j = j + 1
                 }
-                j = j + 1
+                entry_abs_addr = image_base + iat_msvcrt_base + idx * 4
             }
             
-            entry_iat_rva = iat_rva + iat_offsets[idx]
-            entry_abs_addr = image_base + entry_iat_rva
-            
-            # Thunk is FF 25 [AbsAddr]
+            # Thunk is FF 25 [AbsAddr32]
             thunk_offset = len(code)
             code.append(255)
             code.append(37)
@@ -367,64 +461,86 @@ def link(sections: list) -> list {
     
     apply_relocs(code, fixups, labels, text_rva, data_rva, image_base)
     
-    # Build .idata section
+    # 4. Build .idata section
     idata = []
     
-    if len(dll_names) > 0 {
-        append_u32(idata, ilt_rva)   # ILT
-        append_u32(idata, 0)
-        append_u32(idata, 0)
-        append_u32(idata, dll_name_rva)
-        append_u32(idata, iat_rva)
+    # Import descriptors
+    dll_idx = 0
+    ilt_offset = ilt_rva
+    iat_offset = iat_rva
+    
+    if num_k32 > 0 {
+        # kernel32.dll descriptor
+        append_u32(idata, ilt_offset)       # OriginalFirstThunk (ILT)
+        append_u32(idata, 0)                # TimeDateStamp
+        append_u32(idata, 0)                # ForwarderChain
+        append_u32(idata, k32_name_rva)     # Name
+        append_u32(idata, iat_offset)       # FirstThunk (IAT)
+        ilt_offset = ilt_offset + ilt_k32_size
+        iat_offset = iat_offset + ilt_k32_size
     }
     
+    if num_msvcrt > 0 {
+        # msvcrt.dll descriptor
+        append_u32(idata, ilt_offset)       # OriginalFirstThunk (ILT)
+        append_u32(idata, 0)                # TimeDateStamp
+        append_u32(idata, 0)                # ForwarderChain
+        append_u32(idata, msvcrt_name_rva)  # Name
+        append_u32(idata, iat_offset)       # FirstThunk (IAT)
+    }
+    
+    # Null terminator descriptor
     j = 0
     while j < 5 {
         append_u32(idata, 0)
         j = j + 1
     }
     
-    hint_name_bytes = []
-    hint_rvas = []
-    i = 0
-    while i < num_imports {
-        name = import_names[i]
-        curr_rva = hint_name_table_rva + len(hint_name_bytes)
-        hint_rvas.append(curr_rva)
-        append_u16(hint_name_bytes, 0)
-        append_string_bytes(hint_name_bytes, name)
-        hint_name_bytes.append(0)
-        if len(hint_name_bytes) % 2 != 0 {
-            hint_name_bytes.append(0)
-        }
-        i = i + 1
-    }
-    
-    # Write ILT
+    # Write ILT for kernel32
     j = 0
-    while j < len(dll_names) {
-        append_u32(idata, hint_rvas[j])
+    while j < num_k32 {
+        append_u32(idata, hint_rvas_k32[j])
         j = j + 1
     }
-    if len(dll_names) > 0 { append_u32(idata, 0) }
+    if num_k32 > 0 { append_u32(idata, 0) }
     
-    # Write IAT
+    # Write ILT for msvcrt
     j = 0
-    while j < len(dll_names) {
-        append_u32(idata, hint_rvas[j])
+    while j < num_msvcrt {
+        append_u32(idata, hint_rvas_msvcrt[j])
         j = j + 1
     }
-    if len(dll_names) > 0 { append_u32(idata, 0) }
+    if num_msvcrt > 0 { append_u32(idata, 0) }
     
-    # Write DLL name
-    if len(dll_names) > 0 {
-        append_string_bytes(idata, "kernel32.dll")
-        idata.append(0)
+    # Write IAT for kernel32 (same as ILT)
+    j = 0
+    while j < num_k32 {
+        append_u32(idata, hint_rvas_k32[j])
+        j = j + 1
     }
+    if num_k32 > 0 { append_u32(idata, 0) }
     
-    append_bytes(idata, hint_name_bytes)
+    # Write IAT for msvcrt (same as ILT)
+    j = 0
+    while j < num_msvcrt {
+        append_u32(idata, hint_rvas_msvcrt[j])
+        j = j + 1
+    }
+    if num_msvcrt > 0 { append_u32(idata, 0) }
     
-    # 3. Build PE Headers
+    # Write DLL name strings
+    append_string_bytes(idata, "kernel32.dll")
+    idata.append(0)
+    append_string_bytes(idata, "msvcrt.dll")
+    idata.append(0)
+    # Pad to even
+    if len(idata) % 2 != 0 { idata.append(0) }
+    
+    # Write hint-name entries
+    append_bytes(idata, hint_name_bytes_k32)
+    append_bytes(idata, hint_name_bytes_msvcrt)
+    
+    # 5. Build PE Headers
     image = []
     
     # DOS Header (64 bytes)
@@ -432,8 +548,6 @@ def link(sections: list) -> list {
     image.append(90) # Z
     pad_to(image, 60)
     append_u32(image, 64) # e_lfanew = 0x40
-    
-
     
     # PE Signature
     image.append(80) # P

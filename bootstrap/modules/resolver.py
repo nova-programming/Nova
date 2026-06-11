@@ -83,7 +83,7 @@ class ModuleResolver:
         search_dirs.append(self.base_dir)
 
         # 3. stdlib/ directory (relative to Nova's own installation)
-        nova_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        nova_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         stdlib_dir = os.path.join(nova_root, "stdlib")
         search_dirs.append(stdlib_dir)
         

@@ -1,0 +1,355 @@
+# ============================================================
+# Code Generator: Statement Compilation
+# ============================================================
+
+def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
+    if node.kind == "Assignment" {
+        is_str_val = 0
+        if is_string_expr(state, node.left) == 1 {
+            is_str_val = 1
+        }
+        if node.left.kind == "ArrayIndex" {
+            is_str_val = 1
+        }
+        if is_str_val == 1 {
+            found_str = 0
+            k = 0
+            while k < len(state.string_vars) {
+                if state.string_vars[k] == node.val_str {
+                    found_str = 1
+                }
+                k = k + 1
+            }
+            if found_str == 0 {
+                state.string_vars.append(node.val_str)
+            }
+        }
+        compile_expr(state, node.left)
+        emit(state, "    ldr %a, [sp], #16")
+        reg = find_var_reg(state, node.val_str)
+        if reg != "" {
+            emit(state, "    mov " + reg + ", %a")
+        } else {
+            offset = find_var_offset(state, node.val_str)
+            if offset < 0 {
+                emit(state, "    str %a, [%b, #" + str(offset) + "]")
+            } else {
+                emit(state, "    str %a, [%b, #-" + str(offset) + "]")
+            }
+        }
+    }
+    if node.kind == "DataFieldAssign" {
+        compile_expr(state, node.right)
+        compile_expr(state, node.left)
+        emit(state, "    ldr %d, [sp], #16")
+        emit(state, "    ldr %a, [sp], #16")
+        struct_name = ""
+        if node.left.inferred_type != 0 and node.left.inferred_type.kind == "struct" {
+            struct_name = node.left.inferred_type.name
+        }
+        prop_off = get_prop_offset(state, struct_name, node.val_str)
+        emit(state, "    mov [%d + " + str(prop_off) + "], %a")
+    }
+    if node.kind == "PointerAssign" {
+        compile_expr(state, node.right)
+        compile_expr(state, node.left)
+        emit(state, "    ldr %d, [sp], #16")
+        emit(state, "    ldr %a, [sp], #16")
+        if node.val_str == "value_byte" {
+            emit(state, "    mov byte ptr [%d], al")
+        } else {
+            if node.val_str == "value_word" {
+                emit(state, "    mov word ptr [%d], ax")
+            } else {
+                if node.val_str == "value_dword" or node.val_str == "value" {
+                    emit(state, "    mov [%d], %a")
+                }
+            }
+        }
+    }
+    if node.kind == "ArrayIndexAssign" {
+        compile_expr(state, node.cond)
+        compile_expr(state, node.right)
+        compile_expr(state, node.left)
+        emit(state, "    ldr %d, [sp], #16")
+        emit(state, "    ldr %c, [sp], #16")
+        emit(state, "    ldr %a, [sp], #16")
+        emit(state, "    cmp x2, 0")
+        emit(state, "    jl _out_of_bounds")
+        emit(state, "    cmp x2, dword ptr [%d]")
+        emit(state, "    jge _out_of_bounds")
+        ptr_sz = ptr_size(state)
+        emit(state, "    lea %x, [%d + 16]")
+        if ptr_sz == 8 {
+            emit(state, "    mov [%x + %c*8], %a")
+        } else {
+            emit(state, "    mov [%x + %c*4], %a")
+        }
+    }
+    if node.kind == "PrintD" {
+        if debug_mode == 1 {
+            push_data_label(state, "debug_prefix")
+            emit_call(state, "L_write_stdout", 1)
+            emit(state, "    push " + str(node.line))
+            emit_call(state, "L_write_int", 1)
+            push_data_label(state, "debug_suffix")
+            emit_call(state, "L_write_stdout", 1)
+            compile_expr(state, node.left)
+            if is_string_expr(state, node.left) == 1 {
+                push_data_label(state, "fmt_str")
+                emit_call(state, "_printf", 2)
+            } else {
+                if is_float_expr(state, node.left) == 1 {
+                    push_data_label(state, "fmt_float_pure")
+                } else {
+                    push_data_label(state, "fmt_int_pure")
+                }
+                emit_call(state, "_printf", 2)
+            }
+            emit(state, "    mov x0, 1
+        emit(state, "    str x0, [sp, #-16]!")0")
+            emit_call(state, "_fputc", 1)
+            emit(state, "    mov x0, 0
+        emit(state, "    str x0, [sp, #-16]!")")
+            emit_call(state, "_fflush", 1)
+        }
+    }
+    if node.kind == "Print" {
+        compile_expr(state, node.left)
+        if is_string_expr(state, node.left) == 1 {
+            push_data_label(state, "fmt_str")
+        } else {
+            if is_float_expr(state, node.left) == 1 {
+                push_data_label(state, "fmt_float")
+            } else {
+                push_data_label(state, "fmt_int")
+            }
+        }
+        emit_call(state, "_printf", 2)
+        emit(state, "    mov x0, 0
+        emit(state, "    str x0, [sp, #-16]!")")
+        emit_call(state, "_fflush", 1)
+    }
+    if node.kind == "Return" {
+        compile_expr(state, node.left)
+        emit(state, "    ldr %a, [sp], #16")
+        r = len(state.used_regs) - 1
+        while r >= 0 {
+            emit(state, "    pop " + state.used_regs[r])
+            r = r - 1
+        }
+        emit(state, "    mov %s, %b")
+        emit(state, "    ldr %b, [sp], #16")
+        emit(state, "    ret")
+    }
+    if node.kind == "IfElse" {
+        else_label = "L_else_" + str(state.label_count)
+        state.label_count = state.label_count + 1
+        end_label = "L_end_" + str(state.label_count)
+        state.label_count = state.label_count + 1
+        
+        compile_expr(state, node.cond)
+        emit(state, "    ldr %a, [sp], #16")
+        emit(state, "    cmp %a, 0")
+        emit(state, "    je " + else_label)
+        
+        i = 0
+        while i < len(node.body) {
+            compile_stmt(state, node.body[i], debug_mode)
+            i = i + 1
+        }
+        emit(state, "    jmp " + end_label)
+        
+        emit(state, else_label + ":")
+        i = 0
+        while i < len(node.else_body) {
+            compile_stmt(state, node.else_body[i], debug_mode)
+            i = i + 1
+        }
+        
+        emit(state, end_label + ":")
+    }
+    if node.kind == "While" {
+        start_label = next_label(state, "L_loop")
+        end_label = next_label(state, "L_loop_end")
+        state.loop_start_labels.append(start_label)
+        state.loop_end_labels.append(end_label)
+
+        emit(state, start_label + ":")
+        compile_expr(state, node.cond)
+        emit(state, "    ldr %a, [sp], #16")
+        emit(state, "    cmp %a, 0")
+        emit(state, "    je " + end_label)
+
+        i = 0
+        while i < len(node.body) {
+            compile_stmt(state, node.body[i], debug_mode)
+            i = i + 1
+        }
+
+        emit(state, "    jmp " + start_label)
+        emit(state, end_label + ":")
+        state.loop_start_labels.pop()
+        state.loop_end_labels.pop()
+    }
+    if node.kind == "ForLoop" {
+        compile_expr(state, node.left)
+        emit(state, "    ldr %a, [sp], #16")
+        offset = find_var_offset(state, node.val_str)
+        emit(state, "    str %a, [%b, #-" + str(offset) + "]")
+
+        loop_label = next_label(state, "L_for")
+        end_label = next_label(state, "L_for_end")
+        cont_label = next_label(state, "L_for_cont")
+        state.loop_start_labels.append(cont_label)
+        state.loop_end_labels.append(end_label)
+
+        emit(state, loop_label + ":")
+        emit(state, "    ldr %a, [%b, #-" + str(offset) + "]")
+        emit(state, "    str %a, [sp, #-16]!")
+        compile_expr(state, node.right)
+        emit(state, "    pop %x")
+        emit(state, "    ldr %a, [sp], #16")
+        emit(state, "    cmp %a, %x")
+        if node.val_int == 1 {
+            emit(state, "    jl " + end_label)
+        } else {
+            emit(state, "    jg " + end_label)
+        }
+
+        i = 0
+        while i < len(node.body) {
+            compile_stmt(state, node.body[i], debug_mode)
+            i = i + 1
+        }
+
+        emit(state, cont_label + ":")
+        emit(state, "    ldr %a, [%b, #-" + str(offset) + "]")
+        compile_expr(state, node.cond)
+        emit(state, "    pop %x")
+        if node.val_int == 1 {
+            emit(state, "    sub %a, %x")
+        } else {
+            emit(state, "    add %a, %x")
+        }
+        emit(state, "    str %a, [%b, #-" + str(offset) + "]")
+
+        emit(state, "    jmp " + loop_label)
+        emit(state, end_label + ":")
+        state.loop_start_labels.pop()
+        state.loop_end_labels.pop()
+    }
+    if node.kind == "ForIn" {
+        compile_expr(state, node.left)
+        
+        ptr_sz = ptr_size(state)
+        emit(state, "    sub %s, " + str(ptr_sz))
+        emit(state, "    mov dword ptr [%s], 0")
+        
+        loop_label = next_label(state, "L_forin")
+        end_label = next_label(state, "L_forin_end")
+        state.loop_start_labels.append(loop_label)
+        state.loop_end_labels.append(end_label)
+        
+        emit(state, loop_label + ":")
+        emit(state, "    mov %d, [%s + " + str(ptr_sz) + "]")
+        emit(state, "    mov x0, dword ptr [%d]")
+        emit(state, "    cmp dword ptr [%s], x0")
+        emit(state, "    jge " + end_label)
+        
+        emit(state, "    mov x0, dword ptr [%s]")
+        emit(state, "    lea %x, [%d + 16]")
+        if ptr_sz == 8 {
+            emit(state, "    mov %a, [%x + %a*8]")
+        } else {
+            emit(state, "    mov %a, [%x + %a*4]")
+        }
+        
+        var_off = find_var_offset(state, node.val_str)
+        emit(state, "    mov [%b - " + str(var_off) + "], %a")
+        
+        i = 0
+        while i < len(node.body) {
+            compile_stmt(state, node.body[i], debug_mode)
+            i = i + 1
+        }
+        
+        emit(state, "    mov x0, dword ptr [%s]")
+        emit(state, "    inc x0")
+        emit(state, "    mov dword ptr [%s], x0")
+        emit(state, "    jmp " + loop_label)
+        emit(state, end_label + ":")
+        clean_n(state, 2)
+        state.loop_start_labels.pop()
+        state.loop_end_labels.pop()
+    }
+    if node.kind == "Break" {
+        if len(state.loop_end_labels) > 0 {
+            lbl = state.loop_end_labels[len(state.loop_end_labels) - 1]
+            emit(state, "    jmp " + lbl)
+        }
+    }
+    if node.kind == "Continue" {
+        if len(state.loop_start_labels) > 0 {
+            lbl = state.loop_start_labels[len(state.loop_start_labels) - 1]
+            emit(state, "    jmp " + lbl)
+        }
+    }
+    if node.kind == "RawBlock" {
+        i = 0
+        while i < len(node.args) {
+            emit(state, "    .global " + node.args[i])
+            i = i + 1
+        }
+        lines = []
+        i = 0
+        while i < len(node.body) {
+            l = node.body[i].line
+            found = 0
+            j = 0
+            while j < len(lines) {
+                if lines[j] == l { found = 1 }
+                j = j + 1
+            }
+            if found == 0 { lines.append(l) }
+            i = i + 1
+        }
+        j = 0
+        while j < len(lines) {
+            l = lines[j]
+            line_nodes = []
+            i = 0
+            while i < len(node.body) {
+                if node.body[i].line == l { line_nodes.append(node.body[i]) }
+                i = i + 1
+            }
+            first = line_nodes[0]
+            if len(line_nodes) == 1 and first.kind == "String" {
+                emit(state, first.val_str)
+            } else {
+                if first.kind == "Variable" and is_asm_mnemonic(state, first.val_str) == 1 {
+                    asm_line = "    "
+                    k = 0
+                    while k < len(line_nodes) {
+                        asm_line = asm_line + node_to_asm(state, line_nodes[k])
+                        if k < len(line_nodes) - 1 { asm_line = asm_line + " " }
+                        k = k + 1
+                    }
+                    emit(state, asm_line)
+                } else {
+                    k = 0
+                    while k < len(line_nodes) {
+                        compile_stmt(state, line_nodes[k], debug_mode)
+                        k = k + 1
+                    }
+                }
+            }
+            j = j + 1
+        }
+    }
+    
+    if node.kind == "Call" or node.kind == "MethodCall" {
+        compile_expr(state, node)
+        clean_n(state, 1)
+    }
+}
