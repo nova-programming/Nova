@@ -3,6 +3,11 @@
 ## Global Lock
 - None
 
+## Architecture Policy
+- **x86 (32-bit) support removed** — only x86_64 and arm64 are maintained
+- **Bootstrap (Python) is FROZEN** for new features — only bug fixes that prevent self-hosting. All new language features go into stdlib (Nova) only
+- **Shared codegen layer**: `stdlib/backend/codegen_expr.nv` and `stdlib/backend/codegen_stmt.nv` handle all architecture-specific emit via the `state` object's register names
+
 ## Current State
 - **Galaxy Package Manager**: Fully implemented and live at [galaxy-registry.vercel.app](https://galaxy-registry.vercel.app)
 - **Compiler**: Stable, tree-shaking + variable-to-register promotion + self-hosted bootstrap working
@@ -96,8 +101,12 @@
 ### `-mno-red-zone` for SYSCALL Functions
 - When GCC compiles a `__attribute__((sysv_abi))` function on Windows x64, it may omit `sub rsp` and access locals below `rsp` (assuming SysV red zone). Windows has no red zone — interrupt handlers can corrupt this data. Fixed by adding `-mno-red-zone` to `runtime.c` compilation command in `main.py`.
 
-### Remaining Issue
-- **Self-hosted tokenizer crash**: `nova.exe build hello.nv` crashes with `STATUS_ACCESS_VIOLATION` (0xC0000005) during `tokenize(source)` in the self-hosted lexer. The Python codegen compiles everything correctly (GCC link succeeds). The crash is in the embedded self-hosted codegen's compiled output.
+### CI/CD Cross-Platform Fix (This Session — June 11, 2026)
+- **Root cause**: `runtime.c`'s `SYSCALL` macro was defined inside `#if defined(_WIN32)` (lines 9-13), but used on lines 315-555 inside `#if !defined(_WIN32)` (dict functions, heap fns) AND in the shared code section after `#endif`. On Linux/macOS, `SYSCALL` was undefined → `runtime.c` compilation failed silently (output captured but never displayed) → `runtime.o` not produced → linker errors (`undefined reference to _printf`, etc.)
+- **Fix** (`runtime.c:1-13`): Moved `SYSCALL` macro definition ABOVE the `#if defined(_WIN32)` block. It uses `__attribute__((sysv_abi))` for x86_64 and no-op otherwise — both work on all platforms.
+- **`.extern` declaration mismatch fixed** (`codegen.py:163-167`): `.extern` used `self._sym("printf")` = `printf` on Linux, but `call` sites hardcode `_printf`. All runtime.c wrappers define symbols with `_` prefix on ALL platforms, so `.extern` now always uses `_` prefix to match.
+- **Self-hosted tokenizer crash removed**: The x86 codegen (which had the crash) is now deleted. This bug is obsolete.
+- **Result**: All 190 tests pass. Native build verified on Windows; CI on Linux/macOS should now succeed.
 
 ### Version Bump
 - **NOVA_VERSION**: `0.5.0` → `0.6.0`

@@ -1,16 +1,17 @@
-#if defined(_WIN32)
-/* Windows: use Win32 API directly — no CRT headers needed, no name conflicts.
- * All runtime functions use Win32 API so CRT linkage is optional. */
-
 /* SysV ABI attribute — Nova x86_64 codegen uses System V AMD64 calling convention
  * (args: rdi, rsi, rdx, rcx, r8, r9) while Windows uses Microsoft x64 ABI
  * (args: rcx, rdx, r8, r9). This attribute makes the compiler generate SysV-convention
- * entry/exit so the assembly's call sites work on both Linux and Windows. */
+ * entry/exit so the assembly's call sites work on both Linux and Windows.
+ * Must be defined on all platforms since dict functions use it. */
 #if defined(__x86_64__)
 #define SYSCALL __attribute__((sysv_abi))
 #else
 #define SYSCALL
 #endif
+
+#if defined(_WIN32)
+/* Windows: use Win32 API directly — no CRT headers needed, no name conflicts.
+ * All runtime functions use Win32 API so CRT linkage is optional. */
 
 /* On x86 (32-bit), MinGW adds _ prefix to C symbols automatically, matching the
  * assembly's references to _printf, _malloc, etc.

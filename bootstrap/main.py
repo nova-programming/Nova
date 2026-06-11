@@ -120,13 +120,9 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
     if target_arch == "arm64":
         from compiler.backend.arm64.codegen import Arm64Codegen
         codegen = Arm64Codegen(ast, module_names=module_names, debug_mode=debug_mode)
-    elif target_arch == "x86_64":
+    else:
         from compiler.backend.x86_64.codegen import X86_64Codegen
         codegen = X86_64Codegen(ast, module_names=module_names, debug_mode=debug_mode)
-    else:
-        # Fallback to x86 (32-bit)
-        from compiler.backend.x86.codegen import X86Codegen
-        codegen = X86Codegen(ast, module_names=module_names, debug_mode=debug_mode)
         
     asm_code = codegen.generate()
 
@@ -194,10 +190,7 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
     cmd = [gcc_path, asm_file, "-o", exe_file]
     
     if os.name == "nt":
-        if target_arch == "x86":
-            cmd += ["-m32", "-mconsole", "-lkernel32", "-Wl,--heap=67108864"]
-        else:
-            cmd += ["-mconsole", "-lkernel32"]
+        cmd += ["-mconsole", "-lkernel32"]
     else:
         if is_macos:
             if target_arch == "arm64":
@@ -219,8 +212,6 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
             rt_cmd += ["-D", "LINUX_WRAP"]
         else:
             rt_cmd += ["-mno-red-zone"]
-        if target_arch == "x86" and os.name == "nt":
-            rt_cmd += ["-m32"]
         subprocess.run(rt_cmd, capture_output=True, text=True)
         if os.path.exists(runtime_o):
             cmd += [runtime_o]

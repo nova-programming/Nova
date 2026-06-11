@@ -2,7 +2,7 @@ import os
 from nova_ast.nodes import *
 
 class X86_64Codegen:
-    """x86_64 System V AMD64 codegen for macOS/Linux. Uses C runtime (no inline assembly runtime)."""
+    """x86_64 System V AMD64 codegen. Supports Windows (MinGW _-prefix) and Unix (bare symbols)."""
 
     def __init__(self, ast_nodes, module_names=None, debug_mode=0):
         self.ast = ast_nodes
@@ -147,38 +147,19 @@ class X86_64Codegen:
 
     def generate(self):
         self.assembly.append(".intel_syntax noprefix")
-        self.assembly.append(".global _main")
+        entry = "_main" if os.name == "nt" else "main"
+        self.assembly.append(f".global {entry}")
 
-        self.assembly.append(".extern _printf")
-        self.assembly.append(".extern _malloc")
-        self.assembly.append(".extern _free")
-        self.assembly.append(".extern _realloc")
-        self.assembly.append(".extern _fopen")
-        self.assembly.append(".extern _fclose")
-        self.assembly.append(".extern _fread")
-        self.assembly.append(".extern _fwrite")
-        self.assembly.append(".extern _fputs")
-        self.assembly.append(".extern _fputc")
-        self.assembly.append(".extern _fseek")
-        self.assembly.append(".extern _ftell")
-        self.assembly.append(".extern _fflush")
-        self.assembly.append(".extern _exit")
-        self.assembly.append(".extern _system")
-        self.assembly.append(".extern _strlen")
-        self.assembly.append(".extern _strcmp")
-        self.assembly.append(".extern _strcpy")
-        self.assembly.append(".extern _strcat")
-        self.assembly.append(".extern _strstr")
-        self.assembly.append(".extern _memset")
-        self.assembly.append(".extern _sprintf")
-        self.assembly.append(".extern _dict_new")
-        self.assembly.append(".extern _dict_get")
-        self.assembly.append(".extern _dict_set")
-        self.assembly.append(".extern _dict_has")
-        self.assembly.append(".extern _dict_remove")
-        self.assembly.append(".extern _dict_keys")
-        self.assembly.append(".extern _dict_values")
-        self.assembly.append(".extern _dict_items")
+        for c_sym in ["printf", "malloc", "free", "realloc", "fopen", "fclose",
+                       "fread", "fwrite", "fputs", "fputc", "fseek", "ftell",
+                       "fflush", "exit", "system", "strlen", "strcmp", "strcpy",
+                       "strcat", "strstr", "memset", "sprintf"]:
+            # runtime.c defines all wrappers with _ prefix on every platform
+            self.assembly.append(f".extern _{c_sym}")
+
+        for d_sym in ["_dict_new", "_dict_get", "_dict_set", "_dict_has",
+                       "_dict_remove", "_dict_keys", "_dict_values", "_dict_items"]:
+            self.assembly.append(f".extern {d_sym}")
 
         self.data_section.append('fmt_int: .asciz "%d\\n"')
         self.data_section.append('fmt_int_pure: .asciz "%d"')
@@ -218,7 +199,8 @@ class X86_64Codegen:
         for fn in functions:
             self.compile_function(fn)
 
-        self.assembly.append("_main:")
+        entry = "_main" if os.name == "nt" else "main"
+        self.assembly.append(f"{entry}:")
         self.assembly.append("    push rbp")
         self.assembly.append("    mov rbp, rsp")
         self.assembly.append("    and rsp, -16")

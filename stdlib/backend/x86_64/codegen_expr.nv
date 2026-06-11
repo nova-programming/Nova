@@ -904,13 +904,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
             push_data_label(state, "fmt_int_pure")
         }
         
-        sp = "rsp"
-        offset = "16"
-        if state.arch == "x86" {
-            sp = "esp"
-            offset = "8"
-        }
-        emit(state, "    mov %c, [" + sp + " + " + offset + "]") # Fetch saved buffer pointer
+        emit(state, "    mov %c, [rsp + 16]") # Fetch saved buffer pointer
         emit(state, "    push %c")  # arg 1: buffer
         
         emit_call(state, "_sprintf", 3)
