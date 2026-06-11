@@ -71,6 +71,7 @@ class TestInstallPy(unittest.TestCase):
         importlib.reload(install)
         return install
 
+    @unittest.skipIf(sys.platform != "win32", "Windows-specific path test")
     def test_windows_install_dir(self):
         """On Windows, install dir should be under LOCALAPPDATA."""
         install = self._reload_install(
@@ -145,6 +146,7 @@ class TestInstallPy(unittest.TestCase):
         self.assertFalse(install._should_extract("__pycache__/foo.pyc"))
 
     # ===== _create_launchers (sandboxed) =====
+    @unittest.skipIf(sys.platform != "win32", "Windows launcher test")
     def test_create_launchers_writes_files(self):
         """_create_launchers should write launcher scripts to INSTALL_DIR."""
         import install
@@ -185,6 +187,7 @@ class TestInstallPy(unittest.TestCase):
                 self.assertTrue(os.path.exists(galaxy_path))
 
     # ===== _add_to_path_windows (sandboxed) =====
+    @unittest.skipIf(sys.platform != "win32", "Windows PATH test")
     def test_add_to_path_windows_appends(self):
         """Windows PATH should get INSTALL_DIR appended."""
         import install
@@ -197,16 +200,13 @@ class TestInstallPy(unittest.TestCase):
     @unittest.skipIf(sys.platform == "win32", "winreg is a C module on Windows, cannot mock")
     def test_path_dedup_detects_existing(self):
         """Dedup should detect existing entry even with %VAR% in path."""
-        # On non-Windows, winreg is mocked; on Windows this tests that
-        # the REAL winreg doesn't crash when given %VAR% entries
         import install
+        fake_winreg = mock.MagicMock()
         with mock.patch("platform.system", return_value="Windows"):
-            # Import winreg at test level (non-Windows only)
-            import winreg as _wr
-            with mock.patch.object(_wr, "OpenKey") as mock_key:
+            with mock.patch.dict("sys.modules", {"winreg": fake_winreg}):
                 mock_handle = mock.MagicMock()
                 mock_handle.__enter__.return_value = mock_handle
-                mock_key.return_value = mock_handle
+                fake_winreg.OpenKey.return_value = mock_handle
                 mock_handle.QueryValueEx.return_value = (
                     "C:\\Windows;%LOCALAPPDATA%\\nova;",
                     2
