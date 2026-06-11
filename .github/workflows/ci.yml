@@ -35,13 +35,13 @@ jobs:
         if: matrix.os == 'macos-latest'
 
       - name: Nova smoke test — version
-        run: python main.py --version
+        run: python bootstrap/main.py --version
 
       - name: Nova smoke test — VM execution
         run: |
           mkdir -p /tmp/nova-ci
           printf 'print("Hello from Nova CI")\n' > /tmp/nova-ci/hello.nv
-          python main.py dev /tmp/nova-ci/hello.nv
+          python bootstrap/main.py dev /tmp/nova-ci/hello.nv
 
       - name: Native compilation — generate assembly, compile runtime, assemble + link
         run: |
@@ -51,8 +51,8 @@ jobs:
           if [ "${{ matrix.os }}" = "macos-latest" ]; then
             arch_flag="-arch arm64"
           fi
-          python main.py build $arch_flag /tmp/nova-ci/test.nv
-          ls -la /tmp/nova-ci/test.exe /tmp/nova-ci/test.s
+          python bootstrap/main.py build $arch_flag /tmp/nova-ci/test.nv
+          ls -la /tmp/nova-ci/test.s /tmp/nova-ci/test.exe
 
       - name: Execute native binary
         run: |
