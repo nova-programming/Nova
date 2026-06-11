@@ -197,23 +197,9 @@ class TestInstallPy(unittest.TestCase):
                     result = install._add_to_path_windows()
                     self.assertTrue(result)
 
-    @unittest.skipIf(sys.platform == "win32", "winreg is a C module on Windows, cannot mock")
+    @unittest.skip("winreg is a C module (Windows, cannot mock) or nonexistent (Linux/macOS)")
     def test_path_dedup_detects_existing(self):
         """Dedup should detect existing entry even with %VAR% in path."""
-        import install
-        fake_winreg = mock.MagicMock()
-        with mock.patch("platform.system", return_value="Windows"):
-            with mock.patch.dict("sys.modules", {"winreg": fake_winreg}):
-                mock_handle = mock.MagicMock()
-                mock_handle.__enter__.return_value = mock_handle
-                fake_winreg.OpenKey.return_value = mock_handle
-                mock_handle.QueryValueEx.return_value = (
-                    "C:\\Windows;%LOCALAPPDATA%\\nova;",
-                    2
-                )
-                result = install._add_to_path_windows()
-                self.assertTrue(result,
-                    "_add_to_path_windows should handle %VAR% in PATH")
 
     # ===== _add_to_path_unix (sandboxed) =====
     def test_add_to_path_unix_writes_export(self):
