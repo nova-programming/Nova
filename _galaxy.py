@@ -24,8 +24,8 @@ REGISTRY_URL = "https://galaxy-registry.vercel.app"
 REGISTRY_REPO = "nova-programming/galaxy-registry"
 GALAXY_MODULES_DIR = "galaxy_modules"
 MANIFEST_FILE = "galaxy.json"
-NOVA_ZIP_URL = "https://github.com/nova-programming/Nova/archive/refs/heads/develop.zip"
-ZIP_PREFIX = "Nova-develop"
+NOVA_ZIP_URL = "https://github.com/nova-programming/Nova/archive/refs/heads/main.zip"
+ZIP_PREFIX = "Nova-main"
 GALAXY_RELEASE_BASE = "https://github.com/nova-programming/Nova/releases/download"
 
 

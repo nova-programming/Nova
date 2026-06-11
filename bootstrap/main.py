@@ -16,8 +16,8 @@ from compiler.type_checker import TypeInferer, StaticTypeError
 
 NOVA_VERSION = "0.6.0"
 REGISTRY_URL = "https://galaxy-registry.vercel.app"
-NOVA_ZIP_URL = "https://github.com/nova-programming/Nova/archive/refs/heads/develop.zip"
-ZIP_PREFIX = "Nova-develop"
+NOVA_ZIP_URL = "https://github.com/nova-programming/Nova/archive/refs/heads/main.zip"
+ZIP_PREFIX = "Nova-main"
 NOVA_RELEASE_BASE = "https://github.com/nova-programming/Nova/releases/download"
 
 ALLOWED_UPDATE_FILES = {"main.py", "_galaxy.py", "nova.nv"}
