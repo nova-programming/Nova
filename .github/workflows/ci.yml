@@ -43,10 +43,12 @@ jobs:
           printf 'print("Hello from Nova CI")\n' > /tmp/nova-ci/hello.nv
           python bootstrap/main.py dev /tmp/nova-ci/hello.nv
 
-      # TEMP DISABLED: Native compilation skipped because x86_64 codegen hardcodes
-      # Windows/MinGW name-mangling (_printf, _main) incompatible with Linux/macOS.
-      # ARM64 codegen also lacks assembler/linker. Re-enable when cross-platform
-      # codegen is implemented.
+      - name: Native compilation — generate assembly, compile runtime, assemble + link
+        run: |
+          mkdir -p /tmp/nova-ci
+          printf 'print("Hello from Nova CI")\n' > /tmp/nova-ci/test_cc.nv
+          python bootstrap/main.py build /tmp/nova-ci/test_cc.nv
+          /tmp/nova-ci/test_cc.exe
 
       - name: Verify install.py imports cleanly
         run: python -c "import install; print('install.py OK')"
