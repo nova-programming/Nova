@@ -109,7 +109,7 @@ SYSCALL int STR_PFX(fseek)(int s, long o, int w) { return SetFilePointer((HANDLE
 SYSCALL long STR_PFX(ftell)(int s) { return SetFilePointer((HANDLE)(intptr_t)s, 0, 0, 1); }
 SYSCALL int STR_PFX(fflush)(int s) { if (s) FlushFileBuffers((HANDLE)(intptr_t)s); return 0; }
 SYSCALL void STR_PFX(exit)(int c) { ExitProcess(c); }
-SYSCALL int STR_PFX(system)(const char *c) { return (int)WinExec(c, 1); }
+SYSCALL int STR_PFX(system)(const char *c) { return system(c); }
 
 /* String/memory functions — manual implementations to avoid ABI transition bugs */
 SYSCALL unsigned int STR_PFX(strlen)(const char *s) {
@@ -271,36 +271,36 @@ int main(void) {
 #include <stdint.h>
 
 #if defined(LINUX_WRAP)
-int _printf(const char *fmt, ...) {
+SYSCALL int _printf(const char *fmt, ...) {
     va_list ap; va_start(ap, fmt);
     int n = vprintf(fmt, ap); va_end(ap);
     fflush(stdout);
     return n;
 }
-void *_malloc(size_t s) { return malloc(s); }
-void _free(void *p) { free(p); }
-void *_realloc(void *p, size_t s) { return realloc(p, s); }
-size_t _strlen(const char *s) { return strlen(s); }
-int _strcmp(const char *a, const char *b) { return strcmp(a, b); }
-char *_strcpy(char *d, const char *s) { return strcpy(d, s); }
-char *_strcat(char *d, const char *s) { return strcat(d, s); }
-void *_memset(void *p, int c, size_t n) { return memset(p, c, n); }
-char *_strstr(const char *h, const char *n) { return strstr(h, n); }
-int _fopen(const char *p, const char *m) {
+SYSCALL void *_malloc(size_t s) { return malloc(s); }
+SYSCALL void _free(void *p) { free(p); }
+SYSCALL void *_realloc(void *p, size_t s) { return realloc(p, s); }
+SYSCALL size_t _strlen(const char *s) { return strlen(s); }
+SYSCALL int _strcmp(const char *a, const char *b) { return strcmp(a, b); }
+SYSCALL char *_strcpy(char *d, const char *s) { return strcpy(d, s); }
+SYSCALL char *_strcat(char *d, const char *s) { return strcat(d, s); }
+SYSCALL void *_memset(void *p, int c, size_t n) { return memset(p, c, n); }
+SYSCALL char *_strstr(const char *h, const char *n) { return strstr(h, n); }
+SYSCALL int _fopen(const char *p, const char *m) {
     FILE *f = fopen(p, m);
     return f ? (intptr_t)f : 0;
 }
-int _fclose(int s) { return fclose((FILE*)(intptr_t)s); }
-int _fwrite(const void *b, int sz, int c, int s) { return fwrite(b, sz, c, (FILE*)(intptr_t)s); }
-int _fread(void *b, int sz, int c, int s) { return fread(b, sz, c, (FILE*)(intptr_t)s); }
-int _fputs(const char *str, int s) { return fputs(str, (FILE*)(intptr_t)s); }
-int _fputc(int c, int s) { return fputc(c, (FILE*)(intptr_t)s); }
-int _fseek(int s, long o, int w) { return fseek((FILE*)(intptr_t)s, o, w); }
-long _ftell(int s) { return ftell((FILE*)(intptr_t)s); }
-int _fflush(int s) { return fflush((FILE*)(intptr_t)s); }
-void _exit(int c) { exit(c); }
-int _system(const char *c) { return system(c); }
-int _sprintf(char *b, const char *fmt, ...) {
+SYSCALL int _fclose(int s) { return fclose((FILE*)(intptr_t)s); }
+SYSCALL int _fwrite(const void *b, int sz, int c, int s) { return fwrite(b, sz, c, (FILE*)(intptr_t)s); }
+SYSCALL int _fread(void *b, int sz, int c, int s) { return fread(b, sz, c, (FILE*)(intptr_t)s); }
+SYSCALL int _fputs(const char *str, int s) { return fputs(str, (FILE*)(intptr_t)s); }
+SYSCALL int _fputc(int c, int s) { return fputc(c, (FILE*)(intptr_t)s); }
+SYSCALL int _fseek(int s, long o, int w) { return fseek((FILE*)(intptr_t)s, o, w); }
+SYSCALL long _ftell(int s) { return ftell((FILE*)(intptr_t)s); }
+SYSCALL int _fflush(int s) { return fflush((FILE*)(intptr_t)s); }
+SYSCALL void _exit(int c) { exit(c); }
+SYSCALL int _system(const char *c) { return system(c); }
+SYSCALL int _sprintf(char *b, const char *fmt, ...) {
     va_list ap; va_start(ap, fmt);
     int n = vsprintf(b, fmt, ap); va_end(ap);
     return n;
@@ -573,3 +573,25 @@ SYSCALL void *__sys_get_args(void) {
     return list;
 }
 #endif
+
+/* ==================== String helper functions ==================== */
+SYSCALL int _char_code(const char *s, int i) {
+    if (!s) return 0;
+    return (unsigned char)s[i];
+}
+
+SYSCALL char *_str_sub(const char *s, int start, int end) {
+    int len = end - start;
+    if (len < 0) len = 0;
+#if defined(_WIN32)
+    char *res = (char*)STR_PFX(malloc)(len + 1);
+#else
+    char *res = (char*)malloc(len + 1);
+#endif
+    if (!res) return 0;
+    for (int i = 0; i < len; i++) {
+        res[i] = s[start + i];
+    }
+    res[len] = '\0';
+    return res;
+}

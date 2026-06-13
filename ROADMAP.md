@@ -11,12 +11,14 @@ Galaxy is a fully functional package manager with a Git-backed registry website,
 ### 3. Small Function Inlining (Phase 4)
 Implement advanced compiler optimizations to inline extremely short, non-recursive functions, entirely eliminating call/ret overhead for utility methods.
 
-## Long-Term Goals
+## Completed Milestones
 
-### 64-bit x86_64 Support
-- Update codegen to emit 64-bit registers (`rax`/`rbx`/`rcx`)
-- Adopt System V AMD64 or Windows x64 calling convention
-- Implement 16-byte stack alignment for external calls
+### 64-bit x86_64 Support (June 2026)
+The codegen has been fully ported to x86_64 with:
+- 64-bit registers (`rax`/`rbx`/`rcx`/`rdi`/`rsi`/`rdx`/`r8`/`r9`)
+- System V AMD64 calling convention (args in `rdi`/`rsi`/`rdx`/`rcx`/`r8`/`r9`, as used by MinGW GCC)
+- 16-byte stack alignment for external calls
+- Self-hosting verified end-to-end — `nova.exe build nova.nv` produces a working 64-bit compiler
 
 ### Self-Hosted VM
 - Rewrite the Python bytecode VM in Nova

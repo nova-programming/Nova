@@ -1,87 +1,92 @@
-# Nova Native Codegen Internals (`stdlib/codegen.nv`)
+# Nova Native Codegen Internals (`stdlib/backend/`)
 
-The `codegen.nv` module (plus `codegen_expr.nv` and `codegen_stmt.nv`) traverses the AST and emits Intel-syntax x86-32 assembly, which can be linked using MinGW/GCC or directly assembled and linked using the integrated PE linker.
+Codegen is organized by architecture under `stdlib/backend/<arch>/`. Each backend directory contains:
+
+- `codegen.nv` — main codegen state machine, instruction dispatch, runtime helpers
+- `codegen_expr.nv` — expression tree → assembly (compile_expr, node_to_asm)
+- `codegen_stmt.nv` — statement → assembly (compile_stmt)
+
+The same source tree is shared between architectures via the `state` object's register names — `state.rax`, `state.rbx`, etc. resolve to `rax`/`rbx` on x86_64 or `x0`/`x1` on ARM64.
+
+Supported backends:
+- **x86_64** (primary) — SysV calling convention, MinGW GCC compatible, fully verified self-hosted
+- **ARM64** (secondary) — tested via CI on macOS runners
 
 ## State Management
 
 `CodegenState` struct tracks:
-- `asm_lines` — list of assembly instruction strings
-- `data_lines` — list of `.data` section entries (string literals, format strings)
-- `local_vars` / `local_var_names` — maps variable names to `ebp`-relative stack offsets or promoted CPU registers
-- `local_var_regs` — tracks which variables are promoted to CPU registers (`esi`/`edi`)
-- `used_regs` — list of CPU registers used in the current function frame
+- `asm_lines` / `data_lines` — assembly and data section output buffers
+- `local_vars` / `local_var_names` — maps variable names to `rbp`-relative stack offsets with a `local_var_base` shift to prevent overlap with saved parameter area
+- `local_var_regs` — tracks which variables are promoted to CPU registers (per-architecture, e.g. `r12`/`r13` on x86_64)
+- `used_regs` — track of CPU registers used in the current function frame
 - `local_offset` — total local stack frame size
 - `label_counter` — unique label generator for control flow
 - `loop_labels` / `loop_end_labels` — stack of labels for `break`/`continue`
+- `param_names` / `param_offsets` — function parameter layout (saved at negative offsets from `rbp`)
 - `struct_names`, `struct_field_names`, `struct_field_offsets` — per-struct field layout tables
-- `var_struct_types` — maps variable names to their struct type for field access resolution
 
 ## Pass 1: Variable Scanning (`scan_vars`)
 
-Recursively walks the AST of a block to find `Assignment` nodes and register local variables in `local_vars`. Updates `local_offset` for stack frame allocation. Does **not** scan inside `@raw` blocks — variables used exclusively inside `@raw` must be declared outside first.
+Recursively walks the AST of a block to find `Assignment` nodes and register local variables. Uses `local_var_base = 16 + n_params * 8` shift so local variable offsets start above the saved parameter area, preventing overlap bugs. Updates `local_offset` for stack frame allocation.
 
 ## Pass 2: Instruction Generation
 
-Uses x86 cdecl stack calling convention. All expressions push results onto the stack.
+Uses the target architecture's calling convention (SysV on x86_64: args in `rdi`/`rsi`/`rdx`/`rcx`/`r8`/`r9`). All expressions push results onto the stack.
 
 ### Expression Evaluation
-- **Integer literal**: `push imm32`
-- **Variable**: `mov eax, [ebp - offset]` / `push eax`
-- **BinOp**: push left → push right → pop right to `ebx` → pop left to `eax` → compute → push result
+- **Integer literal**: `push imm64` (x86_64) or `mov x0, #imm`
+- **Variable**: `mov rax, [rbp - offset]` / `push rax`
+- **BinOp**: push left → push right → pop into registers → compute → push result
 - **String literal**: references `.data` section label, pushes address
-- **Slice `s[i:j]`**: pushes end, start, base → calls `_slice_string` → `add esp, 12` → pushes result
-- **Concat**: calls `_concat_strings` runtime helper
-- **Variable indexing**: resolves struct field via `get_prop_offset()` or list index via list struct layout
+- **Slice `s[i:j]`**: pushes end, start, base → calls `_slice_string` → `add rsp, 24` → pushes result
+- **Concat**: calls `_concat_strings` runtime helper written in C (`runtime.c`)
+- **HashMap/Dict**: `{"key": val}` literals parsed and compiled; VM supports full dict operations
 
 ### Statements
-- **Function `def`**: Standard prologue (`push ebp` / `mov ebp, esp` / `sub esp, local_offset`), body compilation, epilogue (`mov esp, ebp` / `pop ebp` / `ret [n]`)
-- **Assignment**: Compile RHS → pop to `eax` → `mov [ebp - offset], eax`
-- **If/While**: Compile condition → pop → `cmp eax, 0` → conditional jump using `next_label()`
-- **Loop label stacks**: `while` pushes/ pops labels for `break` and `continue` resolution
-- **`print`**: Selects `fmt_int`, `fmt_str`, or `fmt_float` based on type, pushes args → `call _printf`
-- **`printd`** (debug print): Writes `debug - [line N]: ` prefix via `L_write_stdout`/`L_write_int`, then the value via `_printf` or `L_write_stdout`, then a newline. Only emits code at `debug_mode == 1`.
-- **ForIn loop** (`for i in items`): Pushes list pointer, iterates via index comparison with list length, accesses elements via `[eax + 8][ecx*4]`, cleans up stack after loop.
+- **Function `def`**: Prologue (`push rbp` / `mov rbp, rsp` / `sub rsp, local_offset`), body, epilogue (`mov rsp, rbp` / `pop rbp` / `ret`)
+- **Parameter save/restore**: Parameters are saved to `[rbp - 8]`, `[rbp - 16]`, etc. before body compilation; restored after to prevent callee-side clobbering
+- **Assignment**: Compile RHS → pop → `mov [rbp - offset], reg`
+- **If/While**: Compile condition → `cmp reg, 0` → conditional jump
+- **`print`**: Selects format string based on inferred type; calls `_printf` via `runtime.c` wrapper
+- **ForIn loop**: Pushes list pointer, iterates via index comparison
 
-## Runtime Helpers
+## Runtime Helpers (C wrappers in `runtime.c`)
 
-Generated at the end of the `.text` section:
+Platform-independent C helpers compiled alongside user assembly:
 - `_concat_strings(base, append)` — allocates new buffer, copies both strings, null-terminates
 - `_slice_string(base, start, end)` — allocates `end-start+1` bytes, byte-copies substring, null-terminates
-- `_out_of_bounds` — bounds violation handler: prints "Index Out Of Bounds", calls `ExitProcess(1)`. Jump target for all bounds-check failures.
-- `L_write_float` — x87-based float-to-decimal conversion: extracts sign via `ftst`, processes integer part with `fist`, then iterates fraction digits via `fild`/`fmul`/`fist` loop. Uses `fnstcw`/`fldcw` to set truncation rounding mode.
+- `_printf` / `_sprintf` — wrappers around libc `printf`/`sprintf` (all `%d` and `%s` unified to read from `rsi`)
+- `_sys_get_args` — parses command line with proper `in_quote` tracking for paths with spaces
+- `_system` — synchronous execution via `system()` (not async `WinExec`)
+- Dict runtime functions: `_dict_new`, `_dict_set`, `_dict_get`, `_dict_has`, `_dict_remove`, `_dict_keys`, `_dict_values`, `_dict_items`
 
 ## Bounds Checking
 
-Array reads (`ArrayIndex`) and writes (`ArrayIndexAssign`) emit bounds-checking assembly:
+Array reads and writes emit bounds-checking assembly:
 ```asm
-cmp ecx, 0
-jl _out_of_bounds       ; negative index
-cmp ecx, [edx]          ; compare with list length
-jge _out_of_bounds      ; index >= length
+cmp rcx, 0
+jl _out_of_bounds
+cmp rcx, [rdx]          ; compare with list length
+jge _out_of_bounds
 ```
-
-String byte access (`movzx eax, byte ptr [edx+ecx]`) is unchecked — the `char_strings` lookup table prevents OOB on reads.
 
 ## Type System Integration
 
-Expression codegen reads `node.inferred_type` (set by `type_checker.nv`'s `tc_check` pass) to:
-- Select string vs integer comparison in `Compare` nodes
-- Select string vs list indexing in `ArrayIndex` nodes
-- Select format string (`%s` vs `%d` vs `%f`) for `print` and `printd`
-- Detect float vs int via `is_float_expr()` for PrintD format selection
-
-The helper functions `is_string_expr()` and `is_float_expr()` provide type-aware branching in the codegen without requiring full type resolution at codegen time.
+Expression codegen reads `node.inferred_type` to select format strings, detect string vs list indexing, and choose integer vs string comparison. The helper functions `is_string_expr()` and `is_float_expr()` check `inferred_type` for Variable nodes — critical for recognizing strings assigned without type annotations (e.g., `s = "hello"`).
 
 ## Variable-to-Register Promotion
 
-To optimize runtime execution, local variables are greedily mapped to CPU registers (`esi` and `edi`) instead of standard `ebp`-relative stack offsets:
-- Variables with frequent reads/writes are selected for promotion.
-- Pointers to promoted registers are push/popped in the prologue/epilogue of functions and the main entry point to prevent register clobbering.
-- Access to promoted variables directly targets the allocated registers, bypassing stack memory access overhead.
+Local variables are greedily mapped to CPU registers (`r12`/`r13` on x86_64) instead of stack offsets. Promoted registers are saved/restored in function prologue/epilogue.
 
 ## Native Standard Library Injection
 
-Standard library helper functions (including file I/O `sys_*` from `os_win.nv` and ChaCha20 random functions from `math_utils.nv`) are compiled and injected directly into the assembly output of every compiled program:
-- Users do not need to manually import standard library modules.
-- Unique symbol prefixing (`L_SYS_`) is applied to all injected labels to prevent collision with user labels.
-- Standard library string literals are defined under reserved labels (`str_const_sys_platform` and `str_const_chacha_mem`) to prevent conflict with user string constants.
+Standard library helper functions (file I/O `sys_*` from `os_*.nv`, ChaCha20 from `math_utils.nv`) are compiled and injected directly into the assembly output of every compiled program. All platform data uses the Nova stdlib's authoritative implementations (e.g., `sys_platform()` from `os_windows.nv` returns `"windows"`), not hardcoded assembly.
+
+## Key Fixes (Self-Hosting History)
+
+- **Variable-to-register promotion overlap**: Local var offset shifted by `local_var_base = 16 + n_params * 8` to prevent overlap with saved parameters
+- **`_printf` `%d` register fix**: `runtime.c` unified `%d` and `%s` handlers to both read from `rsi` (SysV second arg)
+- **`_fopen` mode string fix**: Changed from exact match to first-char check, supporting all mode variants (`w`, `wb`, `w+`, `w+b`, etc.)
+- **`_fputs` HANDLE dereference fix**: Removed extra dereference that caused `STATUS_ACCESS_VIOLATION`
+- **`is_string_expr` `inferred_type` check**: Variable nodes without type annotations are now recognized via `inferred_type`
+- **`_sys_platform` assembly removed**: Both backends now use Nova stdlib `sys_platform()` instead of hardcoded assembly

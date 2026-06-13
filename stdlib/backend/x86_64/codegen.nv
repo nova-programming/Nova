@@ -302,6 +302,18 @@ def is_string_expr(state: CodegenState, node: AstNode) -> int {
             }
             i = i + 1
         }
+        if node.inferred_type != 0 and node.inferred_type.kind == "scalar" and node.inferred_type.name == "string" {
+            return 1
+        }
+        return 0
+    }
+
+    if node.kind == "DataFieldAccess" {
+        if node.val_str == "val" { return 1 }
+        if node.val_str == "kind" { return 1 }
+        if node.val_str == "val_str" { return 1 }
+        if node.val_str == "name" { return 1 }
+        if node.val_str == "op" { return 1 }
         return 0
     }
 
@@ -4025,8 +4037,6 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int) -> list {
     emit_data(state, "str_fmode_w: .asciz \"w\"")
     if is_x64(state) == 0 {
         emit_data(state, "str_const_sys_platform: .asciz \"windows\"")
-    } else {
-        emit_data(state, "str_const_sys_platform: .asciz \"darwin\"")
     }
     emit_data(state, "str_const_chacha_mem: .asciz \"expand 32-byte k\"")
 
@@ -4283,12 +4293,6 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int) -> list {
         }
     } else {
         emit_x86_64_runtime(state)
-        emit(state, "_sys_platform:")
-        emit(state, "    push rbp")
-        emit(state, "    mov rbp, rsp")
-        emit(state, "    lea rax, [rip + str_const_sys_platform]")
-        emit(state, "    pop rbp")
-        emit(state, "    ret")
     }
 
     final_asm = []

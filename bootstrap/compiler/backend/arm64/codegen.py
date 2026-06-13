@@ -395,7 +395,6 @@ class Arm64Codegen:
         self.data_section.append('str_fmode_rw: .asciz "r+"')
         self.data_section.append('str_fmode_wp: .asciz "w+"')
         self.data_section.append('str_fmode_w: .asciz "w"')
-        self.data_section.append('str_const_sys_platform: .asciz "macos"')
 
         self.data_section.append("char_strings:")
         for i in range(256):

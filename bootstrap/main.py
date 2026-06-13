@@ -190,7 +190,7 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
     cmd = [gcc_path, asm_file, "-o", exe_file]
     
     if os.name == "nt":
-        cmd += ["-mconsole", "-lkernel32"]
+        cmd += ["-mconsole", "-lkernel32", "-Wl,--stack,16777216"]
     else:
         if is_macos:
             if target_arch == "arm64":

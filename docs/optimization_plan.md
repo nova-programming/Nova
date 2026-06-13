@@ -33,7 +33,8 @@ Functions like `is_prime`, `abs`, `min` are called thousands of times with full 
 3. Rename labels to avoid collisions
 
 **Files:**
-- Modify: `stdlib/codegen.nv`, `compiler/codegen_x86.py`
+- Modify: `stdlib/backend/x86_64/codegen.nv`, `stdlib/backend/arm64/codegen.nv`
+- Bootstrap: `bootstrap/compiler/backend/x86_64/codegen.py`, `bootstrap/compiler/backend/arm64/codegen.py`
 
 **Verification:** `is_prime` inlining eliminates ~2M call/ret pairs in the primes benchmark. fib(30) unaffected (recursive).
 
@@ -42,16 +43,16 @@ Functions like `is_prime`, `abs`, `min` are called thousands of times with full 
 ## Phase 5: Frame Pointer Optimization (Week 5)
 **Impact: ~1.2–1.5×. Effort: medium (~100 lines).**
 
-Currently `ebp` is used exclusively as frame pointer. Free it by tracking stack offsets relative to `esp`.
+Currently `rbp` is used exclusively as frame pointer. Free it by tracking stack offsets relative to `rsp`.
 
 **Implementation:**
-- Skip `push ebp; mov ebp, esp` in prologue
-- Track all local offsets as positive from `esp`
-- Adjust `[ebp ± N]` references to `[esp + N]`
-- Saves 2 instructions per function call + frees `ebp` as a GP register (add to Phase 3 pool)
+- Skip `push rbp; mov rbp, rsp` in prologue
+- Track all local offsets as positive from `rsp`
+- Adjust `[rbp ± N]` references to `[rsp + N]`
+- Saves 2 instructions per function call + frees `rbp` as a GP register (add to Phase 3 pool)
 
 **Files:**
-- Modify: `stdlib/codegen.nv`, `stdlib/codegen_expr.nv`, `compiler/codegen_x86.py`
+- Modify: `stdlib/backend/x86_64/codegen.nv`, `stdlib/backend/x86_64/codegen_expr.nv`, `bootstrap/compiler/backend/x86_64/codegen.py`
 
 ---
 

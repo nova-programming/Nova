@@ -9,7 +9,7 @@ Platform-specific HAL for Windows native compilation. All standard OS functions 
 - **`sys_read(fd)`**: Reads entire file content into a buffer, returns as Nova string
 - **`sys_write(fd, content)`**: Writes string to file descriptor
 - **`sys_close(fd)`**: Closes file descriptor
-- **`sys_system(cmd)`**: Executes shell command via `WinExec` (kernel32)
+- **`sys_system(cmd)`**: Executes shell command via C library `system()` (synchronous, blocks until completion)
 - **`sys_flush()`**: Flushes stdout via `FlushFileBuffers` (kernel32)
 - **`sys_exit(code)`**: Terminates process via `ExitProcess` (kernel32)
 - **`sys_platform()`**: Returns `"windows"`

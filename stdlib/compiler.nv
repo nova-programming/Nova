@@ -23,6 +23,9 @@ def resolve_imports(ast: list, visited: list, target_arch: string) -> list {
         node = ast[i]
         if node.kind == "Import" {
             module_name = node.val_str
+            if module_name == "os_impl" {
+                module_name = "os_windows"
+            }
             if contains(visited, module_name) == 0 {
                 visited.append(module_name)
                 fd = sys_open(module_name + ".nv", "r")
@@ -143,7 +146,7 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
     
     if target_arch == "x86_64" {
         print("Using GCC to assemble and link...")
-        system.system_exec("gcc\\bin\\gcc.exe " + input_path + ".s -o " + output_path + " -mconsole -lkernel32 runtime.o")
+        system.system_exec("gcc\\bin\\gcc.exe " + input_path + ".s -o " + output_path + " -mconsole -lkernel32 -Wl,--stack,16777216 runtime.o")
         print("Compiled: " + input_path + " -> " + output_path)
     } else {
         print("Assembling...")

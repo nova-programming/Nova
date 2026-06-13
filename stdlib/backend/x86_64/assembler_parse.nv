@@ -4,9 +4,7 @@
 
 # --- Utility functions ---
 
-def str_sub(s: string, start: int, end: int) -> string {
-    return s[start:end]
-}
+
 
 def str_contains(haystack: string, needle: string) -> int {
     if len(needle) == 0 { return 1 }

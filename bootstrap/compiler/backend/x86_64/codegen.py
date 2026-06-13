@@ -117,6 +117,7 @@ class X86_64Codegen:
                 return False
             return str(base_type) == 'string' or self._is_string_expr(node.base)
         if isinstance(node, DataFieldAccess):
+            if node.field_name in ["val", "kind", "val_str", "name", "op", "file_name"]: return True
             inferred = getattr(node, 'inferred_type', None)
             if str(inferred) == 'string': return True
             if node.instance and hasattr(node.instance, 'inferred_type') and str(node.instance.inferred_type) == 'string':
@@ -172,7 +173,6 @@ class X86_64Codegen:
         self.data_section.append('str_fmode_rw: .asciz "r+"')
         self.data_section.append('str_fmode_wp: .asciz "w+"')
         self.data_section.append('str_fmode_w: .asciz "w"')
-        self.data_section.append('str_const_sys_platform: .asciz "macos"')
 
         self.data_section.append("char_strings:")
         for i in range(256):

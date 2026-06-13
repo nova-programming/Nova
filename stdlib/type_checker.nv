@@ -90,6 +90,14 @@ def tc_init(tc: TypeChecker) {
     # print(val: any) -> void
     print_t = create_func_type([create_any_type()], create_scalar_type("void"))
     tc_add_func(tc, "print", print_t)
+
+    # char_code(ch: string) -> int
+    char_code_t = create_func_type([create_scalar_type("string")], create_scalar_type("int"))
+    tc_add_func(tc, "char_code", char_code_t)
+
+    # str_sub(s: string, start: int, end: int) -> string
+    str_sub_t = create_func_type([create_scalar_type("string"), create_scalar_type("int"), create_scalar_type("int")], create_scalar_type("string"))
+    tc_add_func(tc, "str_sub", str_sub_t)
 }
 
 def tc_add_func(tc: TypeChecker, name: string, typ: Type) {
@@ -191,7 +199,6 @@ def tc_unify(tc: TypeChecker, t1: Type, t2: Type, node: AstNode) {
 def tc_visit(tc: TypeChecker, node: AstNode) -> Type {
     if node == 0 { return 0 }
     if node.kind == "NONE" { return 0 }
-    
     t = tc_visit_real(tc, node)
     node.inferred_type = t
     return t

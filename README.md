@@ -90,8 +90,12 @@ The compiler is written in Nova and bootstraps in three stages:
 The compiler pipeline within a single invocation:
 
 ```
-.nv source → lexer.nv → parser.nv → type_checker.nv → codegen.nv → assembler.nv → linker.nv → .exe
+.nv source → lexer.nv → parser.nv → type_checker.nv → backend/<arch>/codegen.nv → assembler.nv → linker.nv → .exe
 ```
+
+Supported architectures:
+- **x86_64** — primary target, fully verified self-hosted bootstrap
+- **ARM64** — secondary target, codegen implemented (CI-tested on macOS)
 
 Additional standard library modules:
 - `types.nv` — Type system abstraction (scalar, struct, list, func types)
@@ -112,11 +116,11 @@ nova/
 ├── lexer/            # Reference tokenizer (Python)
 ├── parser/           # Reference parser (Python)
 ├── stdlib/           # Self-hosted compiler written in Nova
+│   ├── backend/          # Architecture-specific codegen backends
+│   │   ├── x86_64/       # x86_64 codegen (codegen.nv, codegen_expr.nv, codegen_stmt.nv)
+│   │   └── arm64/        # ARM64 codegen (same file layout)
 │   ├── lexer.nv          # Tokenizer (Nova)
 │   ├── parser.nv         # Recursive-descent parser (Nova)
-│   ├── codegen.nv        # x86-32 code generator (Nova)
-│   ├── codegen_expr.nv   # Expression codegen (Nova)
-│   ├── codegen_stmt.nv   # Statement codegen (Nova)
 │   ├── compiler.nv       # Pipeline orchestrator (Nova)
 │   ├── compiler_driver.nv# CLI driver for compiler (Nova)
 │   ├── assembler.nv      # x86 assembler (Nova, integrated via assemble_link_file)
@@ -130,10 +134,15 @@ nova/
 │   ├── errors.nv         # Structured error/warning printer (Nova)
 │   ├── os_win.nv         # Windows syscall/runtime facade (Nova)
 │   ├── os_linux.nv       # Linux syscall/runtime facade (Nova)
+│   ├── os_macos.nv       # macOS syscall/runtime facade (Nova)
 │   └── math_utils.nv     # Math utilities (Nova)
-├── main.py           # Python bootstrap compiler entry point
-├── nova.nv      # Self-hosted compiler entry point
-├── modules/          # Standard library modules (Nova)
+├── bootstrap/        # Python bootstrap compiler (frozen)
+│   ├── main.py           # Bootstrap entry point
+│   ├── compiler/         # Bootstrap codegen (Python)
+│   └── README.md         # Bootstrap status
+├── main.py           # Python bootstrap compiler entry point (aliases bootstrap/main.py)
+├── nova.nv           # Self-hosted compiler entry point
+├── runtime.c         # C runtime wrappers for native compilation
 ├── docs/             # Documentation
 └── tests/            # Test programs
 ```

@@ -322,7 +322,11 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             }
             first = line_nodes[0]
             if len(line_nodes) == 1 and first.kind == "String" {
-                emit(state, first.val_str)
+                raw_str = first.val_str
+                if len(raw_str) >= 2 and raw_str[0] == "\"" {
+                    raw_str = str_sub(raw_str, 1, len(raw_str) - 1)
+                }
+                emit(state, raw_str)
             } else {
                 if first.kind == "Variable" and is_asm_mnemonic(state, first.val_str) == 1 {
                     asm_line = "    "

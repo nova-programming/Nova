@@ -7,7 +7,7 @@ Nova bridges high-level Pythonic simplicity with low-level C-like control. This 
 ## 1. High-Level Language Keywords
 
 ### Flow & Structure Control
-* **`def`**: Declares a function. Native codegen generates standard x86 `call`/`ret` routines using the `cdecl` calling convention (arguments pushed right-to-left, caller cleans the stack).
+* **`def`**: Declares a function. Native codegen generates standard `call`/`ret` routines using the target architecture's calling convention (SysV AMD64 for x86_64, standard AArch64 for ARM64).
   * *Syntax*: `def add(a: int, b: int) -> int { return a + b }`
 * **`class`**: Defines an object-oriented class template. Methods are compiled with virtual method table (vtable) entry offsets for dynamic dispatch.
   * *Syntax*:
@@ -132,7 +132,7 @@ These functions are available natively in all programs without requiring manual 
 
 ### Native OS Interface (`os_win.nv` / `os_linux.nv`)
 * **`sys_get_args()`**: Extracts CLI arguments via FFI (using `GetCommandLineA` on Windows), returning them as a parsed string array. Surrounding quotes are automatically stripped.
-* **`sys_system(cmd)`**: Executes shell commands via system sub-processes (uses `WinExec` FFI on Windows).
+* **`sys_system(cmd)`**: Executes shell commands via system sub-processes (uses C library `system()`).
 * **`sys_flush()`**: Flushes standard output buffers.
 * **`sys_exit(code)`**: Terminates the current process immediately with status `code` (uses `ExitProcess` FFI on Windows).
 * **`sys_platform()`**: Returns the host platform identifier (e.g. `"windows"` or `"linux"`).
@@ -165,8 +165,8 @@ The self-hosted compiler files located in `stdlib/` run as a sequential pipeline
 1. **`lexer.nv`**: Tokenizes source characters into a stream of structured `Token` structs.
 2. **`parser.nv`**: Constructs a syntax tree (AST) via recursive-descent parsing. Performs constant folding for integer operations.
 3. **`types.nv` & `type_checker.nv`**: Infers and validates static types across all AST nodes.
-4. **`codegen.nv` (+ `codegen_expr.nv`, `codegen_stmt.nv`)**: Generates Intel-syntax x86-32 assembly lines. Injects list/array bounds checking code and maps local variables to CPU registers (`esi` and `edi`) where possible.
-5. **`assembler.nv` (+ submodules)**: Encodes x86-32 assembly lines to native machine code bytes.
+4. **`codegen.nv` (+ `codegen_expr.nv`, `codegen_stmt.nv`)**: Generates assembly for the target architecture (x86_64 via `stdlib/backend/x86_64/`, ARM64 via `stdlib/backend/arm64/`). Injects list/array bounds checking code and maps local variables to CPU registers where possible.
+5. **`assembler.nv` (+ submodules)**: Encodes x86 assembly lines to native machine code bytes.
 6. **`linker.nv`**: Manually packages machine code, imports, and resources into a valid Windows PE binary (GCC-free compilation).
 
 ---

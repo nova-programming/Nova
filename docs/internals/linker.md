@@ -26,9 +26,11 @@ The PE optional header's `HeapReserve` field is set to **16,777,216 (16 MB)** to
 
 Import name resolution strips `@N` stdcall suffixes (e.g., `ExitProcess@4` → `ExitProcess`). The linker removes the `@N` decoration from DLL names before looking up imports, ensuring Win32 API functions link correctly even when the assembler emits decorated names.
 
-## Imports
+## Imports (Legacy x86-32 PE Linker)
 
-Generates thunks and IAT entries for external functions (`GetProcessHeap`, `HeapAlloc`, `WriteFile`, `CreateFileA`, `ReadFile`, `GetCommandLineA`, `ExitProcess`, `WinExec`, `SetFilePointer`, `FlushFileBuffers`, `CloseHandle`, `GetStdHandle`), mapping them to `kernel32.dll` and constructing `IMAGE_IMPORT_DESCRIPTOR` structures.
+The integrated PE linker (`stdlib/linker.nv`) is used for the x86 (32-bit) bare-metal and assembly-link paths. x86_64 native compilation uses `runtime.c` + GCC instead, avoiding PE import thunk generation.
+
+Generates thunks and IAT entries for external functions (`GetProcessHeap`, `HeapAlloc`, `WriteFile`, `CreateFileA`, `ReadFile`, `GetCommandLineA`, `ExitProcess`, `SetFilePointer`, `FlushFileBuffers`, `CloseHandle`, `GetStdHandle`), mapping them to `kernel32.dll` and constructing `IMAGE_IMPORT_DESCRIPTOR` structures.
 
 ## Bare-Metal Flat Binary Mode (`link_bare`)
 

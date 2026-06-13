@@ -86,14 +86,11 @@ class VirtualMachine:
                 self.stack.append(arg)
             elif opcode == OpCode.LOAD_NAME:
                 name = arg
-                # Look in local frame first, then global
                 if self.frames and name in self.frames[-1].locals:
                     self.stack.append(self.frames[-1].locals[name])
                 elif name in self.env:
                     self.stack.append(self.env[name])
                 else:
-                    # Let's see if it's an uninitialized variable and just return 0 to support flexible scripting
-                    # In a strongly typed later version this will be an error
                     self.stack.append(0)
             elif opcode == OpCode.STORE_NAME:
                 val = self.stack.pop()

@@ -11,3 +11,6 @@ It acts purely as an emergency fallback. If the `nova.exe` binary is accidentall
 
 ### Do not edit code here
 If you are adding a new language feature, syntax, or backend capability to Nova, **do not** add it to these Python files. Only add it to the `stdlib/` compiler source!
+
+### Recent cleanup
+During the self-hosting bootstrap (June 2026), orphaned dead data (`str_const_sys_platform`) was removed from both bootstrap codegens (x86_64 and ARM64) — they never emitted the corresponding assembly function.

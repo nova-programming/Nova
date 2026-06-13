@@ -15,9 +15,9 @@ The compilation pipeline orchestrates tokenizer → parser → codegen → in-pr
 3. **Parse**: `parse(tokens)` → AST (list of `AstNode`). Float literals detected by `.` in number token. Constant folding applied inline for integer arithmetic only.
 4. **Resolve imports**: `resolve_imports(ast, visited)` — recursively loads and tokenizes/parses imported `.nv` files
 5. **Type check**: `TypeChecker.tc_check(tc, ast)` — static type inference using `stdlib/types.nv` type abstractions. Returns `float` type for float literals.
-6. **Generate assembly**: `generate_assembly(ast)` → list of assembly lines. Bounds-checking asm injected for array ops. Float expressions use x87 FPU instructions (`fld`/`fstp`/`faddp`/etc.).
+6. **Generate assembly**: `generate_assembly(ast)` → list of assembly lines via `backend/<arch>/codegen.nv`. Bounds-checking asm injected for array ops.
 7. **Write output**: Assembly lines written to `.s` file via `sys_write()` (optional, mainly for debugging)
-8. **Assemble + Link**: `assemble()` + `link()` in-process — no GCC or external toolchain needed. The assembler supports x87 FPU opcodes and all standard x86-32 instructions used by the codegen.
+8. **Assemble + Link**: `assemble()` + `link()` in-process — no GCC or external toolchain needed. The assembler supports all standard x86 instructions used by the codegen.
 
 ## GCC-Free Assemble-Link Path
 
@@ -32,7 +32,7 @@ The compiler is split into modular `.nv` files:
 - `parser.nv` — recursive-descent parser (includes constant folding)
 - `types.nv` — type system abstraction (scalar, struct, list, func types)
 - `type_checker.nv` — static type inference engine
-- `codegen.nv`, `codegen_expr.nv`, `codegen_stmt.nv` — x86-32 assembly generation (includes bounds checking)
+- `codegen.nv`, `codegen_expr.nv`, `codegen_stmt.nv` — Architecture-specific assembly generation in `backend/<arch>/` (x86_64, ARM64)
 - `assembler.nv` (+ submodules) — x86 instruction encoder (integrated via `assemble_link_file`)
 - `linker.nv` — PE executable generator (integrated via `assemble_link_file`)
 - `errors.nv` — structured error/warning printer with fix suggestions
