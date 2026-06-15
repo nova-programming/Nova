@@ -84,3 +84,8 @@ class OpCode(Enum):
 
     # Slicing
     SLICE = auto()
+
+    # Exception handling
+    PUSH_HANDLER = auto()  # Push exception handler (arg = catch address)
+    POP_HANDLER = auto()   # Pop current exception handler
+    THROW = auto()         # Throw exception with top-of-stack value

@@ -24,5 +24,10 @@ Thumbs.db
 
 # Backup files
 *.bak
+
+# Compiler cache
+.nova_cache.json
+.nova_cache.txt
+
 # GCC bundle
 gcc/

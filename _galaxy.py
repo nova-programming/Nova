@@ -19,7 +19,7 @@ import shutil
 import platform
 from pathlib import Path
 
-GALAXY_VERSION = "0.6.0"
+GALAXY_VERSION = "0.7.0"
 REGISTRY_URL = "https://galaxy-registry.vercel.app"
 REGISTRY_REPO = "nova-programming/galaxy-registry"
 GALAXY_MODULES_DIR = "galaxy_modules"

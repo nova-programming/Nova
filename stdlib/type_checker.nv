@@ -98,6 +98,30 @@ def tc_init(tc: TypeChecker) {
     # str_sub(s: string, start: int, end: int) -> string
     str_sub_t = create_func_type([create_scalar_type("string"), create_scalar_type("int"), create_scalar_type("int")], create_scalar_type("string"))
     tc_add_func(tc, "str_sub", str_sub_t)
+
+    # abs(n: int) -> int
+    abs_t = create_func_type([create_scalar_type("int")], create_scalar_type("int"))
+    tc_add_func(tc, "abs", abs_t)
+    # min(a: int, b: int) -> int
+    min_t = create_func_type([create_scalar_type("int"), create_scalar_type("int")], create_scalar_type("int"))
+    tc_add_func(tc, "min", min_t)
+    # max(a: int, b: int) -> int
+    max_t = create_func_type([create_scalar_type("int"), create_scalar_type("int")], create_scalar_type("int"))
+    tc_add_func(tc, "max", max_t)
+
+    # file_exists(path: string) -> int
+    file_exists_t = create_func_type([create_scalar_type("string")], create_scalar_type("int"))
+    tc_add_func(tc, "file_exists", file_exists_t)
+    # file_size(path: string) -> int
+    file_size_t = create_func_type([create_scalar_type("string")], create_scalar_type("int"))
+    tc_add_func(tc, "file_size", file_size_t)
+    # file_type(path: string) -> string
+    file_type_t = create_func_type([create_scalar_type("string")], create_scalar_type("string"))
+    tc_add_func(tc, "file_type", file_type_t)
+
+    # now() -> string
+    now_t = create_func_type([], create_scalar_type("string"))
+    tc_add_func(tc, "now", now_t)
 }
 
 def tc_add_func(tc: TypeChecker, name: string, typ: Type) {
@@ -190,7 +214,7 @@ def tc_unify(tc: TypeChecker, t1: Type, t2: Type, node: AstNode) {
     if t1.kind == "dyn" or t2.kind == "dyn" { return 0 }
     eq = types_equal(t1, t2)
     if eq == 0 {
-        errors.warn("Type", "", node.line, "expected " + type_to_string(t1) + " but got " + type_to_string(t2), "change the value type or explicitly convert with int() or str()")
+        errors.warn("Type", "", node.line, "expected " + type_to_string(t1) + " but got " + type_to_string(t2), "change the value type or explicitly convert with int() or str()", node.col)
         return 0
     }
     return 0
@@ -261,7 +285,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         print("DEBUG: Function name is: " + node.val_str + " on line: " + str(node.line))
         sys_flush()
         if str_eq(node.val_str, "main") == 1 {
-            errors.err("ReservedName", "", node.line, "Cannot declare a function named 'main'", "the function name 'main' is reserved for the executable's entry point. Please rename it (e.g. to 'run' or 'start')")
+            errors.err("ReservedName", "", node.line, "Cannot declare a function named 'main'", "the function name 'main' is reserved for the executable's entry point. Please rename it (e.g. to 'run' or 'start')", node.col)
             sys_exit(1)
         }
         tc_push_env(tc)
@@ -309,6 +333,27 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return create_any_type()
     }
     
+    if str_eq(k, "TRY") == 1 {
+        i = 0
+        while i < len(node.args) {
+            tc_visit(tc, node.args[i])
+            i = i + 1
+        }
+        i = 0
+        while i < len(node.cond) {
+            tc_visit(tc, node.cond[i])
+            i = i + 1
+        }
+        return create_any_type()
+    }
+    
+    if str_eq(k, "THROW") == 1 {
+        if node.left != 0 {
+            tc_visit(tc, node.left)
+        }
+        return create_any_type()
+    }
+    
     if str_eq(k, "Call") == 1 {
         if tc_find_struct(tc, node.val_str) != 0 {
             i = 0
@@ -321,7 +366,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         func_type = tc_find_func(tc, node.val_str)
         if func_type != 0 {
             if len(node.args) != len(func_type.params) {
-                errors.warn("Args", "", node.line, "function " + node.val_str + " expects " + str(len(func_type.params)) + " args but got " + str(len(node.args)), "add or remove arguments to match the declaration")
+                errors.warn("Args", "", node.line, "function " + node.val_str + " expects " + str(len(func_type.params)) + " args but got " + str(len(node.args)), "add or remove arguments to match the declaration", node.col)
             }
             i = 0
             while i < len(node.args) {

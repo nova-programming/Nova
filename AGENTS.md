@@ -10,9 +10,9 @@
 
 ## Current State
 - **Galaxy Package Manager**: Fully implemented and live at [galaxy-registry.vercel.app](https://galaxy-registry.vercel.app)
-- **Compiler**: Stable, tree-shaking + variable-to-register promotion + self-hosted bootstrap working
+- **Compiler**: Stable, tree-shaking + variable-to-register promotion + self-hosted bootstrap working + 7 built-in functions + cross-platform GCC fallback + exceptions + list comprehensions + REPL + cross-compilation
 - **Installer**: Native `install.sh` (bash, uses only curl+tar) + `install.ps1` (PowerShell) + `install.py` (Python fallback) — no dependencies required
-- **Version System**: `nova --version` / `galaxy --version` + `nova update` / `galaxy update` self-update commands powered by registry version endpoints
+- **Version**: v0.7.0. `nova --version` / `galaxy --version` + self-update via registry endpoints
 
 ## What Was Accomplished
 
@@ -203,3 +203,36 @@ galaxy publish             # Publish to registry
 ### Dead Data Cleanup (This Conversation — June 13, 2026)
 - **`str_const_sys_platform` removed from x86_64 .nv codegen (`stdlib/backend/x86_64/codegen.nv:4038-4042`)**: The x86_64 path emitted `str_const_sys_platform: .asciz "darwin"` — dead data since the `_sys_platform:` assembly function was already removed. Only x86 (32-bit) path retained (still used by `emit_win32_runtime`).
 - **`str_const_sys_platform` removed from both Python bootstrap codegens**: Dead `str_const_sys_platform: .asciz "macos"` removed from `bootstrap/compiler/backend/x86_64/codegen.py:176` and `arm64/codegen.py:398`. Neither Python codegen ever emitted a `_sys_platform:` assembly function — the data was orphaned.
+
+### Phase 4: Platform Naming & Frame Pointer Optimization (This Session — June 13, 2026)
+- **Platform-aware executable naming** (`bootstrap/main.py:compile_native()`, `nova.nv:81`): `.exe` suffix now only applied on Windows (`os.name == "nt"` / `sys_platform() == "windows"`). macOS/Linux produce no extension. CI `ci.yml` uses `$RUNNER_OS` for platform-appropriate naming in native build+run step.
+- **Dict native codegen — already complete**: Contrary to vault notes claiming `push 0` placeholders, all four backends (x86_64 .nv, ARM64 .nv, x86_64 Python, ARM64 Python) already emit proper `_dict_new`/`_dict_set`/`_dict_get`/`_dict_has`/`_dict_remove`/`_dict_keys`/`_dict_values`/`_dict_items` calls for DictLiteral and all 7 dict methods. Tests exist and pass.
+- **Cross-platform CI** (`ci.yml`): Native compilation step now uses `if [ "$RUNNER_OS" = "Windows" ]` to decide `.exe` naming. macOS native build+run works correctly.
+- **Frame pointer optimization (x86_64)** (`stdlib/backend/x86_64/codegen.nv:79,492-548,4128-4178`, `codegen_stmt.nv:130-141`): `state.bp` changed from `"rbp"` to `"rsp"`. `compile_function` no longer emits `push rbp; mov rbp, rsp` for x86_64; adds +8 compensation to `local_offset`; converts variable offsets via `stored = K - local_offset - regs_size + 8` (stored as negative for `[rsp + abs]` access). `_main:` section similarly changed with +16 compensation (no push rbp + `and rsp, -16` alignment). `Return` statement emits `add rsp, local_offset` instead of `mov rsp, rbp; pop rbp`. Saves 2 instructions per function call; frees `rbp` as GP register. x86 (32-bit) mode unchanged.
+- **ARM64 frame pointer optimized** (`stdlib/backend/arm64/codegen.nv:77`, `codegen_stmt.nv:34,137-139`, `codegen_expr.nv:299-304,334-338`): `state.bp` changed from `"fp"` to `"sp"`. `compile_function` no longer emits `mov fp, sp` for ARM64; adds offset conversion formula `new = stack_size - old` to convert fp-relative offsets to sp-relative (positive from sp). `_main:` section similarly updated. `Return` statement emits `add sp, sp, #local_offset` + `ldp fp, lr, [sp], #16` instead of `mov sp, fp; ldp fp, lr, [sp], #16`. All variable loads/stores use `[sp, #+K]` (positive offset) since variables live above sp. `stp fp, lr, [sp, #-16]!` retained (LR must be saved for non-leaf functions). Saves 1 instruction per function call (`mov fp, sp`). Adding `local_offset` instead of `mov sp, fp` also avoids the pre-existing `ldp sp, lr` bug when `%b = "sp"`. All 67 ARM64 codegen tests pass.
+- **ARM64 native pipeline verified**: Full assembler (parse + encode + pass) and PE32+ linker already exist at `stdlib/backend/arm64/`. Produces PE executables for Windows ARM64. No Mach-O linker for macOS ARM64 — would need GCC fallback.
+- **`print("DEBUG"` removed from type_checker.nv**: Debug print left in production code cleaned out.
+- **All 191 tests pass** (1 skipped — registry PATH test requiring Windows-specific environment).
+
+### Phase 5: Built-in Functions & macOS ARM64 GCC Fallback (This Session — June 13, 2026)
+- **7 new built-in functions added** (`abs`, `min`, `max`, `file_exists`, `file_size`, `file_type`, `now`): C implementations in `runtime.c` (lines 601–689). Registered in `stdlib/type_checker.nv` (102–118) and `bootstrap/compiler/type_checker.py` (4–25 — new `BUILTIN_SIGS` dict). Dispatched via `_BUILTIN_HANDLERS` in `bootstrap/vm/machine.py` (714–740, 754–781). `.extern` declarations added to all 4 codegen files. All handlers use Python builtins (`abs()`, `os.path.exists()`, `datetime.now()`) in VM and C runtime functions in native.
+- **`BUILTIN_SIGS` in Python type checker** (`type_checker.py:4-25`): Dict mapping 15+ symbols `(abs..str_sub)` to `(return_type, param_types)` tuples. `visit_Call` checks it before falling through to `AnyType()` — critical for correct `%s` vs `%d` codegen in `Print`.
+- **macOS `_dict_*` wrappers added** (`runtime.c:590-598`): `_dict_new`, `_dict_has`, `_dict_get`, `_dict_set`, `_dict_remove`, `_dict_keys`, `_dict_values`, `_dict_items` and `_sys_platform` for macOS in new `#elif defined(MACOS)` section after the existing `#elif defined(_WIN64)` section. Previously only defined for Windows and Linux — self-hosted compiler on macOS would get linker errors.
+- **Linux `_sys_platform` added** (`runtime.c:529`): `_sys_platform` now returns `"linux"` on Linux (was only defined for Windows, returning `"windows"`). Self-hosted compiler calling `sys_platform()` on Linux would have linked against a missing symbol.
+- **macOS/Linux GCC fallback in compiler** (`stdlib/compiler.nv:143-161`): `compile_to_exe` now uses `sys_platform()` to detect OS. Windows: uses bundled `gcc\\bin\\gcc.exe` with `-mconsole -lkernel32`. macOS/Linux: uses system `gcc` without Windows-specific flags. ARM64 on Windows continues to use internal PE assembler+linker.
+- **All 190 tests pass** (1 skipped — pre-existing registry PATH test requiring Windows-specific environment).
+
+### Phase 6: Exceptions + List Comprehensions + REPL + Cross-Compilation (This Session - June 15, 2026)
+- **Exceptions (try/catch/throw)**: Full implementation across all layers.
+  - **Lexer**: try, catch, throw keywords in bootstrap/lexer/tokens.py and stdlib/lexer.nv
+  - **Parser**: Try (body, catch_body, catch_var_name) + Throw (value) AST nodes in bootstrap/nova_ast/nodes.py
+  - **VM**: OP_TRY, OP_THROW, OP_CATCHEND opcodes in vm/opcodes.py + vm/compiler.py, executed in vm/machine.py
+  - **Native**: runtime.c C helpers: _try_block, _throw_error, _catch_error via setjmp/longjmp
+  - **Self-hosted codegen**: Both x86_64 and ARM64 .nv codegens emit try/catch/throw wrappers
+  - **Tests**: 10 tests in tests/test_exceptions.py
+- **List comprehensions**: [expr for x in list if cond] desugars to Block + ForIn + append at parse time. 7 tests.
+- **REPL** (nova repl): Interactive REPL with multi-line input, persistent state across lines
+- **Cross-compilation infrastructure**: target_os through CodegenState, _find_gcc cross-toolchain lookup
+  - Linux/macOS OS stubs filled in (os_linux.nv, os_macos.nv)
+  - compile_to_exe uses target_os for GCC command, output extension, flags
+- **All 210 tests pass** (1 skipped - pre-existing registry PATH test).

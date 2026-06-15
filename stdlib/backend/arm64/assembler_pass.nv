@@ -1,0 +1,216 @@
+import system
+
+def read_u32(state, off: int) -> int {
+    b0 = state.code[off]
+    b1 = state.code[off + 1]
+    b2 = state.code[off + 2]
+    b3 = state.code[off + 3]
+    return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+}
+
+def write_u32(state, off: int, val: int) {
+    state.code[off] = val % 256
+    val = val / 256
+    state.code[off + 1] = val % 256
+    val = val / 256
+    state.code[off + 2] = val % 256
+    val = val / 256
+    state.code[off + 3] = val % 256
+}
+
+def emit_asciz(state, arg: string) {
+    trimmed = trim(arg)
+    if len(trimmed) >= 2 and trimmed[0] == "\"" {
+        str_content = str_sub(trimmed, 1, len(trimmed) - 1)
+        bytes_list = process_string_escapes(str_content)
+        j = 0
+        while j < len(bytes_list) {
+            state.data_bytes.append(bytes_list[j])
+            j = j + 1
+        }
+        state.data_bytes.append(0)
+    }
+}
+
+def process_string_escapes(s: string) -> list {
+    result = []
+    i = 0
+    while i < len(s) {
+        if s[i] == "\\" and i + 1 < len(s) {
+            next = s[i + 1]
+            if next == "n" { result.append(10) }
+            else {
+                if next == "t" { result.append(9) }
+                else {
+                    if next == "r" { result.append(13) }
+                    else {
+                        if next == "0" { result.append(0) }
+                        else {
+                            if next == "\\" { result.append(92) }
+                            else {
+                                if next == "\"" { result.append(34) }
+                                else {
+                                    if next == "b" { result.append(8) }
+                                    else {
+                                        if next == "a" { result.append(7) }
+                                        else {
+                                            if next == "f" { result.append(12) }
+                                            else {
+                                                if next == "v" { result.append(11) }
+                                                else { result.append(ord(next)) }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            i = i + 2
+        } else {
+            result.append(ord(s[i]))
+            i = i + 1
+        }
+    }
+    return result
+}
+
+def process_label(state, label_name) {
+    sec_off = 0
+    if state.section == 0 {
+        sec_off = len(state.code)
+    } else {
+        sec_off = len(state.code) + len(state.data_bytes)
+    }
+    found = 0
+    j = 0
+    while j < len(state.labels) {
+        if state.labels[j].name == label_name {
+            state.labels[j].offset = sec_off
+            state.labels[j].defined = 1
+            state.labels[j].section = state.section
+            found = 1
+            break
+        }
+        j = j + 1
+    }
+    if found == 0 {
+        lbl = LabelEntry()
+        lbl.name = label_name
+        lbl.offset = sec_off
+        lbl.defined = 1
+        lbl.section = state.section
+        state.labels.append(lbl)
+    }
+}
+
+def process_directive(state, line) {
+    if line.directive == ".text" { state.section = 0 }
+    if line.directive == ".data" { state.section = 1 }
+    if line.directive == ".asciz" { emit_asciz(state, line.dir_arg) }
+    if line.directive == ".byte" {
+        b = atoi(line.dir_arg)
+        state.data_bytes.append(b)
+    }
+    if line.directive == ".extern" {
+        sym_name = line.dir_arg
+        found = 0
+        j = 0
+        while j < len(state.labels) {
+            if state.labels[j].name == sym_name {
+                found = 1
+                break
+            }
+            j = j + 1
+        }
+        if found == 0 {
+            lbl = LabelEntry()
+            lbl.name = sym_name
+            lbl.offset = 0
+            lbl.defined = 0
+            state.labels.append(lbl)
+        }
+    }
+    if line.directive == ".global" {
+        state.globals.append(line.dir_arg)
+    }
+}
+
+def pass2_encode(state) {
+    i = 0
+    while i < len(state.lines) {
+        line = state.lines[i]
+        if line.kind == "label" {
+            process_label(state, line.label)
+        }
+        if line.kind == "label_directive" {
+            process_label(state, line.label)
+            process_directive(state, line)
+        }
+        if line.kind == "label_instruction" {
+            process_label(state, line.label)
+            emit_instruction(state, line)
+        }
+        if line.kind == "directive" {
+            process_directive(state, line)
+        }
+        if line.kind == "instruction" {
+            emit_instruction(state, line)
+        }
+        if line.kind == "label" {
+            process_label(state, line.label)
+        }
+        i = i + 1
+    }
+}
+
+def resolve_label(state, name: string) -> int {
+    i = 0
+    while i < len(state.labels) {
+        if state.labels[i].name == name and state.labels[i].defined == 1 {
+            return state.labels[i].offset
+        }
+        i = i + 1
+    }
+    return 0 - 1
+}
+
+def resolve_fixups(state) {
+    i = 0
+    while i < len(state.fixups) {
+        fixup = state.fixups[i]
+        target_off = resolve_label(state, fixup.target)
+        if target_off >= 0 {
+            if fixup.size == 4 {
+                rel = target_off - (fixup.offset + 4)
+                imm26 = (rel / 4) & 0x3FFFFFF
+                val = read_u32(state, fixup.offset) | imm26
+                write_u32(state, fixup.offset, val)
+            }
+            if fixup.size == 5 {
+                page_diff = (target_off >> 12) - (fixup.offset >> 12)
+                imm21 = page_diff & 0x1FFFFF
+                immlo = imm21 & 3
+                immhi = imm21 >> 2
+                val = read_u32(state, fixup.offset) & 0x9F00001F
+                val = val | (immlo << 29) | (immhi << 5)
+                write_u32(state, fixup.offset, val)
+            }
+            if fixup.size == 6 {
+                imm12 = target_off & 0xFFF
+                val = read_u32(state, fixup.offset) & 0xFFC003FF
+                val = val | (imm12 << 10)
+                write_u32(state, fixup.offset, val)
+            }
+            if fixup.size == 7 {
+                rel = target_off - (fixup.offset + 4)
+                imm19 = (rel / 4) & 0x7FFFF
+                val = read_u32(state, fixup.offset) & 0xFF00001F
+                val = val | (imm19 << 5)
+                write_u32(state, fixup.offset, val)
+            }
+        }
+        i = i + 1
+    }
+}

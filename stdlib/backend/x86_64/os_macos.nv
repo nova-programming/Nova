@@ -1,13 +1,19 @@
 # x86_64 macOS OS Abstraction
 
+@raw {
+    "    .extern _nova_read_file"
+    "    .extern _sys_get_args"
+    "    .extern _nova_get_tick_count"
+}
+
 def sys_open(path: string, mode: string) -> int {
     res = -1
     if mode == "r" {
         @raw {
             "    mov rdi, [rbp - 8]"
-            "    mov rsi, 0" # O_RDONLY
+            "    mov rsi, 0"
             "    mov rdx, 0"
-            "    mov rax, 0x2000005" # sys_open
+            "    mov rax, 0x2000005"
             "    syscall"
             "    mov [rbp - 24], rax"
         }
@@ -15,9 +21,9 @@ def sys_open(path: string, mode: string) -> int {
     if mode == "w" {
         @raw {
             "    mov rdi, [rbp - 8]"
-            "    mov rsi, 0x0601" # O_WRONLY | O_CREAT | O_TRUNC
-            "    mov rdx, 438" # 0666
-            "    mov rax, 0x2000005" # sys_open
+            "    mov rsi, 0x0601"
+            "    mov rdx, 438"
+            "    mov rax, 0x2000005"
             "    syscall"
             "    mov [rbp - 24], rax"
         }
@@ -26,29 +32,35 @@ def sys_open(path: string, mode: string) -> int {
 }
 
 def sys_read(fd: int) {
-    return ""
+    res = ""
+    @raw {
+        "    mov rdi, [rbp - 8]"
+        "    sub rsp, 32"
+        "    call _nova_read_file"
+        "    add rsp, 32"
+        "    mov r12, rax"
+    }
+    return res
 }
 
 def sys_write(fd: int, content: string) {
-    bytes_written = 0
     @raw {
         "    mov rdi, [rbp - 8]"
         "    mov rsi, [rbp - 16]"
         "    mov rdx, [rsi]"
         "    add rsi, 16"
-        "    mov rax, 0x2000004" # sys_write
+        "    mov rax, 0x2000004"
         "    syscall"
     }
 }
 
 def sys_write_raw(fd: int, content: list) {
-    bytes_written = 0
     @raw {
         "    mov rdi, [rbp - 8]"
         "    mov rsi, [rbp - 16]"
         "    mov rdx, [rsi]"
         "    add rsi, 16"
-        "    mov rax, 0x2000004" # sys_write
+        "    mov rax, 0x2000004"
         "    syscall"
     }
 }
@@ -56,7 +68,7 @@ def sys_write_raw(fd: int, content: list) {
 def sys_close(fd: int) {
     @raw {
         "    mov rdi, [rbp - 8]"
-        "    mov rax, 0x2000006" # sys_close
+        "    mov rax, 0x2000006"
         "    syscall"
     }
 }
@@ -66,11 +78,11 @@ def sys_alloc(size: int) -> int {
     @raw {
         "    mov rdi, 0"
         "    mov rsi, [rbp - 8]"
-        "    mov rdx, 3" # PROT_READ | PROT_WRITE
-        "    mov r10, 4098" # MAP_PRIVATE | MAP_ANON
+        "    mov rdx, 3"
+        "    mov r10, 4098"
         "    mov r8, -1"
         "    mov r9, 0"
-        "    mov rax, 0x20000C5" # sys_mmap
+        "    mov rax, 0x20000C5"
         "    syscall"
         "    mov [rbp - 16], rax"
     }
@@ -87,23 +99,37 @@ def sys_platform() -> string {
 def sys_flush(fd: int) {
     @raw {
         "    mov rdi, [rbp - 8]"
-        "    mov rax, 0x200005F" # sys_fsync
+        "    mov rax, 0x200005F"
         "    syscall"
     }
 }
 
 def sys_get_args() -> list {
-    return []
+    res = []
+    @raw {
+        "    sub rsp, 32"
+        "    call _sys_get_args"
+        "    add rsp, 32"
+        "    mov r12, rax"
+    }
+    return res
 }
 
 def sys_get_tick_count() -> int {
-    return 0
+    res = 0
+    @raw {
+        "    sub rsp, 32"
+        "    call _nova_get_tick_count"
+        "    add rsp, 32"
+        "    mov r12, rax"
+    }
+    return res
 }
 
 def sys_exit(code: int) {
     @raw {
         "    mov rdi, [rbp - 8]"
-        "    mov rax, 0x2000001" # sys_exit
+        "    mov rax, 0x2000001"
         "    syscall"
     }
 }

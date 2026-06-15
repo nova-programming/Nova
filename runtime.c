@@ -269,6 +269,9 @@ int main(void) {
 #include <string.h>
 #include <stdarg.h>
 #include <stdint.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
 
 #if defined(LINUX_WRAP)
 SYSCALL int _printf(const char *fmt, ...) {
@@ -524,7 +527,8 @@ SYSCALL void _dict_remove(void *d, const char *k) { dict_remove(d, k); }
 SYSCALL void *_dict_keys(void *d) { return dict_keys(d); }
 SYSCALL void *_dict_values(void *d) { return dict_values(d); }
 SYSCALL void *_dict_items(void *d) { return dict_items(d); }
-SYSCALL void *STR_PFX(sys_get_args)(void) {
+SYSCALL const char *_sys_platform(void) { return "linux"; }
+SYSCALL void *_sys_get_args(void) {
     extern int __nova_argc;
     extern char **__nova_argv;
     int n = __nova_argc;
@@ -572,6 +576,38 @@ SYSCALL void *__sys_get_args(void) {
     }
     return list;
 }
+#elif defined(MACOS)
+/* macOS: libc exports with underscore, but our C functions are compiled as
+ * bare names (no underscore). These wrappers add the _ prefix used by Nova's assembly. */
+SYSCALL void *_dict_new(void) { return dict_new(); }
+SYSCALL int _dict_has(void *d, const char *k) { return dict_has(d, k); }
+SYSCALL intptr_t _dict_get(void *d, const char *k) { return dict_get(d, k); }
+SYSCALL void _dict_set(void *d, const char *k, intptr_t v) { dict_set(d, k, v); }
+SYSCALL void _dict_remove(void *d, const char *k) { dict_remove(d, k); }
+SYSCALL void *_dict_keys(void *d) { return dict_keys(d); }
+SYSCALL void *_dict_values(void *d) { return dict_values(d); }
+SYSCALL void *_dict_items(void *d) { return dict_items(d); }
+SYSCALL const char *_sys_platform(void) { return "darwin"; }
+#endif
+
+/* ==================== File read + get_args for Linux/macOS (no Win32 API) ==================== */
+#if defined(LINUX_WRAP) || defined(MACOS)
+SYSCALL char *_nova_read_file(int fd) {
+    off_t len = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+    char *buf = malloc((size_t)len + 1);
+    if (!buf) return 0;
+    ssize_t n = read(fd, buf, (size_t)len);
+    if (n < 0) { free(buf); return 0; }
+    buf[n] = '\0';
+    return buf;
+}
+
+SYSCALL int _nova_get_tick_count(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+}
 #endif
 
 /* ==================== String helper functions ==================== */
@@ -594,4 +630,94 @@ SYSCALL char *_str_sub(const char *s, int start, int end) {
     }
     res[len] = '\0';
     return res;
+}
+
+/* ==================== Built-in math and file functions ==================== */
+SYSCALL int _abs(int n) {
+    return n < 0 ? -n : n;
+}
+
+SYSCALL int _min(int a, int b) {
+    return a < b ? a : b;
+}
+
+SYSCALL int _max(int a, int b) {
+    return a > b ? a : b;
+}
+
+SYSCALL int _file_exists(const char *path) {
+#if defined(_WIN32)
+    DWORD attrs = GetFileAttributesA(path);
+    return (attrs != INVALID_FILE_ATTRIBUTES) ? 1 : 0;
+#else
+    FILE *f = fopen(path, "r");
+    if (f) { fclose(f); return 1; }
+    return 0;
+#endif
+}
+
+SYSCALL int _file_size(const char *path) {
+#if defined(_WIN32)
+    HANDLE h = CreateFileA(path, 0x80000000, 0, 0, 3, 0x80, 0);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    DWORD sz = GetFileSize(h, NULL);
+    CloseHandle(h);
+    return (int)sz;
+#else
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fclose(f);
+    return (int)sz;
+#endif
+}
+
+SYSCALL const char *_file_type(const char *path) {
+#if defined(_WIN32)
+    DWORD attrs = GetFileAttributesA(path);
+    if (attrs == INVALID_FILE_ATTRIBUTES) return "";
+    if (attrs & FILE_ATTRIBUTE_DIRECTORY) return "dir";
+    return "file";
+#else
+    struct stat st;
+    if (stat(path, &st) != 0) return "";
+    if (S_ISDIR(st.st_mode)) return "dir";
+    return "file";
+#endif
+}
+
+SYSCALL char *_now(void) {
+#if defined(_WIN32)
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+#else
+    time_t t = time(NULL);
+    struct tm *lt = localtime(&t);
+#endif
+    char *buf;
+#if defined(_WIN32)
+    buf = (char*)STR_PFX(malloc)(32);
+#else
+    buf = (char*)malloc(32);
+#endif
+    if (!buf) return 0;
+#if defined(_WIN32)
+    int pos = 0, v;
+    v = st.wYear;   buf[pos++] = '0' + v / 1000; buf[pos++] = '0' + (v / 100) % 10; buf[pos++] = '0' + (v / 10) % 10; buf[pos++] = '0' + v % 10;
+    buf[pos++] = '-';
+    v = st.wMonth;  buf[pos++] = '0' + v / 10; buf[pos++] = '0' + v % 10;
+    buf[pos++] = '-';
+    v = st.wDay;    buf[pos++] = '0' + v / 10; buf[pos++] = '0' + v % 10;
+    buf[pos++] = ' ';
+    v = st.wHour;   buf[pos++] = '0' + v / 10; buf[pos++] = '0' + v % 10;
+    buf[pos++] = ':';
+    v = st.wMinute; buf[pos++] = '0' + v / 10; buf[pos++] = '0' + v % 10;
+    buf[pos++] = ':';
+    v = st.wSecond; buf[pos++] = '0' + v / 10; buf[pos++] = '0' + v % 10;
+    buf[pos] = '\0';
+#else
+    strftime(buf, 32, "%Y-%m-%d %H:%M:%S", lt);
+#endif
+    return buf;
 }

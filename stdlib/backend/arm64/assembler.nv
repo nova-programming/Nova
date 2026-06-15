@@ -1,0 +1,38 @@
+import assembler_parse
+import assembler_encode
+import assembler_pass
+
+def assemble(asm_lines: list) -> list {
+    state = AssemblerState()
+    state.lines = []
+    state.labels = []
+    state.fixups = []
+    state.code = []
+    state.data_bytes = []
+    state.section = 0
+    state.org = 0
+    state.externs = []
+    state.globals = []
+    state.code_count = 0
+    state.data_count = 0
+
+    print("pass0 lines=" + str(len(asm_lines)))
+    i = 0
+    while i < len(asm_lines) {
+        pl = parse_line(asm_lines[i])
+        state.lines.append(pl)
+        i = i + 1
+    }
+    sys_flush()
+
+    pass2_encode(state)
+    
+    resolve_fixups(state)
+
+    result = []
+    result.append(state.code)
+    result.append(state.data_bytes)
+    result.append(state.labels)
+    result.append(state.fixups)
+    return result
+}

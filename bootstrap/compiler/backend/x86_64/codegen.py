@@ -4,10 +4,11 @@ from nova_ast.nodes import *
 class X86_64Codegen:
     """x86_64 System V AMD64 codegen. Supports Windows (MinGW _-prefix) and Unix (bare symbols)."""
 
-    def __init__(self, ast_nodes, module_names=None, debug_mode=0):
+    def __init__(self, ast_nodes, module_names=None, debug_mode=0, target_os="windows"):
         self.ast = ast_nodes
         self.debug_mode = debug_mode
         self.module_names = module_names or []
+        self.target_os = target_os
         self.assembly = []
         self.data_section = []
         self.string_literals = {}
@@ -148,7 +149,7 @@ class X86_64Codegen:
 
     def generate(self):
         self.assembly.append(".intel_syntax noprefix")
-        entry = "_main" if os.name == "nt" else "main"
+        entry = "_main" if self.target_os == "windows" else "main"
         self.assembly.append(f".global {entry}")
 
         for c_sym in ["printf", "malloc", "free", "realloc", "fopen", "fclose",
@@ -161,6 +162,9 @@ class X86_64Codegen:
         for d_sym in ["_dict_new", "_dict_get", "_dict_set", "_dict_has",
                        "_dict_remove", "_dict_keys", "_dict_values", "_dict_items"]:
             self.assembly.append(f".extern {d_sym}")
+
+        for b_sym in ["_abs", "_min", "_max", "_file_exists", "_file_size", "_file_type", "_now"]:
+            self.assembly.append(f".extern {b_sym}")
 
         self.data_section.append('fmt_int: .asciz "%d\\n"')
         self.data_section.append('fmt_int_pure: .asciz "%d"')
@@ -199,7 +203,7 @@ class X86_64Codegen:
         for fn in functions:
             self.compile_function(fn)
 
-        entry = "_main" if os.name == "nt" else "main"
+        entry = "_main" if self.target_os == "windows" else "main"
         self.assembly.append(f"{entry}:")
         self.assembly.append("    push rbp")
         self.assembly.append("    mov rbp, rsp")
@@ -697,6 +701,12 @@ class X86_64Codegen:
             self.assembly.append("    sub rsp, 32")
             self.assembly.append("    call _fclose")
             self.assembly.append("    add rsp, 32")
+        elif isinstance(node, Try):
+            for stmt in node.body:
+                self.compile_stmt(stmt)
+        elif isinstance(node, Throw):
+            self.compile_expr(node.value)
+            self.assembly.append("    add rsp, 8")
         else:
             self.compile_expr(node)
             self.assembly.append("    add rsp, 8")
@@ -1286,5 +1296,9 @@ class X86_64Codegen:
             self.assembly.append("    add rsp, 32")
             self.assembly.append("    pop rax")  # restore buffer pointer
             self.assembly.append("    push rax")
+        elif isinstance(node, Block):
+            for stmt in node.stmts[:-1]:
+                self.compile_stmt(stmt)
+            self.compile_expr(node.stmts[-1])
         else:
             raise Exception(f"[line {getattr(node, 'line', '?')}] Unsupported expression: {type(node).__name__}")

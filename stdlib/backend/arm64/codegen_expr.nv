@@ -296,12 +296,7 @@ def compile_leaf_to_reg(state: CodegenState, node: AstNode, reg_name: string) {
             emit(state, "    mov " + reg_name + ", " + reg)
         } else {
             offset = find_var_offset(state, node.val_str)
-            if offset < 0 {
-                abs_off = 0 - offset
-                emit(state, "    ldr " + reg_name + ", [%b, #-" + str(abs_off) + "]")
-            } else {
-                emit(state, "    ldr " + reg_name + ", [%b, #-" + str(offset) + "]")
-            }
+            emit(state, "    ldr " + reg_name + ", [%b, #" + str(offset) + "]")
         }
     }
 }
@@ -331,12 +326,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    str " + reg + ", [sp, #-16]!")
         } else {
             offset = find_var_offset(state, node.val_str)
-            if offset < 0 {
-                abs_off = 0 - offset
-                emit(state, "    ldr %a, [%b, #-" + str(abs_off) + "]")
-            } else {
-                emit(state, "    ldr %a, [%b, #-" + str(offset) + "]")
-            }
+            emit(state, "    ldr %a, [%b, #" + str(offset) + "]")
             emit(state, "    str %a, [sp, #-16]!")
         }
     }

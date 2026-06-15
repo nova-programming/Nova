@@ -13,12 +13,13 @@ class Instance:
         self.ref_count = 0
 
 class Frame:
-    def __init__(self, return_address, local_env, self_context=None, is_init=False, pending_action=None):
+    def __init__(self, return_address, local_env, self_context=None, is_init=False, pending_action=None, handler_depth=0):
         self.return_address = return_address
         self.locals = local_env.copy() if local_env else {}
         self.self_context = self_context
         self.is_init = is_init
         self.pending_action = pending_action  # Action to perform on return value (e.g. 'print')
+        self.handler_depth = handler_depth  # Saved handler stack depth for function scope
 
 class VirtualMachine:
     def __init__(self, program):
@@ -43,6 +44,8 @@ class VirtualMachine:
         self.open_files = {} # fd -> file object
         self.next_fd = 1
 
+        self.handler_stack = []  # (catch_ip, stack_depth)
+
     def retain(self, obj):
         if isinstance(obj, Instance):
             obj.ref_count += 1
@@ -66,8 +69,12 @@ class VirtualMachine:
     def _to_bytes(self, val):
         return bytearray(self._to_str(val).encode('utf-8'))
 
-    def _call_string_builtin(self, func_name, args):
+    def _call_builtin(self, func_name, args):
         handler = _STRING_HANDLERS.get(func_name)
+        if handler:
+            handler(self, args)
+            return True
+        handler = _BUILTIN_HANDLERS.get(func_name)
         if handler:
             handler(self, args)
             return True
@@ -116,7 +123,7 @@ class VirtualMachine:
                         if len(params) > 0:
                             p = params[0][0] if isinstance(params[0], (list, tuple)) else params[0]
                             local_env[p] = b
-                        self.frames.append(Frame(self.ip, local_env, self_context=a))
+                        self.frames.append(Frame(self.ip, local_env, self_context=a, handler_depth=len(self.handler_stack)))
                         self.ip = func_meta["ip"]
                         continue
                 if isinstance(a, bytearray) and not isinstance(b, bytearray):
@@ -136,7 +143,7 @@ class VirtualMachine:
                         if len(params) > 0:
                             p = params[0][0] if isinstance(params[0], (list, tuple)) else params[0]
                             local_env[p] = b
-                        self.frames.append(Frame(self.ip, local_env, self_context=a))
+                        self.frames.append(Frame(self.ip, local_env, self_context=a, handler_depth=len(self.handler_stack)))
                         self.ip = func_meta["ip"]
                         continue
                 self.stack.append(a - b)
@@ -152,7 +159,7 @@ class VirtualMachine:
                         if len(params) > 0:
                             p = params[0][0] if isinstance(params[0], (list, tuple)) else params[0]
                             local_env[p] = b
-                        self.frames.append(Frame(self.ip, local_env, self_context=a))
+                        self.frames.append(Frame(self.ip, local_env, self_context=a, handler_depth=len(self.handler_stack)))
                         self.ip = func_meta["ip"]
                         continue
                 self.stack.append(a * b)
@@ -179,7 +186,7 @@ class VirtualMachine:
                         if len(params) > 0:
                             p = params[0][0] if isinstance(params[0], (list, tuple)) else params[0]
                             local_env[p] = b
-                        self.frames.append(Frame(self.ip, local_env, self_context=a))
+                        self.frames.append(Frame(self.ip, local_env, self_context=a, handler_depth=len(self.handler_stack)))
                         self.ip = func_meta["ip"]
                         continue
                 self.stack.append(a == b)
@@ -241,6 +248,21 @@ class VirtualMachine:
             elif opcode == OpCode.NOT:
                 a = self.stack.pop()
                 self.stack.append(not a)
+            elif opcode == OpCode.PUSH_HANDLER:
+                self.handler_stack.append((arg, len(self.stack)))
+            elif opcode == OpCode.POP_HANDLER:
+                if self.handler_stack:
+                    self.handler_stack.pop()
+            elif opcode == OpCode.THROW:
+                exc_val = self.stack.pop()
+                if not self.handler_stack:
+                    print(f"Unhandled exception: {exc_val}")
+                    break
+                catch_ip, saved_sp = self.handler_stack.pop()
+                # Restore stack to pre-try depth
+                del self.stack[saved_sp:]
+                self.stack.append(exc_val)
+                self.ip = catch_ip
             elif opcode == OpCode.JUMP:
                 self.ip = arg
             elif opcode == OpCode.JUMP_IF_FALSE:
@@ -253,7 +275,7 @@ class VirtualMachine:
                     method_name = f"{val.class_name}.__str__"
                     if method_name in self.functions:
                         func_meta = self.functions[method_name]
-                        self.frames.append(Frame(self.ip, {}, self_context=val, pending_action='print'))
+                        self.frames.append(Frame(self.ip, {}, self_context=val, pending_action='print', handler_depth=len(self.handler_stack)))
                         self.ip = func_meta["ip"]
                         continue
                     else:
@@ -349,7 +371,7 @@ class VirtualMachine:
                     method_name = f"{val.class_name}.__len__"
                     if method_name in self.functions:
                         func_meta = self.functions[method_name]
-                        self.frames.append(Frame(self.ip, {}, self_context=val))
+                        self.frames.append(Frame(self.ip, {}, self_context=val, handler_depth=len(self.handler_stack)))
                         self.ip = func_meta["ip"]
                         continue
                     else:
@@ -523,7 +545,7 @@ class VirtualMachine:
                     param_name = param[0] if isinstance(param, (list, tuple)) else param
                     local_env[param_name] = args[i] if i < len(args) else 0
 
-                self.frames.append(Frame(self.ip, local_env, self_context=instance))
+                self.frames.append(Frame(self.ip, local_env, self_context=instance, handler_depth=len(self.handler_stack)))
                 self.ip = func_meta["ip"]
             elif opcode == OpCode.LOAD_LIB:
                 lib_path = self.stack.pop()
@@ -601,7 +623,7 @@ class VirtualMachine:
                     method_name = f"{val.class_name}.__str__"
                     if method_name in self.functions:
                         func_meta = self.functions[method_name]
-                        self.frames.append(Frame(self.ip, {}, self_context=val))
+                        self.frames.append(Frame(self.ip, {}, self_context=val, handler_depth=len(self.handler_stack)))
                         self.ip = func_meta["ip"]
                         continue
                     else:
@@ -630,14 +652,14 @@ class VirtualMachine:
                             local_env[param_name] = args[i] if i < len(args) else 0
                         # Push instance first (it will be the return value after __init__)
                         self.stack.append(instance)
-                        self.frames.append(Frame(self.ip, local_env, self_context=instance, is_init=True))
+                        self.frames.append(Frame(self.ip, local_env, self_context=instance, is_init=True, handler_depth=len(self.handler_stack)))
                         self.ip = func_meta["ip"]
                     else:
                         self.stack.append(instance)
                     continue
 
                 if func_name not in self.functions:
-                    if self._call_string_builtin(func_name, args):
+                    if self._call_builtin(func_name, args):
                         continue
                     raise Exception(f"Function {func_name} not found")
 
@@ -648,11 +670,14 @@ class VirtualMachine:
                     param_name = param[0] if isinstance(param, (list, tuple)) else param
                     local_env[param_name] = args[i] if i < len(args) else 0
 
-                self.frames.append(Frame(self.ip, local_env))
+                self.frames.append(Frame(self.ip, local_env, handler_depth=len(self.handler_stack)))
                 self.ip = func_meta["ip"]
             elif opcode == OpCode.RETURN:
                 if self.frames:
                     frame = self.frames.pop()
+
+                    # Restore handler stack to function entry depth
+                    del self.handler_stack[frame.handler_depth:]
 
                     # ARC: when a frame pops, release all locals
                     for val in frame.locals.values():
@@ -721,4 +746,51 @@ _STRING_HANDLERS = {
     "to_lower": _string_to_lower,
     "starts_with": _string_starts_with,
     "ends_with": _string_ends_with,
+}
+
+# === Built-in function handlers (for the VM interpreter) ===
+
+def _builtin_abs(m, args):
+    m.stack.append(abs(args[0]))
+
+def _builtin_min(m, args):
+    m.stack.append(min(args[0], args[1]))
+
+def _builtin_max(m, args):
+    m.stack.append(max(args[0], args[1]))
+
+def _builtin_now(m, args):
+    import datetime
+    m.stack.append(bytearray(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S").encode('utf-8')))
+
+def _builtin_file_exists(m, args):
+    import os
+    m.stack.append(1 if os.path.exists(m._to_str(args[0])) else 0)
+
+def _builtin_file_size(m, args):
+    import os
+    path = m._to_str(args[0])
+    try:
+        m.stack.append(os.path.getsize(path))
+    except:
+        m.stack.append(0)
+
+def _builtin_file_type(m, args):
+    import os
+    path = m._to_str(args[0])
+    if os.path.isdir(path):
+        m.stack.append(bytearray(b"dir"))
+    elif os.path.isfile(path):
+        m.stack.append(bytearray(b"file"))
+    else:
+        m.stack.append(bytearray(b""))
+
+_BUILTIN_HANDLERS = {
+    "abs": _builtin_abs,
+    "min": _builtin_min,
+    "max": _builtin_max,
+    "now": _builtin_now,
+    "file_exists": _builtin_file_exists,
+    "file_size": _builtin_file_size,
+    "file_type": _builtin_file_type,
 }

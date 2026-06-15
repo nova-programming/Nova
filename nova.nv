@@ -78,7 +78,12 @@ if cmd == "build" {
     out_len = len(file_path)
     print("out_len is " + str(out_len))
     sys_flush()
-    out_file = file_path[0 : out_len - 3] + ".exe"
+    plat = sys_platform()
+    if plat == "windows" {
+        out_file = file_path[0 : out_len - 3] + ".exe"
+    } else {
+        out_file = file_path[0 : out_len - 3]
+    }
     print("out_file is " + out_file)
     sys_flush()
     
@@ -87,7 +92,7 @@ if cmd == "build" {
         start_ticks = sys_get_tick_count()
     }
     
-    compile_to_exe(file_path, out_file, debug_mode, target_arch)
+    compile_to_exe(file_path, out_file, debug_mode, target_arch, plat)
     
     if bench_mode == 1 {
         end_ticks = sys_get_tick_count()

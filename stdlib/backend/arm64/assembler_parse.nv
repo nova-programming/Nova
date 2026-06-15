@@ -1,0 +1,547 @@
+
+
+def byte_extract(val: int, shift: int) -> int {
+    remaining = val
+    i = 0
+    while i <= shift {
+        if i == shift {
+            r = remaining % 256
+            if r < 0 { r = r + 256 }
+            return r
+        }
+        low_byte = remaining % 256
+        if low_byte < 0 { low_byte = low_byte + 256 }
+        remaining = remaining - low_byte
+        remaining = remaining / 256
+        i = i + 8
+    }
+    return 0
+}
+
+def byte_mask(val: int) -> int {
+    r = val % 256
+    if r < 0 { r = r + 256 }
+    return r
+}
+
+def ord(ch: string) -> int {
+    if ch == "\n" { return 10 }
+    if ch == "\r" { return 13 }
+    if ch == "\t" { return 9 }
+    if ch == " " { return 32 }
+    if ch == "!" { return 33 }
+    if ch == "\"" { return 34 }
+    if ch == "#" { return 35 }
+    if ch == "$" { return 36 }
+    if ch == "%" { return 37 }
+    if ch == "&" { return 38 }
+    if ch == "'" { return 39 }
+    if ch == "(" { return 40 }
+    if ch == ")" { return 41 }
+    if ch == "*" { return 42 }
+    if ch == "+" { return 43 }
+    if ch == "," { return 44 }
+    if ch == "-" { return 45 }
+    if ch == "." { return 46 }
+    if ch == "/" { return 47 }
+    if ch == "0" { return 48 } if ch == "1" { return 49 } if ch == "2" { return 50 }
+    if ch == "3" { return 51 } if ch == "4" { return 52 } if ch == "5" { return 53 }
+    if ch == "6" { return 54 } if ch == "7" { return 55 } if ch == "8" { return 56 }
+    if ch == "9" { return 57 }
+    if ch == ":" { return 58 } if ch == ";" { return 59 }
+    if ch == "<" { return 60 } if ch == "=" { return 61 } if ch == ">" { return 62 }
+    if ch == "?" { return 63 } if ch == "@" { return 64 }
+    if ch == "A" { return 65 } if ch == "B" { return 66 } if ch == "C" { return 67 }
+    if ch == "D" { return 68 } if ch == "E" { return 69 } if ch == "F" { return 70 }
+    if ch == "G" { return 71 } if ch == "H" { return 72 } if ch == "I" { return 73 }
+    if ch == "J" { return 74 } if ch == "K" { return 75 } if ch == "L" { return 76 }
+    if ch == "M" { return 77 } if ch == "N" { return 78 } if ch == "O" { return 79 }
+    if ch == "P" { return 80 } if ch == "Q" { return 81 } if ch == "R" { return 82 }
+    if ch == "S" { return 83 } if ch == "T" { return 84 } if ch == "U" { return 85 }
+    if ch == "V" { return 86 } if ch == "W" { return 87 } if ch == "X" { return 88 }
+    if ch == "Y" { return 89 } if ch == "Z" { return 90 }
+    if ch == "[" { return 91 } if ch == "\\" { return 92 } if ch == "]" { return 93 }
+    if ch == "^" { return 94 } if ch == "_" { return 95 }
+    if ch == "`" { return 96 }
+    if ch == "a" { return 97 } if ch == "b" { return 98 } if ch == "c" { return 99 }
+    if ch == "d" { return 100 } if ch == "e" { return 101 } if ch == "f" { return 102 }
+    if ch == "g" { return 103 } if ch == "h" { return 104 } if ch == "i" { return 105 }
+    if ch == "j" { return 106 } if ch == "k" { return 107 } if ch == "l" { return 108 }
+    if ch == "m" { return 109 } if ch == "n" { return 110 } if ch == "o" { return 111 }
+    if ch == "p" { return 112 } if ch == "q" { return 113 } if ch == "r" { return 114 }
+    if ch == "s" { return 115 } if ch == "t" { return 116 } if ch == "u" { return 117 }
+    if ch == "v" { return 118 } if ch == "w" { return 119 } if ch == "x" { return 120 }
+    if ch == "y" { return 121 } if ch == "z" { return 122 }
+    if ch == "{" { return 123 } if ch == "|" { return 124 } if ch == "}" { return 125 }
+    if ch == "~" { return 126 }
+    return 0
+}
+
+def reg_code_arm64(name: string) -> int {
+    if name == "x0" or name == "w0" { return 0 }
+    if name == "x1" or name == "w1" { return 1 }
+    if name == "x2" or name == "w2" { return 2 }
+    if name == "x3" or name == "w3" { return 3 }
+    if name == "x4" or name == "w4" { return 4 }
+    if name == "x5" or name == "w5" { return 5 }
+    if name == "x6" or name == "w6" { return 6 }
+    if name == "x7" or name == "w7" { return 7 }
+    if name == "x8" or name == "w8" { return 8 }
+    if name == "x9" or name == "w9" { return 9 }
+    if name == "x10" or name == "w10" { return 10 }
+    if name == "x11" or name == "w11" { return 11 }
+    if name == "x12" or name == "w12" { return 12 }
+    if name == "x13" or name == "w13" { return 13 }
+    if name == "x14" or name == "w14" { return 14 }
+    if name == "x15" or name == "w15" { return 15 }
+    if name == "x16" or name == "w16" { return 16 }
+    if name == "x17" or name == "w17" { return 17 }
+    if name == "x18" or name == "w18" { return 18 }
+    if name == "x19" or name == "w19" { return 19 }
+    if name == "x20" or name == "w20" { return 20 }
+    if name == "x21" or name == "w21" { return 21 }
+    if name == "x22" or name == "w22" { return 22 }
+    if name == "x23" or name == "w23" { return 23 }
+    if name == "x24" or name == "w24" { return 24 }
+    if name == "x25" or name == "w25" { return 25 }
+    if name == "x26" or name == "w26" { return 26 }
+    if name == "x27" or name == "w27" { return 27 }
+    if name == "x28" or name == "w28" { return 28 }
+    if name == "fp" { return 29 }
+    if name == "x29" or name == "w29" { return 29 }
+    if name == "lr" { return 30 }
+    if name == "x30" or name == "w30" { return 30 }
+    if name == "sp" { return 31 }
+    if name == "xzr" { return 31 }
+    if name == "wzr" { return 31 }
+    return -1
+}
+
+def is_xreg(name: string) -> int {
+    if name == "x0" { return 1 } if name == "x1" { return 1 }
+    if name == "x2" { return 1 } if name == "x3" { return 1 }
+    if name == "x4" { return 1 } if name == "x5" { return 1 }
+    if name == "x6" { return 1 } if name == "x7" { return 1 }
+    if name == "x8" { return 1 } if name == "x9" { return 1 }
+    if name == "x10" { return 1 } if name == "x11" { return 1 }
+    if name == "x12" { return 1 } if name == "x13" { return 1 }
+    if name == "x14" { return 1 } if name == "x15" { return 1 }
+    if name == "x16" { return 1 } if name == "x17" { return 1 }
+    if name == "x18" { return 1 } if name == "x19" { return 1 }
+    if name == "x20" { return 1 } if name == "x21" { return 1 }
+    if name == "x22" { return 1 } if name == "x23" { return 1 }
+    if name == "x24" { return 1 } if name == "x25" { return 1 }
+    if name == "x26" { return 1 } if name == "x27" { return 1 }
+    if name == "x28" { return 1 } if name == "x29" { return 1 }
+    if name == "x30" { return 1 } if name == "xzr" { return 1 }
+    if name == "sp" { return 1 } if name == "fp" { return 1 }
+    if name == "lr" { return 1 }
+    return 0
+}
+
+def is_wreg(name: string) -> int {
+    if name == "w0" { return 1 } if name == "w1" { return 1 }
+    if name == "w2" { return 1 } if name == "w3" { return 1 }
+    if name == "w4" { return 1 } if name == "w5" { return 1 }
+    if name == "w6" { return 1 } if name == "w7" { return 1 }
+    if name == "w8" { return 1 } if name == "w9" { return 1 }
+    if name == "w10" { return 1 } if name == "w11" { return 1 }
+    if name == "w12" { return 1 } if name == "w13" { return 1 }
+    if name == "w14" { return 1 } if name == "w15" { return 1 }
+    if name == "w16" { return 1 } if name == "w17" { return 1 }
+    if name == "w18" { return 1 } if name == "w19" { return 1 }
+    if name == "w20" { return 1 } if name == "w21" { return 1 }
+    if name == "w22" { return 1 } if name == "w23" { return 1 }
+    if name == "w24" { return 1 } if name == "w25" { return 1 }
+    if name == "w26" { return 1 } if name == "w27" { return 1 }
+    if name == "w28" { return 1 } if name == "w29" { return 1 }
+    if name == "w30" { return 1 } if name == "wzr" { return 1 }
+    return 0
+}
+
+def is_arm64_reg(name: string) -> int {
+    r = reg_code_arm64(name)
+    if r >= 0 { return 1 }
+    return 0
+}
+
+data AsmLine {
+    kind: string
+    label: string
+    mnemonic: string
+    operands: list
+    directive: string
+    dir_arg: string
+    raw: string
+}
+
+data LabelEntry {
+    name: string
+    offset: int
+    defined: int
+    section: int
+}
+
+data Fixup {
+    offset: int
+    target: string
+    size: int
+}
+
+data AssemblerState {
+    lines: list
+    labels: list
+    fixups: list
+    code: list
+    data_bytes: list
+    section: int
+    org: int
+    externs: list
+    globals: list
+    code_count: int
+    data_count: int
+}
+
+data OperandInfo {
+    kind: string
+    reg: int
+    width: int
+    imm_val: int
+    mem_base: int
+    mem_disp: int
+    mem_offset_reg: int
+    mem_offset_shift: int
+    writeback: int
+    label: string
+}
+
+def trim(s: string) -> string {
+    start = 0
+    while start < len(s) {
+        if s[start] != " " and s[start] != "\t" { break }
+        start = start + 1
+    }
+    end = len(s)
+    while end > start {
+        if s[end - 1] != " " and s[end - 1] != "\t" and s[end - 1] != "\r" { break }
+        end = end - 1
+    }
+    if start >= end { return "" }
+    return str_sub(s, start, end)
+}
+
+def parse_line(raw: string) -> AsmLine {
+    line = AsmLine()
+    line.raw = raw
+    trimmed = trim(raw)
+
+    if len(trimmed) == 0 {
+        line.kind = "empty"
+        return line
+    }
+
+    if trimmed[0] == "#" {
+        line.kind = "empty"
+        return line
+    }
+
+    colon_idx = -1
+    i = 0
+    while i < len(trimmed) {
+        if trimmed[i] == ":" {
+            colon_idx = i
+            break
+        }
+        i = i + 1
+    }
+
+    if colon_idx >= 0 {
+        line.kind = "label"
+        line.label = trim(str_sub(trimmed, 0, colon_idx))
+        rest = trim(str_sub(trimmed, colon_idx + 1, len(trimmed)))
+        if len(rest) > 0 {
+            if rest[0] == "." {
+                line.kind = "label_directive"
+                line.directive = rest
+                space_idx2 = -1
+                j = 0
+                while j < len(rest) {
+                    if rest[j] == " " or rest[j] == "\t" {
+                        space_idx2 = j
+                        break
+                    }
+                    j = j + 1
+                }
+                if space_idx2 >= 0 {
+                    line.directive = str_sub(rest, 0, space_idx2)
+                    line.dir_arg = trim(str_sub(rest, space_idx2 + 1, len(rest)))
+                }
+            } else {
+                line.kind = "label_instruction"
+                line.mnemonic = rest
+                space_idx2 = -1
+                j = 0
+                while j < len(rest) {
+                    if rest[j] == " " or rest[j] == "\t" {
+                        space_idx2 = j
+                        break
+                    }
+                    j = j + 1
+                }
+                if space_idx2 >= 0 {
+                    line.mnemonic = str_sub(rest, 0, space_idx2)
+                    ops_str2 = trim(str_sub(rest, space_idx2 + 1, len(rest)))
+                    line.operands = []
+                    start2 = 0
+                    in_bracket2 = 0
+                    j = 0
+                    while j < len(ops_str2) {
+                        if ops_str2[j] == "[" { in_bracket2 = 1 }
+                        if ops_str2[j] == "]" { in_bracket2 = 0 }
+                        if ops_str2[j] == "," and in_bracket2 == 0 {
+                            line.operands.append(trim(str_sub(ops_str2, start2, j)))
+                            start2 = j + 1
+                        }
+                        j = j + 1
+                    }
+                    if start2 < len(ops_str2) {
+                        line.operands.append(trim(str_sub(ops_str2, start2, len(ops_str2))))
+                    }
+                }
+            }
+        }
+        return line
+    }
+
+    if trimmed[0] == "." {
+        line.kind = "directive"
+        space_idx = -1
+        i = 0
+        while i < len(trimmed) {
+            if trimmed[i] == " " or trimmed[i] == "\t" {
+                space_idx = i
+                break
+            }
+            i = i + 1
+        }
+        if space_idx >= 0 {
+            line.directive = str_sub(trimmed, 0, space_idx)
+            line.dir_arg = trim(str_sub(trimmed, space_idx + 1, len(trimmed)))
+        } else {
+            line.directive = trimmed
+            line.dir_arg = ""
+        }
+        return line
+    }
+
+    line.kind = "instruction"
+    line.operands = []
+
+    space_idx = -1
+    i = 0
+    while i < len(trimmed) {
+        if trimmed[i] == " " or trimmed[i] == "\t" {
+            space_idx = i
+            break
+        }
+        i = i + 1
+    }
+
+    if space_idx >= 0 {
+        line.mnemonic = str_sub(trimmed, 0, space_idx)
+        ops_str = trim(str_sub(trimmed, space_idx + 1, len(trimmed)))
+        start = 0
+        in_bracket = 0
+        i = 0
+        while i < len(ops_str) {
+            if ops_str[i] == "[" { in_bracket = 1 }
+            if ops_str[i] == "]" { in_bracket = 0 }
+            if ops_str[i] == "," and in_bracket == 0 {
+                line.operands.append(trim(str_sub(ops_str, start, i)))
+                start = i + 1
+            }
+            i = i + 1
+        }
+        if start < len(ops_str) {
+            line.operands.append(trim(str_sub(ops_str, start, len(ops_str))))
+        }
+    } else {
+        line.mnemonic = trimmed
+    }
+
+    return line
+}
+
+def parse_mem_content(content: string) -> OperandInfo {
+    info = OperandInfo()
+    info.kind = "mem"
+    info.mem_base = -1
+    info.mem_disp = 0
+    info.mem_offset_reg = -1
+    info.mem_offset_shift = 0
+    info.writeback = 0
+    info.reg = -1
+    info.width = 0
+    info.imm_val = 0
+    info.label = ""
+
+    if len(content) == 0 { return info }
+
+    parts = []
+    start = 0
+    in_lsl = 0
+    i = 0
+    while i < len(content) {
+        if content[i] == "," and in_lsl == 0 {
+            parts.append(trim(str_sub(content, start, i)))
+            start = i + 1
+        }
+        i = i + 1
+    }
+    parts.append(trim(str_sub(content, start, len(content))))
+
+    if len(parts) >= 1 {
+        base_reg = reg_code_arm64(parts[0])
+        if base_reg >= 0 {
+            info.mem_base = base_reg
+        } else {
+            info.mem_base = 31
+            info.label = parts[0]
+        }
+    }
+
+    if len(parts) >= 2 {
+        offset_str = parts[1]
+        if offset_str[0] == "#" {
+            info.mem_disp = atoi(str_sub(offset_str, 1, len(offset_str)))
+        } else {
+            off_reg = reg_code_arm64(offset_str)
+            if off_reg >= 0 {
+                info.mem_offset_reg = off_reg
+            } else {
+                lsl_idx = -1
+                j = 0
+                while j + 3 <= len(offset_str) {
+                    if str_sub(offset_str, j, j + 3) == "lsl" {
+                        lsl_idx = j
+                        break
+                    }
+                    j = j + 1
+                }
+                if lsl_idx >= 0 {
+                    reg_part = trim(str_sub(offset_str, 0, lsl_idx))
+                    shift_part = trim(str_sub(offset_str, lsl_idx + 3, len(offset_str)))
+                    info.mem_offset_reg = reg_code_arm64(reg_part)
+                    if len(shift_part) >= 2 and shift_part[0] == "#" {
+                        info.mem_offset_shift = atoi(str_sub(shift_part, 1, len(shift_part)))
+                    }
+                }
+            }
+        }
+    }
+
+    if len(parts) >= 3 {
+        third = parts[2]
+        if len(third) >= 3 and str_sub(third, 0, 3) == "lsl" {
+            shift_part = trim(str_sub(third, 3, len(third)))
+            if len(shift_part) >= 1 and shift_part[0] == "#" {
+                info.mem_offset_shift = atoi(str_sub(shift_part, 1, len(shift_part)))
+            }
+        }
+    }
+
+    return info
+}
+
+def parse_operand(op_str: string) -> OperandInfo {
+    info = OperandInfo()
+    info.reg = -1
+    info.width = 0
+    info.imm_val = 0
+    info.mem_base = -1
+    info.mem_disp = 0
+    info.mem_offset_reg = -1
+    info.mem_offset_shift = 0
+    info.writeback = 0
+    info.label = ""
+    op_str = trim(op_str)
+
+    if len(op_str) >= 6 and str_sub(op_str, 0, 6) == ":lo12:" {
+        label_str = trim(str_sub(op_str, 6, len(op_str)))
+        info.kind = "lo12_label"
+        info.label = label_str
+        return info
+    }
+
+    if len(op_str) >= 5 {
+        suffix = str_sub(op_str, len(op_str) - 5, len(op_str))
+        if suffix == "@PAGE" {
+            label_str = trim(str_sub(op_str, 0, len(op_str) - 5))
+            info.kind = "label"
+            info.label = label_str
+            return info
+        }
+    }
+
+    if is_arm64_reg(op_str) == 1 {
+        info.kind = "reg"
+        info.reg = reg_code_arm64(op_str)
+        if is_xreg(op_str) == 1 { info.width = 64 }
+        if is_wreg(op_str) == 1 { info.width = 32 }
+        return info
+    }
+
+    if op_str[0] == "[" {
+        has_writeback = 0
+        content_end = len(op_str) - 1
+
+        if content_end >= 1 and op_str[content_end] == "!" {
+            has_writeback = 1
+            content_end = content_end - 1
+        }
+
+        if content_end >= 1 and op_str[content_end] == "]" {
+            content_inner = str_sub(op_str, 1, content_end)
+        } else {
+            content_inner = str_sub(op_str, 1, len(op_str) - 1)
+        }
+
+        info = parse_mem_content(content_inner)
+        info.kind = "mem"
+        if has_writeback == 1 {
+            info.writeback = 1
+        }
+        return info
+    }
+
+    first = op_str[0]
+    if first == "'" {
+        info.kind = "imm"
+        if len(op_str) >= 3 {
+            info.imm_val = ord(op_str[1])
+        }
+        return info
+    }
+
+    if first == "#" {
+        info.kind = "imm"
+        val_str = str_sub(op_str, 1, len(op_str))
+        if len(val_str) > 0 and (val_str[0] == "-" or val_str[0] == "+") {
+            info.imm_val = atoi(val_str)
+        } else {
+            info.imm_val = atoi(val_str)
+        }
+        return info
+    }
+
+    if (first >= "0" and first <= "9") or first == "-" {
+        info.kind = "imm"
+        info.imm_val = atoi(op_str)
+        return info
+    }
+
+    info.kind = "label"
+    info.label = op_str
+
+    return info
+}

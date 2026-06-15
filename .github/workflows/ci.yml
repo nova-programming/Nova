@@ -48,7 +48,33 @@ jobs:
           mkdir -p /tmp/nova-ci
           printf 'print("Hello from Nova CI")\n' > /tmp/nova-ci/test_cc.nv
           python bootstrap/main.py build /tmp/nova-ci/test_cc.nv
-          /tmp/nova-ci/test_cc.exe
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            /tmp/nova-ci/test_cc.exe
+          else
+            /tmp/nova-ci/test_cc
+          fi
+        shell: bash
+
+      - name: Self-hosted bootstrap — Nova builds a test program
+        run: |
+          python bootstrap/main.py build nova.nv
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            STAGE1="./nova.exe"
+            STAGE1_SAFE="./nova-stage1.exe"
+          else
+            STAGE1="./nova"
+            STAGE1_SAFE="./nova-stage1"
+          fi
+          mv "$STAGE1" "$STAGE1_SAFE"
+          mkdir -p /tmp/nova-ci
+          printf 'print("Self-hosted Nova OK")\n' > /tmp/nova-ci/selfhost.nv
+          $STAGE1_SAFE build /tmp/nova-ci/selfhost.nv
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ./selfhost.exe
+          else
+            ./selfhost
+          fi
+        shell: bash
 
       - name: Verify install.py imports cleanly
         run: python -c "import install; print('install.py OK')"

@@ -294,6 +294,20 @@ class Compiler:
         elif isinstance(node, Data):
             # Data definitions are handled in the first pass metadata collection
             pass
+        elif isinstance(node, Try):
+            catch_label = self.emit(OpCode.PUSH_HANDLER)
+            for stmt in node.body:
+                self.compile_stmt(stmt)
+            self.emit(OpCode.POP_HANDLER)
+            end_label = self.emit(OpCode.JUMP)
+            self.patch_jump(catch_label, len(self.code))
+            self.emit(OpCode.STORE_NAME, node.catch_var)
+            for stmt in node.catch_body:
+                self.compile_stmt(stmt)
+            self.patch_jump(end_label, len(self.code))
+        elif isinstance(node, Throw):
+            self.compile_expr(node.value)
+            self.emit(OpCode.THROW)
 
     def compile_expr(self, node):
         if isinstance(node, Number):
@@ -414,5 +428,9 @@ class Compiler:
                 self.compile_expr(v)
                 self.compile_expr(k)
             self.emit(OpCode.BUILD_DICT, len(node.keys))
+        elif isinstance(node, Block):
+            for stmt in node.stmts[:-1]:
+                self.compile_stmt(stmt)
+            self.compile_expr(node.stmts[-1])
         else:
             raise Exception(f"Compiler unhandled expr: {type(node)}")

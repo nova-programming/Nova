@@ -46,6 +46,10 @@ def tokenize(code):
         line_num += code.count('\n', last_pos, pos)
         last_pos = pos
 
+        # Compute column (0-indexed, within current line)
+        line_start = code.rfind('\n', 0, pos) + 1
+        col = pos - line_start
+
         if kind in {"SKIP", "COMMENT"}:
             continue
         
@@ -55,7 +59,10 @@ def tokenize(code):
             continue
         
         elif kind == "MISMATCH":
-            raise SyntaxError(f"Unexpected character: {value!r} at line {line_num}")
+            e = SyntaxError(f"Unexpected character: {value!r} at line {line_num}, col {col}")
+            e.lineno = line_num
+            e.offset = col + 1
+            raise e
         
         # Treat hex and binary literals as regular numbers (int() handles both)
         if kind in ("HEX", "BIN"):
@@ -84,28 +91,28 @@ def tokenize(code):
                         if depth > 0:
                             # Unmatched brace, treat as normal text up to end
                             text = inner[i:]
-                            new_tokens.append(("STRING", '"' + text + '"', line_num))
+                            new_tokens.append(("STRING", '"' + text + '"', line_num, col))
                             break
 
                         expr_str = inner[i+1:j-1]
                         if not expr_str.strip():
                             # Empty {}, treat as normal text
                             text = inner[i:j]
-                            new_tokens.append(("STRING", '"' + text + '"', line_num))
+                            new_tokens.append(("STRING", '"' + text + '"', line_num, col))
                         else:
                             expr_tokens = tokenize(expr_str)
-                            new_tokens.append(("STR", "str", line_num))
-                            new_tokens.append(("LPAREN", "(", line_num))
+                            new_tokens.append(("STR", "str", line_num, col))
+                            new_tokens.append(("LPAREN", "(", line_num, col))
                             new_tokens.extend(expr_tokens)
-                            new_tokens.append(("RPAREN", ")", line_num))
+                            new_tokens.append(("RPAREN", ")", line_num, col))
                         i = j
                     else:
                         start = i
                         while i < len(inner) and inner[i] != '{':
                             i += 1
                         text = inner[start:i]
-                        new_tokens.append(("STRING", '"' + text + '"', line_num))
-                    new_tokens.append(("PLUS", "+", line_num))
+                        new_tokens.append(("STRING", '"' + text + '"', line_num, col))
+                    new_tokens.append(("PLUS", "+", line_num, col))
                 if new_tokens:
                     new_tokens.pop()
                 tokens.extend(new_tokens)
@@ -113,6 +120,6 @@ def tokenize(code):
 
             value = '"' + inner + '"'
         
-        tokens.append((kind, value, line_num))
+        tokens.append((kind, value, line_num, col))
     
     return tokens

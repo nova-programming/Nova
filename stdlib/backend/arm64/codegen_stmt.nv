@@ -31,11 +31,7 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             emit(state, "    mov " + reg + ", %a")
         } else {
             offset = find_var_offset(state, node.val_str)
-            if offset < 0 {
-                emit(state, "    str %a, [%b, #" + str(offset) + "]")
-            } else {
-                emit(state, "    str %a, [%b, #-" + str(offset) + "]")
-            }
+            emit(state, "    str %a, [%b, #" + str(offset) + "]")
         }
     }
     if node.kind == "DataFieldAssign" {
@@ -138,8 +134,10 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             emit(state, "    ldr " + state.used_regs[r] + ", [sp], #16")
             r = r - 1
         }
-        emit(state, "    mov %s, %b")
-        emit(state, "    ldp %b, lr, [sp], #16")
+        if state.local_offset > 0 {
+            emit(state, "    add sp, sp, #" + str(state.local_offset))
+        }
+        emit(state, "    ldp fp, lr, [sp], #16")
         emit(state, "    ret")
     }
     if node.kind == "IfElse" {
@@ -196,7 +194,7 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         compile_expr(state, node.left)
         emit(state, "    ldr %a, [sp], #16")
         offset = find_var_offset(state, node.val_str)
-        emit(state, "    str %a, [%b, #-" + str(offset) + "]")
+        emit(state, "    str %a, [%b, #" + str(offset) + "]")
 
         loop_label = next_label(state, "L_for")
         end_label = next_label(state, "L_for_end")
@@ -205,7 +203,7 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         state.loop_end_labels.append(end_label)
 
         emit(state, loop_label + ":")
-        emit(state, "    ldr %a, [%b, #-" + str(offset) + "]")
+        emit(state, "    ldr %a, [%b, #" + str(offset) + "]")
         emit(state, "    str %a, [sp, #-16]!")
         compile_expr(state, node.right)
         emit(state, "    ldr %x, [sp], #16")
@@ -224,7 +222,7 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         }
 
         emit(state, cont_label + ":")
-        emit(state, "    ldr %a, [%b, #-" + str(offset) + "]")
+        emit(state, "    ldr %a, [%b, #" + str(offset) + "]")
         compile_expr(state, node.cond)
         emit(state, "    ldr %x, [sp], #16")
         if node.val_int == 1 {
@@ -232,7 +230,7 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         } else {
             emit(state, "    add %a, %x")
         }
-        emit(state, "    str %a, [%b, #-" + str(offset) + "]")
+        emit(state, "    str %a, [%b, #" + str(offset) + "]")
 
         emit(state, "    b " + loop_label)
         emit(state, end_label + ":")
@@ -267,7 +265,7 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         }
         
         var_off = find_var_offset(state, node.val_str)
-        emit(state, "    str %a, [%b, #-" + str(var_off) + "]")
+        emit(state, "    str %a, [%b, #" + str(var_off) + "]")
         
         i = 0
         while i < len(node.body) {
@@ -349,6 +347,17 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         }
     }
     
+    if node.kind == "TRY" {
+        i = 0
+        while i < len(node.args) {
+            compile_stmt(state, node.args[i], debug_mode)
+            i = i + 1
+        }
+    }
+    if node.kind == "THROW" {
+        compile_expr(state, node.left)
+        clean_n(state, 1)
+    }
     if node.kind == "Call" or node.kind == "MethodCall" {
         compile_expr(state, node)
         clean_n(state, 1)

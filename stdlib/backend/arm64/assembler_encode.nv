@@ -1,0 +1,866 @@
+def cond_code(name: string) -> int {
+    if name == "eq" { return 0 }
+    if name == "ne" { return 1 }
+    if name == "cs" or name == "hs" { return 2 }
+    if name == "cc" or name == "lo" { return 3 }
+    if name == "mi" { return 4 }
+    if name == "pl" { return 5 }
+    if name == "vs" { return 6 }
+    if name == "vc" { return 7 }
+    if name == "hi" { return 8 }
+    if name == "ls" { return 9 }
+    if name == "ge" { return 10 }
+    if name == "lt" { return 11 }
+    if name == "gt" { return 12 }
+    if name == "le" { return 13 }
+    if name == "al" { return 14 }
+    return 0
+}
+
+def append_u32(state, val: int) {
+    state.code.append(val % 256)
+    val = val / 256
+    state.code.append(val % 256)
+    val = val / 256
+    state.code.append(val % 256)
+    val = val / 256
+    state.code.append(val % 256)
+}
+
+def add_fixup(state, offset: int, target: string, size: int) {
+    fix = Fixup()
+    fix.offset = offset
+    fix.target = target
+    fix.size = size
+    state.fixups.append(fix)
+}
+
+def encode_add_imm(state, ops: list) {
+    xd = parse_operand(ops[0])
+    xn = parse_operand(ops[1])
+    if len(ops) == 3 and ops[2][0] == ":" {
+        imm_op = parse_operand(ops[2])
+        sf = 1
+        if xd.width == 32 { sf = 0 }
+        rd = xd.reg
+        rn = xn.reg
+        base = 0x91000000
+        if sf == 0 { base = 0x11000000 }
+        val = base | (rn << 5) | rd
+        add_fixup(state, len(state.code), imm_op.label, 6)
+        append_u32(state, val)
+        return
+    }
+    imm_op = parse_operand(ops[2])
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    rn = xn.reg
+    imm = imm_op.imm_val
+    shift = 0
+    if imm > 4095 and imm % 4096 == 0 {
+        shift = 1
+        imm = imm / 4096
+    }
+    base = 0x91000000
+    if sf == 0 { base = 0x11000000 }
+    val = base | (shift << 22) | ((imm & 0xFFF) << 10) | (rn << 5) | rd
+    append_u32(state, val)
+}
+
+def encode_sub_imm(state, ops: list) {
+    xd = parse_operand(ops[0])
+    xn = parse_operand(ops[1])
+    imm_op = parse_operand(ops[2])
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    rn = xn.reg
+    imm = imm_op.imm_val
+    shift = 0
+    if imm > 4095 and imm % 4096 == 0 {
+        shift = 1
+        imm = imm / 4096
+    }
+    base = 0xD1000000
+    if sf == 0 { base = 0x51000000 }
+    val = base | (shift << 22) | ((imm & 0xFFF) << 10) | (rn << 5) | rd
+    append_u32(state, val)
+}
+
+def encode_bitmask_enc(val: int, sf: int) -> int {
+    bits = 64
+    if sf == 0 { bits = 32 }
+    v = val
+    if sf == 0 { v = v & 0xFFFFFFFF }
+    if v == 0 { return 0 - 1 }
+    all_ones = 1
+    b = 0
+    while b < bits {
+        if v >> b & 1 == 0 { all_ones = 0; break }
+        b = b + 1
+    }
+    if all_ones == 1 { return 0 - 1 }
+    size = 2
+    while size <= bits {
+        mask = (1 << size) - 1
+        pat = v & mask
+        repeats = 1
+        pos = size
+        while pos < bits {
+            if (v >> pos) & mask != pat { repeats = 0; break }
+            pos = pos + size
+        }
+        if repeats == 1 and pat != 0 and pat != mask {
+            rot = 0
+            while rot < size {
+                ror_val = ((pat >> rot) | (pat << (size - rot))) & mask
+                if (ror_val & (ror_val + 1)) == 0 and ror_val != 0 {
+                    k = 0
+                    tv = ror_val
+                    while tv != 0 { k = k + 1; tv = tv & (tv - 1) }
+                    immr = rot
+                    if size == bits {
+                        N = 1
+                        imms = k - 1
+                    } else {
+                        N = 0
+                        e = 0
+                        ts = size
+                        while ts > 1 { ts = ts / 2; e = e + 1 }
+                        sel_bits = 5
+                        if sf == 0 { sel_bits = 4 }
+                        imms = (((1 << (sel_bits - e)) - 1) << e) | (k - 1)
+                    }
+                    return (N << 22) | (immr << 16) | ((imms & 0x3F) << 10)
+                }
+                rot = rot + 1
+            }
+        }
+        size = size * 2
+    }
+    return 0 - 1
+}
+
+def encode_and_imm(state, ops: list) {
+    xd = parse_operand(ops[0])
+    xn = parse_operand(ops[1])
+    imm_op = parse_operand(ops[2])
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    rn = xn.reg
+    imm = imm_op.imm_val
+    encoded = encode_bitmask_enc(imm, sf)
+    if encoded >= 0 {
+        base = 0x92000000
+        if sf == 0 { base = 0x12000000 }
+        val = base | encoded | (rn << 5) | rd
+        append_u32(state, val)
+    }
+}
+
+def encode_cmp_imm(state, ops: list) {
+    xn = parse_operand(ops[0])
+    imm_op = parse_operand(ops[1])
+    sf = 1
+    if xn.width == 32 { sf = 0 }
+    rn = xn.reg
+    imm = imm_op.imm_val
+    shift = 0
+    if imm > 4095 and imm % 4096 == 0 {
+        shift = 1
+        imm = imm / 4096
+    }
+    base = 0xF1000000
+    if sf == 0 { base = 0x71000000 }
+    val = base | (shift << 22) | ((imm & 0xFFF) << 10) | (rn << 5) | 31
+    append_u32(state, val)
+}
+
+def encode_mov_imm(state, ops: list) {
+    xd = parse_operand(ops[0])
+    imm_op = parse_operand(ops[1])
+    if imm_op.kind != "imm" { return }
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    imm = imm_op.imm_val
+    hw = 0
+    remaining = imm
+    if sf == 0 { remaining = remaining % 65536 }
+    base = 0xD2800000
+    if sf == 0 { base = 0x52800000 }
+    val = base | (hw << 21) | ((remaining & 0xFFFF) << 5) | rd
+    append_u32(state, val)
+}
+
+def encode_add_reg(state, ops: list) {
+    xd = parse_operand(ops[0])
+    xn = parse_operand(ops[1])
+    xm = parse_operand(ops[2])
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    rn = xn.reg
+    rm = xm.reg
+    base = 0x8B000000
+    if sf == 0 { base = 0x0B000000 }
+    val = base | (rm << 16) | (rn << 5) | rd
+    append_u32(state, val)
+}
+
+def encode_sub_reg(state, ops: list) {
+    xd = parse_operand(ops[0])
+    xn = parse_operand(ops[1])
+    xm = parse_operand(ops[2])
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    rn = xn.reg
+    rm = xm.reg
+    base = 0xCB000000
+    if sf == 0 { base = 0x4B000000 }
+    val = base | (rm << 16) | (rn << 5) | rd
+    append_u32(state, val)
+}
+
+def encode_and_reg(state, ops: list) {
+    xd = parse_operand(ops[0])
+    xn = parse_operand(ops[1])
+    xm = parse_operand(ops[2])
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    rn = xn.reg
+    rm = xm.reg
+    base = 0x8A000000
+    if sf == 0 { base = 0x0A000000 }
+    val = base | (rm << 16) | (rn << 5) | rd
+    append_u32(state, val)
+}
+
+def encode_orr_reg(state, ops: list) {
+    xd = parse_operand(ops[0])
+    xn = parse_operand(ops[1])
+    xm = parse_operand(ops[2])
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    rn = xn.reg
+    rm = xm.reg
+    base = 0xAA000000
+    if sf == 0 { base = 0x2A000000 }
+    val = base | (rm << 16) | (rn << 5) | rd
+    append_u32(state, val)
+}
+
+def encode_eor_reg(state, ops: list) {
+    xd = parse_operand(ops[0])
+    xn = parse_operand(ops[1])
+    xm = parse_operand(ops[2])
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    rn = xn.reg
+    rm = xm.reg
+    base = 0xCA000000
+    if sf == 0 { base = 0x4A000000 }
+    val = base | (rm << 16) | (rn << 5) | rd
+    append_u32(state, val)
+}
+
+def encode_cmp_reg(state, ops: list) {
+    xn = parse_operand(ops[0])
+    xm = parse_operand(ops[1])
+    sf = 1
+    if xn.width == 32 { sf = 0 }
+    rn = xn.reg
+    rm = xm.reg
+    base = 0xEB000000
+    if sf == 0 { base = 0x6B000000 }
+    val = base | (rm << 16) | (rn << 5) | 31
+    append_u32(state, val)
+}
+
+def encode_mov_reg(state, ops: list) {
+    if len(ops) == 1 {
+        xd = parse_operand(ops[0])
+        rd = xd.reg
+        val = 0xAA0003E0 | rd
+        append_u32(state, val)
+        return
+    }
+    xd = parse_operand(ops[0])
+    src = parse_operand(ops[1])
+    if src.kind == "imm" {
+        encode_mov_imm(state, ops)
+        return
+    }
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    rm = src.reg
+    base = 0xAA0003E0
+    if sf == 0 { base = 0x2A0003E0 }
+    val = base | (rm << 16) | rd
+    append_u32(state, val)
+}
+
+def encode_mul(state, ops: list) {
+    xd = parse_operand(ops[0])
+    xn = parse_operand(ops[1])
+    xm = parse_operand(ops[2])
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    rn = xn.reg
+    rm = xm.reg
+    base = 0x9B007C00
+    if sf == 0 { base = 0x1B007C00 }
+    val = base | (rm << 16) | (rn << 5) | rd
+    append_u32(state, val)
+}
+
+def encode_msub(state, ops: list) {
+    xd = parse_operand(ops[0])
+    xn = parse_operand(ops[1])
+    xm = parse_operand(ops[2])
+    xa = parse_operand(ops[3])
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    rn = xn.reg
+    rm = xm.reg
+    ra = xa.reg
+    base = 0x9B000000
+    if sf == 0 { base = 0x1B000000 }
+    val = base | (rm << 16) | (ra << 10) | (rn << 5) | rd
+    append_u32(state, val)
+}
+
+def encode_sdiv(state, ops: list) {
+    xd = parse_operand(ops[0])
+    xn = parse_operand(ops[1])
+    xm = parse_operand(ops[2])
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    rn = xn.reg
+    rm = xm.reg
+    base = 0x9AC00C00
+    if sf == 0 { base = 0x1AC00C00 }
+    val = base | (rm << 16) | (rn << 5) | rd
+    append_u32(state, val)
+}
+
+def encode_lsl_reg(state, ops: list) {
+    xd = parse_operand(ops[0])
+    xn = parse_operand(ops[1])
+    xm = parse_operand(ops[2])
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    rn = xn.reg
+    rm = xm.reg
+    base = 0x9AC08000
+    if sf == 0 { base = 0x1AC08000 }
+    val = base | (rm << 16) | (rn << 5) | rd
+    append_u32(state, val)
+}
+
+def encode_lsl_imm(state, ops: list) {
+    xd = parse_operand(ops[0])
+    xn = parse_operand(ops[1])
+    imm_op = parse_operand(ops[2])
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    rn = xn.reg
+    s = imm_op.imm_val
+    if sf == 0 {
+        immr = (32 - s) & 31
+        imms = (31 - s) & 31
+        val = 0x53000000 | (immr << 16) | (imms << 10) | (rn << 5) | rd
+    } else {
+        immr = (64 - s) & 63
+        imms = (63 - s) & 63
+        val = 0xD3800000 | (immr << 16) | (imms << 10) | (rn << 5) | rd
+    }
+    append_u32(state, val)
+}
+
+def encode_asr_reg(state, ops: list) {
+    xd = parse_operand(ops[0])
+    xn = parse_operand(ops[1])
+    xm = parse_operand(ops[2])
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    rn = xn.reg
+    rm = xm.reg
+    base = 0x9AC08800
+    if sf == 0 { base = 0x1AC08800 }
+    val = base | (rm << 16) | (rn << 5) | rd
+    append_u32(state, val)
+}
+
+def encode_mvn(state, ops: list) {
+    xd = parse_operand(ops[0])
+    xm = parse_operand(ops[1])
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    rm = xm.reg
+    base = 0xAA2003E0
+    if sf == 0 { base = 0x2A2003E0 }
+    val = base | (rm << 16) | rd
+    append_u32(state, val)
+}
+
+def encode_neg(state, ops: list) {
+    xd = parse_operand(ops[0])
+    xn = parse_operand(ops[1])
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    rn = xn.reg
+    base = 0xCB0003E0
+    if sf == 0 { base = 0x4B0003E0 }
+    val = base | (rn << 16) | rd
+    append_u32(state, val)
+}
+
+def encode_csel(state, ops: list) {
+    xd = parse_operand(ops[0])
+    xn = parse_operand(ops[1])
+    xm = parse_operand(ops[2])
+    cond_name = ops[3]
+    cc = cond_code(cond_name)
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    rn = xn.reg
+    rm = xm.reg
+    base = 0x9A800000
+    if sf == 0 { base = 0x1A800000 }
+    val = base | (1 << 21) | (rm << 16) | (1 << 15) | (1 << 14) | ((cc >> 3) << 13) | (((cc >> 2) & 1) << 12) | (1 << 11) | (((cc >> 1) & 1) << 10) | (rn << 5) | rd
+    append_u32(state, val)
+}
+
+def encode_cset(state, ops: list) {
+    xd = parse_operand(ops[0])
+    cond_name = ops[1]
+    cc = cond_code(cond_name)
+    inv_cc = cc ^ 1
+    sf = 1
+    if xd.width == 32 { sf = 0 }
+    rd = xd.reg
+    base = 0x9A800000
+    if sf == 0 { base = 0x1A800000 }
+    val = base | (31 << 16) | ((inv_cc >> 3) << 13) | (((inv_cc >> 2) & 1) << 12) | (1 << 11) | (((inv_cc >> 1) & 1) << 10) | (31 << 5) | rd
+    append_u32(state, val)
+}
+
+def encode_mem_ldr_str(state, size_code: int, is_load: int, ops: list) {
+    rt = parse_operand(ops[0])
+    mem = parse_operand(ops[1])
+    post_imm = 0
+    post_mode = 0
+    if len(ops) >= 3 {
+        post_op = parse_operand(ops[2])
+        if post_op.kind == "imm" {
+            post_imm = post_op.imm_val
+            post_mode = 1
+        }
+    }
+    if mem.kind != "mem" { return }
+    if mem.mem_offset_reg >= 0 {
+        option = 3
+        if size_code == 0 {
+            base = 0x38200000
+            if is_load == 0 { base = 0x38200000 }
+        }
+        if size_code == 1 {
+            base = 0x78600000
+            if is_load == 0 { base = 0x78200000 }
+        }
+        if size_code == 2 {
+            base = 0xB8600000
+            if is_load == 0 { base = 0xB8200000 }
+        }
+        if size_code == 3 {
+            base = 0xF8600000
+            if is_load == 0 { base = 0xF8200000 }
+        }
+        val = base | (mem.mem_offset_reg << 16) | (option << 13) | (mem.mem_offset_shift << 12) | (2 << 10) | (mem.mem_base << 5) | rt.reg
+        append_u32(state, val)
+        return
+    }
+    rn = mem.mem_base
+    imm = mem.mem_disp
+    use_wb = mem.writeback
+    if post_mode == 1 {
+        imm = post_imm
+        use_wb = 2
+    }
+    scale = 0
+    if size_code == 0 { scale = 0 }
+    if size_code == 1 { scale = 1 }
+    if size_code == 2 { scale = 2 }
+    if size_code == 3 { scale = 3 }
+    if use_wb == 0 and imm >= 0 {
+        scaled = imm / (1 << scale)
+        base = 0x39400000
+        if size_code == 1 { base = 0x79400000 }
+        if size_code == 2 { base = 0xB9400000 }
+        if size_code == 3 { base = 0xF9400000 }
+        if is_load == 0 {
+            if size_code == 0 { base = 0x39000000 }
+            if size_code == 1 { base = 0x79000000 }
+            if size_code == 2 { base = 0xB9000000 }
+            if size_code == 3 { base = 0xF9000000 }
+        }
+        val = base | ((scaled & 0xFFF) << 10) | (rn << 5) | rt.reg
+        append_u32(state, val)
+        return
+    }
+    base = 0x38400000
+    if size_code == 1 { base = 0x78400000 }
+    if size_code == 2 { base = 0xB8400000 }
+    if size_code == 3 { base = 0xF8400000 }
+    if is_load == 0 {
+        if size_code == 0 { base = 0x38000000 }
+        if size_code == 1 { base = 0x78000000 }
+        if size_code == 2 { base = 0xB8000000 }
+        if size_code == 3 { base = 0xF8000000 }
+    }
+    if use_wb == 1 {
+        base = base | (1 << 23)
+    }
+    if use_wb == 2 {
+        base = base | (1 << 24)
+    }
+    val = base | ((imm & 0x1FF) << 12) | (rn << 5) | rt.reg
+    append_u32(state, val)
+}
+
+def encode_ldr(state, ops: list) {
+    rt = parse_operand(ops[0])
+    if rt.width == 64 or rt.width == 0 {
+        encode_mem_ldr_str(state, 3, 1, ops)
+    } else {
+        encode_mem_ldr_str(state, 2, 1, ops)
+    }
+}
+
+def encode_str(state, ops: list) {
+    rt = parse_operand(ops[0])
+    if rt.width == 64 or rt.width == 0 {
+        encode_mem_ldr_str(state, 3, 0, ops)
+    } else {
+        encode_mem_ldr_str(state, 2, 0, ops)
+    }
+}
+
+def encode_ldrb(state, ops: list) {
+    encode_mem_ldr_str(state, 0, 1, ops)
+}
+
+def encode_strb(state, ops: list) {
+    encode_mem_ldr_str(state, 0, 0, ops)
+}
+
+def encode_ldrh(state, ops: list) {
+    encode_mem_ldr_str(state, 1, 1, ops)
+}
+
+def encode_strh(state, ops: list) {
+    encode_mem_ldr_str(state, 1, 0, ops)
+}
+
+def encode_ldp(state, ops: list) {
+    rt1 = parse_operand(ops[0])
+    rt2 = parse_operand(ops[1])
+    mem = parse_operand(ops[2])
+    imm = mem.mem_disp
+    rn = mem.mem_base
+    imm7 = imm / 8
+    base = 0xA9400000
+    if mem.writeback == 1 { base = 0xA9C00000 }
+    if mem.writeback == 2 { base = 0xA8C00000 }
+    val = base | ((imm7 & 0x7F) << 15) | (rt2.reg << 10) | (rn << 5) | rt1.reg
+    append_u32(state, val)
+}
+
+def encode_stp(state, ops: list) {
+    rt1 = parse_operand(ops[0])
+    rt2 = parse_operand(ops[1])
+    mem = parse_operand(ops[2])
+    imm = mem.mem_disp
+    rn = mem.mem_base
+    imm7 = imm / 8
+    base = 0xA9000000
+    if mem.writeback == 1 { base = 0xA9800000 }
+    if mem.writeback == 2 { base = 0xA8800000 }
+    val = base | ((imm7 & 0x7F) << 15) | (rt2.reg << 10) | (rn << 5) | rt1.reg
+    append_u32(state, val)
+}
+
+def encode_adrp(state, ops: list) {
+    xd = parse_operand(ops[0])
+    label_op = parse_operand(ops[1])
+    rd = xd.reg
+    off = len(state.code)
+    append_u32(state, 0x90000000 | rd)
+    add_fixup(state, off, label_op.label, 5)
+}
+
+def encode_b(state, ops: list) {
+    label_op = parse_operand(ops[0])
+    off = len(state.code)
+    append_u32(state, 0x14000000)
+    add_fixup(state, off, label_op.label, 4)
+}
+
+def encode_bl(state, ops: list) {
+    label_op = parse_operand(ops[0])
+    off = len(state.code)
+    append_u32(state, 0x94000000)
+    add_fixup(state, off, label_op.label, 4)
+}
+
+def encode_bcond(state, ops: list) {
+    label_op = parse_operand(ops[0])
+    off = len(state.code)
+    cc = 0
+    if len(ops) >= 2 {
+        cond_name = ops[1]
+        cc = cond_code(cond_name)
+    }
+    append_u32(state, 0x54000000 | cc)
+    add_fixup(state, off, label_op.label, 7)
+}
+
+def encode_fadd(state, ops: list) {
+    rd = parse_operand(ops[0])
+    rn = parse_operand(ops[1])
+    rm = parse_operand(ops[2])
+    val = 0x1E602800 | (rm.reg << 16) | (rn.reg << 5) | rd.reg
+    append_u32(state, val)
+}
+
+def encode_fsub(state, ops: list) {
+    rd = parse_operand(ops[0])
+    rn = parse_operand(ops[1])
+    rm = parse_operand(ops[2])
+    val = 0x1E606800 | (rm.reg << 16) | (rn.reg << 5) | rd.reg
+    append_u32(state, val)
+}
+
+def encode_fmul(state, ops: list) {
+    rd = parse_operand(ops[0])
+    rn = parse_operand(ops[1])
+    rm = parse_operand(ops[2])
+    val = 0x1E600800 | (rm.reg << 16) | (rn.reg << 5) | rd.reg
+    append_u32(state, val)
+}
+
+def encode_fdiv(state, ops: list) {
+    rd = parse_operand(ops[0])
+    rn = parse_operand(ops[1])
+    rm = parse_operand(ops[2])
+    val = 0x1E601800 | (rm.reg << 16) | (rn.reg << 5) | rd.reg
+    append_u32(state, val)
+}
+
+def encode_fcmp(state, ops: list) {
+    rn = parse_operand(ops[0])
+    rm = parse_operand(ops[1])
+    val = 0x1EC03800 | (rm.reg << 16) | (rn.reg << 5)
+    append_u32(state, val)
+}
+
+def emit_instruction(state, line: AsmLine) {
+    if line.mnemonic == "add" {
+        if len(line.operands) == 3 {
+            op2 = parse_operand(line.operands[2])
+            if op2.kind == "imm" or op2.kind == "lo12_label" {
+                encode_add_imm(state, line.operands)
+            } else {
+                encode_add_reg(state, line.operands)
+            }
+        }
+        return
+    }
+    if line.mnemonic == "sub" {
+        if len(line.operands) == 3 {
+            op2 = parse_operand(line.operands[2])
+            if op2.kind == "imm" {
+                encode_sub_imm(state, line.operands)
+            } else {
+                encode_sub_reg(state, line.operands)
+            }
+        }
+        return
+    }
+    if line.mnemonic == "and" {
+        op2 = parse_operand(line.operands[2])
+        if op2.kind == "imm" {
+            encode_and_imm(state, line.operands)
+        } else {
+            encode_and_reg(state, line.operands)
+        }
+        return
+    }
+    if line.mnemonic == "orr" {
+        encode_orr_reg(state, line.operands)
+        return
+    }
+    if line.mnemonic == "eor" {
+        encode_eor_reg(state, line.operands)
+        return
+    }
+    if line.mnemonic == "cmp" {
+        op1 = parse_operand(line.operands[1])
+        if op1.kind == "imm" {
+            encode_cmp_imm(state, line.operands)
+        } else {
+            encode_cmp_reg(state, line.operands)
+        }
+        return
+    }
+    if line.mnemonic == "mov" {
+        encode_mov_reg(state, line.operands)
+        return
+    }
+    if line.mnemonic == "mul" {
+        encode_mul(state, line.operands)
+        return
+    }
+    if line.mnemonic == "msub" {
+        encode_msub(state, line.operands)
+        return
+    }
+    if line.mnemonic == "sdiv" {
+        encode_sdiv(state, line.operands)
+        return
+    }
+    if line.mnemonic == "lsl" {
+        op2 = parse_operand(line.operands[2])
+        if op2.kind == "imm" {
+            encode_lsl_imm(state, line.operands)
+        } else {
+            encode_lsl_reg(state, line.operands)
+        }
+        return
+    }
+    if line.mnemonic == "asr" {
+        encode_asr_reg(state, line.operands)
+        return
+    }
+    if line.mnemonic == "mvn" {
+        encode_mvn(state, line.operands)
+        return
+    }
+    if line.mnemonic == "neg" {
+        encode_neg(state, line.operands)
+        return
+    }
+    if line.mnemonic == "csel" {
+        encode_csel(state, line.operands)
+        return
+    }
+    if line.mnemonic == "cset" {
+        encode_cset(state, line.operands)
+        return
+    }
+    if line.mnemonic == "ldr" {
+        encode_ldr(state, line.operands)
+        return
+    }
+    if line.mnemonic == "str" {
+        encode_str(state, line.operands)
+        return
+    }
+    if line.mnemonic == "ldrb" {
+        encode_ldrb(state, line.operands)
+        return
+    }
+    if line.mnemonic == "strb" {
+        encode_strb(state, line.operands)
+        return
+    }
+    if line.mnemonic == "ldrh" {
+        encode_ldrh(state, line.operands)
+        return
+    }
+    if line.mnemonic == "strh" {
+        encode_strh(state, line.operands)
+        return
+    }
+    if line.mnemonic == "ldp" {
+        encode_ldp(state, line.operands)
+        return
+    }
+    if line.mnemonic == "stp" {
+        encode_stp(state, line.operands)
+        return
+    }
+    if line.mnemonic == "adrp" {
+        encode_adrp(state, line.operands)
+        return
+    }
+    if line.mnemonic == "b" {
+        encode_b(state, line.operands)
+        return
+    }
+    if line.mnemonic == "bl" {
+        encode_bl(state, line.operands)
+        return
+    }
+    if len(line.mnemonic) >= 3 and line.mnemonic[0] == "b" and line.mnemonic[1] == "." {
+        cond_str = line.mnemonic
+        cond_name = cond_str
+        cond_len = len(cond_str)
+        cond_code_val = 0
+        if cond_len >= 3 and cond_str[0] == "b" and cond_str[1] == "." {
+            cc_name = ""
+            i = 2
+            while i < cond_len {
+                cc_name = cc_name + cond_str[i]
+                i = i + 1
+            }
+            cond_code_val = cond_code(cc_name)
+        }
+        label_op = parse_operand(line.operands[0])
+        off = len(state.code)
+        append_u32(state, 0x54000000 | cond_code_val)
+        add_fixup(state, off, label_op.label, 7)
+        return
+    }
+    if line.mnemonic == "fadd" {
+        encode_fadd(state, line.operands)
+        return
+    }
+    if line.mnemonic == "fsub" {
+        encode_fsub(state, line.operands)
+        return
+    }
+    if line.mnemonic == "fmul" {
+        encode_fmul(state, line.operands)
+        return
+    }
+    if line.mnemonic == "fdiv" {
+        encode_fdiv(state, line.operands)
+        return
+    }
+    if line.mnemonic == "fcmp" {
+        encode_fcmp(state, line.operands)
+        return
+    }
+    if line.mnemonic == "ret" {
+        append_u32(state, 0xD65F03C0)
+        return
+    }
+}

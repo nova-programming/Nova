@@ -2,12 +2,13 @@ import os
 from nova_ast.nodes import *
 
 class Arm64Codegen:
-    """AArch64 (ARM64) codegen for Apple Silicon (macOS). Full feature parity with x86_64."""
+    """AArch64 (ARM64) codegen for Apple Silicon (macOS) and Windows ARM64. Full feature parity with x86_64."""
 
-    def __init__(self, ast_nodes, module_names=None, debug_mode=0):
+    def __init__(self, ast_nodes, module_names=None, debug_mode=0, target_os="windows"):
         self.ast = ast_nodes
         self.debug_mode = debug_mode
         self.module_names = module_names or []
+        self.target_os = target_os
         self.assembly = []
         self.data_section = []
         self.string_literals = {}
@@ -15,6 +16,7 @@ class Arm64Codegen:
         self.label_count = 0
         self.local_vars = {}
         self.local_offset = 0
+        self.local_aligned = 0
         self.loop_labels = []
         self.prop_offsets = {}
         self.struct_defs = {}
@@ -134,7 +136,7 @@ class Arm64Codegen:
             if isinstance(offset, str):
                 self.assembly.append(f"    mov {reg}, {offset}")
             else:
-                self.assembly.append(f"    ldr {reg}, [fp, #{-offset}]")
+                self.assembly.append(f"    ldr {reg}, [sp, #{self.local_aligned - offset}]")
             return reg
         elif isinstance(node, UnaryOp):
             in_reg = self._compile_expr_to_reg(node.value)
@@ -350,7 +352,8 @@ class Arm64Codegen:
     def generate(self):
         self.assembly.append(".text")
         self.assembly.append(".align 2")
-        self.assembly.append(".global _main")
+        entry = "_main" if self.target_os == "windows" else "main"
+        self.assembly.append(f".global {entry}")
 
         self.assembly.append(".extern _printf")
         self.assembly.append(".extern _malloc")
@@ -382,6 +385,13 @@ class Arm64Codegen:
         self.assembly.append(".extern _dict_keys")
         self.assembly.append(".extern _dict_values")
         self.assembly.append(".extern _dict_items")
+        self.assembly.append(".extern _abs")
+        self.assembly.append(".extern _min")
+        self.assembly.append(".extern _max")
+        self.assembly.append(".extern _file_exists")
+        self.assembly.append(".extern _file_size")
+        self.assembly.append(".extern _file_type")
+        self.assembly.append(".extern _now")
 
         self.data_section.append(".align 3")
         self.data_section.append('fmt_int: .asciz "%d\\n"')
@@ -419,9 +429,9 @@ class Arm64Codegen:
         for fn in functions:
             self.compile_function(fn)
 
-        self.assembly.append("_main:")
+        entry = "_main" if self.target_os == "windows" else "main"
+        self.assembly.append(f"{entry}:")
         self.assembly.append("    stp fp, lr, [sp, #-16]!")
-        self.assembly.append("    mov fp, sp")
 
         self.local_vars = {}
         self.local_offset = 0
@@ -434,17 +444,19 @@ class Arm64Codegen:
         for node in top_level:
             self.scan_vars(node)
 
-        if self.local_offset > 0:
-            aligned = (self.local_offset + 15) & ~15
+        aligned = (self.local_offset + 15) & ~15 if self.local_offset > 0 else 0
+        self.local_aligned = aligned
+        if aligned > 0:
             self.assembly.append(f"    sub sp, sp, #{aligned}")
 
-        self.assembly.append("    str w0, [fp, #-8]")
-        self.assembly.append("    str x1, [fp, #-16]")
+        self.assembly.append(f"    str w0, [sp, #{aligned - 8}]")
+        self.assembly.append(f"    str x1, [sp, #{aligned - 16}]")
 
         for node in top_level:
             self.compile_stmt(node)
 
-        self.assembly.append("    mov sp, fp")
+        if aligned > 0:
+            self.assembly.append(f"    add sp, sp, #{aligned}")
         self.assembly.append("    ldp fp, lr, [sp], #16")
         self.assembly.append("    mov w0, #0")
         self.assembly.append("    ret")
@@ -464,39 +476,37 @@ class Arm64Codegen:
     def _emit_concat_strings(self):
         self.assembly.append("_concat_strings:")
         self.assembly.append("    stp fp, lr, [sp, #-16]!")
-        self.assembly.append("    mov fp, sp")
         self.assembly.append("    sub sp, sp, #32")
         self.assembly.append("    str x19, [sp, #16]")
-        self.assembly.append("    ldr x0, [fp, #16]")
+        self.assembly.append("    ldr x0, [sp, #48]")
         self.assembly.append("    bl _strlen")
         self.assembly.append("    mov x19, x0")
-        self.assembly.append("    ldr x0, [fp, #24]")
+        self.assembly.append("    ldr x0, [sp, #56]")
         self.assembly.append("    bl _strlen")
         self.assembly.append("    add x19, x19, x0")
         self.assembly.append("    add x0, x19, #1")
         self.assembly.append("    bl _malloc")
         self.assembly.append("    str x0, [sp, #8]")
-        self.assembly.append("    ldr x1, [fp, #16]")
+        self.assembly.append("    ldr x1, [sp, #48]")
         self.assembly.append("    mov x0, x0")
         self.assembly.append("    bl _strcpy")
-        self.assembly.append("    ldr x1, [fp, #24]")
+        self.assembly.append("    ldr x1, [sp, #56]")
         self.assembly.append("    ldr x0, [sp, #8]")
         self.assembly.append("    bl _strcat")
         self.assembly.append("    ldr x0, [sp, #8]")
         self.assembly.append("    ldr x19, [sp, #16]")
-        self.assembly.append("    mov sp, fp")
+        self.assembly.append("    add sp, sp, #32")
         self.assembly.append("    ldp fp, lr, [sp], #16")
         self.assembly.append("    ret")
 
     def _emit_slice_string(self):
         self.assembly.append("_slice_string:")
         self.assembly.append("    stp fp, lr, [sp, #-16]!")
-        self.assembly.append("    mov fp, sp")
         self.assembly.append("    sub sp, sp, #48")
         self.assembly.append("    str x19, [sp, #32]")
-        self.assembly.append("    ldr x0, [fp, #16]")
-        self.assembly.append("    ldr w1, [fp, #24]")
-        self.assembly.append("    ldr w2, [fp, #32]")
+        self.assembly.append("    ldr x0, [sp, #64]")
+        self.assembly.append("    ldr w1, [sp, #72]")
+        self.assembly.append("    ldr w2, [sp, #80]")
         self.assembly.append("    sub w2, w2, w1")
         self.assembly.append("    cmp w2, #0")
         self.assembly.append("    b.ge L_slice_alloc_arm")
@@ -507,8 +517,8 @@ class Arm64Codegen:
         self.assembly.append("    bl _malloc")
         self.assembly.append("    str x0, [sp, #16]")
         self.assembly.append("    ldr w2, [sp, #24]")
-        self.assembly.append("    ldr x0, [fp, #16]")
-        self.assembly.append("    ldr w1, [fp, #24]")
+        self.assembly.append("    ldr x0, [sp, #64]")
+        self.assembly.append("    ldr w1, [sp, #72]")
         self.assembly.append("    add x0, x0, w1")
         self.assembly.append("    ldr x1, [sp, #16]")
         self.assembly.append("    str x1, [sp, #8]")
@@ -528,7 +538,7 @@ class Arm64Codegen:
         self.assembly.append("    strb wzr, [x1, x2]")
         self.assembly.append("    ldr x0, [sp, #8]")
         self.assembly.append("    ldr x19, [sp, #32]")
-        self.assembly.append("    mov sp, fp")
+        self.assembly.append("    add sp, sp, #48")
         self.assembly.append("    ldp fp, lr, [sp], #16")
         self.assembly.append("    ret")
 
@@ -568,7 +578,6 @@ class Arm64Codegen:
     def compile_function(self, fn):
         self.assembly.append(f"_{fn.name}:")
         self.assembly.append("    stp fp, lr, [sp, #-16]!")
-        self.assembly.append("    mov fp, sp")
 
         old_local_vars = self.local_vars.copy()
         old_string_vars = self.string_vars.copy()
@@ -585,20 +594,22 @@ class Arm64Codegen:
         for stmt in fn.body:
             self.scan_vars(stmt)
 
-        if self.local_offset > 0:
-            aligned = (self.local_offset + 15) & ~15
+        aligned = (self.local_offset + 15) & ~15 if self.local_offset > 0 else 0
+        self.local_aligned = aligned
+        if aligned > 0:
             self.assembly.append(f"    sub sp, sp, #{aligned}")
 
         for i, param in enumerate(fn.params):
             if i < 8:
                 param_name = param[0] if isinstance(param, (list, tuple)) else param
                 offset = self.local_vars[param_name]
-                self.assembly.append(f"    str x{i}, [fp, #{-offset}]")
+                self.assembly.append(f"    str x{i}, [sp, #{aligned - offset}]")
 
         for stmt in fn.body:
             self.compile_stmt(stmt)
 
-        self.assembly.append("    mov sp, fp")
+        if aligned > 0:
+            self.assembly.append(f"    add sp, sp, #{aligned}")
         self.assembly.append("    ldp fp, lr, [sp], #16")
         self.assembly.append("    ret")
 
@@ -619,7 +630,7 @@ class Arm64Codegen:
             if isinstance(offset, str):
                 self.assembly.append(f"    mov {offset}, x0")
             else:
-                self.assembly.append(f"    str x0, [fp, #{-offset}]")
+                self.assembly.append(f"    str x0, [sp, #{self.local_aligned - offset}]")
             if self._is_string_expr(node.value):
                 self.string_vars.add(node.name)
         elif isinstance(node, DataFieldAssign):
@@ -697,7 +708,8 @@ class Arm64Codegen:
         elif isinstance(node, Return):
             self.compile_expr(node.value)
             self.assembly.append("    ldr x0, [sp], #16")
-            self.assembly.append("    mov sp, fp")
+            if self.local_aligned > 0:
+                self.assembly.append(f"    add sp, sp, #{self.local_aligned}")
             self.assembly.append("    ldp fp, lr, [sp], #16")
             self.assembly.append("    ret")
         elif isinstance(node, IfElse):
@@ -735,7 +747,7 @@ class Arm64Codegen:
             if isinstance(offset, str):
                 self.assembly.append(f"    mov {offset}, x0")
             else:
-                self.assembly.append(f"    str x0, [fp, #{-offset}]")
+                self.assembly.append(f"    str x0, [sp, #{self.local_aligned - offset}]")
             loop_label = self.next_label("L_for")
             end_label = self.next_label("L_for_end")
             continue_label = self.next_label("L_for_cont")
@@ -744,7 +756,7 @@ class Arm64Codegen:
             if isinstance(offset, str):
                 self.assembly.append(f"    mov x0, {offset}")
             else:
-                self.assembly.append(f"    ldr x0, [fp, #{-offset}]")
+                self.assembly.append(f"    ldr x0, [sp, #{self.local_aligned - offset}]")
             self.assembly.append("    str x0, [sp, #-16]!")
             self.compile_expr(end_val)
             self.assembly.append("    ldr x1, [sp], #16")
@@ -761,9 +773,9 @@ class Arm64Codegen:
             if isinstance(offset, str):
                 self.assembly.append(f"    add {offset}, {offset}, x1")
             else:
-                self.assembly.append(f"    ldr x0, [fp, #{-offset}]")
+                self.assembly.append(f"    ldr x0, [sp, #{self.local_aligned - offset}]")
                 self.assembly.append("    add x0, x0, x1")
-                self.assembly.append(f"    str x0, [fp, #{-offset}]")
+                self.assembly.append(f"    str x0, [sp, #{self.local_aligned - offset}]")
             self.assembly.append(f"    b {loop_label}")
             self.assembly.append(f"{end_label}:")
             self.loop_labels.pop()
@@ -777,12 +789,12 @@ class Arm64Codegen:
             self.assembly.append("    str x0, [sp, #-16]!")
             offset = self.local_vars[node.var_name]
             if not isinstance(offset, str):
-                self.assembly.append(f"    str xzr, [fp, #{-offset}]")
+                self.assembly.append(f"    str xzr, [sp, #{self.local_aligned - offset}]")
             self.assembly.append(f"{loop_label}:")
             if isinstance(offset, str):
                 self.assembly.append(f"    ldr w0, {offset}")
             else:
-                self.assembly.append(f"    ldr w0, [fp, #{-offset}]")
+                self.assembly.append(f"    ldr w0, [sp, #{self.local_aligned - offset}]")
             self.assembly.append("    ldr x1, [sp], #16")
             self.assembly.append("    str x1, [sp, #-16]!")
             self.assembly.append("    cmp w0, w1")
@@ -791,18 +803,18 @@ class Arm64Codegen:
             if isinstance(offset, str):
                 self.assembly.append(f"    ldr w1, {offset}")
             else:
-                self.assembly.append(f"    ldr w1, [fp, #{-offset}]")
+                self.assembly.append(f"    ldr w1, [sp, #{self.local_aligned - offset}]")
             self.assembly.append("    ldr w0, [x2, x1, lsl #2]")
             if not isinstance(offset, str):
-                self.assembly.append(f"    str x0, [fp, #-8]")
+                self.assembly.append(f"    str x0, [sp, #{self.local_aligned - 8}]")
             self.assembly.append("    str x0, [sp, #-16]!")
             for s in node.body: self.compile_stmt(s)
             if isinstance(offset, str):
                 self.assembly.append(f"    add {offset}, {offset}, #1")
             else:
-                self.assembly.append(f"    ldr x0, [fp, #{-offset}]")
+                self.assembly.append(f"    ldr x0, [sp, #{self.local_aligned - offset}]")
                 self.assembly.append("    add x0, x0, #1")
-                self.assembly.append(f"    str x0, [fp, #{-offset}]")
+                self.assembly.append(f"    str x0, [sp, #{self.local_aligned - offset}]")
             self.assembly.append(f"    b {loop_label}")
             self.assembly.append(f"{end_label}:")
             self.assembly.append("    add sp, sp, #16")
@@ -847,6 +859,12 @@ class Arm64Codegen:
             self.compile_expr(node.value)
             self.assembly.append("    ldr x0, [sp], #16")
             self.assembly.append("    bl _fclose")
+        elif isinstance(node, Try):
+            for stmt in node.body:
+                self.compile_stmt(stmt)
+        elif isinstance(node, Throw):
+            self.compile_expr(node.value)
+            self.assembly.append("    add sp, sp, #16")
         elif isinstance(node, RawBlock):
             for line in node.body:
                 if isinstance(line, str): self.assembly.append(line)
@@ -889,7 +907,7 @@ class Arm64Codegen:
             if isinstance(offset, str):
                 self.assembly.append(f"    mov x0, {offset}")
             else:
-                self.assembly.append(f"    ldr x0, [fp, #{-offset}]")
+                self.assembly.append(f"    ldr x0, [sp, #{self.local_aligned - offset}]")
             self.assembly.append("    str x0, [sp, #-16]!")
         elif isinstance(node, BinOp):
             reg = self._compile_binop_to_reg(node)
@@ -1163,5 +1181,9 @@ class Arm64Codegen:
             self.assembly.append("    mov x0, sp")
             self.assembly.append("    add sp, sp, #16")
             self.assembly.append("    str x0, [sp, #-16]!")
+        elif isinstance(node, Block):
+            for stmt in node.stmts[:-1]:
+                self.compile_stmt(stmt)
+            self.compile_expr(node.stmts[-1])
         else:
             raise Exception(f"[line {getattr(node, 'line', '?')}] Unsupported expression: {type(node).__name__}")

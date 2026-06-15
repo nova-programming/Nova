@@ -21,11 +21,13 @@ data CodegenState {
     reg_pool: list
     reg_pool_idx: int
     target: int
+    target_os: string
 }
 
-def new_codegen(tgt: int) -> CodegenState {
+def new_codegen(tgt: int, target_os: string) -> CodegenState {
     state = CodegenState()
     state.target = tgt
+    state.target_os = target_os
     state.asm_lines = []
     state.data_lines = []
     state.str_count = 0
@@ -74,7 +76,7 @@ def emit(state: CodegenState, line: string) {
         if i + 1 < len(line) and line[i] == "%" {
             nextc = line[i + 1]
             if nextc == "b" {
-                result = result + "fp"
+                result = result + "sp"
                 i = i + 2
             } elif nextc == "s" {
                 result = result + "sp"
@@ -371,14 +373,23 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     if stack_size % 16 != 0 {
         stack_size = stack_size + (16 - (stack_size % 16))
     }
+    state.local_offset = stack_size
+
+    # Convert offsets from fp-relative to sp-relative
+    i = 0
+    while i < len(state.local_vars) {
+        state.local_vars[i] = stack_size - state.local_vars[i]
+        i = i + 1
+    }
 
     func_name = node.val_str
-    if func_name == "main" { func_name = "_main" }
-    elif func_name == "nova_start" { func_name = "_main" }
+    if state.target_os == "windows" {
+        if func_name == "main" { func_name = "_main" }
+        elif func_name == "nova_start" { func_name = "_main" }
+    }
 
     emit(state, func_name + ":")
     emit(state, "    stp fp, lr, [sp, #-16]!")
-    emit(state, "    mov fp, sp")
     if stack_size > 0 {
         emit(state, "    sub sp, sp, #" + str(stack_size))
     }
@@ -388,7 +399,7 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     while p < len(node.params) {
         if p < 8 {
             param_offset = state.local_vars[p]
-            emit(state, "    str x" + str(p) + ", [fp, #" + str(0 - param_offset) + "]")
+            emit(state, "    str x" + str(p) + ", [sp, #" + str(param_offset) + "]")
         }
         p = p + 1
     }
@@ -399,7 +410,9 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
         s = s + 1
     }
 
-    emit(state, "    mov sp, fp")
+    if state.local_offset > 0 {
+        emit(state, "    add sp, sp, #" + str(state.local_offset))
+    }
     emit(state, "    ldp fp, lr, [sp], #16")
     emit(state, "    ret")
 
@@ -412,11 +425,12 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     state.reg_pool_idx = old_reg_pool_idx
 }
 
-def generate_assembly(ast: list, debug_mode: int) -> list {
-    state = new_codegen(1)
+def generate_assembly(ast: list, debug_mode: int, target_os: string) -> list {
+    state = new_codegen(1, target_os)
 
     emit(state, ".text")
-    emit(state, ".global _main")
+    entry = "main" if target_os == "linux" else "_main"
+    emit(state, ".global " + entry)
     emit(state, ".extern _printf")
     emit(state, ".extern _malloc")
     emit(state, ".extern _free")
@@ -448,6 +462,14 @@ def generate_assembly(ast: list, debug_mode: int) -> list {
     emit(state, ".extern _dict_keys")
     emit(state, ".extern _dict_values")
     emit(state, ".extern _dict_items")
+
+    emit(state, ".extern _abs")
+    emit(state, ".extern _min")
+    emit(state, ".extern _max")
+    emit(state, ".extern _file_exists")
+    emit(state, ".extern _file_size")
+    emit(state, ".extern _file_type")
+    emit(state, ".extern _now")
 
     emit_data(state, "fmt_int: .asciz \"%d\\n\"")
     emit_data(state, "fmt_int_pure: .asciz \"%d\"")
@@ -518,9 +540,20 @@ def generate_assembly(ast: list, debug_mode: int) -> list {
         i = i + 1
     }
 
-    emit(state, "_main:")
+    # Align and convert offsets for sp-relative access
+    stack_size = state.local_offset
+    if stack_size % 16 != 0 {
+        stack_size = stack_size + (16 - (stack_size % 16))
+    }
+    state.local_offset = stack_size
+    i = 0
+    while i < len(state.local_vars) {
+        state.local_vars[i] = stack_size - state.local_vars[i]
+        i = i + 1
+    }
+
+    emit(state, entry + ":")
     emit(state, "    stp fp, lr, [sp, #-16]!")
-    emit(state, "    mov fp, sp")
     if state.local_offset > 0 {
         emit(state, "    sub sp, sp, #" + str(state.local_offset))
     }
@@ -542,7 +575,9 @@ def generate_assembly(ast: list, debug_mode: int) -> list {
         emit(state, "    ldr " + state.used_regs[r] + ", [sp], #16")
         r = r - 1
     }
-    emit(state, "    mov sp, fp")
+    if state.local_offset > 0 {
+        emit(state, "    add sp, sp, #" + str(state.local_offset))
+    }
     emit(state, "    ldp fp, lr, [sp], #16")
     emit(state, "    mov x0, #0")
     emit(state, "    ret")

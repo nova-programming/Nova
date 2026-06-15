@@ -42,10 +42,10 @@ class TestArm64CodegenOutput(unittest.TestCase):
         self.assertIn(".extern _exit", asm)
 
     def test_main_prologue_arm64(self):
-        """_main must use ARM64 prologue: stp fp, lr, [sp, #-16]!"""
+        """_main uses sp-based frame: stp fp/lr only, no mov fp,sp"""
         asm = compile_to_asm('print("hello")')
         self.assertIn("stp fp, lr, [sp, #-16]!", asm)
-        self.assertIn("mov fp, sp", asm)
+        self.assertNotIn("mov fp, sp", asm)
         self.assertIn("sub sp, sp, #", asm)
 
     def test_string_literal_pic(self):
@@ -140,8 +140,8 @@ class TestArm64CodegenOutput(unittest.TestCase):
     def test_variable_assignment_and_load(self):
         asm = compile_to_asm("x = 42\nprint(x)")
         # peephole eliminates dead str/ldr push/pop pair
-        self.assertIn("str x0, [fp, #-", asm)
-        self.assertIn("ldr x0, [fp, #-", asm)
+        self.assertIn("str x0, [sp, #", asm)
+        self.assertIn("ldr x0, [sp, #", asm)
 
     def test_compare_eq(self):
         asm = compile_to_asm("a = 1\nb = 2\nprint(a == b)")
@@ -192,15 +192,15 @@ class TestArm64CodegenOutput(unittest.TestCase):
     def test_return_statement(self):
         asm = compile_to_asm("def add(a, b) { return a + b }\nprint(add(1, 2))")
         self.assertIn("ldr x0, [sp], #16", asm)
-        self.assertIn("mov sp, fp", asm)
+        self.assertNotIn("mov sp, fp", asm)
         self.assertIn("ldp fp, lr, [sp], #16", asm)
         self.assertIn("ret", asm)
 
     def test_main_receives_argc_argv(self):
         """_main should store w0/x1 (argc/argv) into the local frame."""
         asm = compile_to_asm('print("hello")')
-        self.assertIn("str w0, [fp, #-8]", asm)
-        self.assertIn("str x1, [fp, #-16]", asm)
+        self.assertIn("str w0, [sp, #", asm)
+        self.assertIn("str x1, [sp, #", asm)
 
     def test_list_literal(self):
         asm = compile_to_asm("print([1, 2, 3])")

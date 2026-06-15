@@ -6,6 +6,7 @@ class Parser:
         self.tokens = tokens
         self.pos = 0
         self.in_raw = False
+        self._comp_counter = 0
 
     def parse_type_annotation(self):
         token = self.current()
@@ -93,7 +94,7 @@ class Parser:
             self.eat("DOWNTO")
             is_downto = True
         else:
-            raise SyntaxError("Expected 'to' or 'downto' in for loop")
+            self._syntax_error("Expected 'to' or 'downto' in for loop")
         
         end = self.parse_expr()
         
@@ -116,13 +117,42 @@ class Parser:
             return self.tokens[self.pos]
         return None
 
+    def _line_col(self, token=None):
+        if token is None:
+            token = self.current()
+        if not token:
+            return ('?', 0)
+        line = token[2] if len(token) > 2 else '?'
+        col = (token[3] if len(token) > 3 else 0) if isinstance(line, int) else 0
+        return (line, col)
+
+    def _syntax_error(self, msg, token=None):
+        """Raise SyntaxError with lineno/offset set for source context display."""
+        if token is None:
+            token = self.current()
+        line, col = self._line_col(token)
+        if not isinstance(line, int):
+            # EOF fallback: use the last token's line if available
+            if self.tokens:
+                line = self.tokens[-1][2] if len(self.tokens[-1]) > 2 and isinstance(self.tokens[-1][2], int) else 1
+                col = 0
+            else:
+                line = 1
+                col = 0
+        e = SyntaxError(msg)
+        e.lineno = line
+        e.offset = col + 1 if isinstance(col, int) else None
+        raise e
+
     def eat(self, kind):
         token = self.current()
         if token and token[0] == kind:
             self.pos += 1
             return token
-        line = token[2] if token and len(token) > 2 else '?'
-        raise SyntaxError(f"[line {line}] Expected {kind}, got {token[0] if token else 'EOF'} ('{token[1] if token else ''}')")
+        line, col = self._line_col(token)
+        got_kind = token[0] if token else 'EOF'
+        got_val = token[1] if token else ''
+        self._syntax_error(f"Expected {kind}, got {got_kind} ('{got_val}')", token)
 
     def skip_newlines(self):
         while self.current() and self.current()[0] == "NEWLINE":
@@ -196,7 +226,7 @@ class Parser:
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         token = self.current()
         if not token:
-            raise SyntaxError("Unexpected EOF")
+            self._syntax_error("Unexpected end of file")
         kind = token[0]
         value = token[1]
         line = token[2] if len(token) > 2 else 0
@@ -302,7 +332,11 @@ class Parser:
             self.eat("LBRACK")
             elements = []
             if self.current() and self.current()[0] != "RBRACK":
-                elements.append(self.parse_expr())
+                first_expr = self.parse_expr()
+                # Check for list comprehension: [expr for x in list]
+                if self.current() and self.current()[0] == "FOR":
+                    return self._parse_list_comp(first_expr, line)
+                elements.append(first_expr)
                 while self.current() and self.current()[0] == "COMMA":
                     self.eat("COMMA")
                     if self.current() and self.current()[0] != "RBRACK":
@@ -348,7 +382,7 @@ class Parser:
             self.eat("COMMA")
             node = Variable(",", line=line)
         else:
-            raise SyntaxError(f"Unexpected token: {token}")
+            self._syntax_error(f"Unexpected token '{token[1]}' ({token[0]})")
 
         # Now, parse trailing suffix operators (. and [) in a loop
         while True:
@@ -441,7 +475,7 @@ class Parser:
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("ALLOC")
         if not self.current() or self.current()[0] != "LPAREN":
-            raise SyntaxError("Expected '(' after alloc")
+            self._syntax_error("Expected '(' after alloc")
         self.eat("LPAREN")
         size = self.parse_expr()
         self.eat("RPAREN")
@@ -561,6 +595,12 @@ class Parser:
             return self.parse_free()
         if kind == "DATA":
             return self.parse_data()
+        if kind == "TRY":
+            return self.parse_try()
+        if kind == "THROW":
+            self.eat("THROW")
+            value = self.parse_expr()
+            return Throw(value, line=line)
 
         is_const = False
         type_name = None
@@ -588,11 +628,22 @@ class Parser:
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("FREE")
         if not self.current() or self.current()[0] != "LPAREN":
-            raise SyntaxError("Expected '(' after free")
+            self._syntax_error("Expected '(' after free")
         self.eat("LPAREN")
         ptr = self.parse_expr()
         self.eat("RPAREN")
         return Free(ptr, line=line)
+
+    def parse_try(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
+        self.eat("TRY")
+        body = self.parse_block()
+        self.eat("CATCH")
+        self.eat("LPAREN")
+        catch_var = self.eat("IDENT")[1]
+        self.eat("RPAREN")
+        catch_body = self.parse_block()
+        return Try(body, catch_var, catch_body, line=line)
 
     def parse_function(self):
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
@@ -764,6 +815,52 @@ class Parser:
         cond = self.parse_expr()
         body = self.parse_block()
         return While(cond, body, line=line)
+
+    def _parse_list_comp(self, expr, line):
+        """Parse list comprehension: [expr for x in list] or [expr for x in list if cond]"""
+        self.eat("FOR")
+        target = self.eat("IDENT")[1]
+        self.eat("IN")
+        iterable = self.parse_expr()
+
+        filter_expr = None
+        if self.current() and self.current()[0] == "IF":
+            self.eat("IF")
+            filter_expr = self.parse_expr()
+
+        self.eat("RBRACK")
+
+        c = self._comp_counter
+        self._comp_counter += 1
+        result_var = f"__comp_{c}"
+        iter_var = f"__iter_{c}"
+        index_var = f"__i_{c}"
+
+        body_stmts = [Assignment(target, ArrayIndex(Variable(iter_var, line=line), Variable(index_var, line=line), line=line), line=line)]
+
+        append_call = MethodCall(Variable(result_var, line=line), "append", [expr], line=line)
+
+        if filter_expr:
+            body_stmts.append(IfElse(filter_expr, [append_call], [], line=line))
+        else:
+            body_stmts.append(append_call)
+
+        for_loop = ForLoop(
+            index_var,
+            Number(0, line=line),
+            BinOp(Len(Variable(iter_var, line=line), line=line), "-", Number(1, line=line), line=line),
+            Number(1, line=line),
+            body_stmts,
+            False,
+            line=line
+        )
+
+        return Block([
+            Assignment(result_var, ListLiteral([], line=line), line=line),
+            Assignment(iter_var, iterable, line=line),
+            for_loop,
+            Variable(result_var, line=line)
+        ], line=line)
 
     def parse(self):
         program = []

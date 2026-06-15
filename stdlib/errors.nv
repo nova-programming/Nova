@@ -1,18 +1,18 @@
-def err(err_type: string, filename: string, line: int, msg: string, suggestion: string) {
+def err(err_type: string, filename: string, line: int, msg: string, suggestion: string, col: int) {
     if filename != "" {
-        print("ERROR [" + filename + ":" + str(line) + "] (" + err_type + "): " + msg)
+        print("ERROR [" + filename + ":" + str(line) + ":" + str(col) + "] (" + err_type + "): " + msg)
     } else {
-        print("ERROR [line " + str(line) + "] (" + err_type + "): " + msg)
+        print("ERROR [line " + str(line) + ":" + str(col) + "] (" + err_type + "): " + msg)
     }
     print("  -> " + suggestion)
     sys_flush()
 }
 
-def warn(err_type: string, filename: string, line: int, msg: string, suggestion: string) {
+def warn(err_type: string, filename: string, line: int, msg: string, suggestion: string, col: int) {
     if filename != "" {
-        print("WARNING [" + filename + ":" + str(line) + "] (" + err_type + "): " + msg)
+        print("WARNING [" + filename + ":" + str(line) + ":" + str(col) + "] (" + err_type + "): " + msg)
     } else {
-        print("WARNING [line " + str(line) + "] (" + err_type + "): " + msg)
+        print("WARNING [line " + str(line) + ":" + str(col) + "] (" + err_type + "): " + msg)
     }
     print("  -> " + suggestion)
     sys_flush()

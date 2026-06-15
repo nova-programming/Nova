@@ -1,6 +1,7 @@
 import sys
 import os
 import json
+import hashlib
 import urllib.request
 import urllib.error
 import zipfile
@@ -14,7 +15,7 @@ from vm.compiler import Compiler
 from vm.machine import VirtualMachine
 from compiler.type_checker import TypeInferer, StaticTypeError
 
-NOVA_VERSION = "0.6.0"
+NOVA_VERSION = "0.7.0"
 REGISTRY_URL = "https://galaxy-registry.vercel.app"
 NOVA_ZIP_URL = "https://github.com/nova-programming/Nova/archive/refs/heads/main.zip"
 ZIP_PREFIX = "Nova-main"
@@ -25,16 +26,229 @@ ALLOWED_UPDATE_DIRS = {"compiler", "parser", "lexer", "nova_ast", "vm", "stdlib"
 
 BUNDLED_GCC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gcc")
 
-def _find_gcc():
-    """Find GCC: bundled dir first, then system PATH."""
-    gcc_name = "gcc.exe" if os.name == "nt" else "gcc"
+def _host_os():
+    """Detect the host operating system."""
+    if sys.platform == "win32":
+        return "windows"
+    if sys.platform == "darwin":
+        return "macos"
+    return "linux"
+
+
+CROSS_GCC_NAMES = {
+    ("linux", "x86_64"):   "x86_64-linux-gnu-gcc",
+    ("linux", "arm64"):    "aarch64-linux-gnu-gcc",
+    ("windows", "x86_64"): "x86_64-w64-mingw32-gcc",
+    ("windows", "arm64"):  "aarch64-w64-mingw32-gcc",
+    ("macos", "x86_64"):   "x86_64-apple-darwin-gcc",
+    ("macos", "arm64"):    "aarch64-apple-darwin-gcc",
+}
+
+
+def _find_gcc(target_os=None, target_arch="x86_64"):
+    """Find GCC: bundled dir first, then system PATH. Supports cross-compilation."""
+    host = _host_os()
+    gcc_name = "gcc.exe" if host == "windows" else "gcc"
+
+    # Native: bundled dir first
     bundled = os.path.join(BUNDLED_GCC_DIR, "bin", gcc_name)
     if os.path.exists(bundled):
         return bundled
-    system = shutil.which("gcc")
+
+    # If cross-compiling, look for a cross-GCC toolchain on PATH
+    if target_os and target_os != host:
+        cross_key = (target_os, target_arch)
+        cross_name = CROSS_GCC_NAMES.get(cross_key)
+        if cross_name:
+            cross = shutil.which(cross_name)
+            if cross:
+                return cross
+        # Fallback: check bundled gcc dir for cross-GCC
+        bundled_cross = os.path.join(BUNDLED_GCC_DIR, "bin", cross_name if cross_name else gcc_name)
+        if os.path.exists(bundled_cross):
+            return bundled_cross
+
+    # Native system GCC
+    system = shutil.which(gcc_name)
     if system:
         return system
+
+    # Last resort: try cross-GCC even without explicit target_os
+    if target_os and target_os != host:
+        cross_key = (target_os, target_arch)
+        cross_name = CROSS_GCC_NAMES.get(cross_key)
+        if cross_name:
+            cross = shutil.which(cross_name)
+            if cross:
+                return cross
+
     return None
+
+
+CACHE_FILE = ".nova_cache.json"
+
+
+def _load_cache(project_dir):
+    """Load the build cache dict from project directory."""
+    path = os.path.join(project_dir, CACHE_FILE)
+    if os.path.exists(path):
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"version": NOVA_VERSION, "files": {}}
+
+
+def _save_cache(project_dir, cache):
+    """Save the build cache dict to project directory."""
+    path = os.path.join(project_dir, CACHE_FILE)
+    try:
+        with open(path, "w") as f:
+            json.dump(cache, f, indent=2)
+    except OSError:
+        pass
+
+
+def _file_hash(file_path):
+    """Compute SHA-256 hash of a file."""
+    h = hashlib.sha256()
+    try:
+        with open(file_path, "rb") as f:
+            h.update(f.read())
+        return h.hexdigest()
+    except OSError:
+        return None
+
+
+def _check_cache(project_dir, file_path):
+    """Check if a file is unchanged since last build. Returns True if cached."""
+    cache = _load_cache(project_dir)
+    if cache.get("version") != NOVA_VERSION:
+        return False
+    fhash = _file_hash(file_path)
+    if fhash is None:
+        return False
+    return cache.get("files", {}).get(file_path) == fhash
+
+
+def _update_cache(project_dir, file_path):
+    """Update the cache with the current file hash."""
+    cache = _load_cache(project_dir)
+    cache["version"] = NOVA_VERSION
+    fhash = _file_hash(file_path)
+    if fhash:
+        cache["files"][file_path] = fhash
+    _save_cache(project_dir, cache)
+
+
+def format_error(source, lineno, offset, message):
+    """Format a compiler error with source context.
+
+    Shows the offending line with a ^ marker pointing at the column.
+    lineno is 1-based, offset is 1-based (Python's SyntaxError convention).
+    """
+    if not source or not isinstance(lineno, int) or lineno < 1:
+        return f"  Error: {message}\n    |"
+    lines = source.rstrip('\n').split('\n')
+    if lineno > len(lines):
+        return f"  Error (line {lineno}): {message}\n    |"
+    line = lines[lineno - 1]
+    marker = ""
+    if isinstance(offset, int) and offset > 0 and offset <= len(line) + 1:
+        marker = " " * (offset - 1) + "^---"
+    return (
+        f"  Error at line {lineno}:\n"
+        f"    |\n"
+        f"  {lineno:4d} | {line}\n"
+        f"    | {marker}\n"
+        f"    |\n"
+        f"  {message}"
+    )
+
+
+def cmd_repl():
+    """Start interactive Nova REPL."""
+    import sys as _sys
+
+    print(f"Nova v{NOVA_VERSION} REPL")
+    print("Type 'exit' to quit, Ctrl+C to interrupt")
+    print()
+
+    persistent = {"env": {}, "functions": {}, "classes": {}}
+
+    while True:
+        try:
+            line = input(">>> ")
+        except EOFError:
+            print()
+            break
+        except KeyboardInterrupt:
+            print()
+            continue
+
+        if not line or line.strip() == "exit":
+            break
+
+        source = line.strip()
+
+        # Multi-line input: accumulate lines until parse succeeds
+        while True:
+            try:
+                tokens = tokenize(source)
+                Parser(tokens).parse()
+                break
+            except SyntaxError as e:
+                if "EOF" in str(e) or "Unexpected end" in str(e):
+                    try:
+                        extra = input("... ")
+                    except (EOFError, KeyboardInterrupt):
+                        print()
+                        source += "\n"
+                        break
+                    if extra == "":
+                        source += "\n"
+                        break
+                    source += "\n" + extra
+                else:
+                    break
+
+        if not source.strip():
+            continue
+
+        try:
+            tokens = tokenize(source)
+            ast = Parser(tokens).parse()
+
+            is_bare_expr = False
+            if len(ast) == 1:
+                from nova_ast.nodes import Print, Assignment, Function, ClassDef, While, ForLoop, ForIn, IfElse, Return, Break, Continue, Data, EnumDef, Import, RawBlock, Try, Throw
+                stmt = ast[0]
+                if not isinstance(stmt, (Assignment, Function, ClassDef, Data, EnumDef, Import, RawBlock, Print, While, ForLoop, ForIn, IfElse, Return, Break, Continue, Try, Throw)):
+                    is_bare_expr = True
+                    ast = [Print(stmt)]
+
+            TypeInferer().infer(ast)
+
+            from vm.compiler import Compiler
+            compiler = Compiler()
+            program = compiler.compile(ast)
+
+            from vm.machine import VirtualMachine
+            vm = VirtualMachine(program)
+            vm.env.update(persistent["env"])
+            vm.functions.update(persistent["functions"])
+            vm.classes.update(persistent["classes"])
+            vm.run()
+
+            persistent["env"].update(vm.env)
+            persistent["functions"].update(vm.functions)
+            persistent["classes"].update(vm.classes)
+
+        except SyntaxError as e:
+            print(f"  SyntaxError: {e}")
+        except Exception as e:
+            print(f"  Error: {e}")
 
 
 def run_source(file_path):
@@ -45,13 +259,17 @@ def run_source(file_path):
     with open(file_path, "r", encoding="utf-8") as f:
         source = f.read()
 
-    tokens = tokenize(source)
-    ast = Parser(tokens).parse()
+    try:
+        tokens = tokenize(source)
+        ast = Parser(tokens).parse()
+    except SyntaxError as e:
+        print(format_error(source, getattr(e, 'lineno', None), getattr(e, 'offset', None), str(e)))
+        sys.exit(1)
 
     try:
         TypeInferer().infer(ast)
     except StaticTypeError as e:
-        print(f"TypeError: {e}")
+        print(format_error(source, getattr(e, 'line', None), getattr(e, 'col', None), str(e)))
         sys.exit(1)
 
     compiler = Compiler(base_dir=base_dir)
@@ -93,12 +311,26 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
     """Compile a Nova program to a native executable (build mode)."""
     file_path = os.path.abspath(file_path)
     base_dir = os.path.dirname(file_path)
+    if target_os is None:
+        target_os = "macos" if sys.platform == "darwin" else ("windows" if sys.platform == "win32" else "linux")
+
+    output_ext = ".exe" if target_os == "windows" else ""
+    exe_file = file_path.rsplit(".", 1)[0] + output_ext
+
+    # Build cache: skip if source unchanged and output exists
+    if not debug_mode and os.path.exists(exe_file) and _check_cache(base_dir, file_path):
+        print(f"  [cached] {os.path.basename(file_path)} unchanged — {os.path.basename(exe_file)} is up to date")
+        return
 
     with open(file_path, "r", encoding="utf-8") as f:
         source = f.read()
 
-    tokens = tokenize(source)
-    ast = Parser(tokens).parse()
+    try:
+        tokens = tokenize(source)
+        ast = Parser(tokens).parse()
+    except SyntaxError as e:
+        print(format_error(source, getattr(e, 'lineno', None), getattr(e, 'offset', None), str(e)))
+        sys.exit(1)
     
     # Collect module names before expansion
     from nova_ast.nodes import Import
@@ -107,27 +339,23 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
         if isinstance(node, Import):
             module_names.add(node.module)
 
-    if target_os is None:
-        target_os = "macos" if sys.platform == "darwin" else ("windows" if sys.platform == "win32" else "linux")
-
     ast = expand_imports(ast, base_dir, target_arch=target_arch, target_os=target_os)
 
     try:
         TypeInferer().infer(ast)
     except StaticTypeError as e:
-        print(f"TypeWarning: {e} (continuing build)")
+        print(format_error(source, getattr(e, 'line', None), getattr(e, 'col', None), f"{e} (continuing build)"))
 
     if target_arch == "arm64":
         from compiler.backend.arm64.codegen import Arm64Codegen
-        codegen = Arm64Codegen(ast, module_names=module_names, debug_mode=debug_mode)
+        codegen = Arm64Codegen(ast, module_names=module_names, debug_mode=debug_mode, target_os=target_os)
     else:
         from compiler.backend.x86_64.codegen import X86_64Codegen
-        codegen = X86_64Codegen(ast, module_names=module_names, debug_mode=debug_mode)
+        codegen = X86_64Codegen(ast, module_names=module_names, debug_mode=debug_mode, target_os=target_os)
         
     asm_code = codegen.generate()
 
     asm_file = file_path.rsplit(".", 1)[0] + ".s"
-    exe_file = file_path.rsplit(".", 1)[0] + ".exe"
 
     with open(asm_file, "w", encoding="utf-8") as f:
         f.write(asm_code)
@@ -152,6 +380,7 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
                 if res.stdout:
                     print(res.stdout)
                 print(f"Successfully compiled native executable: {exe_file}")
+                _update_cache(base_dir, file_path)
                 return
             print(f"Weird: nova.exe said OK but {exe_file} not found. Falling back to GCC.")
             if res.stdout:
@@ -160,21 +389,22 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
         if res.stderr:
             print(res.stderr)
     
-    gcc_path = _find_gcc()
+    gcc_path = _find_gcc(target_os=target_os, target_arch=target_arch)
     if not gcc_path:
         print()
         print("  [FAIL] GCC not found.")
         print("  Nova build requires a C compiler to link native executables.")
         print()
         print("  To install a C compiler:")
-        if os.name == "nt":
+        if target_os == "windows":
             print("    Option 1: Download w64devkit from https://github.com/skeeto/w64devkit")
             print("    Option 2: Install MinGW-w64 from https://winlibs.com")
             print("    Option 3: Use 'nova dev <file.nv>' (runs via Python VM, no GCC needed)")
+        elif target_os == "macos":
+            print("    macOS: xcode-select --install")
         else:
             print("    Ubuntu/Debian: sudo apt install build-essential")
             print("    Fedora:        sudo dnf install gcc")
-            print("    macOS:         xcode-select --install")
         print()
         print("  Or run in development mode (no compilation needed):")
         print("    nova dev <file.nv>")
@@ -185,33 +415,33 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
     runtime_c = os.path.join(nova_root, "runtime.c")
     runtime_o = os.path.join(nova_root, "runtime.o")
     needs_runtime = target_arch in ("x86_64", "arm64")
-    is_macos = sys.platform == "darwin"
+    is_macos = target_os == "macos"
+    is_windows = target_os == "windows"
     
-    cmd = [gcc_path, asm_file, "-o", exe_file]
+    cmd = [gcc_path, "-O3", "-flto", asm_file, "-o", exe_file]
     
-    if os.name == "nt":
+    if is_windows:
         cmd += ["-mconsole", "-lkernel32", "-Wl,--stack,16777216"]
+    elif is_macos:
+        if target_arch == "arm64":
+            cmd += ["-arch", "arm64"]
+        cmd += ["-Wl,-no_compact_unwind"]
     else:
-        if is_macos:
-            if target_arch == "arm64":
-                cmd += ["-arch", "arm64"]
-            cmd += ["-Wl,-no_compact_unwind"]
-        else:
-            cmd += ["-no-pie"]
+        cmd += ["-no-pie"]
     
     if needs_runtime and os.path.exists(runtime_c):
         # Always recompile runtime.c to avoid stale object file issues
         if os.path.exists(runtime_o):
             os.remove(runtime_o)
-        rt_cmd = [gcc_path, "-c", runtime_c, "-o", runtime_o]
+        rt_cmd = [gcc_path, "-O3", "-flto", "-c", runtime_c, "-o", runtime_o]
         if is_macos:
             rt_cmd += ["-D", "MACOS"]
             if target_arch == "arm64":
                 rt_cmd += ["-arch", "arm64"]
-        elif os.name != "nt":
-            rt_cmd += ["-D", "LINUX_WRAP"]
-        else:
+        elif is_windows:
             rt_cmd += ["-mno-red-zone"]
+        else:
+            rt_cmd += ["-D", "LINUX_WRAP"]
         subprocess.run(rt_cmd, capture_output=True, text=True)
         if os.path.exists(runtime_o):
             cmd += [runtime_o]
@@ -223,6 +453,7 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
         print(res.stderr)
         sys.exit(1)
     print(f"Successfully compiled native executable: {exe_file}")
+    _update_cache(base_dir, file_path)
 
 
 def cmd_uninstall():
@@ -349,6 +580,7 @@ def print_usage():
     print("  nova dev <file.nv>       Run in VM (fast, for development)")
     print("  nova build <file.nv>     Compile to native executable")
     print("  nova run <file.nv>       Alias for 'dev' (backward compatible)")
+    print("  nova repl                Interactive REPL shell")
     print("  nova update              Update Nova compiler")
     print("  nova --uninstall         Remove Nova from your system")
     print("  nova galaxy <cmd>        Run Galaxy Package Manager")
@@ -361,6 +593,7 @@ def print_usage():
     print("Fallback (python):")
     print("  python main.py dev program.nv")
     print("  python main.py build program.nv")
+    print("  python main.py repl")
     print("  python main.py --uninstall")
 
 
@@ -472,6 +705,10 @@ def main():
         sys.argv = ["galaxy"] + sys.argv[2:]
         galaxy_main()
         sys.argv = old_argv
+        return
+
+    if command in ("repl", "interactive", "shell"):
+        cmd_repl()
         return
 
     if len(sys.argv) < 3:

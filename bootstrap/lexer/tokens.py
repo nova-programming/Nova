@@ -51,6 +51,9 @@ TOKEN_SPEC = [
     ("ELIF",     r"elif\b"),
     ("SWITCH",   r"switch\b"),
     ("CASE",     r"case\b"),
+    ("TRY",      r"try\b"),
+    ("CATCH",    r"catch\b"),
+    ("THROW",    r"throw\b"),
 
     # Directives
     ("RAW",      r"@raw"),

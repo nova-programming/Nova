@@ -10,6 +10,7 @@ data AstNode {
     val_int: int
     val_str: string
     line: int
+    col: int
     is_float: int
     left: AstNode
     right: AstNode
@@ -39,6 +40,7 @@ def current_tok(state: ParserState) -> Token {
     t.kind = "EOF"
     t.val = ""
     t.line = 0
+    t.col = 0
     return t
 }
 
@@ -48,7 +50,7 @@ def eat_tok(state: ParserState, expected_kind: string) -> Token {
         state.pos = state.pos + 1
         return tok
     }
-    errors.err("Syntax", state.filename, tok.line, "expected " + expected_kind + " but got " + tok.kind, "check the syntax around this token — did you forget a closing brace, parenthesis, or keyword?")
+    errors.err("Syntax", state.filename, tok.line, "expected " + expected_kind + " but got " + tok.kind, "check the syntax around this token — did you forget a closing brace, parenthesis, or keyword?", tok.col)
     return tok
 }
 
@@ -58,6 +60,7 @@ def parse_primary(state: ParserState) -> AstNode {
     tok = current_tok(state)
     node = AstNode()
     node.line = tok.line
+    node.col = tok.col
     
     if tok.kind == "NUMBER" {
         eat_tok(state, "NUMBER")
@@ -147,6 +150,8 @@ def parse_primary(state: ParserState) -> AstNode {
         mode_node = AstNode()
         mode_node.kind = "String"
         mode_node.val_str = "r"
+        mode_node.line = node.line
+        mode_node.col = node.col
         
         check_comma = current_tok(state)
         if check_comma.kind == "COMMA" {
@@ -229,7 +234,7 @@ def parse_primary(state: ParserState) -> AstNode {
         node.kind = "Variable"
         node.val_str = ","
     } else {
-        errors.err("Syntax", state.filename, tok.line, "unexpected token: " + tok.kind, "this token does not belong here — check for misplaced operators, missing expressions, or extra punctuation")
+        errors.err("Syntax", state.filename, tok.line, "unexpected token: " + tok.kind, "this token does not belong here — check for misplaced operators, missing expressions, or extra punctuation", tok.col)
         state.pos = state.pos + 1
     }
     
@@ -246,6 +251,7 @@ def parse_primary(state: ParserState) -> AstNode {
                 eat_tok(state, "LPAREN")
                 method_node = AstNode()
                 method_node.line = tok.line
+                method_node.col = tok.col
                 method_node.kind = "MethodCall"
                 method_node.left = node  # instance
                 method_node.val_str = prop_tok.val  # method name
@@ -281,6 +287,7 @@ def parse_primary(state: ParserState) -> AstNode {
                         val_node = parse_expr(state)
                         assign_node = AstNode()
                         assign_node.line = tok.line
+                        assign_node.col = tok.col
                         assign_node.kind = "PointerAssign"
                         assign_node.left = node  # instance
                         assign_node.val_str = prop_tok.val  # field name
@@ -290,6 +297,7 @@ def parse_primary(state: ParserState) -> AstNode {
                         # Pointer property access: ptr.value
                         access_node = AstNode()
                         access_node.line = tok.line
+                        access_node.col = tok.col
                         access_node.kind = "PointerProperty"
                         access_node.left = node  # instance
                         access_node.val_str = prop_tok.val  # field name
@@ -302,6 +310,7 @@ def parse_primary(state: ParserState) -> AstNode {
                         val_node = parse_expr(state)
                         assign_node = AstNode()
                         assign_node.line = tok.line
+                        assign_node.col = tok.col
                         assign_node.kind = "DataFieldAssign"
                         assign_node.left = node  # instance
                         assign_node.val_str = prop_tok.val  # field name
@@ -311,6 +320,7 @@ def parse_primary(state: ParserState) -> AstNode {
                         # Field access: obj.field
                         access_node = AstNode()
                         access_node.line = tok.line
+                        access_node.col = tok.col
                         access_node.kind = "DataFieldAccess"
                         access_node.left = node  # instance
                         access_node.val_str = prop_tok.val  # field name
@@ -334,6 +344,7 @@ def parse_primary(state: ParserState) -> AstNode {
                 eat_tok(state, "RBRACK")
                 slice_node = AstNode()
                 slice_node.line = tok.line
+                slice_node.col = tok.col
                 slice_node.kind = "Slice"
                 slice_node.left = node  # base
                 slice_node.right = AstNode()  # start = 0 (unused, handled at runtime)
@@ -352,6 +363,7 @@ def parse_primary(state: ParserState) -> AstNode {
                     eat_tok(state, "RBRACK")
                     slice_node = AstNode()
                     slice_node.line = tok.line
+                    slice_node.col = tok.col
                     slice_node.kind = "Slice"
                     slice_node.left = node       # base
                     slice_node.right = index_node # start
@@ -365,6 +377,7 @@ def parse_primary(state: ParserState) -> AstNode {
                         val_node = parse_expr(state)
                         array_assign = AstNode()
                         array_assign.line = tok.line
+                        array_assign.col = tok.col
                         array_assign.kind = "ArrayIndexAssign"
                         array_assign.left = node  # base
                         array_assign.right = index_node # index
@@ -374,6 +387,7 @@ def parse_primary(state: ParserState) -> AstNode {
                     } else {
                         array_node = AstNode()
                         array_node.line = tok.line
+                        array_node.col = tok.col
                         array_node.kind = "ArrayIndex"
                         array_node.left = node # base
                         array_node.right = index_node # index
@@ -397,6 +411,8 @@ def parse_unary(state: ParserState) -> AstNode {
         node = AstNode()
         node.kind = "UnaryOp"
         node.val_str = tok.val
+        node.line = tok.line
+        node.col = tok.col
         node.left = parse_unary(state)
         return node
     }
@@ -425,6 +441,8 @@ def parse_mul(state: ParserState) -> AstNode {
                 node = AstNode()
                 node.kind = "BinOp"
                 node.val_str = tok.val
+                node.line = tok.line
+                node.col = tok.col
                 node.left = left
                 node.right = right
                 left = node
@@ -455,6 +473,8 @@ def parse_add(state: ParserState) -> AstNode {
                 node = AstNode()
                 node.kind = "BinOp"
                 node.val_str = tok.val
+                node.line = tok.line
+                node.col = tok.col
                 node.left = left
                 node.right = right
                 left = node
@@ -477,6 +497,8 @@ def parse_compare(state: ParserState) -> AstNode {
             node = AstNode()
             node.kind = "Compare"
             node.val_str = tok.val
+            node.line = tok.line
+            node.col = tok.col
             node.left = left
             node.right = right
             left = node
@@ -498,6 +520,8 @@ def parse_logic(state: ParserState) -> AstNode {
             node = AstNode()
             node.kind = "BinOp"
             node.val_str = tok.val
+            node.line = tok.line
+            node.col = tok.col
             node.left = left
             node.right = right
             left = node
@@ -536,6 +560,24 @@ def parse_type_annotation(state: ParserState) -> string {
 
 # ---------------- STATEMENTS ----------------
 
+def parse_try_block(state: ParserState, stmt_line: int, stmt_col: int) -> AstNode {
+    eat_tok(state, "TRY")
+    body = parse_block(state)
+    eat_tok(state, "CATCH")
+    eat_tok(state, "LPAREN")
+    catch_var = eat_tok(state, "IDENT").val
+    eat_tok(state, "RPAREN")
+    catch_body = parse_block(state)
+    node = AstNode()
+    node.line = stmt_line
+    node.col = stmt_col
+    node.kind = "TRY"
+    node.val_str = catch_var
+    node.args = body
+    node.cond = catch_body
+    return node
+}
+
 def parse_if_tail(state: ParserState) -> list {
     check = current_tok(state)
     if check.kind == "ELSE" {
@@ -549,6 +591,7 @@ def parse_if_tail(state: ParserState) -> list {
         tail = parse_if_tail(state)
         elif_node = AstNode()
         elif_node.line = check.line
+        elif_node.col = check.col
         elif_node.kind = "IfElse"
         elif_node.cond = elif_cond
         elif_node.body = elif_body
@@ -580,6 +623,7 @@ def parse_block(state: ParserState) -> list {
 def parse_statement(state: ParserState) -> AstNode {
     tok = current_tok(state)
     stmt_line = tok.line
+    stmt_col = tok.col
     
     if tok.kind == "PRINTD" {
         eat_tok(state, "PRINTD")
@@ -588,6 +632,7 @@ def parse_statement(state: ParserState) -> AstNode {
         eat_tok(state, "RPAREN")
         node = AstNode()
         node.line = stmt_line
+        node.col = stmt_col
         node.kind = "PrintD"
         node.left = expr
         return node
@@ -600,6 +645,7 @@ def parse_statement(state: ParserState) -> AstNode {
         eat_tok(state, "RPAREN")
         node = AstNode()
         node.line = stmt_line
+        node.col = stmt_col
         node.kind = "Print"
         node.left = expr
         return node
@@ -612,6 +658,7 @@ def parse_statement(state: ParserState) -> AstNode {
         else_body = parse_if_tail(state)
         node = AstNode()
         node.line = stmt_line
+        node.col = stmt_col
         node.kind = "IfElse"
         node.cond = cond
         node.body = then_body
@@ -620,7 +667,7 @@ def parse_statement(state: ParserState) -> AstNode {
     }
 
     if tok.kind == "SWITCH" {
-        return parse_switch(state, stmt_line)
+        return parse_switch(state, stmt_line, stmt_col)
     }
     
     if tok.kind == "WHILE" {
@@ -629,6 +676,7 @@ def parse_statement(state: ParserState) -> AstNode {
         body = parse_block(state)
         node = AstNode()
         node.line = stmt_line
+        node.col = stmt_col
         node.kind = "While"
         node.cond = cond
         node.body = body
@@ -645,6 +693,7 @@ def parse_statement(state: ParserState) -> AstNode {
             body = parse_block(state)
             node = AstNode()
             node.line = stmt_line
+            node.col = stmt_col
             node.kind = "ForIn"
             node.val_str = var_name
             node.left = collection
@@ -666,6 +715,8 @@ def parse_statement(state: ParserState) -> AstNode {
         step_expr = AstNode()
         step_expr.kind = "Number"
         step_expr.val_int = 1
+        step_expr.line = stmt_line
+        step_expr.col = stmt_col
         
         next_tok = current_tok(state)
         if next_tok.kind == "STEP" {
@@ -677,6 +728,7 @@ def parse_statement(state: ParserState) -> AstNode {
         
         node = AstNode()
         node.line = stmt_line
+        node.col = stmt_col
         node.kind = "ForLoop"
         node.val_str = var_name
         node.val_int = is_downto
@@ -691,6 +743,7 @@ def parse_statement(state: ParserState) -> AstNode {
         eat_tok(state, "BREAK")
         node = AstNode()
         node.line = stmt_line
+        node.col = stmt_col
         node.kind = "Break"
         return node
     }
@@ -698,6 +751,7 @@ def parse_statement(state: ParserState) -> AstNode {
         eat_tok(state, "CONTINUE")
         node = AstNode()
         node.line = stmt_line
+        node.col = stmt_col
         node.kind = "Continue"
         return node
     }
@@ -708,12 +762,30 @@ def parse_statement(state: ParserState) -> AstNode {
         if check_tok.kind == "RBRACE" or check_tok.kind == "EOF" {
             expr = AstNode()
             expr.kind = "None"
+            expr.line = stmt_line
+            expr.col = stmt_col
         } else {
             expr = parse_expr(state)
         }
         node = AstNode()
         node.line = stmt_line
+        node.col = stmt_col
         node.kind = "Return"
+        node.left = expr
+        return node
+    }
+
+    if tok.kind == "TRY" {
+        return parse_try_block(state, stmt_line, stmt_col)
+    }
+
+    if tok.kind == "THROW" {
+        eat_tok(state, "THROW")
+        expr = parse_expr(state)
+        node = AstNode()
+        node.line = stmt_line
+        node.col = stmt_col
+        node.kind = "THROW"
         node.left = expr
         return node
     }
@@ -758,6 +830,7 @@ def parse_statement(state: ParserState) -> AstNode {
         body = parse_block(state)
         node = AstNode()
         node.line = stmt_line
+        node.col = stmt_col
         node.kind = "Function"
         node.val_str = name
         node.params = param_names
@@ -789,6 +862,7 @@ def parse_statement(state: ParserState) -> AstNode {
         eat_tok(state, "RBRACE")
         node = AstNode()
         node.line = stmt_line
+        node.col = stmt_col
         node.kind = "Data"
         node.val_str = name
         node.params = fields
@@ -844,6 +918,8 @@ def parse_statement(state: ParserState) -> AstNode {
                 mnode = AstNode()
                 mnode.kind = "Function"
                 mnode.val_str = mname
+                mnode.line = tok.line
+                mnode.col = tok.col
                 mnode.params = mparams
                 mnode.param_types = mparam_types
                 mnode.return_type = mreturn_type
@@ -866,6 +942,7 @@ def parse_statement(state: ParserState) -> AstNode {
         eat_tok(state, "RBRACE")
         node = AstNode()
         node.line = stmt_line
+        node.col = stmt_col
         node.kind = "ClassDef"
         node.val_str = name
         node.params = fields
@@ -899,6 +976,7 @@ def parse_statement(state: ParserState) -> AstNode {
         eat_tok(state, "RBRACE")
         node = AstNode()
         node.line = stmt_line
+        node.col = stmt_col
         node.kind = "RawBlock"
         node.body = body
         node.args = exports
@@ -909,6 +987,7 @@ def parse_statement(state: ParserState) -> AstNode {
         eat_tok(state, "IMPORT")
         node = AstNode()
         node.line = stmt_line
+        node.col = stmt_col
         node.kind = "Import"
         # Check for FFI string import `import "c" as libc`
         check = current_tok(state)
@@ -929,7 +1008,7 @@ def parse_statement(state: ParserState) -> AstNode {
     }
 
     if tok.kind == "ENUM" {
-        return parse_enum_def(state, stmt_line)
+        return parse_enum_def(state, stmt_line, stmt_col)
     }
 
     # Assignment or standalone expr
@@ -944,6 +1023,7 @@ def parse_statement(state: ParserState) -> AstNode {
         eat_tok(state, "RBRACE")
         node = AstNode()
         node.line = stmt_line
+        node.col = stmt_col
         node.kind = "NONE"
         return node
     }
@@ -956,6 +1036,7 @@ def parse_statement(state: ParserState) -> AstNode {
         if expr.kind == "Variable" {
             node = AstNode()
             node.line = stmt_line
+            node.col = stmt_col
             node.kind = "Assignment"
             node.val_str = expr.val_str
             node.val_int = 0  # is_const = 0 (false) by default
@@ -986,7 +1067,7 @@ def parse_export(state: ParserState) -> list {
     return names
 }
 
-def parse_switch(state: ParserState, stmt_line: int) -> AstNode {
+def parse_switch(state: ParserState, stmt_line: int, stmt_col: int) -> AstNode {
     eat_tok(state, "SWITCH")
     expr = parse_expr(state)
     eat_tok(state, "LBRACE")
@@ -1014,6 +1095,7 @@ def parse_switch(state: ParserState, stmt_line: int) -> AstNode {
         if len(else_body) > 0 { return else_body[0] }
         node = AstNode()
         node.line = stmt_line
+        node.col = stmt_col
         node.kind = "NONE"
         return node
     }
@@ -1023,6 +1105,7 @@ def parse_switch(state: ParserState, stmt_line: int) -> AstNode {
     while i >= 0 {
         cond_node = AstNode()
         cond_node.line = stmt_line
+        cond_node.col = stmt_col
         cond_node.kind = "Compare"
         cond_node.val_str = "=="
         cond_node.left = expr
@@ -1030,6 +1113,7 @@ def parse_switch(state: ParserState, stmt_line: int) -> AstNode {
         
         if_node = AstNode()
         if_node.line = stmt_line
+        if_node.col = stmt_col
         if_node.kind = "IfElse"
         if_node.cond = cond_node
         if_node.body = case_bodies[i]
@@ -1042,7 +1126,7 @@ def parse_switch(state: ParserState, stmt_line: int) -> AstNode {
     return current_else[0]
 }
 
-def parse_enum_def(state: ParserState, stmt_line: int) -> AstNode {
+def parse_enum_def(state: ParserState, stmt_line: int, stmt_col: int) -> AstNode {
     eat_tok(state, "ENUM")
     name = eat_tok(state, "IDENT").val
     eat_tok(state, "LBRACE")
@@ -1060,6 +1144,7 @@ def parse_enum_def(state: ParserState, stmt_line: int) -> AstNode {
     eat_tok(state, "RBRACE")
     node = AstNode()
     node.line = stmt_line
+    node.col = stmt_col
     node.kind = "EnumDef"
     node.val_str = name
     node.params = variants
@@ -1077,11 +1162,13 @@ def desugar_enums(program: list) -> list {
                 const_name = node.val_str + "_" + node.params[j]
                 assign = AstNode()
                 assign.line = node.line
+                assign.col = node.col
                 assign.kind = "Assignment"
                 assign.val_str = const_name
                 assign.val_int = 1  # is_const = true
                 num_node = AstNode()
                 num_node.line = node.line
+                num_node.col = node.col
                 num_node.kind = "Number"
                 num_node.val_int = j
                 assign.left = num_node

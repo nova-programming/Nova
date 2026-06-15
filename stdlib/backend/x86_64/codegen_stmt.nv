@@ -135,8 +135,14 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             emit(state, "    pop " + state.used_regs[r])
             r = r - 1
         }
-        emit(state, "    mov %s, %b")
-        emit(state, "    pop %b")
+        if is_x64(state) == 1 {
+            if state.local_offset > 0 {
+                emit(state, "    add " + state.sp + ", " + str(state.local_offset))
+            }
+        } else {
+            emit(state, "    mov " + state.sp + ", " + state.bp)
+            emit(state, "    pop " + state.bp)
+        }
         emit(state, "    ret")
     }
     if node.kind == "IfElse" {
@@ -349,6 +355,17 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         }
     }
     
+    if node.kind == "TRY" {
+        i = 0
+        while i < len(node.args) {
+            compile_stmt(state, node.args[i], debug_mode)
+            i = i + 1
+        }
+    }
+    if node.kind == "THROW" {
+        compile_expr(state, node.left)
+        clean_n(state, 1)
+    }
     if node.kind == "Call" or node.kind == "MethodCall" {
         compile_expr(state, node)
         clean_n(state, 1)

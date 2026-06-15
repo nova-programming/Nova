@@ -1,8 +1,37 @@
 from nova_ast.nodes import *
 from compiler.types import *
 
+# Built-in FFI function signatures: (return_type, [param_types])
+BUILTIN_SIGS = {
+    "abs":           (IntType, [IntType]),
+    "min":           (IntType, [IntType, IntType]),
+    "max":           (IntType, [IntType, IntType]),
+    "file_exists":   (IntType, [StringType]),
+    "file_size":     (IntType, [StringType]),
+    "file_type":     (StringType, [StringType]),
+    "now":           (StringType, []),
+    "sys_open":      (IntType, [StringType, StringType]),
+    "sys_read":      (StringType, [IntType]),
+    "sys_write":     (AnyType(), [IntType, AnyType()]),
+    "sys_close":     (AnyType(), [IntType]),
+    "sys_alloc":     (AnyType(), [IntType]),
+    "sys_free":      (AnyType(), [AnyType()]),
+    "sys_exit":      (AnyType(), [IntType]),
+    "sys_platform":  (StringType, []),
+    "sys_flush":     (AnyType(), [IntType]),
+    "sys_system":    (IntType, [StringType]),
+    "sys_get_args":  (ListType(AnyType()), []),
+    "sys_get_tick_count": (IntType, []),
+    "print":         (AnyType(), [AnyType()]),
+    "len":           (IntType, [AnyType()]),
+    "char_code":     (IntType, [StringType, IntType]),
+    "str_sub":       (StringType, [StringType, IntType, IntType]),
+}
+
 class StaticTypeError(Exception):
-    def __init__(self, message, line=None, suggestion=""):
+    def __init__(self, message, line=None, suggestion="", col=None):
+        self.line = line
+        self.col = col
         prefix = f"[line {line}]" if line else ""
         if suggestion:
             super().__init__(f"{prefix} {message}\n  -> {suggestion}")
@@ -205,12 +234,22 @@ class TypeInferer:
             
         # Struct instantiation (faked as Call currently)
         if node.name in self.structs:
-            # We don't check struct args here yet, handled in Phase 2
             for arg in node.args:
                 self.visit(arg)
             return self.structs[node.name]
 
-        # FFI or builtins
+        # Built-in FFI functions registered with known signatures
+        if node.name in BUILTIN_SIGS:
+            ret_type, param_types = BUILTIN_SIGS[node.name]
+            if len(node.args) != len(param_types):
+                raise StaticTypeError(f"Built-in {node.name} expects {len(param_types)} args, got {len(node.args)}", node.line)
+            for arg, param_type in zip(node.args, param_types):
+                arg_t = self.visit(arg)
+                if param_type is not AnyType():
+                    self.unify(param_type, arg_t, arg)
+            return ret_type
+
+        # FFI or unknown builtins
         for arg in node.args:
             self.visit(arg)
         return AnyType()
@@ -318,6 +357,22 @@ class TypeInferer:
         return AnyType()
 
     def visit_Export(self, node):
+        return AnyType()
+
+    def visit_Block(self, node):
+        for stmt in node.stmts[:-1]:
+            self.visit(stmt)
+        return self.visit(node.stmts[-1])
+
+    def visit_Try(self, node):
+        for stmt in node.body:
+            self.visit(stmt)
+        for stmt in node.catch_body:
+            self.visit(stmt)
+        return AnyType()
+
+    def visit_Throw(self, node):
+        self.visit(node.value)
         return AnyType()
 
     def visit_Data(self, node):

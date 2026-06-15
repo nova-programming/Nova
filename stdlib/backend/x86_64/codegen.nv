@@ -37,11 +37,13 @@ data CodegenState {
     dx: string
     si: string
     di: string
+    target_os: string
 }
 
-def new_codegen(tgt: int) -> CodegenState {
+def new_codegen(tgt: int, target_os: string) -> CodegenState {
     state = CodegenState()
     state.target = tgt
+    state.target_os = target_os
     state.asm_lines = []
     state.data_lines = []
     state.str_count = 0
@@ -76,7 +78,7 @@ def new_codegen(tgt: int) -> CodegenState {
         state.si = "esi"
         state.di = "edi"
     } else {
-        state.bp = "rbp"
+        state.bp = "rsp"
         state.sp = "rsp"
         state.ax = "rax"
         state.bx = "rbx"
@@ -490,14 +492,30 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     }
 
     emit(state, "_" + node.val_str + ":")
-    emit(state, "    push " + bp)
-    emit(state, "    mov " + bp + ", " + sp)
     regs_size = len(state.used_regs) * psize
-    total_space = state.local_offset + regs_size
-    rem = total_space % 16
-    if rem != 0 {
-        pad = 16 - rem
-        state.local_offset = state.local_offset + pad
+    
+    if is_x64(state) == 1 {
+        state.local_offset = state.local_offset + 8
+        total_space = state.local_offset + regs_size
+        rem = total_space % 16
+        if rem != 0 {
+            pad = 16 - rem
+            state.local_offset = state.local_offset + pad
+        }
+        i = 0
+        while i < len(state.local_vars) {
+            state.local_vars[i] = state.local_vars[i] - state.local_offset - regs_size + 8
+            i = i + 1
+        }
+    } else {
+        emit(state, "    push " + bp)
+        emit(state, "    mov " + bp + ", " + sp)
+        total_space = state.local_offset + regs_size
+        rem = total_space % 16
+        if rem != 0 {
+            pad = 16 - rem
+            state.local_offset = state.local_offset + pad
+        }
     }
     
     if state.local_offset > 0 {
@@ -521,8 +539,14 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    pop " + state.used_regs[r])
         r = r - 1
     }
-    emit(state, "    mov " + sp + ", " + bp)
-    emit(state, "    pop " + bp)
+    if is_x64(state) == 1 {
+        if state.local_offset > 0 {
+            emit(state, "    add " + sp + ", " + str(state.local_offset))
+        }
+    } else {
+        emit(state, "    mov " + sp + ", " + bp)
+        emit(state, "    pop " + bp)
+    }
     emit(state, "    ret")
 
     state.local_var_names = old_var_names
@@ -3970,11 +3994,12 @@ def emit_x86_64_runtime(state) {
 
 # --- Main entry point ---
 
-def generate_assembly(ast: list, debug_mode: int, tgt: int) -> list {
-    state = new_codegen(tgt)
+def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -> list {
+    state = new_codegen(tgt, target_os)
 
     emit(state, ".intel_syntax noprefix")
-    emit(state, ".global _main")
+    entry = "main" if target_os == "linux" else "_main"
+    emit(state, ".global " + entry)
     if is_x64(state) == 0 {
         emit(state, ".extern GetProcessHeap")
         emit(state, ".extern HeapAlloc")
@@ -4023,6 +4048,14 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int) -> list {
     emit(state, ".extern _dict_keys")
     emit(state, ".extern _dict_values")
     emit(state, ".extern _dict_items")
+
+    emit(state, ".extern _abs")
+    emit(state, ".extern _min")
+    emit(state, ".extern _max")
+    emit(state, ".extern _file_exists")
+    emit(state, ".extern _file_size")
+    emit(state, ".extern _file_type")
+    emit(state, ".extern _now")
 
     emit_data(state, "fmt_int: .asciz \"%d\\n\"")
     emit_data(state, "fmt_int_pure: .asciz \"%d\"")
@@ -4103,11 +4136,25 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int) -> list {
     bp = reg32(state, "ebp", "rbp")
     sp = reg32(state, "esp", "rsp")
 
-    emit(state, "_main:")
-    emit(state, "    push " + bp)
-    emit(state, "    mov " + bp + ", " + sp)
+    emit(state, entry + ":")
     if is_x64(state) == 1 {
         emit(state, "    and " + sp + ", -16")
+        state.local_offset = state.local_offset + 16
+        regs_size = len(state.used_regs) * 8
+        total_space = state.local_offset + regs_size
+        rem = total_space % 16
+        if rem != 0 {
+            pad = 16 - rem
+            state.local_offset = state.local_offset + pad
+        }
+        i = 0
+        while i < len(state.local_vars) {
+            state.local_vars[i] = state.local_vars[i] - state.local_offset - regs_size + 8
+            i = i + 1
+        }
+    } else {
+        emit(state, "    push " + bp)
+        emit(state, "    mov " + bp + ", " + sp)
     }
     if state.local_offset > 0 {
         emit(state, "    sub " + sp + ", " + str(state.local_offset))
@@ -4130,8 +4177,14 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int) -> list {
         emit(state, "    pop " + state.used_regs[r])
         r = r - 1
     }
-    emit(state, "    mov " + sp + ", " + bp)
-    emit(state, "    pop " + bp)
+    if is_x64(state) == 1 {
+        if state.local_offset > 0 {
+            emit(state, "    add " + sp + ", " + str(state.local_offset))
+        }
+    } else {
+        emit(state, "    mov " + sp + ", " + bp)
+        emit(state, "    pop " + bp)
+    }
     emit(state, "    mov eax, 0")
     emit(state, "    ret")
 

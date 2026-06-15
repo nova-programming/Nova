@@ -466,3 +466,26 @@ class DictLiteral:
         self.values = values
     def __repr__(self):
         return f"DictLiteral({self.keys}, {self.values})"
+
+class Block:
+    def __init__(self, stmts, line=0):
+        self.line = line
+        self.stmts = stmts
+    def __repr__(self):
+        return f"Block({self.stmts})"
+
+class Try:
+    def __init__(self, body, catch_var, catch_body, line=0):
+        self.line = line
+        self.body = body
+        self.catch_var = catch_var
+        self.catch_body = catch_body
+    def __repr__(self):
+        return f"Try({self.body}, {self.catch_var}, {self.catch_body})"
+
+class Throw:
+    def __init__(self, value, line=0):
+        self.line = line
+        self.value = value
+    def __repr__(self):
+        return f"Throw({self.value})"

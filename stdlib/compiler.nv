@@ -60,7 +60,78 @@ def resolve_imports(ast: list, visited: list, target_arch: string) -> list {
     return expanded
 }
 
-def compile_file(path: string, debug_mode: int, target_arch: string) -> list {
+def cache_path(path: string) -> string {
+    slash = 0
+    i = 0
+    while i < len(path) {
+        if path[i] == "/" or path[i] == "\\" { slash = i }
+        i = i + 1
+    }
+    if slash > 0 { return str_sub(path, 0, slash + 1) + ".nova_cache.txt" }
+    return ".nova_cache.txt"
+}
+
+def load_cache(cache_file: string) -> list {
+    if file_exists(cache_file) == 0 { return [] }
+    fd = sys_open(cache_file, "r")
+    content = sys_read(fd)
+    sys_close(fd)
+    lines = []
+    start = 0
+    i = 0
+    while i < len(content) {
+        if content[i] == "\n" {
+            if i > start { lines.append(str_sub(content, start, i)) }
+            start = i + 1
+        }
+        i = i + 1
+    }
+    if i > start { lines.append(str_sub(content, start, i)) }
+    return lines
+}
+
+def save_cache(cache_file: string, lines: list) {
+    fd = sys_open(cache_file, "w")
+    i = 0
+    while i < len(lines) {
+        sys_write(fd, lines[i])
+        sys_write(fd, "\n")
+        i = i + 1
+    }
+    sys_close(fd)
+}
+
+def cache_key(cache_lines: list, path: string) -> string {
+    prefix = path + "="
+    i = 0
+    while i < len(cache_lines) {
+        line = cache_lines[i]
+        if str_sub(line, 0, len(prefix)) == prefix {
+            return str_sub(line, len(prefix), len(line))
+        }
+        i = i + 1
+    }
+    return ""
+}
+
+def compile_file(path: string, debug_mode: int, target_arch: string, target_os: string) -> list {
+    cache_file = cache_path(path)
+    cached_lines = load_cache(cache_file)
+    current_size = file_size(path)
+    cached_size_str = cache_key(cached_lines, path)
+    cached_size = 0
+    if cached_size_str != "" {
+        if cached_size_str == str(current_size) {
+            print("[cached] " + path + " is up to date" + "\n")
+            ext = ".exe" if target_os == "windows" else ""
+            out_path = str_sub(path, 0, len(path) - 3) + ext
+            if file_exists(out_path) == 1 {
+                sys_flush()
+                return []
+            }
+        }
+    }
+
     print("Reading file: " + path)
     print("path len = " + str(len(path)))
     fd = sys_open(path, "r")
@@ -87,14 +158,37 @@ def compile_file(path: string, debug_mode: int, target_arch: string) -> list {
     print("Generating assembly...")
     is_x64 = 0
     if target_arch == "x86_64" { is_x64 = 1 }
-    asm = generate_assembly(ast, debug_mode, is_x64)
+    if target_arch == "arm64" {
+        asm = generate_assembly(ast, debug_mode, target_os)
+    } else {
+        asm = generate_assembly(ast, debug_mode, is_x64, target_os)
+    }
 
     print("Compilation finished.")
+
+    # Update build cache
+    new_cached_lines = cached_lines
+    new_entry = path + "=" + str(current_size)
+    found = 0
+    i = 0
+    while i < len(new_cached_lines) {
+        line = new_cached_lines[i]
+        prefix = path + "="
+        if str_sub(line, 0, len(prefix)) == prefix {
+            new_cached_lines[i] = new_entry
+            found = 1
+        }
+        i = i + 1
+    }
+    if found == 0 { new_cached_lines.append(new_entry) }
+    save_cache(cache_file, new_cached_lines)
+
     return asm
 }
 
-def compile_to_file(input_path: string, output_path: string, debug_mode: int) {
-    asm = compile_file(input_path, debug_mode, "x86_64")
+def compile_to_file(input_path: string, output_path: string, debug_mode: int, target_os: string) {
+    asm = compile_file(input_path, debug_mode, "x86_64", target_os)
+    if len(asm) == 0 { return }
     write_lines(asm, output_path)
     print("Compiled: " + input_path + " -> " + output_path)
 }
@@ -140,15 +234,31 @@ def read_lines(path: string) -> list {
     return result
 }
 
-def compile_to_exe(input_path: string, output_path: string, debug_mode: int, target_arch: string) {
-    asm = compile_file(input_path, debug_mode, target_arch)
+def compile_to_exe(input_path: string, output_path: string, debug_mode: int, target_arch: string, target_os: string) {
+    asm = compile_file(input_path, debug_mode, target_arch, target_os)
+    if len(asm) == 0 { return }
     write_lines(asm, input_path + ".s")
     
-    if target_arch == "x86_64" {
+    is_windows = 0
+    if target_os == "windows" { is_windows = 1 }
+    is_macos = 0
+    if target_os == "macos" { is_macos = 1 }
+    is_linux = 0
+    if target_os == "linux" { is_linux = 1 }
+    
+    # Choose GCC: native bundled, cross compiler, or system
+    gcc_name = "gcc"
+    if is_windows == 1 {
+        gcc_name = "gcc\\bin\\gcc.exe"
+    } elif is_linux == 1 {
+        gcc_name = "x86_64-linux-gnu-gcc"
+        # fall back to plain gcc
+    }
+    # Cross-compilation from Linux to Windows
+    if is_windows == 1 and target_arch == "x86_64" {
         print("Using GCC to assemble and link...")
-        system.system_exec("gcc\\bin\\gcc.exe " + input_path + ".s -o " + output_path + " -mconsole -lkernel32 -Wl,--stack,16777216 runtime.o")
-        print("Compiled: " + input_path + " -> " + output_path)
-    } else {
+        system.system_exec(gcc_name + " -O3 -flto " + input_path + ".s -o " + output_path + " -mconsole -lkernel32 -Wl,--stack,16777216 runtime.o")
+    } elif is_windows == 1 {
         print("Assembling...")
         assembled = assemble(asm)
         print("Linking...")
@@ -156,12 +266,22 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
         fd = sys_open(output_path, "wb")
         sys_write_raw(fd, exe_bytes)
         sys_close(fd)
-        print("Compiled: " + input_path + " -> " + output_path)
+    } else {
+        print("Using system GCC to assemble and link...")
+        gcc_cmd = gcc_name + " -O3 -flto " + input_path + ".s -o " + output_path + " runtime.o"
+        if is_macos == 1 {
+            gcc_cmd = gcc_cmd + " -Wl,-no_compact_unwind"
+        } elif is_linux == 1 {
+            gcc_cmd = gcc_cmd + " -no-pie"
+        }
+        system.system_exec(gcc_cmd)
     }
+    print("Compiled: " + input_path + " -> " + output_path)
 }
 
 def compile_to_bare(input_path: string, output_path: string, debug_mode: int, load_addr: int, entry_name: string, target_arch: string) {
     asm = compile_file(input_path, debug_mode, target_arch)
+    if len(asm) == 0 { return }
     write_lines(asm, input_path + ".s")
     
     print("Assembling...")
