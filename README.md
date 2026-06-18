@@ -182,7 +182,15 @@ nova/
 - **Variable-to-Register Promotion** — greedily maps local variables to CPU registers (`esi`/`edi`), massively boosting runtime performance.
 - **Native Standard Library Injection** — standard library functions (from `os_win` and `math_utils`) are automatically injected and natively compiled into all executables, removing the need for manual imports of core modules.
 - **Automatic CSPRNG Initialization** — the built-in ChaCha20 random number generator automatically seeds itself at runtime using the Windows tick count (`sys_get_tick_count()`), removing the need for manual seeding initialization.
-- Self-hosted lexer, parser, codegen, type checker
+- **HashMap/Dictionary** — `{"key": value}` literals with native codegen for `get()`, `set()`, `has()`, `remove()`, `keys()`, `values()`, `items()`, `len()`
+- **Switch/match** — `switch expr { case val { body } else { body } }` desugars to if-elif chain at parse time
+- **List comprehensions** — `[expr for x in list if cond]` desugars to Block + ForIn + append at parse time
+- **Exceptions (try/catch/throw)** — full implementation with `setjmp`/`longjmp` native runtime, 10 tests
+- **REPL** — `nova repl` interactive Read-Eval-Print Loop with multi-line input and persistent state
+- **Cross-compilation** — `target_os`-aware codegen with platform-specific GCC commands and output extension
+- **Frame pointer optimization** — x86_64 and ARM64 use `rsp`/`sp`-relative offsets, saving 1-2 instructions per function call
+- **VM self-hosting** — `stdlib/vm.nv` implements bytecode VM in Nova with 20+ opcodes, stack-based execution
+- Self-hosted lexer, parser, codegen, type checker, assembler, linker, VM
 
 ## License
 

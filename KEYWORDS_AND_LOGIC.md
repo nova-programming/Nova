@@ -36,9 +36,11 @@ Nova bridges high-level Pythonic simplicity with low-level C-like control. This 
   1. **Range-based loops**: `for i = start to end step s { ... }` or `for i = start downto end step s { ... }` for descending iteration.
   2. **Collection loops**: `for item in list { ... }` (syntactic sugar over index-based list retrieval).
 * **`break` / `continue`**: Controls loop execution. The compiler maintains stacks of active loop labels to resolve jumps to loop heads or loop exits.
-* **`return`**: Returns a value from a function. Pops the returned value into `eax`, restores any pushed registers, cleans local stack frames, and executes the x86 `ret` instruction.
+* **`return`**: Returns a value from a function. Pops the returned value into `eax`/`rax`, restores any pushed registers, cleans local stack frames, and executes the architecture's `ret` instruction.
 * **`const`**: Enforces compile-time variable immutability. Assigning to a variable declared with `const` will cause a static compilation error.
 * **`null`**: Evaluates to the memory address `0` (used for pointer checks and object initialization checks).
+* **`switch`/`case`/`else`**: Multi-branch selection. `switch expr { case val { body } else { body } }` desugars to an if-elif-else chain at parse time (no AST or codegen changes needed).
+* **`try`/`catch`/`throw`**: Exception handling. `try { ... } catch e { ... }` compiles to setjmp/longjmp in native mode. `throw val` triggers the exception. Both VM (OP_TRY/OP_THROW/OP_CATCHEND) and native runtimes supported.
 
 ### Heap Allocation & Raw Memory
 * **`data`**: Declares C-style structs with statically typed fields. Offsets are resolved during codegen based on field order (4 bytes per field).
@@ -76,6 +78,7 @@ The static type checker (`type_checker.nv`) resolves, infers, and enforces the f
 * **`byte`**: 8-bit unsigned byte.
 * **`void`**: Denotes an empty expression or a function returning no value.
 * **`list[T]`**: Dynamically-sized array containing elements of type `T` (e.g. `list[int]`).
+* **`dict`**: HashMap/dictionary type. `{"key": val}` literal syntax. Methods: `get(key)`, `set(key, val)`, `has(key)`, `remove(key)`, `keys()`, `values()`, `items()`. Native codegen via `_dict_*` runtime calls.
 * **User-defined structs**: Types defined using the `data` keyword.
 * **User-defined classes**: Object templates defined using the `class` keyword.
 
@@ -122,6 +125,7 @@ These functions are available natively in all programs without requiring manual 
 ### Lists & Arrays
 * **`lst.append(value)`**: Appends `value` to `lst`. If size exceeds current capacity, dynamically doubles the allocated memory buffer (`HeapReAlloc`), preventing linear allocation overhead.
 * **`lst.pop()`**: Removes and returns the last element from the list, decreasing the logical length.
+* **List comprehensions**: `[expr for x in list if cond]` syntax desugars at parse time to a Block + ForIn loop + `append()` call. 7 tests.
 * **Array bounds checking**: Array reads (`arr[i]`) and writes (`arr[i] = val`) emit bounds checking instructions:
   ```asm
   cmp ecx, 0
@@ -137,6 +141,19 @@ These functions are available natively in all programs without requiring manual 
 * **`sys_exit(code)`**: Terminates the current process immediately with status `code` (uses `ExitProcess` FFI on Windows).
 * **`sys_platform()`**: Returns the host platform identifier (e.g. `"windows"` or `"linux"`).
 * **`sys_get_tick_count()`**: Returns the system uptime tick count in milliseconds (uses `GetTickCount` FFI on Windows).
+
+### Dict/HashMap Methods
+* **`dict.get(key)`**: Returns the value associated with `key`, or `null` if not found.
+* **`dict.set(key, val)`**: Associates `key` with `val` in the dictionary.
+* **`dict.has(key)`**: Returns `true` if `key` exists in the dictionary, `false` otherwise.
+* **`dict.remove(key)`**: Removes `key` and its associated value from the dictionary.
+* **`dict.keys()`**: Returns a list of all keys in the dictionary.
+* **`dict.values()`**: Returns a list of all values in the dictionary.
+* **`dict.items()`**: Returns a list of alternating key-value pairs.
+
+### type() and call() Built-ins
+* **`type(val)`**: Returns the type name of `val` as a string. Returns `"int"`, `"string"`, `"float"`, `"bool"`, `"list"`, `"dict"`, or `"unknown"`. In native codegen, resolved to a compile-time string constant.
+* **`call(name, args)`**: Dynamically dispatches to a function by name string. `args` is a `list[any]`. Currently works in VM mode.
 
 ### Cryptographically Secure PRNG
 * **`random()`**: Returns a cryptographically secure 32-bit random integer. Uses an optimized, fully-unrolled ChaCha20 block generation algorithm. The CSPRNG is automatically initialized and seeded at startup using `sys_get_tick_count()`.
@@ -162,16 +179,32 @@ These functions are available natively in all programs without requiring manual 
 
 ### Self-Hosted Compiler pipeline
 The self-hosted compiler files located in `stdlib/` run as a sequential pipeline:
-1. **`lexer.nv`**: Tokenizes source characters into a stream of structured `Token` structs.
-2. **`parser.nv`**: Constructs a syntax tree (AST) via recursive-descent parsing. Performs constant folding for integer operations.
+1. **`lexer.nv`**: Tokenizes source characters into a stream of structured `Token` structs. Uses `switch` internally to match 47 keywords and all operators.
+2. **`parser.nv`**: Constructs a syntax tree (AST) via recursive-descent parsing. Performs constant folding for integer operations. Desugars switch/match, list comprehensions, and dict literals.
 3. **`types.nv` & `type_checker.nv`**: Infers and validates static types across all AST nodes.
-4. **`codegen.nv` (+ `codegen_expr.nv`, `codegen_stmt.nv`)**: Generates assembly for the target architecture (x86_64 via `stdlib/backend/x86_64/`, ARM64 via `stdlib/backend/arm64/`). Injects list/array bounds checking code and maps local variables to CPU registers where possible.
+4. **`codegen.nv` (+ `codegen_expr.nv`, `codegen_stmt.nv`)**: Generates assembly for the target architecture (x86_64 via `stdlib/backend/x86_64/`, ARM64 via `stdlib/backend/arm64/`). Injects list/array bounds checking code and maps local variables to CPU registers where possible. Emits try/catch/throw via setjmp/longjmp wrappers.
 5. **`assembler.nv` (+ submodules)**: Encodes x86 assembly lines to native machine code bytes.
 6. **`linker.nv`**: Manually packages machine code, imports, and resources into a valid Windows PE binary (GCC-free compilation).
+7. **`vm.nv`**: Nova bytecode VM written in Nova. Supports 20+ opcodes and stack-based execution for `nova dev` and `nova repl` modes.
 
 ---
 
-## 8. CLI Modes
+## 8. Additional Compiler Optimizations
+
+### Frame Pointer Optimization
+Both x86_64 and ARM64 backends have been optimized to eliminate the frame pointer:
+- **x86_64**: `state.bp = "rsp"` — no `push rbp; mov rbp, rsp` emitted in function prologue. Local variable offsets are positive from `rsp` with +8 compensation.
+- **ARM64**: `state.bp = "sp"` — no `mov fp, sp` emitted. Offsets converted via `new = stack_size - old` formula.
+- Saves 1-2 instructions per function call, frees `rbp`/`fp` as a general-purpose register.
+
+### Cross-Compilation
+The compiler supports building for different target platforms via the `target_os` field in `CodegenState`:
+- Platform-aware GCC command generation (`gcc` on Linux/macOS, bundled `gcc/bin/gcc.exe` on Windows)
+- OS-appropriate output extensions (`.exe` on Windows, no extension on macOS/Linux)
+- Platform-specific stub selection (`os_win.nv`, `os_linux.nv`, `os_macos.nv`)
+- `--target` flag for cross-compilation invocations
+
+### 8. CLI Modes
 
 ### Nova Compiler
 
@@ -182,6 +215,8 @@ The self-hosted compiler files located in `stdlib/` run as a sequential pipeline
 | `nova.exe build <file.nv>` | Self-hosted | Nova-compiled compiler compiles directly to native PE executable using internal assembler + linker (no external toolchain required) |
 | `nova.exe assemble-link <file.s> <out.exe>` | Assembler/Linker | Assembles and links a raw x86 assembly file directly to a PE executable |
 | `nova.exe build-bare <file.nv> <org> <entry>` | Flat Binary | Compiles to a flat, headerless binary (ideal for bare-metal/bootloader use) |
+| `nova.exe dev <file.nv>` | Development | Runs in the Nova-written bytecode VM (stdlib/vm.nv) |
+| `nova.exe repl` | Interactive | Starts the interactive REPL with multi-line input and persistent state |
 
 ### Galaxy Package Manager
 
@@ -191,6 +226,8 @@ After installing with `python install.py`, the `nova` and `galaxy` commands are 
 |---------|-------------|
 | `nova --version` | Show Nova compiler version |
 | `nova build <file.nv>` | Compile a Nova program (alias for `python main.py build`) |
+| `nova dev <file.nv>` | Run in the Nova bytecode VM |
+| `nova repl` | Start the interactive REPL |
 | `nova update` | Update Nova compiler itself |
 | `galaxy --version` | Show Galaxy CLI version |
 | `galaxy init library <name>` | Scaffold a new library project |

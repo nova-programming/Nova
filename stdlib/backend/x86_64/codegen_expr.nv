@@ -824,8 +824,8 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    pop %x")
             emit(state, "    pop %c")
             emit(state, "    push %c")
-            emit(state, "    push %x")
             emit(state, "    push %a")
+            emit(state, "    push %x")
             emit(state, "    push %c")
             emit_call(state, "_dict_set", 3)
             i = i + 2
@@ -1140,6 +1140,23 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit_call(state, "_sprintf", 3)
             
             # The saved buffer pointer is now at top of stack, perfect.
+            return
+        }
+        
+        if node.val_str == "type" {
+            type_str = "unknown"
+            if len(node.args) > 0 {
+                inferred = "unknown"
+                if node.args[0].inferred_type != 0 { inferred = node.args[0].inferred_type }
+                if inferred == "int" { type_str = "int" }
+                elif inferred == "string" { type_str = "string" }
+                elif inferred == "float" { type_str = "float" }
+                elif inferred == "bool" { type_str = "bool" }
+                elif inferred == "list" { type_str = "list" }
+                elif inferred == "dict" { type_str = "dict" }
+            }
+            push_data_label(state, "str_type_" + type_str)
+            emit(state, "    push %a")
             return
         }
         

@@ -1086,6 +1086,23 @@ def compile_expr(state: CodegenState, node: AstNode) {
             return
         }
         
+        if node.val_str == "type" {
+            type_str = "unknown"
+            if len(node.args) > 0 {
+                inferred = "unknown"
+                if node.args[0].inferred_type != 0 { inferred = node.args[0].inferred_type }
+                if inferred == "int" { type_str = "int" }
+                elif inferred == "string" { type_str = "string" }
+                elif inferred == "float" { type_str = "float" }
+                elif inferred == "bool" { type_str = "bool" }
+                elif inferred == "list" { type_str = "list" }
+                elif inferred == "dict" { type_str = "dict" }
+            }
+            push_data_label(state, "str_type_" + type_str)
+            emit(state, "    str %a, [sp, #-16]!")
+            return
+        }
+        
         is_struct = 0
         struct_size = 0
         idx = 0

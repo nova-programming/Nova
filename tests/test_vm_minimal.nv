@@ -1,0 +1,37 @@
+import vm
+
+def make_instr(opcode: string, arg: string, arg_int: int) {
+    i = Instr()
+    i.opcode = opcode
+    i.arg = arg
+    i.arg_int = arg_int
+    return i
+}
+
+def make_funcmeta(name: string, params: list, ip: int, num_instrs: int) {
+    f = FuncMeta()
+    f.name = name
+    f.params = params
+    f.ip = ip
+    f.num_instrs = num_instrs
+    return f
+}
+
+code = []
+code.append(make_instr("LOAD_CONST", "", 0))
+code.append(make_instr("PRINT", "", 0))
+code.append(make_instr("LOAD_CONST", "", 1))
+code.append(make_instr("RETURN", "", 0))
+
+funcs = []
+funcs.append(make_funcmeta("main", [], 0, len(code)))
+
+prog = Program()
+prog.code = code
+prog.constants = [42, 0]
+prog.strings = []
+prog.functions = funcs
+
+print("A")
+exec_func(prog, "main", [], 0)
+print("B")

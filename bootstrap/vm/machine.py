@@ -763,6 +763,46 @@ def _builtin_now(m, args):
     import datetime
     m.stack.append(bytearray(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S").encode('utf-8')))
 
+def _builtin_call(m, args):
+    """call(name: string, args_list: list) -> any
+    Dynamically look up a Nova function by name and call it with the given args.
+    The return value is left on the VM stack."""
+    func_name = m._to_str(args[0])
+    call_args = args[1] if len(args) > 1 else []
+
+    if func_name not in m.functions:
+        if not m._call_builtin(func_name, call_args):
+            raise Exception(f"call(): function '{func_name}' not found")
+        return
+
+    func_meta = m.functions[func_name]
+    local_env = {}
+    for i, param in enumerate(func_meta["params"]):
+        param_name = param[0] if isinstance(param, (list, tuple)) else param
+        local_env[param_name] = call_args[i] if i < len(call_args) else 0
+
+    m.frames.append(Frame(m.ip, local_env, handler_depth=len(m.handler_stack)))
+    m.ip = func_meta["ip"]
+
+def _builtin_type(m, args):
+    val = args[0]
+    if isinstance(val, Instance):
+        m.stack.append(bytearray(b"data:" + val.class_name.encode('utf-8')))
+    elif isinstance(val, bytearray):
+        m.stack.append(bytearray(b"string"))
+    elif isinstance(val, bool):
+        m.stack.append(bytearray(b"bool"))
+    elif isinstance(val, int):
+        m.stack.append(bytearray(b"int"))
+    elif isinstance(val, float):
+        m.stack.append(bytearray(b"float"))
+    elif isinstance(val, list):
+        m.stack.append(bytearray(b"list"))
+    elif isinstance(val, dict):
+        m.stack.append(bytearray(b"dict"))
+    else:
+        m.stack.append(bytearray(b"unknown"))
+
 def _builtin_file_exists(m, args):
     import os
     m.stack.append(1 if os.path.exists(m._to_str(args[0])) else 0)
@@ -786,6 +826,8 @@ def _builtin_file_type(m, args):
         m.stack.append(bytearray(b""))
 
 _BUILTIN_HANDLERS = {
+    "type": _builtin_type,
+    "call": _builtin_call,
     "abs": _builtin_abs,
     "min": _builtin_min,
     "max": _builtin_max,

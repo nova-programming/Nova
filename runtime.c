@@ -632,6 +632,48 @@ SYSCALL char *_str_sub(const char *s, int start, int end) {
     return res;
 }
 
+/* ==================== List slice function ==================== */
+/* List struct: [0..3]=len(int), [4..7]=cap_bytes(int), [8..15]=data(void*)
+ * Capacity at offset 4 is in BYTES to match the codegen's append handler. */
+SYSCALL void *_slice_list(void *list, int start, int end) {
+    if (!list) return 0;
+    int len = *(int*)list;
+    if (end > len) end = len;
+    if (start < 0) start = 0;
+    if (start > len) start = len;
+    int new_len = end - start;
+    if (new_len < 0) new_len = 0;
+    int cap_bytes = (new_len ? new_len : 1) * (int)sizeof(intptr_t);
+#if defined(_WIN32)
+    void *result = STR_PFX(malloc)(16);
+#else
+    void *result = malloc(16);
+#endif
+    if (!result) return 0;
+#if defined(_WIN32)
+    void *new_data = STR_PFX(malloc)((size_t)cap_bytes);
+#else
+    void *new_data = malloc((size_t)cap_bytes);
+#endif
+    if (!new_data) {
+#if defined(_WIN32)
+        STR_PFX(free)(result);
+#else
+        free(result);
+#endif
+        return 0;
+    }
+    *(int*)result = new_len;
+    *(int*)((char*)result + 4) = cap_bytes;
+    *(intptr_t*)((char*)result + 8) = (intptr_t)new_data;
+    intptr_t *src = (intptr_t*)(*(intptr_t*)((char*)list + 8));
+    intptr_t *dst = (intptr_t*)new_data;
+    for (int i = 0; i < new_len; i++) {
+        dst[i] = src[start + i];
+    }
+    return result;
+}
+
 /* ==================== Built-in math and file functions ==================== */
 SYSCALL int _abs(int n) {
     return n < 0 ? -n : n;
@@ -720,4 +762,10 @@ SYSCALL char *_now(void) {
     strftime(buf, 32, "%Y-%m-%d %H:%M:%S", lt);
 #endif
     return buf;
+}
+
+/* _call(name, args_array, num_args) — dynamic function dispatch stub */
+SYSCALL long long _call(const char *name, long long *args, long long num_args) {
+    (void)name; (void)args; (void)num_args;
+    return 0;
 }

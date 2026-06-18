@@ -263,6 +263,7 @@ def is_string_expr(state: CodegenState, node: AstNode) -> int {
         if node.val_str == "str_sub" { return 1 }
         if node.val_str == "trim" { return 1 }
         if node.val_str == "str" { return 1 }
+        if node.val_str == "type" { return 1 }
         if node.val_str == "sys_read" { return 1 }
         if node.val_str == "sys_platform" { return 1 }
         if node.val_str == "_sys_extract_arg" { return 1 }
@@ -470,12 +471,20 @@ def generate_assembly(ast: list, debug_mode: int, target_os: string) -> list {
     emit(state, ".extern _file_size")
     emit(state, ".extern _file_type")
     emit(state, ".extern _now")
+    emit(state, ".extern _call")
 
     emit_data(state, "fmt_int: .asciz \"%d\\n\"")
     emit_data(state, "fmt_int_pure: .asciz \"%d\"")
     emit_data(state, "fmt_str: .asciz \"%s\\n\"")
     emit_data(state, "fmt_float: .asciz \"%f\\n\"")
     emit_data(state, "fmt_float_pure: .asciz \"%f\"")
+    emit_data(state, "str_type_int: .asciz \"int\"")
+    emit_data(state, "str_type_string: .asciz \"string\"")
+    emit_data(state, "str_type_float: .asciz \"float\"")
+    emit_data(state, "str_type_bool: .asciz \"bool\"")
+    emit_data(state, "str_type_list: .asciz \"list\"")
+    emit_data(state, "str_type_dict: .asciz \"dict\"")
+    emit_data(state, "str_type_unknown: .asciz \"unknown\"")
     emit_data(state, "debug_prefix: .asciz \"debug - [line \"")
     emit_data(state, "debug_suffix: .asciz \"]: \"")
     emit_data(state, "L_out_of_bounds_msg: .asciz \"Index Out Of Bounds\\n\"")

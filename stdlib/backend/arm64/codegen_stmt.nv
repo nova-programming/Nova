@@ -70,17 +70,25 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    ldr %d, [sp], #16")
         emit(state, "    ldr %c, [sp], #16")
         emit(state, "    ldr %a, [sp], #16")
-        emit(state, "    cmp %c, #0")
-        emit(state, "    b.lt _out_of_bounds")
-        emit(state, "    ldr w1, [%d]")
-        emit(state, "    cmp %c, x1")
-        emit(state, "    b.ge _out_of_bounds")
-        ptr_sz = ptr_size(state)
-        emit(state, "    add %x, %d, #16")
-        if ptr_sz == 8 {
-            emit(state, "    str %a, [%x, %c, lsl #3]")
+        base_str = str(node.left.inferred_type)
+        if base_str == "dict" {
+            emit(state, "    str %a, [sp, #-16]!")
+            emit(state, "    str %c, [sp, #-16]!")
+            emit(state, "    str %d, [sp, #-16]!")
+            emit_call(state, "_dict_set", 3)
         } else {
-            emit(state, "    str w0, [%x, %c, lsl #2]")
+            emit(state, "    cmp %c, #0")
+            emit(state, "    b.lt _out_of_bounds")
+            emit(state, "    ldr w1, [%d]")
+            emit(state, "    cmp %c, x1")
+            emit(state, "    b.ge _out_of_bounds")
+            ptr_sz = ptr_size(state)
+            emit(state, "    add %x, %d, #16")
+            if ptr_sz == 8 {
+                emit(state, "    str %a, [%x, %c, lsl #3]")
+            } else {
+                emit(state, "    str w0, [%x, %c, lsl #2]")
+            }
         }
     }
     if node.kind == "PrintD" {

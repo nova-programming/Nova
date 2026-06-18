@@ -53,6 +53,16 @@ class ListType(Type):
     def __str__(self):
         return f"list[{self.element_type}]"
 
+class DictType(Type):
+    def __init__(self, value_type=None):
+        super().__init__("dict")
+        self.value_type = value_type or AnyType()
+
+    def __eq__(self, other):
+        if isinstance(other, AnyType): return True
+        if not isinstance(other, DictType): return False
+        return True
+
 class AnyType(Type):
     def __init__(self):
         super().__init__("any")

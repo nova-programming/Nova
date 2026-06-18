@@ -74,16 +74,24 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    pop %d")
         emit(state, "    pop %c")
         emit(state, "    pop %a")
-        emit(state, "    cmp ecx, 0")
-        emit(state, "    jl _out_of_bounds")
-        emit(state, "    cmp ecx, dword ptr [%d]")
-        emit(state, "    jge _out_of_bounds")
-        ptr_sz = ptr_size(state)
-        emit(state, "    lea %x, [%d + 16]")
-        if ptr_sz == 8 {
-            emit(state, "    mov [%x + %c*8], %a")
+        base_str = str(node.left.inferred_type)
+        if base_str == "dict" {
+            emit(state, "    push %a")
+            emit(state, "    push %c")
+            emit(state, "    push %d")
+            emit_call(state, "_dict_set", 3)
         } else {
-            emit(state, "    mov [%x + %c*4], %a")
+            emit(state, "    cmp ecx, 0")
+            emit(state, "    jl _out_of_bounds")
+            emit(state, "    cmp ecx, dword ptr [%d]")
+            emit(state, "    jge _out_of_bounds")
+            ptr_sz = ptr_size(state)
+            emit(state, "    lea %x, [%d + 16]")
+            if ptr_sz == 8 {
+                emit(state, "    mov [%x + %c*8], %a")
+            } else {
+                emit(state, "    mov [%x + %c*4], %a")
+            }
         }
     }
     if node.kind == "PrintD" {

@@ -1,12 +1,12 @@
 # Nova Linker Internals (`stdlib/linker.nv`)
 
-The `linker.nv` module constructs a Windows PE (Portable Executable) binary from raw byte streams produced by the assembler. Integrated via `assemble_link_file()` in `stdlib/compiler.nv` — the `nova assemble-link` command and `main.py`'s auto-fallback both use it.
+The `linker.nv` module constructs a Windows PE (Portable Executable) binary from raw byte streams produced by the assembler. Integrated via `assemble_link_file()` in `stdlib/compiler.nv` — the `nova assemble-link` command and `main.py`'s auto-fallback both use it. Supports both x86_64 (PE32+) and ARM64 PE32+ formats.
 
 ## PE Format Construction
 
 The linker manually builds:
 1. **DOS Header** — MZ signature and DOS stub
-2. **PE Header** — signature, file header (x86 machine), optional header (entry point, image base `0x00400000`, alignments)
+2. **PE Header** — signature, file header (x86_64 or ARM64 machine), optional header (entry point, image base `0x00400000`, alignments)
 3. **Section Headers** — `.text` (code), `.data` (static data), `.idata` (imports)
 4. **`.text`** — assembled machine code bytes
 5. **`.data`** — string literals and static data
@@ -26,9 +26,9 @@ The PE optional header's `HeapReserve` field is set to **16,777,216 (16 MB)** to
 
 Import name resolution strips `@N` stdcall suffixes (e.g., `ExitProcess@4` → `ExitProcess`). The linker removes the `@N` decoration from DLL names before looking up imports, ensuring Win32 API functions link correctly even when the assembler emits decorated names.
 
-## Imports (Legacy x86-32 PE Linker)
+## Imports (x86_64 & ARM64 PE Linker)
 
-The integrated PE linker (`stdlib/linker.nv`) is used for the x86 (32-bit) bare-metal and assembly-link paths. x86_64 native compilation uses `runtime.c` + GCC instead, avoiding PE import thunk generation.
+The integrated PE linker (`stdlib/linker.nv`) is used for the assembly-link path on both x86_64 and ARM64. The in-process assembler+linker (`assemble_link_file`) works for both architectures — no GCC or external toolchain needed. ARM64 uses its own PE32+ variant at `stdlib/backend/arm64/linker.nv`. GCC fallback is only used when the in-process path fails or when explicitly requested.
 
 Generates thunks and IAT entries for external functions (`GetProcessHeap`, `HeapAlloc`, `WriteFile`, `CreateFileA`, `ReadFile`, `GetCommandLineA`, `ExitProcess`, `SetFilePointer`, `FlushFileBuffers`, `CloseHandle`, `GetStdHandle`), mapping them to `kernel32.dll` and constructing `IMAGE_IMPORT_DESCRIPTOR` structures.
 

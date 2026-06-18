@@ -1,0 +1,517 @@
+# Nova Virtual Machine
+# A recursive bytecode interpreter written in Nova.
+#
+# Architecture:
+#   - Tagged union "Value" for the operand stack
+#   - Instr structs for bytecode instructions
+#   - Recursive function calls for CALL opcodes
+
+import types
+import errors
+
+# --- Data Structures ---
+
+data Value {
+    kind: string
+    int_val: int
+    str_val: string
+    bool_val: int
+    list_val: list
+    dict_val: dict
+    float_val: float
+}
+
+data Instr {
+    opcode: string
+    arg: string
+    arg_int: int
+}
+
+data FuncMeta {
+    name: string
+    params: list
+    ip: int
+    num_instrs: int
+}
+
+data Program {
+    code: list
+    constants: list
+    strings: list
+    functions: list
+}
+
+# --- Helper Functions ---
+
+def make_int_val(v: int) -> Value {
+    result = Value()
+    result.kind = "int"
+    result.int_val = v
+    return result
+}
+
+def make_float_val(v: float) -> Value {
+    result = Value()
+    result.kind = "float"
+    result.float_val = v
+    return result
+}
+
+def make_str_val(v: string) -> Value {
+    result = Value()
+    result.kind = "string"
+    result.str_val = v
+    return result
+}
+
+def make_bool_val(v) -> Value {
+    result = Value()
+    result.kind = "bool"
+    result.bool_val = v
+    return result
+}
+
+def make_list_val(v: list) -> Value {
+    result = Value()
+    result.kind = "list"
+    result.list_val = v
+    return result
+}
+
+def make_dict_val(v: dict) -> Value {
+    result = Value()
+    result.kind = "dict"
+    result.dict_val = v
+    return result
+}
+
+def make_null_val() -> Value {
+    result = Value()
+    result.kind = "null"
+    return result
+}
+
+def value_is_truthy(v: Value) -> int {
+    if v.kind == "bool" { if v.bool_val != 0 { return 1 } else { return 0 } }
+    if v.kind == "int" { if v.int_val != 0 { return 1 } else { return 0 } }
+    if v.kind == "float" { if v.float_val != 0.0 { return 1 } else { return 0 } }
+    if v.kind == "string" { if len(v.str_val) > 0 { return 1 } else { return 0 } }
+    if v.kind == "list" { if len(v.list_val) > 0 { return 1 } else { return 0 } }
+    if v.kind == "dict" { return 1 }
+    return 0
+}
+
+def val_to_str_val(v: Value) -> Value {
+    if v.kind == "int" { return make_str_val(str(v.int_val)) }
+    if v.kind == "float" { return make_str_val(str(v.float_val)) }
+    if v.kind == "string" { return v }
+    if v.kind == "bool" {
+        if v.bool_val != 0 { return make_str_val("true") }
+        return make_str_val("false")
+    }
+    return make_str_val("<unknown>")
+}
+
+# --- Interpreter ---
+
+# exec_func: recursively execute a function within a program
+# Returns the result Value
+def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value {
+    func = 0
+    i = 0
+    while i < len(prog.functions) {
+        if prog.functions[i].name == func_name { func = prog.functions[i] }
+        i = i + 1
+    }
+    if func == 0 {
+        errors.warn("VM", "", 0, "function not found: " + func_name, "", 0)
+        return make_null_val()
+    }
+
+    local_env = {}
+    j = 0
+    while j < len(func.params) {
+        if j < len(args) { local_env[func.params[j]] = args[j] }
+        else { local_env[func.params[j]] = make_null_val() }
+        j = j + 1
+    }
+
+    stack = []
+    ip = func.ip
+    end_ip = func.ip + func.num_instrs
+
+    while ip < end_ip {
+        instr = prog.code[ip]
+        op = instr.opcode
+
+        # --- Constants ---
+        if op == "LOAD_CONST" { stack.append(make_int_val(prog.constants[instr.arg_int]) )}
+        elif op == "LOAD_STR" { stack.append(make_str_val(prog.strings[instr.arg_int]) )}
+        elif op == "LOAD_BOOL" { stack.append(make_bool_val(instr.arg_int) )}
+
+        # --- Variables ---
+        elif op == "LOAD_NAME" {
+            if local_env.has(instr.arg) { stack.append(local_env[instr.arg] )}
+            else { stack.append(make_null_val() )}
+        }
+        elif op == "STORE_NAME" {
+            local_env[instr.arg] = stack[len(stack) - 1]
+            stack = stack[0:len(stack) - 1]
+        }
+
+        # --- Arithmetic ---
+        elif op == "ADD" {
+            b = stack[len(stack) - 1]
+            a = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            if a.kind == "int" and b.kind == "int" { stack.append(make_int_val(a.int_val + b.int_val) )}
+            elif a.kind == "float" and b.kind == "float" { stack.append(make_float_val(a.float_val + b.float_val) )}
+            elif a.kind == "int" and b.kind == "float" { stack.append(make_float_val(a.int_val + b.float_val) )}
+            elif a.kind == "float" and b.kind == "int" { stack.append(make_float_val(a.float_val + b.int_val) )}
+            elif a.kind == "string" and b.kind == "string" { stack.append(make_str_val(a.str_val + b.str_val) )}
+        }
+        elif op == "SUB" {
+            b = stack[len(stack) - 1]
+            a = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            if a.kind == "int" and b.kind == "int" { stack.append(make_int_val(a.int_val - b.int_val) )}
+            elif a.kind == "float" and b.kind == "float" { stack.append(make_float_val(a.float_val - b.float_val) )}
+            elif a.kind == "int" and b.kind == "float" { stack.append(make_float_val(a.int_val - b.float_val) )}
+            elif a.kind == "float" and b.kind == "int" { stack.append(make_float_val(a.float_val - b.int_val) )}
+        }
+        elif op == "MUL" {
+            b = stack[len(stack) - 1]
+            a = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            if a.kind == "int" and b.kind == "int" { stack.append(make_int_val(a.int_val * b.int_val) )}
+            elif a.kind == "float" and b.kind == "float" { stack.append(make_float_val(a.float_val * b.float_val) )}
+            elif a.kind == "int" and b.kind == "float" { stack.append(make_float_val(a.int_val * b.float_val) )}
+            elif a.kind == "float" and b.kind == "int" { stack.append(make_float_val(a.float_val * b.int_val) )}
+        }
+        elif op == "DIV" {
+            b = stack[len(stack) - 1]
+            a = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            if a.kind == "float" and b.kind == "float" { stack.append(make_float_val(a.float_val / b.float_val) )}
+            elif a.kind == "int" and b.kind == "float" { stack.append(make_float_val(a.int_val / b.float_val) )}
+            elif a.kind == "float" and b.kind == "int" { stack.append(make_float_val(a.float_val / b.int_val) )}
+            elif a.kind == "int" and b.kind == "int" { stack.append(make_float_val(a.int_val / b.int_val) )}
+        }
+        elif op == "MOD" {
+            b = stack[len(stack) - 1]
+            a = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            if a.kind == "int" and b.kind == "int" { stack.append(make_int_val(a.int_val % b.int_val) )}
+        }
+        elif op == "NEG" {
+            a = stack[len(stack) - 1]
+            stack = stack[0:len(stack) - 1]
+            if a.kind == "int" { stack.append(make_int_val(-a.int_val) )}
+            else { stack.append(make_float_val(-a.float_val) )}
+        }
+
+        # --- Comparisons ---
+        elif op == "CMP_EQ" {
+            b = stack[len(stack) - 1]
+            a = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            if a.kind != b.kind { stack.append(make_bool_val(0) )}
+            elif a.kind == "int" { stack.append(make_bool_val(a.int_val == b.int_val) )}
+            elif a.kind == "float" { stack.append(make_bool_val(a.float_val == b.float_val) )}
+            elif a.kind == "string" { stack.append(make_bool_val(a.str_val == b.str_val) )}
+            elif a.kind == "bool" { stack.append(make_bool_val(a.bool_val == b.bool_val) )}
+            else { stack.append(make_bool_val(0) )}
+        }
+        elif op == "CMP_NEQ" {
+            b = stack[len(stack) - 1]
+            a = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            if a.kind != b.kind { stack.append(make_bool_val(1) )}
+            elif a.kind == "int" { stack.append(make_bool_val(a.int_val != b.int_val) )}
+            elif a.kind == "float" { stack.append(make_bool_val(a.float_val != b.float_val) )}
+            elif a.kind == "string" { stack.append(make_bool_val(a.str_val != b.str_val) )}
+            elif a.kind == "bool" { stack.append(make_bool_val(a.bool_val != b.bool_val) )}
+            else { stack.append(make_bool_val(0) )}
+        }
+        elif op == "CMP_LT" {
+            b = stack[len(stack) - 1]
+            a = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            if a.kind == "int" and b.kind == "int" { stack.append(make_bool_val(a.int_val < b.int_val) )}
+            elif a.kind == "float" and b.kind == "float" { stack.append(make_bool_val(a.float_val < b.float_val) )}
+            elif a.kind == "int" and b.kind == "float" { stack.append(make_bool_val(a.int_val < b.float_val) )}
+            elif a.kind == "float" and b.kind == "int" { stack.append(make_bool_val(a.float_val < b.int_val) )}
+            else { stack.append(make_bool_val(0) )}
+        }
+        elif op == "CMP_GT" {
+            b = stack[len(stack) - 1]
+            a = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            if a.kind == "int" and b.kind == "int" { stack.append(make_bool_val(a.int_val > b.int_val) )}
+            elif a.kind == "float" and b.kind == "float" { stack.append(make_bool_val(a.float_val > b.float_val) )}
+            elif a.kind == "int" and b.kind == "float" { stack.append(make_bool_val(a.int_val > b.float_val) )}
+            elif a.kind == "float" and b.kind == "int" { stack.append(make_bool_val(a.float_val > b.int_val) )}
+            else { stack.append(make_bool_val(0) )}
+        }
+        elif op == "CMP_LE" {
+            b = stack[len(stack) - 1]
+            a = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            if a.kind == "int" and b.kind == "int" { stack.append(make_bool_val(a.int_val <= b.int_val) )}
+            elif a.kind == "float" and b.kind == "float" { stack.append(make_bool_val(a.float_val <= b.float_val) )}
+            elif a.kind == "int" and b.kind == "float" { stack.append(make_bool_val(a.int_val <= b.float_val) )}
+            elif a.kind == "float" and b.kind == "int" { stack.append(make_bool_val(a.float_val <= b.int_val) )}
+            else { stack.append(make_bool_val(0) )}
+        }
+        elif op == "CMP_GE" {
+            b = stack[len(stack) - 1]
+            a = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            if a.kind == "int" and b.kind == "int" { stack.append(make_bool_val(a.int_val >= b.int_val) )}
+            elif a.kind == "float" and b.kind == "float" { stack.append(make_bool_val(a.float_val >= b.float_val) )}
+            elif a.kind == "int" and b.kind == "float" { stack.append(make_bool_val(a.int_val >= b.float_val) )}
+            elif a.kind == "float" and b.kind == "int" { stack.append(make_bool_val(a.float_val >= b.int_val) )}
+            else { stack.append(make_bool_val(0) )}
+        }
+
+        # --- Logic ---
+        elif op == "AND" {
+            b = stack[len(stack) - 1]
+            a = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            if value_is_truthy(a) != 0 and value_is_truthy(b) != 0 { stack.append(make_bool_val(1) )}
+            else { stack.append(make_bool_val(0) )}
+        }
+        elif op == "OR" {
+            b = stack[len(stack) - 1]
+            a = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            if value_is_truthy(a) != 0 or value_is_truthy(b) != 0 { stack.append(make_bool_val(1) )}
+            else { stack.append(make_bool_val(0) )}
+        }
+        elif op == "NOT" {
+            a = stack[len(stack) - 1]
+            stack = stack[0:len(stack) - 1]
+            if value_is_truthy(a) != 0 { stack.append(make_bool_val(0) )}
+            else { stack.append(make_bool_val(1) )}
+        }
+
+        # --- Bitwise ---
+        elif op == "BIT_AND" {
+            b = stack[len(stack) - 1]
+            a = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            stack.append(make_int_val(a.int_val & b.int_val))
+        }
+        elif op == "BIT_OR" {
+            b = stack[len(stack) - 1]
+            a = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            stack.append(make_int_val(a.int_val | b.int_val))
+        }
+        elif op == "BIT_XOR" {
+            b = stack[len(stack) - 1]
+            a = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            stack.append(make_int_val(a.int_val ^ b.int_val))
+        }
+        elif op == "BIT_NOT" {
+            a = stack[len(stack) - 1]
+            stack = stack[0:len(stack) - 1]
+            stack.append(make_int_val(~a.int_val))
+        }
+        elif op == "SHL" {
+            b = stack[len(stack) - 1]
+            a = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            stack.append(make_int_val(a.int_val << b.int_val))
+        }
+        elif op == "SAR" {
+            b = stack[len(stack) - 1]
+            a = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            stack.append(make_int_val(a.int_val >> b.int_val))
+        }
+
+        # --- List operations ---
+        elif op == "NEW_LIST" { stack.append(make_list_val([]) )}
+        elif op == "LEN" {
+            a = stack[len(stack) - 1]
+            stack = stack[0:len(stack) - 1]
+            if a.kind == "list" { stack.append(make_int_val(len(a.list_val)) )}
+            elif a.kind == "string" { stack.append(make_int_val(len(a.str_val)) )}
+            elif a.kind == "dict" { stack.append(make_int_val(len(a.dict_val)) )}
+        }
+        elif op == "LOAD_INDEX" {
+            idx_val = stack[len(stack) - 1]
+            base_val = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            idx = idx_val.int_val
+            if base_val.kind == "list" and idx >= 0 and idx < len(base_val.list_val) {
+                stack.append(base_val.list_val[idx])
+            }
+            elif base_val.kind == "string" and idx >= 0 and idx < len(base_val.str_val) {
+                stack.append(make_str_val(str_sub(base_val.str_val, idx, idx + 1)))
+            }
+        }
+        elif op == "STORE_INDEX" {
+            val = stack[len(stack) - 1]
+            idx_val = stack[len(stack) - 2]
+            base_val = stack[len(stack) - 3]
+            stack = stack[0:len(stack) - 3]
+            idx = idx_val.int_val
+            if base_val.kind == "list" and idx >= 0 and idx < len(base_val.list_val) {
+                base_val.list_val[idx] = val
+            }
+        }
+        elif op == "SLICE" {
+            end_val = stack[len(stack) - 1]
+            start_val = stack[len(stack) - 2]
+            base_val = stack[len(stack) - 3]
+            stack = stack[0:len(stack) - 3]
+            start = start_val.int_val
+            end = end_val.int_val
+            if end < 0 { end = 0 }
+            if base_val.kind == "list" {
+                if end > len(base_val.list_val) { end = len(base_val.list_val) }
+                if start < 0 { start = 0 }
+                if start < end { stack.append(make_list_val(base_val.list_val[start:end]) )}
+                else { stack.append(make_list_val([]) )}
+            }
+            elif base_val.kind == "string" {
+                if end > len(base_val.str_val) { end = len(base_val.str_val) }
+                if start < 0 { start = 0 }
+                if start < end { stack.append(make_str_val(str_sub(base_val.str_val, start, end)) )}
+                else { stack.append(make_str_val("") )}
+            }
+        }
+
+        # --- Dict operations ---
+        elif op == "BUILD_DICT" { stack.append(make_dict_val({}) )}
+        elif op == "HAS" {
+            key_val = stack[len(stack) - 1]
+            dict_val = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            if dict_val.kind == "dict" {
+                stack.append(make_bool_val(dict_val.dict_val.has(key_val.str_val)))
+            }
+        }
+
+        # --- Control flow ---
+        elif op == "JUMP" { ip = instr.arg_int }
+        elif op == "JUMP_IF_FALSE" {
+            cond = stack[len(stack) - 1]
+            stack = stack[0:len(stack) - 1]
+            if value_is_truthy(cond) == 0 { ip = instr.arg_int }
+        }
+        elif op == "CALL" {
+            num_args = instr.arg_int
+            callee_args = []
+            k = 0
+            while k < num_args {
+                callee_args.append(stack[len(stack) - 1])
+                stack = stack[0:len(stack) - 1]
+                k = k + 1
+            }
+            # Reverse: args pushed in reverse order
+            rev_args = []
+            ri = len(callee_args) - 1
+            while ri >= 0 {
+                rev_args.append(callee_args[ri])
+                ri = ri - 1
+            }
+            callee_args = rev_args
+            result = exec_func(prog, instr.arg, callee_args, depth + 1)
+            stack.append(result)
+        }
+        elif op == "RETURN" { return stack[len(stack) - 1] }
+
+        # --- Print ---
+        elif op == "PRINT" {
+            val = stack[len(stack) - 1]
+            stack = stack[0:len(stack) - 1]
+            if val.kind == "int" { print(val.int_val) }
+            elif val.kind == "float" { print(val.float_val) }
+            elif val.kind == "string" { print(val.str_val) }
+            elif val.kind == "bool" {
+                if val.bool_val != 0 { print("true") } else { print("false") }
+            }
+            elif val.kind == "list" {
+                s = "["
+                li = 0
+                while li < len(val.list_val) {
+                    if li > 0 { s = s + ", " }
+                    elem = val.list_val[li]
+                    if elem.kind == "int" { s = s + str(elem.int_val) }
+                    elif elem.kind == "string" { s = s + "\"" + elem.str_val + "\"" }
+                    elif elem.kind == "float" { s = s + str(elem.float_val) }
+                    elif elem.kind == "bool" { if elem.bool_val != 0 { s = s + "true" } else { s = s + "false" } }
+                    elif elem.kind == "list" { s = s + "[...]" }
+                    li = li + 1
+                }
+                s = s + "]"
+                print(s)
+            }
+            elif val.kind == "dict" { print("<dict>") }
+        }
+
+        elif op == "LOAD_PTR" {}
+        elif op == "STORE_PTR" {}
+        elif op == "PTR_OFFSET" {}
+        elif op == "ALLOC" { stack.append(make_int_val(0) )}
+        elif op == "FREE" { stack = stack[0:len(stack) - 1] }
+        elif op == "OPEN_FILE" {
+            mode_val = stack[len(stack) - 1]
+            path_val = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+            stack.append(make_int_val(0))
+        }
+        elif op == "READ_FILE" {
+            fd_val = stack[len(stack) - 1]
+            stack = stack[0:len(stack) - 1]
+            stack.append(make_str_val(""))
+        }
+        elif op == "WRITE_FILE" {
+            content_val = stack[len(stack) - 1]
+            fd_val = stack[len(stack) - 2]
+            stack = stack[0:len(stack) - 2]
+        }
+        elif op == "CLOSE_FILE" {
+            fd_val = stack[len(stack) - 1]
+            stack = stack[0:len(stack) - 1]
+        }
+        elif op == "SIZEOF" {
+            target_val = stack[len(stack) - 1]
+            stack.append(make_int_val(0))
+        }
+        elif op == "STR_CONVERT" {
+            val = stack[len(stack) - 1]
+            stack = stack[0:len(stack) - 1]
+            stack.append(val_to_str_val(val))
+        }
+
+        # --- OOP ---
+        elif op == "NEW" {}
+        elif op == "LOAD_ATTR" {}
+        elif op == "STORE_ATTR" {}
+        elif op == "CALL_METHOD" {}
+        elif op == "LOAD_SELF" {}
+
+        # --- Exception handling ---
+        elif op == "PUSH_HANDLER" {}
+        elif op == "POP_HANDLER" {}
+        elif op == "THROW" {
+            val = stack[len(stack) - 1]
+            stack = stack[0:len(stack) - 1]
+        }
+
+        ip = ip + 1
+    }
+
+    return make_null_val()
+}
+
+# --- Entry point ---
+def exec_program(prog: Program) {
+    _ = exec_func(prog, "main", [], 0)
+}

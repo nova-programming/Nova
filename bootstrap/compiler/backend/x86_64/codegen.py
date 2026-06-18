@@ -118,7 +118,7 @@ class X86_64Codegen:
                 return False
             return str(base_type) == 'string' or self._is_string_expr(node.base)
         if isinstance(node, DataFieldAccess):
-            if node.field_name in ["val", "kind", "val_str", "name", "op", "file_name"]: return True
+            if node.field_name in ["val", "kind", "val_str", "str_val", "name", "op", "file_name"]: return True
             inferred = getattr(node, 'inferred_type', None)
             if str(inferred) == 'string': return True
             if node.instance and hasattr(node.instance, 'inferred_type') and str(node.instance.inferred_type) == 'string':
@@ -163,8 +163,10 @@ class X86_64Codegen:
                        "_dict_remove", "_dict_keys", "_dict_values", "_dict_items"]:
             self.assembly.append(f".extern {d_sym}")
 
-        for b_sym in ["_abs", "_min", "_max", "_file_exists", "_file_size", "_file_type", "_now"]:
+        for b_sym in ["_abs", "_min", "_max", "_file_exists", "_file_size", "_file_type", "_now", "_call"]:
             self.assembly.append(f".extern {b_sym}")
+
+        self.assembly.append(".extern _slice_list")
 
         self.data_section.append('fmt_int: .asciz "%d\\n"')
         self.data_section.append('fmt_int_pure: .asciz "%d"')
@@ -668,18 +670,32 @@ class X86_64Codegen:
             self.assembly.append("    pop rax")
             self.assembly.append("    mov [rbx], eax")
         elif isinstance(node, ArrayIndexAssign):
+            base_type = str(getattr(node.base, 'inferred_type', ''))
+            # Check if base is a Variable with name known to be dict-typed
+            from nova_ast.nodes import Variable as _Var, DataFieldAccess as _DFA
+            if isinstance(node.base, _Var) and node.base.name in ('local_env',):
+                base_type = 'dict'
             self.compile_expr(node.value)
             self.compile_expr(node.index)
             self.compile_expr(node.base)
             self.assembly.append("    pop rbx")
             self.assembly.append("    pop rcx")
             self.assembly.append("    pop rax")
-            self.assembly.append("    cmp ecx, 0")
-            self.assembly.append("    jl _out_of_bounds")
-            self.assembly.append("    cmp ecx, [rbx]")
-            self.assembly.append("    jge _out_of_bounds")
-            self.assembly.append("    mov rdi, [rbx + 8]")
-            self.assembly.append("    mov [rdi + rcx*8], rax")
+            if base_type == 'dict':
+                self.assembly.append("    mov rdi, rbx")
+                self.assembly.append("    mov rsi, rcx")
+                self.assembly.append("    mov rdx, rax")
+                self._ensure_aligned()
+                self.assembly.append("    sub rsp, 32")
+                self.assembly.append("    call _dict_set")
+                self.assembly.append("    add rsp, 32")
+            else:
+                self.assembly.append("    cmp ecx, 0")
+                self.assembly.append("    jl _out_of_bounds")
+                self.assembly.append("    cmp ecx, [rbx]")
+                self.assembly.append("    jge _out_of_bounds")
+                self.assembly.append("    mov rdi, [rbx + 8]")
+                self.assembly.append("    mov [rdi + rcx*8], rax")
         elif isinstance(node, WriteFile):
             self.compile_expr(node.content)
             self.compile_expr(node.file)
@@ -972,7 +988,18 @@ class X86_64Codegen:
                 self.assembly.append("    movzx eax, al")
                 self.assembly.append("    push rax")
         elif isinstance(node, Call):
-            if node.name in self.struct_defs:
+            if node.name == "type":
+                # type(expr) -> resolve to string constant at compile time
+                arg = node.args[0] if node.args else None
+                arg_type = "unknown"
+                if arg is not None:
+                    it = getattr(arg, 'inferred_type', None)
+                    if it is not None:
+                        arg_type = str(it)
+                label = self.add_string_literal(arg_type)
+                self.assembly.append(f"    lea rax, [rip + {label}]")
+                self.assembly.append("    push rax")
+            elif node.name in self.struct_defs:
                 struct_size = (max(self.prop_offsets.values()) + 8) if self.prop_offsets else 128
                 struct_size = max(struct_size, 16)
                 struct_size = (struct_size + 15) & ~15
@@ -1042,6 +1069,11 @@ class X86_64Codegen:
                 raise Exception(f"[line {getattr(node, 'line', '?')}] Property {node.property} not supported in native codegen")
         elif isinstance(node, ArrayIndex):
             base_type = getattr(node.base, 'inferred_type', 'any')
+            # Variable name-based dict detection (fallback when type checker doesn't set inferred_type)
+            from nova_ast.nodes import Variable as _Var
+            base_var_name = node.base.name if isinstance(node.base, _Var) else ''
+            if base_var_name in ('local_env',):
+                base_type = 'dict'
             is_str = self._is_string_expr(node.base) or str(base_type) == 'string'
             if isinstance(node.base, DataFieldAccess) and node.base.field_name in ['struct_names', 'prop_names', 'local_var_names']:
                 is_str = False
@@ -1055,6 +1087,14 @@ class X86_64Codegen:
                 self.assembly.append("    mov rcx, rax")
                 self.assembly.append("    lea rax, [rip + char_strings]")
                 self.assembly.append("    add rax, rcx")
+                self.assembly.append("    push rax")
+            elif str(base_type) == 'dict':
+                self.assembly.append("    mov rdi, rdx")
+                self.assembly.append("    mov rsi, rcx")
+                self._ensure_aligned()
+                self.assembly.append("    sub rsp, 32")
+                self.assembly.append("    call _dict_get")
+                self.assembly.append("    add rsp, 32")
                 self.assembly.append("    push rax")
             else:
                 self.assembly.append("    cmp ecx, 0")
@@ -1268,15 +1308,26 @@ class X86_64Codegen:
                 self.assembly.append("    mov eax, [rax]")
                 self.assembly.append("    push rax")
         elif isinstance(node, Slice):
-            self.compile_expr(node.end)
-            self.compile_expr(node.start)
-            self.compile_expr(node.base)
-            self.assembly.append("    pop rdi")
-            self.assembly.append("    pop rsi")
-            self.assembly.append("    pop rdx")
-            self._ensure_aligned()
-            self.assembly.append("    call _slice_string")
-            self.assembly.append("    push rax")
+            if self._is_string_expr(node.base):
+                self.compile_expr(node.end)
+                self.compile_expr(node.start)
+                self.compile_expr(node.base)
+                self.assembly.append("    pop rdi")
+                self.assembly.append("    pop rsi")
+                self.assembly.append("    pop rdx")
+                self._ensure_aligned()
+                self.assembly.append("    call _slice_string")
+                self.assembly.append("    push rax")
+            else:
+                self.compile_expr(node.end)
+                self.compile_expr(node.start)
+                self.compile_expr(node.base)
+                self.assembly.append("    pop rdi")
+                self.assembly.append("    pop rsi")
+                self.assembly.append("    pop rdx")
+                self._ensure_aligned()
+                self.assembly.append("    call _slice_list")
+                self.assembly.append("    push rax")
         elif isinstance(node, StrConvert):
             self.compile_expr(node.target)
             self.assembly.append("    pop rdx")

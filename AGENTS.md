@@ -236,3 +236,31 @@ galaxy publish             # Publish to registry
   - Linux/macOS OS stubs filled in (os_linux.nv, os_macos.nv)
   - compile_to_exe uses target_os for GCC command, output extension, flags
 - **All 210 tests pass** (1 skipped - pre-existing registry PATH test).
+
+### Phase 7: type() + call() Built-in Functions (This Session — June 15, 2026)
+- **`type()` built-in**: Compile-time string constant resolution in codegens + runtime `_builtin_type` VM handler. Returns `"int"`, `"string"`, `"float"`, `"bool"`, `"list"`, `"dict"`, `"unknown"` based on `inferred_type` (codegen) or Python `type()` (VM).
+  - Bootstrap VM handler (`machine.py:787-804`): `_builtin_type` dispatches via `isinstance` checks
+  - Bootstrap codegen: x86_64 (line 975-985) and ARM64 (line 925) `codegen.py` — compile-time string literal
+  - Self-hosted codegen: x86_64 and ARM64 `codegen_expr.nv` special case + `is_string_expr` registration
+  - Data section: `str_type_int`, `str_type_string`, etc. `.asciz` constants in both backend data sections
+  - No runtime.c function needed (compile-time resolution for native)
+- **`call()` built-in**: Dynamic function dispatch in the VM — `call("func_name", [arg1, arg2, ...])`.
+  - Bootstrap VM handler (`machine.py:766-785`): `_builtin_call` looks up function in `m.functions`, sets up frame + IP for user functions, delegates to `_call_builtin` for built-in functions
+  - Type checker (`type_checker.py` + `type_checker.nv`): `call(string, list[any]) -> any`
+  - Runtime.c: `_call` stub returning 0 (native dispatch TBD)
+  - `.extern _call` added to all 4 codegen files
+- **Tests**: 17 tests (13 for `type`, 4 for `call`) in `tests/test_type_call.py` — all passing
+- **Full suite**: 227 passed, 1 skipped, 13 subtests passed
+
+### _dict_set key/value Swap Bug Fixed (This Conversation — June 18, 2026)
+- **Root cause**: `_dict_set(void*d, const char*k, intptr_t v)` expects `rdi=dict, rsi=key, rdx=value`, but `ArrayIndexAssign` codegen in `bootstrap/compiler/backend/x86_64/codegen.py:684-691` had `mov rsi, rax` (value) and `mov rdx, rcx` (key) — key and value were swapped. This caused `local_env["x"] = 5` to call `_dict_set(local_env, 5, "x")`, storing key=5 (garbage char*) and value="x" in the dict. Subsequent `_dict_has(local_env, "x")` returned False because the string "x" was stored as the *value*, not the *key*.
+- **Fix**: Changed to `mov rsi, rcx` (key) and `mov rdx, rax` (value) in x86_64 Python bootstrap `ArrayIndexAssign`.
+- **VM self-hosting tests** (`tests/test_vm_selfhosted.nv`): 5 tests all passing, including `test_user_func_call` which calls a recursive user-defined function with dict-based parameter passing (previously crashing at `has_key=0`).
+- **Same bug in other backends**:
+  - **ARM64 Python DictLiteral** (`bootstrap/compiler/backend/arm64/codegen.py:1067-1077`): Loaded `x2=key, x1=value` for `_dict_set(x0=dict, x1=key, x2=value)`. Fixed by swapping loads to `x1=key, x2=value`.
+  - **Self-hosted x86_64 DictLiteral** (`stdlib/backend/x86_64/codegen_expr.nv:815-831`): Had key/value/dict push order wrong (pushed dict→value→key but emit_call pops rdi=key, rsi=value, rdx=dict). Additionally lacked the 4th `push %c` to keep dict on stack for expression result. Fixed push order to key→value→dict + added 4th push dict.
+  - **Self-hosted x86_64 ArrayIndexAssign** (`stdlib/backend/x86_64/codegen_stmt.nv:70-88`): Had no dict branch at all (only list indexing). Added dict branch with correct push order + `emit_call("_dict_set", 3)`.
+  - **Self-hosted ARM64 ArrayIndexAssign** (`stdlib/backend/arm64/codegen_stmt.nv:66-85`): Same — no dict branch. Added dict branch with correct ARM64 push order + `emit_call("_dict_set", 3)`.
+  - **Self-hosted ARM64 DictLiteral** (`stdlib/backend/arm64/codegen_expr.nv:775-793`): Already correct (4-push pattern with dict preserved on stack).
+- **Reverted all debug prints** from `stdlib/vm.nv` (temporary debug lines in `exec_func` for LOAD_NAME, LOAD_CONST, ADD, CALL, RETURN).
+- **Full suite**: 229 passed, 1 skipped, 13 subtests passed

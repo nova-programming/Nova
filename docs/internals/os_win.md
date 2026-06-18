@@ -2,6 +2,8 @@
 
 Platform-specific HAL for Windows native compilation. All standard OS functions are natively injected and compiled into every executable (no import statement is required).
 
+Cross-platform equivalents exist: `os_linux.nv` (`sys_platform()` → `"linux"`) and `os_macos.nv` (`sys_platform()` → `"darwin"`). All implement the same API surface (`sys_open`, `sys_read`, `sys_write`, `sys_close`, `sys_system`, `sys_platform`, etc). The compiler selects the correct module based on `target_os`.
+
 ## Functions
 
 - **`sys_get_args()`**: Calls `sys_read_byte` on result of `GetCommandLineA()`, returns parsed argument list as Nova string array

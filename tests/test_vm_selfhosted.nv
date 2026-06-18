@@ -1,0 +1,142 @@
+# Nova VM Self-Hosting Test
+# Exercises the VM by building program bytecodes and executing them
+
+import vm
+
+def make_instr(opcode: string, arg: string, arg_int: int) {
+    i = Instr()
+    i.opcode = opcode
+    i.arg = arg
+    i.arg_int = arg_int
+    return i
+}
+
+def make_funcmeta(name: string, params: list, ip: int, num_instrs: int) {
+    f = FuncMeta()
+    f.name = name
+    f.params = params
+    f.ip = ip
+    f.num_instrs = num_instrs
+    return f
+}
+
+# LOAD_CONST arg_int is an INDEX into the Program.constants table
+# LOAD_STR arg_int is an INDEX into the Program.strings table
+
+def test_print_constant() {
+    code = []
+    code.append(make_instr("LOAD_CONST", "", 0))
+    code.append(make_instr("PRINT", "", 0))
+    code.append(make_instr("LOAD_CONST", "", 1))
+    code.append(make_instr("RETURN", "", 0))
+
+    funcs = []
+    funcs.append(make_funcmeta("main", [], 0, len(code)))
+    prog = Program()
+    prog.code = code
+    prog.constants = [42, 0]
+    prog.strings = []
+    prog.functions = funcs
+
+    result = exec_func(prog, "main", [], 0)
+    print("Print constant test done")
+}
+
+def test_add() {
+    code = []
+    code.append(make_instr("LOAD_CONST", "", 0))
+    code.append(make_instr("LOAD_CONST", "", 1))
+    code.append(make_instr("ADD", "", 0))
+    code.append(make_instr("PRINT", "", 0))
+    code.append(make_instr("LOAD_CONST", "", 2))
+    code.append(make_instr("RETURN", "", 0))
+
+    funcs = []
+    funcs.append(make_funcmeta("main", [], 0, len(code)))
+    prog = Program()
+    prog.code = code
+    prog.constants = [10, 20, 0]
+    prog.strings = []
+    prog.functions = funcs
+
+    result = exec_func(prog, "main", [], 0)
+    print("Add test done")
+}
+
+def test_compare() {
+    code = []
+    code.append(make_instr("LOAD_CONST", "", 0))
+    code.append(make_instr("LOAD_CONST", "", 0))
+    code.append(make_instr("CMP_EQ", "", 0))
+    code.append(make_instr("PRINT", "", 0))
+    code.append(make_instr("LOAD_CONST", "", 1))
+    code.append(make_instr("RETURN", "", 0))
+
+    funcs = []
+    funcs.append(make_funcmeta("main", [], 0, len(code)))
+    prog = Program()
+    prog.code = code
+    prog.constants = [5, 0]
+    prog.strings = []
+    prog.functions = funcs
+
+    result = exec_func(prog, "main", [], 0)
+    print("Compare test done")
+}
+
+def test_string_concat() {
+    code = []
+    code.append(make_instr("LOAD_STR", "", 0))
+    code.append(make_instr("LOAD_STR", "", 1))
+    code.append(make_instr("ADD", "", 0))
+    code.append(make_instr("PRINT", "", 0))
+    code.append(make_instr("LOAD_CONST", "", 0))
+    code.append(make_instr("RETURN", "", 0))
+
+    funcs = []
+    funcs.append(make_funcmeta("main", [], 0, len(code)))
+    prog = Program()
+    prog.code = code
+    prog.constants = [0]
+    prog.strings = ["Hello, ", "World!"]
+    prog.functions = funcs
+
+    result = exec_func(prog, "main", [], 0)
+    print("String concat test done")
+}
+
+def test_user_func_call() {
+    code = []
+    main_start = 0
+    code.append(make_instr("LOAD_CONST", "", 0))
+    code.append(make_instr("CALL", "add_one", 1))
+    code.append(make_instr("PRINT", "", 0))
+    code.append(make_instr("LOAD_CONST", "", 1))
+    code.append(make_instr("RETURN", "", 0))
+
+    add_one_start = len(code)
+    code.append(make_instr("LOAD_NAME", "x", 0))
+    code.append(make_instr("LOAD_CONST", "", 2))
+    code.append(make_instr("ADD", "", 0))
+    code.append(make_instr("RETURN", "", 0))
+
+    funcs = []
+    funcs.append(make_funcmeta("main", [], main_start, add_one_start - main_start))
+    funcs.append(make_funcmeta("add_one", ["x"], add_one_start, len(code) - add_one_start))
+    prog = Program()
+    prog.code = code
+    prog.constants = [5, 0, 1]
+    prog.strings = []
+    prog.functions = funcs
+
+    result = exec_func(prog, "main", [], 0)
+    print("User func call test done")
+}
+
+print("=== Nova VM Self-Hosting Tests ===")
+_ = test_print_constant()
+_ = test_add()
+_ = test_compare()
+_ = test_string_concat()
+_ = test_user_func_call()
+print("=== All tests done ===")

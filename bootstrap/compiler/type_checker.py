@@ -22,6 +22,8 @@ BUILTIN_SIGS = {
     "sys_system":    (IntType, [StringType]),
     "sys_get_args":  (ListType(AnyType()), []),
     "sys_get_tick_count": (IntType, []),
+    "type":          (StringType, [AnyType()]),
+    "call":          (AnyType(), [StringType, ListType(AnyType())]),
     "print":         (AnyType(), [AnyType()]),
     "len":           (IntType, [AnyType()]),
     "char_code":     (IntType, [StringType, IntType]),
@@ -92,13 +94,13 @@ class TypeInferer:
     def visit(self, node):
         if node is None:
             return AnyType()
-        
+
         method_name = f"visit_{type(node).__name__}"
         if hasattr(self, method_name):
             t = getattr(self, method_name)(node)
         else:
             t = AnyType()
-            
+
         node.inferred_type = t
         return t
 
@@ -490,14 +492,17 @@ class TypeInferer:
             if isinstance(elem_t, AnyType):
                 elem_t = t
             else:
-                elem_t = self.unify(elem_t, t, element)
+                try:
+                    elem_t = self.unify(elem_t, t, element)
+                except StaticTypeError:
+                    elem_t = AnyType()
         return ListType(elem_t)
 
     def visit_DictLiteral(self, node):
         for k, v in zip(node.keys, node.values):
             self.visit(k)
             self.visit(v)
-        return AnyType()
+        return DictType()
 
     def visit_DataInstance(self, node):
         # Unused currently, struct instantiation goes through Call

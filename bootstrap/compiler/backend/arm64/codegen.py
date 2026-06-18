@@ -392,6 +392,7 @@ class Arm64Codegen:
         self.assembly.append(".extern _file_size")
         self.assembly.append(".extern _file_type")
         self.assembly.append(".extern _now")
+        self.assembly.append(".extern _call")
 
         self.data_section.append(".align 3")
         self.data_section.append('fmt_int: .asciz "%d\\n"')
@@ -922,7 +923,18 @@ class Arm64Codegen:
             self.assembly.append(f"    str {reg}, [sp, #-16]!")
             self._free_reg(reg)
         elif isinstance(node, Call):
-            if node.name in self.struct_defs:
+            if node.name == "type":
+                arg = node.args[0] if node.args else None
+                arg_type = "unknown"
+                if arg is not None:
+                    it = getattr(arg, 'inferred_type', None)
+                    if it is not None:
+                        arg_type = str(it)
+                label = self.add_string_literal(arg_type)
+                self.assembly.append(f"    adrp x0, {label}")
+                self.assembly.append(f"    add x0, x0, :lo12:{label}")
+                self.assembly.append("    str x0, [sp, #-16]!")
+            elif node.name in self.struct_defs:
                 struct_size = (max(self.prop_offsets.values()) + 8) if self.prop_offsets else 128
                 struct_size = max(struct_size, 16)
                 struct_size = (struct_size + 15) & ~15
@@ -1058,8 +1070,8 @@ class Arm64Codegen:
             for k, v in zip(node.keys, node.values):
                 self.compile_expr(v)
                 self.compile_expr(k)
-                self.assembly.append("    ldr x2, [sp], #16")
                 self.assembly.append("    ldr x1, [sp], #16")
+                self.assembly.append("    ldr x2, [sp], #16")
                 self.assembly.append("    ldr x0, [sp], #16")
                 self.assembly.append("    str x0, [sp, #-16]!")
                 self.assembly.append("    bl _dict_set")
