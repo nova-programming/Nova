@@ -1,5 +1,5 @@
-# x86_64 Windows OS Abstraction
-# All system functions delegate to C helpers in runtime.c
+# arm64 Unix OS Abstraction (Linux + macOS)
+# All syscall functions delegate to C helpers in runtime.c
 
 @raw {
     "    .extern _sys_open_c"

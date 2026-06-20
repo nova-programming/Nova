@@ -16,7 +16,7 @@ def contains(lst: list, item: string) -> int {
     return 0
 }
 
-def resolve_imports(ast: list, visited: list, target_arch: string) -> list {
+def resolve_imports(ast: list, visited: list, target_arch: string, target_os: string) -> list {
     expanded = []
     i = 0
     while i < len(ast) {
@@ -24,7 +24,11 @@ def resolve_imports(ast: list, visited: list, target_arch: string) -> list {
         if node.kind == "Import" {
             module_name = node.val_str
             if module_name == "os_impl" {
-                module_name = "os_windows"
+                if target_os == "windows" {
+                    module_name = "os_windows"
+                } else {
+                    module_name = "os_unix"
+                }
             }
             if contains(visited, module_name) == 0 {
                 visited.append(module_name)
@@ -44,7 +48,7 @@ def resolve_imports(ast: list, visited: list, target_arch: string) -> list {
                     print("Tokenizing... " + module_name)
                     tokens = tokenize(source)
                     imported_ast = parse(tokens, module_name + ".nv")
-                    resolved_ast = resolve_imports(imported_ast, visited, target_arch)
+                    resolved_ast = resolve_imports(imported_ast, visited, target_arch, target_os)
                     j = 0
                     while j < len(resolved_ast) {
                         expanded.append(resolved_ast[j])
@@ -123,10 +127,14 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     if cached_size_str != "" {
         if cached_size_str == str(current_size) {
             print("[cached] " + path + " is up to date" + "\n")
-            ext = ".exe" if target_os == "windows" else ""
+            if target_os == "windows" {
+                ext = ".exe"
+            } else {
+                ext = ""
+            }
             out_path = str_sub(path, 0, len(path) - 3) + ext
             if file_exists(out_path) == 1 {
-                sys_flush()
+                sys_flush(1)
                 return []
             }
         }
@@ -148,7 +156,7 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     
     print("Resolving imports...")
     visited = []
-    ast = resolve_imports(ast, visited, target_arch)
+    ast = resolve_imports(ast, visited, target_arch, target_os)
 
     print("Type checking...")
     tc = TypeChecker()

@@ -217,10 +217,10 @@ SYSCALL void STR_PFX(out_of_bounds)(void) {
     STR_PFX(exit)(1);
 }
 
-/* ============== Nova sys_* runtime ============== */
-SYSCALL int STR_PFX(sys_open)(const char *path, const char *mode) { return STR_PFX(fopen)(path, mode); }
-SYSCALL int STR_PFX(sys_close)(int s) { return STR_PFX(fclose)(s); }
-SYSCALL char *STR_PFX(sys_read)(int s) {
+/* ============== Nova sys_* runtime (_c suffix to match Nova codegen naming) ============== */
+SYSCALL int _sys_open_c(const char *path, const char *mode) { return STR_PFX(fopen)(path, mode); }
+SYSCALL int _sys_close_c(int s) { return STR_PFX(fclose)(s); }
+SYSCALL char *_sys_read_c(int s) {
     long len;
     char *buf;
     STR_PFX(fseek)(s, 0, 2);
@@ -231,20 +231,20 @@ SYSCALL char *STR_PFX(sys_read)(int s) {
     buf[len] = '\0';
     return buf;
 }
-SYSCALL int STR_PFX(sys_write)(int s, const char *str) { return STR_PFX(fputs)(str, s); }
-SYSCALL int STR_PFX(sys_write_raw)(int s, void *arr) {
+SYSCALL int _sys_write_c(int s, const char *str) { return STR_PFX(fputs)(str, s); }
+SYSCALL int _sys_write_raw_c(int s, void *arr) {
     int *iarr = (int*)arr;
     int len = iarr[0];
     char *data = (char*)arr + 16;
     return STR_PFX(fwrite)(data, 1, len, s);
 }
-SYSCALL void *STR_PFX(sys_alloc)(int sz) { return STR_PFX(malloc)(sz); }
-SYSCALL void STR_PFX(sys_free)(void *p) { STR_PFX(free)(p); }
-SYSCALL void STR_PFX(sys_exit)(int c) { STR_PFX(exit)(c); }
-SYSCALL int STR_PFX(sys_system)(const char *c) { return STR_PFX(system)(c); }
-SYSCALL int STR_PFX(sys_flush)(int s) { return STR_PFX(fflush)(s); }
-SYSCALL const char *STR_PFX(sys_platform)(void) { return "windows"; }
-SYSCALL int STR_PFX(sys_get_tick_count)(void) { return (int)GetTickCount(); }
+SYSCALL void *_sys_alloc_c(int sz) { return STR_PFX(malloc)(sz); }
+SYSCALL void _sys_free_c(void *p) { STR_PFX(free)(p); }
+SYSCALL void _sys_exit_c(int c) { STR_PFX(exit)(c); }
+SYSCALL int _system_c(const char *c) { return STR_PFX(system)(c); }
+SYSCALL int _sys_flush_c(int s) { return STR_PFX(fflush)(s); }
+SYSCALL const char *_sys_platform_c(void) { return "windows"; }
+SYSCALL int _sys_get_tick_count_c(void) { return (int)GetTickCount(); }
 
 /* ============== Entry point bridge for Windows x64 ============== */
 /* MinGW x64 CRT expects main() (no _ prefix). Nova codegen emits _main (with _ prefix
@@ -302,7 +302,7 @@ SYSCALL int _fseek(int s, long o, int w) { return fseek((FILE*)(intptr_t)s, o, w
 SYSCALL long _ftell(int s) { return ftell((FILE*)(intptr_t)s); }
 SYSCALL int _fflush(int s) { return fflush((FILE*)(intptr_t)s); }
 SYSCALL void _exit(int c) { exit(c); }
-SYSCALL int _system(const char *c) { return system(c); }
+SYSCALL int _system_c(const char *c) { return system(c); }
 SYSCALL int _sprintf(char *b, const char *fmt, ...) {
     va_list ap; va_start(ap, fmt);
     int n = vsprintf(b, fmt, ap); va_end(ap);
@@ -334,9 +334,10 @@ static unsigned long _dh(const char *s) {
 static int _df(char **keys, int cap, const char *key) {
     if (!keys || cap < 1) return -1;
     unsigned long h = _dh(key);
-    int idx = (int)(h % (unsigned long)cap);
+    unsigned long mask = (unsigned long)(cap - 1);
+    int idx = (int)(h & mask);
     for (int i = 0; i < cap; i++) {
-        int j = (idx + i) % cap;
+        int j = (idx + i) & (int)mask;
         if (!keys[j]) return -1;
         if (strcmp(keys[j], key) == 0) return j;
     }
@@ -357,8 +358,9 @@ static void _dg(void *d) {
     for (int i = 0; i < cap; i++) {
         if (ok[i]) {
             unsigned long h = _dh(ok[i]);
-            int idx = (int)(h % (unsigned long)nc);
-            while (nk[idx]) idx = (idx + 1) % nc;
+            unsigned long nmask = (unsigned long)(nc - 1);
+            int idx = (int)(h & nmask);
+            while (nk[idx]) idx = (idx + 1) & (int)nmask;
             nk[idx] = ok[i];
             nv[idx] = ov[i];
         }
@@ -414,8 +416,9 @@ SYSCALL void dict_set(void *d, const char *key, intptr_t value) {
         values = *(intptr_t**)((char*)d + 16);
     }
     unsigned long h = _dh(key);
-    idx = (int)(h % (unsigned long)cap);
-    while (keys[idx]) idx = (idx + 1) % cap;
+    unsigned long mask = (unsigned long)(cap - 1);
+    idx = (int)(h & mask);
+    while (keys[idx]) idx = (idx + 1) & (int)mask;
     size_t len = strlen(key) + 1;
     keys[idx] = (char*)malloc(len);
     if (keys[idx]) { strcpy(keys[idx], key); }
@@ -431,6 +434,19 @@ SYSCALL void dict_remove(void *d, const char *key) {
     if (idx < 0) return;
     free(keys[idx]); keys[idx] = 0; values[idx] = 0;
     *(int*)d = *(int*)d - 1;
+}
+
+SYSCALL void dict_free(void *d) {
+    if (!d) return;
+    int cap = *(int*)((char*)d + 4);
+    char **keys = *(char***)((char*)d + 8);
+    intptr_t *values = *(intptr_t**)((char*)d + 16);
+    for (int i = 0; i < cap; i++) {
+        if (keys[i]) free(keys[i]);
+    }
+    free(keys);
+    free(values);
+    free(d);
 }
 
 /* Count actual entries in dict (handles tombstones from dict_remove on full table) */
@@ -517,8 +533,7 @@ SYSCALL void *dict_items(void *d) {
     return list;
 }
 
-#if defined(LINUX_WRAP)
-/* Linux ELF: no underscore prefix. Assembly calls _dict_new but C function is dict_new. */
+/* ===== Dict wrappers (shared, identical on all platforms) ===== */
 SYSCALL void *_dict_new(void) { return dict_new(); }
 SYSCALL int _dict_has(void *d, const char *k) { return dict_has(d, k); }
 SYSCALL intptr_t _dict_get(void *d, const char *k) { return dict_get(d, k); }
@@ -527,8 +542,11 @@ SYSCALL void _dict_remove(void *d, const char *k) { dict_remove(d, k); }
 SYSCALL void *_dict_keys(void *d) { return dict_keys(d); }
 SYSCALL void *_dict_values(void *d) { return dict_values(d); }
 SYSCALL void *_dict_items(void *d) { return dict_items(d); }
-SYSCALL const char *_sys_platform(void) { return "linux"; }
-SYSCALL void *_sys_get_args(void) {
+
+/* ===== Platform-specific helpers ===== */
+#if defined(LINUX_WRAP)
+SYSCALL const char *_sys_platform_c(void) { return "linux"; }
+SYSCALL void *_sys_get_args_c(void) {
     extern int __nova_argc;
     extern char **__nova_argv;
     int n = __nova_argc;
@@ -548,16 +566,7 @@ SYSCALL void *_sys_get_args(void) {
     return list;
 }
 #elif defined(_WIN64)
-/* Windows x64: MinGW doesn't add _ prefix. Same wrapper approach as Linux. */
-SYSCALL void *_dict_new(void) { return dict_new(); }
-SYSCALL int _dict_has(void *d, const char *k) { return dict_has(d, k); }
-SYSCALL intptr_t _dict_get(void *d, const char *k) { return dict_get(d, k); }
-SYSCALL void _dict_set(void *d, const char *k, intptr_t v) { dict_set(d, k, v); }
-SYSCALL void _dict_remove(void *d, const char *k) { dict_remove(d, k); }
-SYSCALL void *_dict_keys(void *d) { return dict_keys(d); }
-SYSCALL void *_dict_values(void *d) { return dict_values(d); }
-SYSCALL void *_dict_items(void *d) { return dict_items(d); }
-SYSCALL void *__sys_get_args(void) {
+SYSCALL void *_sys_get_args_c(void) {
     extern int __argc;
     extern char **__argv;
     int n = __argc;
@@ -577,21 +586,35 @@ SYSCALL void *__sys_get_args(void) {
     return list;
 }
 #elif defined(MACOS)
-/* macOS: libc exports with underscore, but our C functions are compiled as
- * bare names (no underscore). These wrappers add the _ prefix used by Nova's assembly. */
-SYSCALL void *_dict_new(void) { return dict_new(); }
-SYSCALL int _dict_has(void *d, const char *k) { return dict_has(d, k); }
-SYSCALL intptr_t _dict_get(void *d, const char *k) { return dict_get(d, k); }
-SYSCALL void _dict_set(void *d, const char *k, intptr_t v) { dict_set(d, k, v); }
-SYSCALL void _dict_remove(void *d, const char *k) { dict_remove(d, k); }
-SYSCALL void *_dict_keys(void *d) { return dict_keys(d); }
-SYSCALL void *_dict_values(void *d) { return dict_values(d); }
-SYSCALL void *_dict_items(void *d) { return dict_items(d); }
-SYSCALL const char *_sys_platform(void) { return "darwin"; }
+SYSCALL const char *_sys_platform_c(void) { return "macos"; }
+SYSCALL void *_sys_get_args_c(void) {
+    extern int *__NSGetArgc(void);
+    extern char ***__NSGetArgv(void);
+    int n = *__NSGetArgc();
+    char **argv = *__NSGetArgv();
+    void *list = malloc(16);
+    if (!list) return 0;
+    void *data = malloc((size_t)n * sizeof(intptr_t));
+    if (!data) { free(list); return 0; }
+    *(int*)list = n;
+    *(int*)((char*)list + 4) = n;
+    *(intptr_t*)((char*)list + 8) = (intptr_t)data;
+    for (int i = 0; i < n; i++) {
+        size_t sl = strlen(argv[i]) + 1;
+        char *copy = (char*)malloc(sl);
+        if (copy) strcpy(copy, argv[i]);
+        *(intptr_t*)((char*)data + i * sizeof(intptr_t)) = (intptr_t)(copy ? copy : argv[i]);
+    }
+    return list;
+}
 #endif
 
 /* ==================== File read + get_args for Linux/macOS (no Win32 API) ==================== */
 #if defined(LINUX_WRAP) || defined(MACOS)
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/mman.h>
+
 SYSCALL char *_nova_read_file(int fd) {
     off_t len = lseek(fd, 0, SEEK_END);
     lseek(fd, 0, SEEK_SET);
@@ -607,6 +630,60 @@ SYSCALL int _nova_get_tick_count(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+}
+
+/* ===== Unix syscall helpers (_c suffix for Nova codegen naming compatibility) ===== */
+SYSCALL int _sys_open_c(const char *path, const char *mode) {
+    int flags;
+    if (*mode == 'w' || *mode == 'a') {
+        flags = O_WRONLY | O_CREAT;
+        if (*mode == 'a') flags |= O_APPEND;
+        else flags |= O_TRUNC;
+        return open(path, flags, 0666);
+    }
+    return open(path, O_RDONLY);
+}
+
+SYSCALL void _sys_close_c(int fd) {
+    close(fd);
+}
+
+SYSCALL char *_sys_read_c(int fd) {
+    off_t len = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+    char *buf = (char*)malloc((size_t)len + 1);
+    if (!buf) return 0;
+    ssize_t n = read(fd, buf, (size_t)len);
+    if (n < 0) { free(buf); return 0; }
+    buf[n] = '\0';
+    return buf;
+}
+
+SYSCALL void _sys_write_c(int fd, const char *str) {
+    int len = strlen(str);
+    write(fd, str, (size_t)len);
+}
+
+SYSCALL void _sys_write_raw_c(int fd, void *list) {
+    int len = *(int*)list;
+    char *data = (char*)list + 16;
+    write(fd, data, (size_t)len);
+}
+
+SYSCALL void *_sys_alloc_c(int sz) {
+    return malloc((size_t)sz);
+}
+
+SYSCALL void _sys_free_c(void *p) {
+    free(p);
+}
+
+SYSCALL void _sys_flush_c(int fd) {
+    fsync(fd);
+}
+
+SYSCALL void _sys_exit_c(int code) {
+    _exit(code);
 }
 #endif
 

@@ -1185,3 +1185,8 @@ def node_to_asm(state: CodegenState, node: AstNode) -> string {
     if node.kind == "UnaryOp" { return node.val_str + node_to_asm(state, node.left) }
     return ""
 }
+
+def get_entry_name(target_os: string) -> string {
+    if target_os == "linux" { return "main" }
+    return "_main"
+}

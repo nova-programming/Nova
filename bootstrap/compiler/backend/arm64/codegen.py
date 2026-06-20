@@ -369,7 +369,7 @@ class Arm64Codegen:
         self.assembly.append(".extern _ftell")
         self.assembly.append(".extern _fflush")
         self.assembly.append(".extern _exit")
-        self.assembly.append(".extern _system")
+        self.assembly.append(".extern _system_c")
         self.assembly.append(".extern _strlen")
         self.assembly.append(".extern _strcmp")
         self.assembly.append(".extern _strcpy")
@@ -385,6 +385,7 @@ class Arm64Codegen:
         self.assembly.append(".extern _dict_keys")
         self.assembly.append(".extern _dict_values")
         self.assembly.append(".extern _dict_items")
+        self.assembly.append(".extern _dict_free")
         self.assembly.append(".extern _abs")
         self.assembly.append(".extern _min")
         self.assembly.append(".extern _max")
@@ -524,15 +525,12 @@ class Arm64Codegen:
         self.assembly.append("    ldr x1, [sp, #16]")
         self.assembly.append("    str x1, [sp, #8]")
         self.assembly.append("    str w2, [sp, #40]")
-        self.assembly.append("    mov w3, #0")
         self.assembly.append("    cmp w2, #0")
         self.assembly.append("    b.le L_slice_done_arm")
-        self.assembly.append("L_slice_copy_arm:")
-        self.assembly.append("    ldrb w4, [x0, x3]")
-        self.assembly.append("    strb w4, [x1, x3]")
-        self.assembly.append("    add w3, w3, #1")
-        self.assembly.append("    cmp w3, w2")
-        self.assembly.append("    b.lt L_slice_copy_arm")
+        self.assembly.append("    mov x3, x0")
+        self.assembly.append("    mov x0, x1")
+        self.assembly.append("    mov x1, x3")
+        self.assembly.append("    bl _memcpy")
         self.assembly.append("L_slice_done_arm:")
         self.assembly.append("    ldr x1, [sp, #8]")
         self.assembly.append("    ldr w2, [sp, #40]")
@@ -800,12 +798,12 @@ class Arm64Codegen:
             self.assembly.append("    str x1, [sp, #-16]!")
             self.assembly.append("    cmp w0, w1")
             self.assembly.append(f"    b.ge {end_label}")
-            self.assembly.append("    ldr x2, [x3, #16]")
+            self.assembly.append("    add x2, x3, #16")
             if isinstance(offset, str):
                 self.assembly.append(f"    ldr w1, {offset}")
             else:
-                self.assembly.append(f"    ldr w1, [sp, #{self.local_aligned - offset}]")
-            self.assembly.append("    ldr w0, [x2, x1, lsl #2]")
+                self.assembly.append(f"    ldr x1, [sp, #{self.local_aligned - offset}]")
+            self.assembly.append("    ldr x0, [x2, x1, lsl #3]")
             if not isinstance(offset, str):
                 self.assembly.append(f"    str x0, [sp, #{self.local_aligned - 8}]")
             self.assembly.append("    str x0, [sp, #-16]!")
@@ -848,8 +846,8 @@ class Arm64Codegen:
             self.assembly.append("    ldr w3, [x2]")
             self.assembly.append("    cmp w1, w3")
             self.assembly.append("    b.ge _out_of_bounds")
-            self.assembly.append("    ldr x3, [x2, #16]")
-            self.assembly.append("    str w0, [x3, x1, lsl #2]")
+            self.assembly.append("    add x3, x2, #16")
+            self.assembly.append("    str x0, [x3, x1, lsl #3]")
         elif isinstance(node, WriteFile):
             self.compile_expr(node.content)
             self.compile_expr(node.file)
@@ -1017,8 +1015,8 @@ class Arm64Codegen:
                 self.assembly.append("    ldr w2, [x0]")
                 self.assembly.append("    cmp w1, w2")
                 self.assembly.append("    b.ge _out_of_bounds")
-                self.assembly.append("    ldr x2, [x0, #16]")
-                self.assembly.append("    ldr w0, [x2, x1, lsl #2]")
+                self.assembly.append("    add x2, x0, #16")
+                self.assembly.append("    ldr x0, [x2, x1, lsl #3]")
                 self.assembly.append("    str x0, [sp, #-16]!")
         elif isinstance(node, Openf):
             self.assembly.append("    mov x0, #24")
@@ -1046,11 +1044,11 @@ class Arm64Codegen:
         elif isinstance(node, ReadFile):
             self.compile_expr(node.file)
             self.assembly.append("    ldr x0, [sp], #16")
-            self.assembly.append("    bl _sys_read")
+            self.assembly.append("    bl _sys_read_c")
             self.assembly.append("    str x0, [sp, #-16]!")
         elif isinstance(node, ListLiteral):
             n = len(node.elements)
-            list_size = 16 + n * 4
+            list_size = 16 + n * 8
             self.assembly.append(f"    mov x0, #{list_size}")
             self.assembly.append("    bl _malloc")
             self.assembly.append("    str x0, [sp, #-16]!")
@@ -1062,7 +1060,7 @@ class Arm64Codegen:
             for i, elem in enumerate(node.elements):
                 self.compile_expr(elem)
                 self.assembly.append("    ldr x0, [sp], #16")
-                self.assembly.append(f"    str w0, [x2, #{i*4}]")
+                self.assembly.append(f"    str x0, [x2, #{i*8}]")
             self.assembly.append("    str x1, [sp, #-16]!")
         elif isinstance(node, DictLiteral):
             self.assembly.append("    bl _dict_new")
@@ -1101,9 +1099,10 @@ class Arm64Codegen:
                 self.assembly.append("    ldr x0, [sp], #16")
                 self.assembly.append("    ldr x1, [sp], #16")
                 self.assembly.append("L_append_no_realloc_arm:")
+                self.assembly.append("    ldr w3, [x1]")
                 self.assembly.append("    add x2, x1, #16")
-                self.assembly.append("    sub w3, w2, #1")
-                self.assembly.append("    str w0, [x2, x3, lsl #2]")
+                self.assembly.append("    sub w3, w3, #1")
+                self.assembly.append("    str x0, [x2, x3, lsl #3]")
                 self.assembly.append("    str x1, [sp, #-16]!")
             elif node.method_name == "pop":
                 self.compile_expr(node.instance)
@@ -1112,7 +1111,7 @@ class Arm64Codegen:
                 self.assembly.append("    sub w2, w2, #1")
                 self.assembly.append("    str w2, [x1]")
                 self.assembly.append("    add x3, x1, #16")
-                self.assembly.append("    ldr w0, [x3, x2, lsl #2]")
+                self.assembly.append("    ldr x0, [x3, x2, lsl #3]")
                 self.assembly.append("    str x0, [sp, #-16]!")
             elif node.method_name == "open" or node.method_name == "open_append":
                 self.compile_expr(node.args[0])
@@ -1125,7 +1124,7 @@ class Arm64Codegen:
             elif node.method_name == "read":
                 self.compile_expr(node.instance)
                 self.assembly.append("    ldr x0, [sp], #16")
-                self.assembly.append("    bl _sys_read")
+                self.assembly.append("    bl _sys_read_c")
                 self.assembly.append("    str x0, [sp, #-16]!")
             elif node.method_name == "write":
                 self.compile_expr(node.args[0])

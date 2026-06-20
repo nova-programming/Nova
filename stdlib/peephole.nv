@@ -9,22 +9,16 @@ def apply(state) {
             nxt = lines[i + 1]
             
             if len(line) >= 10 and len(nxt) >= 9 {
-                if line == "    push eax" and nxt == "    pop eax" {
+                if (line == "    push eax" and nxt == "    pop eax") or (line == "    push rax" and nxt == "    pop rax") {
                     i = i + 2
                     continue
                 }
-                if line == "    push eax" and nxt == "    pop ebx" {
-                    result.append("    mov ebx, eax")
+                if (line == "    push eax" and nxt == "    pop ebx") or (line == "    push rax" and nxt == "    pop rbx") {
+                    result.append("    mov rbx, rax")
                     i = i + 2
                     continue
                 }
             }
-        }
-        
-        if line == "    xor eax, eax" {
-            result.append("    mov eax, 0")
-            i = i + 1
-            continue
         }
         
         result.append(line)

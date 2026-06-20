@@ -1,265 +1,70 @@
 # arm64 Windows OS Abstraction
+# All system functions delegate to C helpers in runtime.c
 
 @raw {
-    "    .extern CreateFileA"
-    "    .extern ReadFile"
-    "    .extern WriteFile"
-    "    .extern CloseHandle"
-    "    .extern GetStdHandle"
-    "    .extern GetProcessHeap"
-    "    .extern HeapAlloc"
-    "    .extern HeapFree"
-    "    .extern ExitProcess"
-    "    .extern GetCommandLineA"
-    "    .extern GetTickCount"
-    "    .extern FlushFileBuffers"
-    "    .extern SetFilePointer"
-    "    .extern GetLastError"
-    "    .extern GetFileSize"
-    "    .extern _strlen"
-    "    .extern _exit"
-    "    .extern _system"
-    "    .extern __sys_get_args"
+    "    .extern _sys_open_c"
+    "    .extern _sys_read_c"
+    "    .extern _sys_write_c"
+    "    .extern _sys_write_raw_c"
+    "    .extern _sys_close_c"
+    "    .extern _sys_alloc_c"
+    "    .extern _sys_free_c"
+    "    .extern _sys_flush_c"
+    "    .extern _sys_exit_c"
+    "    .extern _sys_platform_c"
+    "    .extern _sys_get_args_c"
+    "    .extern _sys_get_tick_count_c"
+    "    .extern _system_c"
 }
 
 def sys_open(path: string, mode: string) -> int {
-    res = 0
-    if mode == "r" or mode == "rb" {
-        @raw {
-            "    ldr x0, [fp, #-8]"
-            "    mov x1, #0x80000000"
-            "    mov x2, #1"
-            "    mov x3, #0"
-            "    mov x4, #3"
-            "    mov x5, #128"
-            "    mov x6, #0"
-            "    bl CreateFileA"
-            "    mov x1, #-1"
-            "    cmp x0, x1"
-            "    b.ne L_sys_open_r_ok"
-            "    mov x0, #0"
-            "L_sys_open_r_ok:"
-            "    str x0, [fp, #-24]"
-        }
-    }
-    if mode == "w" or mode == "wb" {
-        @raw {
-            "    ldr x0, [fp, #-8]"
-            "    mov x1, #0x40000000"
-            "    mov x2, #0"
-            "    mov x3, #0"
-            "    mov x4, #2"
-            "    mov x5, #128"
-            "    mov x6, #0"
-            "    bl CreateFileA"
-            "    mov x1, #-1"
-            "    cmp x0, x1"
-            "    b.ne L_sys_open_w_ok"
-            "    mov x0, #0"
-            "L_sys_open_w_ok:"
-            "    str x0, [fp, #-24]"
-        }
-    }
-    return res
+    return sys_open_c(path, mode)
 }
 
-def win_GetFileSize(fd: int) -> int {
-    res = 0
-    @raw {
-        "    ldr x0, [fp, #-8]"
-        "    mov x1, #0"
-        "    bl GetFileSize"
-        "    str x0, [fp, #-16]"
-    }
-    return res
-}
-
-def win_ReadFile(fd: int, buf: int, size: int) -> int {
-    res = 0
-    @raw {
-        "    ldr x0, [fp, #-8]"
-        "    cmp x0, #0"
-        "    b.ne L_win_read_ready"
-        "    mov x0, #-10"
-        "    bl GetStdHandle"
-        "L_win_read_ready:"
-        "    ldr x1, [fp, #-16]"
-        "    ldr x2, [fp, #-24]"
-        "    sub sp, sp, #16"
-        "    mov x3, sp"
-        "    mov x4, #0"
-        "    bl ReadFile"
-        "    ldr w0, [sp]"
-        "    add sp, sp, #16"
-        "    str x0, [fp, #-32]"
-    }
-    return res
-}
-
-def win_set_string_null(s: int, size: int) {
-    @raw {
-        "    ldr x0, [fp, #-8]"
-        "    ldr x1, [fp, #-16]"
-        "    mov w2, #0"
-        "    strb w2, [x0, x1]"
-    }
-}
-
-def sys_read(fd: int) {
-    size = win_GetFileSize(fd)
-    buf = sys_alloc(size + 1)
-    win_ReadFile(fd, buf, size)
-    win_set_string_null(buf, size)
-    return buf
-}
-
-def win_WriteFile(fd: int, buf: int, size: int) -> int {
-    res = 0
-    @raw {
-        "    ldr x0, [fp, #-8]"
-        "    cmp x0, #1"
-        "    b.ne L_win_write_not_stdout"
-        "    mov x0, #-11"
-        "    bl GetStdHandle"
-        "    b L_win_write_ready"
-        "L_win_write_not_stdout:"
-        "    cmp x0, #2"
-        "    b.ne L_win_write_ready"
-        "    mov x0, #-12"
-        "    bl GetStdHandle"
-        "L_win_write_ready:"
-        "    ldr x1, [fp, #-16]"
-        "    ldr x2, [fp, #-24]"
-        "    sub sp, sp, #16"
-        "    mov x3, sp"
-        "    mov x4, #0"
-        "    bl WriteFile"
-        "    ldr w0, [sp]"
-        "    add sp, sp, #16"
-        "    str x0, [fp, #-32]"
-    }
-    return res
-}
-
-def win_string_ptr(s: string) -> int {
-    res = 0
-    @raw {
-        "    ldr x0, [fp, #-8]"
-        "    str x0, [fp, #-16]"
-    }
-    return res
-}
-
-def win_string_len(s: string) -> int {
-    res = 0
-    @raw {
-        "    ldr x0, [fp, #-8]"
-        "    bl _strlen"
-        "    str x0, [fp, #-16]"
-    }
-    return res
+def sys_read(fd: int) -> string {
+    return sys_read_c(fd)
 }
 
 def sys_write(fd: int, content: string) {
-    ptr = win_string_ptr(content)
-    size = win_string_len(content)
-    win_WriteFile(fd, ptr, size)
-}
-
-def win_list_ptr(ls: list) -> int {
-    res = 0
-    @raw {
-        "    ldr x0, [fp, #-8]"
-        "    add x0, x0, #16"
-        "    str x0, [fp, #-16]"
-    }
-    return res
-}
-
-def win_list_len(ls: list) -> int {
-    res = 0
-    @raw {
-        "    ldr x0, [fp, #-8]"
-        "    ldr x0, [x0]"
-        "    str x0, [fp, #-16]"
-    }
-    return res
+    sys_write_c(fd, content)
 }
 
 def sys_write_raw(fd: int, content: list) {
-    ptr = win_list_ptr(content)
-    size = win_list_len(content)
-    win_WriteFile(fd, ptr, size)
+    sys_write_raw_c(fd, content)
 }
 
 def sys_close(fd: int) {
-    @raw {
-        "    ldr x0, [fp, #-8]"
-        "    bl CloseHandle"
-    }
+    sys_close_c(fd)
 }
 
 def sys_alloc(size: int) -> int {
-    res = 0
-    @raw {
-        "    bl GetProcessHeap"
-        "    mov x1, #8"
-        "    ldr x2, [fp, #-8]"
-        "    bl HeapAlloc"
-        "    str x0, [fp, #-16]"
-    }
-    return res
+    return sys_alloc_c(size)
 }
 
 def sys_free(ptr: int) {
-    @raw {
-        "    bl GetProcessHeap"
-        "    mov x1, #0"
-        "    ldr x2, [fp, #-8]"
-        "    bl HeapFree"
-    }
+    sys_free_c(ptr)
 }
 
-def sys_platform() -> string {
-    return "windows"
-}
-
-def sys_flush() {
-    @raw {
-        "    mov x0, #-11"
-        "    bl GetStdHandle"
-        "    bl FlushFileBuffers"
-    }
-}
-
-def sys_get_args() -> list {
-    res = []
-    @raw {
-        "    bl __sys_get_args"
-        "    str x0, [fp, #-8]"
-    }
-    return res
-}
-
-def sys_get_tick_count() -> int {
-    res = 0
-    @raw {
-        "    bl GetTickCount"
-        "    str x0, [fp, #-8]"
-    }
-    return res
+def sys_flush(fd: int) {
+    sys_flush_c(fd)
 }
 
 def sys_exit(code: int) {
-    @raw {
-        "    ldr x0, [fp, #-8]"
-        "    bl _exit"
-    }
+    sys_exit_c(code)
+}
+
+def sys_platform() -> string {
+    return sys_platform_c()
+}
+
+def sys_get_args() -> list {
+    return sys_get_args_c()
+}
+
+def sys_get_tick_count() -> int {
+    return sys_get_tick_count_c()
 }
 
 def sys_system(cmd: string) {
-    @raw {
-        "    ldr x0, [fp, #-8]"
-        "    bl _system"
-    }
+    system_c(cmd)
 }

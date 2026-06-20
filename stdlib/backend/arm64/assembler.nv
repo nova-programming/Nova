@@ -23,7 +23,7 @@ def assemble(asm_lines: list) -> list {
         state.lines.append(pl)
         i = i + 1
     }
-    sys_flush()
+    sys_flush(1)
 
     pass2_encode(state)
     

@@ -155,12 +155,12 @@ class X86_64Codegen:
         for c_sym in ["printf", "malloc", "free", "realloc", "fopen", "fclose",
                        "fread", "fwrite", "fputs", "fputc", "fseek", "ftell",
                        "fflush", "exit", "system", "strlen", "strcmp", "strcpy",
-                       "strcat", "strstr", "memset", "sprintf"]:
+                        "strcat", "strstr", "memset", "memcpy", "sprintf"]:
             # runtime.c defines all wrappers with _ prefix on every platform
             self.assembly.append(f".extern _{c_sym}")
 
         for d_sym in ["_dict_new", "_dict_get", "_dict_set", "_dict_has",
-                       "_dict_remove", "_dict_keys", "_dict_values", "_dict_items"]:
+                        "_dict_remove", "_dict_keys", "_dict_values", "_dict_items", "_dict_free"]:
             self.assembly.append(f".extern {d_sym}")
 
         for b_sym in ["_abs", "_min", "_max", "_file_exists", "_file_size", "_file_type", "_now", "_call"]:
@@ -310,14 +310,8 @@ class X86_64Codegen:
         self.assembly.append("    push rcx")
         self.assembly.append("    cmp ecx, 0")
         self.assembly.append("    jle L_slice_done_64")
-        self.assembly.append("L_slice_copy_64:")
-        self.assembly.append("    mov al, [rsi]")
-        self.assembly.append("    mov [rdi], al")
-        self.assembly.append("    inc rsi")
-        self.assembly.append("    inc rdi")
-        self.assembly.append("    dec ecx")
-        self.assembly.append("    cmp ecx, 0")
-        self.assembly.append("    jg L_slice_copy_64")
+        self.assembly.append("    cld")
+        self.assembly.append("    rep movsb")
         self.assembly.append("L_slice_done_64:")
         self.assembly.append("    pop rcx")
         self.assembly.append("    pop rdi")
@@ -1146,7 +1140,7 @@ class X86_64Codegen:
             self.compile_expr(node.file)
             self.assembly.append("    pop rdi")
             self._ensure_aligned()
-            self.assembly.append("    call _sys_read")
+            self.assembly.append("    call _sys_read_c")
             self.assembly.append("    push rax")
         elif isinstance(node, ListLiteral):
             n = len(node.elements)
@@ -1253,7 +1247,7 @@ class X86_64Codegen:
                 self.compile_expr(node.instance)
                 self.assembly.append("    pop rdi")
                 self._ensure_aligned()
-                self.assembly.append("    call _sys_read")
+                self.assembly.append("    call _sys_read_c")
                 self.assembly.append("    push rax")
             elif node.method_name == "write":
                 self.compile_expr(node.args[0])

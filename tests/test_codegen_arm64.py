@@ -384,6 +384,7 @@ class TestArm64DictCodegen(unittest.TestCase):
         self.assertIn(".extern _dict_keys", asm)
         self.assertIn(".extern _dict_values", asm)
         self.assertIn(".extern _dict_items", asm)
+        self.assertIn(".extern _dict_free", asm)
 
 
 if __name__ == "__main__":

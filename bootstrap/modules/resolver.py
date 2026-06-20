@@ -69,7 +69,10 @@ class ModuleResolver:
             3. In the stdlib/ directory relative to the Nova installation
         """
         if module_name == "os_impl":
-            module_name = f"os_{self.target_os}"
+            if self.target_os in ("linux", "macos"):
+                module_name = "os_unix"
+            else:
+                module_name = f"os_{self.target_os}"
 
         filename = f"{module_name}.nv"
 

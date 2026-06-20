@@ -1,0 +1,34 @@
+def get_externs() -> list {
+    return ["_printf", "_malloc", "_free", "_realloc", "_fopen", "_fclose",
+            "_fread", "_fwrite", "_fputs", "_fputc", "_fseek", "_ftell",
+            "_fflush", "_exit", "_system_c", "_strlen", "_strcmp", "_strcpy",
+            "_strcat", "_strstr", "_memset", "_memcpy", "_sprintf",
+            "_dict_new", "_dict_get", "_dict_set", "_dict_has", "_dict_remove",
+            "_dict_keys", "_dict_values", "_dict_items", "_dict_free",
+            "_abs", "_min", "_max", "_file_exists", "_file_size", "_file_type", "_now", "_call"]
+}
+
+def get_data_strings() -> list {
+    return ["fmt_int: .asciz \"%d\\n\"",
+            "fmt_int_pure: .asciz \"%d\"",
+            "fmt_str: .asciz \"%s\\n\"",
+            "fmt_float: .asciz \"%f\\n\"",
+            "fmt_float_pure: .asciz \"%f\"",
+            "str_type_int: .asciz \"int\"",
+            "str_type_string: .asciz \"string\"",
+            "str_type_float: .asciz \"float\"",
+            "str_type_bool: .asciz \"bool\"",
+            "str_type_list: .asciz \"list\"",
+            "str_type_dict: .asciz \"dict\"",
+            "str_type_unknown: .asciz \"unknown\"",
+            "debug_prefix: .asciz \"debug - [line \"",
+            "debug_suffix: .asciz \"]: \"",
+            "L_out_of_bounds_msg: .asciz \"Index Out Of Bounds\\n\"",
+            "L_realloc_fail_msg: .asciz \"Realloc failed!\\n\"",
+            "str_fmode_a: .asciz \"a\"",
+            "str_fmode_w: .asciz \"w\"",
+            "str_fmode_r: .asciz \"r\"",
+            "str_fmode_rw: .asciz \"r+\"",
+            "str_fmode_wp: .asciz \"w+\"",
+            "str_const_chacha_mem: .asciz \"expand 32-byte k\""]
+}

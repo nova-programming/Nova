@@ -1,5 +1,5 @@
 # ============================================================
-# Nova x86-32 Assembler (stdlib/assembler.nv)
+# Nova x86-64 Assembler (stdlib/assembler.nv)
 # ============================================================
 # Sub-modules:
 #   assembler_parse.nv  — line/operand parsing, data structures
@@ -35,7 +35,7 @@ def assemble(asm_lines: list) -> list {
         state.lines.append(pl)
         i = i + 1
     }
-    sys_flush()
+    sys_flush(1)
 
     # Encode: collect labels and encode instructions in one pass
     pass2_encode(state)

@@ -264,3 +264,13 @@ galaxy publish             # Publish to registry
   - **Self-hosted ARM64 DictLiteral** (`stdlib/backend/arm64/codegen_expr.nv:775-793`): Already correct (4-push pattern with dict preserved on stack).
 - **Reverted all debug prints** from `stdlib/vm.nv` (temporary debug lines in `exec_func` for LOAD_NAME, LOAD_CONST, ADD, CALL, RETURN).
 - **Full suite**: 229 passed, 1 skipped, 13 subtests passed
+
+### Performance & Consolidation (This Session — June 20, 2026)
+- **PE machine type bug fixed** (`stdlib/backend/x86_64/linker.nv:559`): COFF machine type was `0x014c` (i386) — changed to `0x8664` (AMD64). Self-hosted `nova.exe assemble-link` was producing PE files claiming to be 32-bit executables.
+- **Peephole optimizer fixed** (`stdlib/peephole.nv`): Added `rax` (64-bit) checks alongside `eax` — previously `push rax`/`pop rax` never matched, making optimizer ineffective on x86_64. Removed `xor eax, eax → mov eax, 0` anti-optimization (xor is faster on modern x86).
+- **Dict hash `%` → `& (cap-1)`** (`runtime.c:333-418`): 6 modulo operations replaced with bitwise AND. Cap is always power-of-2 (8→16→32...). 30-80× speedup per hash operation (AND = ~1 cycle vs DIV = ~30-80).
+- **`dict_free` added** (`runtime.c`): Frees keys, values, and header. `.extern _dict_free` added to all 4 codegen files + test assertions.
+- **`rep movsb` in string slice** (`stdlib/backend/x86_64/codegen.nv`, `bootstrap/compiler/backend/x86_64/codegen.py`): Replaced byte-by-byte copy loop with `rep movsb` (hardware-accelerated bulk copy). ARM64 bootstrap (`bootstrap/compiler/backend/arm64/codegen.py`): replaced byte loop with `_memcpy`. Self-hosted ARM64 already used `_memcpy`.
+- **`stdlib/codegen_common.nv`** — new shared module with `get_externs()` and `get_data_strings()` functions. Both `x86_64/codegen.nv` and `arm64/codegen.nv` import it, eliminating 53 lines of duplicated declarations across 2 files.
+- **Dead `emit_x86_64_runtime` removed** — empty function (leftover from `emit_win32_runtime` deletion) + its call site removed from `x86_64/codegen.nv`.
+- **Full suite**: 229 passed, 1 skipped, 13 subtests passed
