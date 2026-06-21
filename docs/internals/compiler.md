@@ -6,7 +6,7 @@ The compilation pipeline orchestrates tokenizer → parser → codegen → in-pr
 
 - **`nova.nv`**: CLI entry point for the self-hosted native compiler. Parses `build` command (reads `.nv` → `compile_to_exe()` → native PE executable) or `assemble-link` command (reads `.s` → `assemble_link_file()` → in-process PE generation).
 - **`stdlib/compiler.nv`**: Core library exposing `compile_file(path)`, `compile_to_file(input, output)`, `compile_to_exe(input, output, debug_mode)`, and `assemble_link_file(asm_path, output_path)`. Orchestrates full pipeline: read file → tokenize → parse → resolve imports → type check → generate assembly.
-- **`stdlib/compiler_driver.nv`**: Minimal standalone CLI driver for the compiler (used for testing).
+- **`stdlib/compiler.nv`** also provides `compile_to_bare()`, `assemble_bare_file()`, and `assemble_link_file()` for alternative compilation modes.
 
 ## Pipeline
 

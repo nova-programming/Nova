@@ -122,7 +122,6 @@ nova/
 │   ├── lexer.nv          # Tokenizer (Nova)
 │   ├── parser.nv         # Recursive-descent parser (Nova)
 │   ├── compiler.nv       # Pipeline orchestrator (Nova)
-│   ├── compiler_driver.nv# CLI driver for compiler (Nova)
 │   ├── assembler.nv      # x86 assembler (Nova, integrated via assemble_link_file)
 │   ├── assembler_parse.nv# Assembly line/operand parsing (Nova)
 │   ├── assembler_encode.nv# Instruction encoding (Nova)
@@ -135,7 +134,8 @@ nova/
 │   ├── os_win.nv         # Windows syscall/runtime facade (Nova)
 │   ├── os_linux.nv       # Linux syscall/runtime facade (Nova)
 │   ├── os_macos.nv       # macOS syscall/runtime facade (Nova)
-│   └── math_utils.nv     # Math utilities (Nova)
+│   ├── codegen_common.nv # Shared codegen externs + data strings (Nova)
+│   └── peephole.nv       # Assembly peephole optimizer (Nova)
 ├── bootstrap/        # Python bootstrap compiler (frozen)
 │   ├── main.py           # Bootstrap entry point
 │   ├── compiler/         # Bootstrap codegen (Python)
@@ -180,7 +180,7 @@ nova/
 - **Tree-Shaking Dead Code Elimination** — the compiler natively builds dependency graphs of function calls and slices out unused standard library functions, reducing final binary sizes by up to 70%.
 - **Self-Hosted Assembler & Linker** — fully integrated in-process x86 assembler and PE executable linker, entirely eliminating the GCC dependency.
 - **Variable-to-Register Promotion** — greedily maps local variables to CPU registers (`esi`/`edi`), massively boosting runtime performance.
-- **Native Standard Library Injection** — standard library functions (from `os_win` and `math_utils`) are automatically injected and natively compiled into all executables, removing the need for manual imports of core modules.
+- **Native Standard Library Injection** — standard library functions (from `os_windows`, `os_unix`, and built-in runtime helpers) are automatically injected and natively compiled into all executables, removing the need for manual imports of core modules.
 - **Automatic CSPRNG Initialization** — the built-in ChaCha20 random number generator automatically seeds itself at runtime using the Windows tick count (`sys_get_tick_count()`), removing the need for manual seeding initialization.
 - **HashMap/Dictionary** — `{"key": value}` literals with native codegen for `get()`, `set()`, `has()`, `remove()`, `keys()`, `values()`, `items()`, `len()`
 - **Switch/match** — `switch expr { case val { body } else { body } }` desugars to if-elif chain at parse time

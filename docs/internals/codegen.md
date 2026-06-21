@@ -92,7 +92,7 @@ Local variables are greedily mapped to CPU registers (`r12`/`r13` on x86_64) ins
 
 ## Native Standard Library Injection
 
-Standard library helper functions (file I/O `sys_*` from `os_*.nv`, ChaCha20 from `math_utils.nv`) are compiled and injected directly into the assembly output of every compiled program. All platform data uses the Nova stdlib's authoritative implementations (e.g., `sys_platform()` from `os_windows.nv` returns `"windows"`), not hardcoded assembly.
+Standard library helper functions (file I/O `sys_*` from `os_*.nv`, runtime helpers from `runtime.c`) are compiled and injected directly into the assembly output of every compiled program. All platform data uses the Nova stdlib's authoritative implementations (e.g., `sys_platform()` from `os_windows.nv` returns `"windows"`), not hardcoded assembly.
 
 ## Cross-Compilation
 

@@ -841,7 +841,7 @@ SYSCALL char *_now(void) {
     return buf;
 }
 
-/* _call(name, args_array, num_args) — dynamic function dispatch stub */
+/* _call(name, args, num_args) — dynamic dispatch stub; native codegen never emits this */
 SYSCALL long long _call(const char *name, long long *args, long long num_args) {
     (void)name; (void)args; (void)num_args;
     return 0;
