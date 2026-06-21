@@ -37,7 +37,7 @@ def test_try_catch_basic():
     out = _capture_print("""
 try {
     throw 42
-} catch(e) {
+} catch e {
     print(e)
 }
 """)
@@ -48,7 +48,7 @@ def test_try_no_throw():
     out = _capture_print("""
 try {
     print(1)
-} catch(e) {
+} catch e {
     print(2)
 }
 """)
@@ -59,7 +59,7 @@ def test_try_catch_string_exception():
     out = _capture_print("""
 try {
     throw "error occurred"
-} catch(e) {
+} catch e {
     print(e)
 }
 """)
@@ -71,7 +71,7 @@ def test_try_catch_expression_result():
 x = 0
 try {
     throw 10
-} catch(e) {
+} catch e {
     x = e
 }
 print(x)
@@ -84,7 +84,7 @@ def test_try_no_exception_skips_catch():
 x = 1
 try {
     x = 2
-} catch(e) {
+} catch e {
     x = 3
 }
 print(x)
@@ -98,10 +98,10 @@ x = 0
 try {
     try {
         throw "inner"
-    } catch(inner) {
+    } catch inner {
         x = 100
     }
-} catch(outer) {
+} catch outer {
     x = 200
 }
 print(x)
@@ -115,10 +115,10 @@ x = 0
 try {
     try {
         throw "up"
-    } catch(inner) {
+    } catch inner {
         throw "outer"
     }
-} catch(outer) {
+} catch outer {
     x = 999
 }
 print(x)
@@ -136,7 +136,7 @@ def safe_div(a, b) {
 }
 try {
     safe_div(10, 0)
-} catch(e) {
+} catch e {
     print(-1)
 }
 """)
@@ -148,7 +148,7 @@ def test_try_catch_inside_function():
 def test() {
     try {
         throw 99
-    } catch(e) {
+    } catch e {
         print(e)
     }
 }
@@ -166,7 +166,7 @@ for i = 0 to 3 step 1 {
             throw "err"
         }
         print(i)
-    } catch(e) {
+    } catch e {
         print(-1)
     }
 }
@@ -183,7 +183,7 @@ def test_try_no_exception_no_throw():
 x = 0
 try {
     x = 42
-} catch(e) {
+} catch e {
     x = 99
 }
 print(x)
@@ -195,7 +195,7 @@ def test_unhandled_throw():
     out = _capture_print("""
 try {
     throw "caught"
-} catch(e) {
+} catch e {
     print(e)
 }
 """)
@@ -207,10 +207,10 @@ def test_throw_in_catch():
 x = 0
 try {
     throw "first"
-} catch(e) {
+} catch e {
     try {
         throw "second"
-    } catch(inner) {
+    } catch inner {
         x = 77
     }
 }

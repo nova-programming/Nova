@@ -220,12 +220,143 @@ def tokenize(src: string) -> list {
                 i = i + 1
             }
             str_val = str_sub(src, start, i)
-            tok = Token()
-            tok.kind = "STRING"
-            tok.val = str_val
-            tok.line = line_num
-            tok.col = col
-            tokens.append(tok)
+            inner = str_sub(str_val, 1, len(str_val) - 1)
+            inner_len = len(inner)
+            has_interp = 0
+            ci = 0
+            while ci < inner_len {
+                if inner[ci] == "{" { has_interp = 1 }
+                ci = ci + 1
+            }
+            if has_interp == 0 {
+                tok = Token()
+                tok.kind = "STRING"
+                tok.val = str_val
+                tok.line = line_num
+                tok.col = col
+                tokens.append(tok)
+            } else {
+                interp_tokens = []
+                needs_plus = 0
+                ci = 0
+                while ci < inner_len {
+                    if inner[ci] == "{" {
+                        depth = 1
+                        cj = ci + 1
+                        while cj < inner_len and depth > 0 {
+                            if inner[cj] == "{" { depth = depth + 1 }
+                            elif inner[cj] == "}" { depth = depth - 1 }
+                            cj = cj + 1
+                        }
+                        if depth > 0 {
+                            text = str_sub(inner, ci, inner_len)
+                            if needs_plus == 1 {
+                                t = Token()
+                                t.kind = "PLUS"
+                                t.val = "+"
+                                t.line = line_num
+                                t.col = col
+                                interp_tokens.append(t)
+                            }
+                            t = Token()
+                            t.kind = "STRING"
+                            t.val = "\"" + text + "\""
+                            t.line = line_num
+                            t.col = col
+                            interp_tokens.append(t)
+                            needs_plus = 1
+                            ci = inner_len
+                        } else {
+                            expr_str = str_sub(inner, ci + 1, cj - 1)
+                            has_expr = 0
+                            ei = 0
+                            while ei < len(expr_str) {
+                                if expr_str[ei] != " " { has_expr = 1 }
+                                ei = ei + 1
+                            }
+                            if has_expr == 0 {
+                                text = str_sub(inner, ci, cj)
+                                if needs_plus == 1 {
+                                    t = Token()
+                                    t.kind = "PLUS"
+                                    t.val = "+"
+                                    t.line = line_num
+                                    t.col = col
+                                    interp_tokens.append(t)
+                                }
+                                t = Token()
+                                t.kind = "STRING"
+                                t.val = "\"" + text + "\""
+                                t.line = line_num
+                                t.col = col
+                                interp_tokens.append(t)
+                                needs_plus = 1
+                            } else {
+                                if needs_plus == 1 {
+                                    t = Token()
+                                    t.kind = "PLUS"
+                                    t.val = "+"
+                                    t.line = line_num
+                                    t.col = col
+                                    interp_tokens.append(t)
+                                }
+                                t = Token()
+                                t.kind = "STR"
+                                t.val = "str"
+                                t.line = line_num
+                                t.col = col
+                                interp_tokens.append(t)
+                                t = Token()
+                                t.kind = "LPAREN"
+                                t.val = "("
+                                t.line = line_num
+                                t.col = col
+                                interp_tokens.append(t)
+                                expr_tokens = tokenize(expr_str)
+                                ek = 0
+                                while ek < len(expr_tokens) - 1 {
+                                    interp_tokens.append(expr_tokens[ek])
+                                    ek = ek + 1
+                                }
+                                t = Token()
+                                t.kind = "RPAREN"
+                                t.val = ")"
+                                t.line = line_num
+                                t.col = col
+                                interp_tokens.append(t)
+                                needs_plus = 1
+                            }
+                            ci = cj
+                        }
+                    } else {
+                        text_start = ci
+                        while ci < inner_len and inner[ci] != "{" {
+                            ci = ci + 1
+                        }
+                        text = str_sub(inner, text_start, ci)
+                        if needs_plus == 1 {
+                            t = Token()
+                            t.kind = "PLUS"
+                            t.val = "+"
+                            t.line = line_num
+                            t.col = col
+                            interp_tokens.append(t)
+                        }
+                        t = Token()
+                        t.kind = "STRING"
+                        t.val = "\"" + text + "\""
+                        t.line = line_num
+                        t.col = col
+                        interp_tokens.append(t)
+                        needs_plus = 1
+                    }
+                }
+                ik = 0
+                while ik < len(interp_tokens) {
+                    tokens.append(interp_tokens[ik])
+                    ik = ik + 1
+                }
+            }
             continue
         }
 

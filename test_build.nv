@@ -1,0 +1,3 @@
+print("Hello from self-hosted Nova!")
+print("Interpolation test: answer is " + str(42))
+print("Done.")

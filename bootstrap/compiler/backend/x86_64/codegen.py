@@ -341,6 +341,7 @@ class X86_64Codegen:
             if node.name not in self.local_vars:
                 self.local_offset += 8
                 self.local_vars[node.name] = self.local_offset
+            self.scan_vars(node.value)
         elif isinstance(node, IfElse):
             for s in node.if_body:
                 self.scan_vars(s)
@@ -364,6 +365,11 @@ class X86_64Codegen:
         elif isinstance(node, RawBlock):
             for s in node.body:
                 self.scan_vars(s)
+        elif isinstance(node, Block):
+            for s in node.stmts:
+                self.scan_vars(s)
+        elif isinstance(node, (Print, Return, Throw)):
+            self.scan_vars(node.value)
 
     def compile_function(self, fn):
         old_local_vars = self.local_vars.copy()
@@ -599,7 +605,7 @@ class X86_64Codegen:
             if isinstance(offset, str):
                 self.assembly.append(f"    add {offset}, rax")
             else:
-                self.assembly.append(f"    add qword [rbp - {offset}], rax")
+                self.assembly.append(f"    add qword ptr [rbp - {offset}], rax")
             self.assembly.append(f"    jmp {loop_label}")
             self.assembly.append(f"{end_label}:")
             self.loop_labels.pop()
@@ -608,44 +614,39 @@ class X86_64Codegen:
             end_label = self.next_label("L_forin_end")
             self.loop_labels.append((loop_label, end_label))
             self.compile_expr(node.collection)
-            self.assembly.append("    pop rdx")
-            self.assembly.append(f"    mov eax, [rdx]")
-            self.assembly.append("    push rax")
-            self.assembly.append(f"    xor eax, eax")
+            self.assembly.append("    pop rdx")           # rdx = list pointer
+            self.assembly.append("    push rdx")          # save list pointer (clobbered by calls)
+            self.assembly.append("    mov eax, [rdx]")    # eax = list length
+            self.assembly.append("    push rax")          # push length
+            self.assembly.append("    sub rsp, 8")         # allocate counter
+            self.assembly.append("    mov qword ptr [rsp], 0") # counter = 0
+
+            self.assembly.append(f"{loop_label}:")
+            self.assembly.append("    mov rax, [rsp]")     # rax = counter
+            self.assembly.append("    mov rcx, [rsp + 8]") # rcx = length
+            self.assembly.append("    cmp rax, rcx")
+            self.assembly.append(f"    jge {end_label}")
+
+            self.assembly.append("    mov rdx, [rsp + 16]") # rdx = list pointer (restore after calls)
+            self.assembly.append("    mov rax, [rdx + 8]") # rax = data ptr
+            self.assembly.append("    mov rcx, [rsp]")     # rcx = counter
+            self.assembly.append("    mov rax, [rax + rcx*8]") # rax = element
+
             offset = self.local_vars[node.var_name]
             if isinstance(offset, str):
-                pass
+                self.assembly.append(f"    mov {offset}, rax")
             else:
                 self.assembly.append(f"    mov [rbp - {offset}], rax")
-            self.assembly.append(f"{loop_label}:")
-            if isinstance(offset, str):
-                self.assembly.append(f"    mov eax, {offset}")
-            else:
-                self.assembly.append(f"    mov eax, [rbp - {offset}]")
-            self.assembly.append("    pop rbx")
-            self.assembly.append("    push rbx")
-            self.assembly.append("    cmp eax, ebx")
-            self.assembly.append(f"    jge {end_label}")
-            self.assembly.append(f"    mov rax, [rdx + 8]")
-            if isinstance(offset, str):
-                self.assembly.append(f"    mov ecx, {offset}")
-            else:
-                self.assembly.append(f"    mov ecx, [rbp - {offset}]")
-            self.assembly.append(f"    mov rax, [rax + rcx*8]")
-            if isinstance(offset, str):
-                pass
-            else:
-                self.assembly.append(f"    mov [rbp - 8], rax")
-            self.assembly.append("    push rax")
+
             for s in node.body:
                 self.compile_stmt(s)
-            if isinstance(offset, str):
-                self.assembly.append(f"    inc {offset}")
-            else:
-                self.assembly.append(f"    inc qword [rbp - {offset}]")
+
+            self.assembly.append("    mov rax, [rsp]")
+            self.assembly.append("    inc rax")
+            self.assembly.append("    mov [rsp], rax")
             self.assembly.append(f"    jmp {loop_label}")
             self.assembly.append(f"{end_label}:")
-            self.assembly.append("    add rsp, 8")
+            self.assembly.append("    add rsp, 24")        # pop counter + length + list ptr
             self.loop_labels.pop()
         elif isinstance(node, Break):
             if self.loop_labels:
@@ -713,6 +714,8 @@ class X86_64Codegen:
             self.assembly.append("    add rsp, 32")
         elif isinstance(node, Try):
             for stmt in node.body:
+                self.compile_stmt(stmt)
+            for stmt in node.catch_body:
                 self.compile_stmt(stmt)
         elif isinstance(node, Throw):
             self.compile_expr(node.value)

@@ -639,9 +639,7 @@ class Parser:
         self.eat("TRY")
         body = self.parse_block()
         self.eat("CATCH")
-        self.eat("LPAREN")
         catch_var = self.eat("IDENT")[1]
-        self.eat("RPAREN")
         catch_body = self.parse_block()
         return Try(body, catch_var, catch_body, line=line)
 
