@@ -303,7 +303,9 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         if func_type != 0 {
             tc.current_ret = func_type.ret
             i = 0
-            while i < len(node.params) {
+            n = len(node.params)
+            if len(func_type.params) < n { n = len(func_type.params) }
+            while i < n {
                 tc_set_var(tc, node.params[i], func_type.params[i])
                 i = i + 1
             }
@@ -377,7 +379,9 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
                 errors.warn("Args", "", node.line, "function " + node.val_str + " expects " + str(len(func_type.params)) + " args but got " + str(len(node.args)), "add or remove arguments to match the declaration", node.col)
             }
             i = 0
-            while i < len(node.args) {
+            n = len(node.args)
+            if len(func_type.params) < n { n = len(func_type.params) }
+            while i < n {
                 arg_t = tc_visit(tc, node.args[i])
                 tc_unify(tc, func_type.params[i], arg_t, node.args[i])
                 i = i + 1

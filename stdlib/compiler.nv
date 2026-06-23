@@ -159,6 +159,7 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     ast = resolve_imports(ast, visited, target_arch, target_os)
 
     print("Type checking...")
+    sys_flush(1)
     tc = TypeChecker()
     tc_init(tc)
     tc_check(tc, ast)
