@@ -1,3 +1,5 @@
+import codegen_stmt
+
 # ============================================================
 # Code Generator: Expression Compilation (ARM64/A64)
 # ============================================================
@@ -302,6 +304,18 @@ def compile_leaf_to_reg(state: CodegenState, node: AstNode, reg_name: string) {
 }
 
 def compile_expr(state: CodegenState, node: AstNode) {
+    if node.kind == "Block" {
+        i = 0
+        while i < len(node.body) {
+            if i < len(node.body) - 1 {
+                codegen_stmt.compile_stmt(state, node.body[i])
+            } else {
+                compile_expr(state, node.body[i])
+            }
+            i = i + 1
+        }
+        return
+    }
     if node.kind == "Number" {
         if is_float_expr(state, node) == 1 {
             f_hex = float_str_to_hex(node.val_str)
@@ -428,9 +442,9 @@ def compile_expr(state: CodegenState, node: AstNode) {
                         compile_leaf_to_reg(state, node.right, "x1")
                         compile_leaf_to_reg(state, node.left, "x0")
                     } else {
-                        compile_expr(state, node.left)
                         compile_expr(state, node.right)
                         emit(state, "    ldr %x, [sp], #16")
+                        compile_expr(state, node.left)
                         emit(state, "    ldr %a, [sp], #16")
                     }
                     
@@ -564,9 +578,9 @@ def compile_expr(state: CodegenState, node: AstNode) {
                 compile_leaf_to_reg(state, node.right, "x1")
                 compile_leaf_to_reg(state, node.left, "x0")
             } else {
-                compile_expr(state, node.left)
                 compile_expr(state, node.right)
                 emit(state, "    ldr %x, [sp], #16")
+                compile_expr(state, node.left)
                 emit(state, "    ldr %a, [sp], #16")
             }
             
@@ -780,9 +794,9 @@ def compile_expr(state: CodegenState, node: AstNode) {
             value = node.args[i + 1]
             key = node.args[i]
             compile_expr(state, value)
+            emit(state, "    ldr %x, [sp], #16")
             compile_expr(state, key)
             emit(state, "    ldr %a, [sp], #16")
-            emit(state, "    ldr %x, [sp], #16")
             emit(state, "    ldr %c, [sp], #16")
             emit(state, "    str %c, [sp, #-16]!")
             emit(state, "    str %x, [sp, #-16]!")
@@ -804,10 +818,20 @@ def compile_expr(state: CodegenState, node: AstNode) {
         }
         
         compile_expr(state, node.right)
+        emit(state, "    ldr %c, [sp], #16")
         compile_expr(state, node.left)
         emit(state, "    ldr %d, [sp], #16")
-        emit(state, "    ldr %c, [sp], #16")
-        if is_str == 1 {
+        
+        is_dict = 0
+        if node.left.inferred_type != 0 and node.left.inferred_type.kind == "dict" {
+            is_dict = 1
+        }
+        if is_dict == 1 {
+            emit(state, "    str %c, [sp, #-16]!")
+            emit(state, "    str %d, [sp, #-16]!")
+            emit_call(state, "_dict_get", 2)
+            emit(state, "    str %a, [sp, #-16]!")
+        } elif is_str == 1 {
             emit(state, "    ldrb w0, [%d, %c]")
             emit(state, "    lsl w0, w0, #1")
             emit(state, "    lsl %c, %c, #1")

@@ -9,7 +9,9 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             is_str_val = 1
         }
         if node.left.kind == "ArrayIndex" {
-            is_str_val = 1
+            if is_string_expr(state, node.left) == 1 {
+                is_str_val = 1
+            }
         }
         if is_str_val == 1 {
             found_str = 0
@@ -74,8 +76,11 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    pop %d")
         emit(state, "    pop %c")
         emit(state, "    pop %a")
-        base_str = str(node.left.inferred_type)
-        if base_str == "dict" {
+        is_dict = 0
+        if node.left.inferred_type != 0 and node.left.inferred_type.kind == "dict" {
+            is_dict = 1
+        }
+        if is_dict == 1 {
             emit(state, "    push %a")
             emit(state, "    push %c")
             emit(state, "    push %d")
@@ -86,7 +91,7 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             emit(state, "    cmp ecx, dword ptr [%d]")
             emit(state, "    jge _out_of_bounds")
             ptr_sz = ptr_size(state)
-            emit(state, "    lea %x, [%d + 16]")
+            emit(state, "    mov %x, [%d + 8]")
             if ptr_sz == 8 {
                 emit(state, "    mov [%x + %c*8], %a")
             } else {
@@ -143,14 +148,8 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             emit(state, "    pop " + state.used_regs[r])
             r = r - 1
         }
-        if is_x64(state) == 1 {
-            if state.local_offset > 0 {
-                emit(state, "    add " + state.sp + ", " + str(state.local_offset))
-            }
-        } else {
-            emit(state, "    mov " + state.sp + ", " + state.bp)
-            emit(state, "    pop " + state.bp)
-        }
+        emit(state, "    mov " + state.sp + ", " + state.bp)
+        emit(state, "    pop " + state.bp)
         emit(state, "    ret")
     }
     if node.kind == "IfElse" {
@@ -206,8 +205,17 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
     if node.kind == "ForLoop" {
         compile_expr(state, node.left)
         emit(state, "    pop %a")
-        offset = find_var_offset(state, node.val_str)
-        emit(state, "    mov [%b - " + str(offset) + "], %a")
+        loop_reg = find_var_reg(state, node.val_str)
+        if loop_reg != "" {
+            emit(state, "    mov " + loop_reg + ", %a")
+        } else {
+            offset = find_var_offset(state, node.val_str)
+            if offset < 0 {
+                emit(state, "    mov [%b + " + str(0 - offset) + "], %a")
+            } else {
+                emit(state, "    mov [%b - " + str(offset) + "], %a")
+            }
+        }
 
         loop_label = next_label(state, "L_for")
         end_label = next_label(state, "L_for_end")
@@ -216,11 +224,17 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         state.loop_end_labels.append(end_label)
 
         emit(state, loop_label + ":")
-        emit(state, "    mov %a, [%b - " + str(offset) + "]")
-        emit(state, "    push %a")
         compile_expr(state, node.right)
         emit(state, "    pop %x")
-        emit(state, "    pop %a")
+        if loop_reg != "" {
+            emit(state, "    mov %a, " + loop_reg)
+        } else {
+            if offset < 0 {
+                emit(state, "    mov %a, [%b + " + str(0 - offset) + "]")
+            } else {
+                emit(state, "    mov %a, [%b - " + str(offset) + "]")
+            }
+        }
         emit(state, "    cmp %a, %x")
         if node.val_int == 1 {
             emit(state, "    jl " + end_label)
@@ -235,15 +249,31 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         }
 
         emit(state, cont_label + ":")
-        emit(state, "    mov %a, [%b - " + str(offset) + "]")
         compile_expr(state, node.cond)
         emit(state, "    pop %x")
+        if loop_reg != "" {
+            emit(state, "    mov %a, " + loop_reg)
+        } else {
+            if offset < 0 {
+                emit(state, "    mov %a, [%b + " + str(0 - offset) + "]")
+            } else {
+                emit(state, "    mov %a, [%b - " + str(offset) + "]")
+            }
+        }
         if node.val_int == 1 {
             emit(state, "    sub %a, %x")
         } else {
             emit(state, "    add %a, %x")
         }
-        emit(state, "    mov [%b - " + str(offset) + "], %a")
+        if loop_reg != "" {
+            emit(state, "    mov " + loop_reg + ", %a")
+        } else {
+            if offset < 0 {
+                emit(state, "    mov [%b + " + str(0 - offset) + "], %a")
+            } else {
+                emit(state, "    mov [%b - " + str(offset) + "], %a")
+            }
+        }
 
         emit(state, "    jmp " + loop_label)
         emit(state, end_label + ":")
@@ -276,8 +306,17 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             emit(state, "    mov %a, [%x + %a*4]")
         }
         
-        var_off = find_var_offset(state, node.val_str)
-        emit(state, "    mov [%b - " + str(var_off) + "], %a")
+        loop_reg = find_var_reg(state, node.val_str)
+        if loop_reg != "" {
+            emit(state, "    mov " + loop_reg + ", %a")
+        } else {
+            var_off = find_var_offset(state, node.val_str)
+            if var_off < 0 {
+                emit(state, "    mov [%b + " + str(0 - var_off) + "], %a")
+            } else {
+                emit(state, "    mov [%b - " + str(var_off) + "], %a")
+            }
+        }
         
         i = 0
         while i < len(node.body) {

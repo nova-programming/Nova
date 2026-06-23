@@ -45,6 +45,13 @@ def create_list_type(element: Type) -> Type {
     return t
 }
 
+def create_dict_type() -> Type {
+    t = Type()
+    t.kind = "dict"
+    t.name = "dict"
+    return t
+}
+
 def create_func_type(params: list, ret: Type) -> Type {
     t = Type()
     t.kind = "func"
@@ -119,6 +126,7 @@ def types_equal(t1: Type, t2: Type) -> int {
     
     if t1.kind == "scalar" { return str_eq(t1.name, t2.name) }
     if t1.kind == "struct" { return str_eq(t1.name, t2.name) }
+    if t1.kind == "dict" { return 1 }
     if t1.kind == "list" { return types_equal(t1.element_type, t2.element_type) }
     if t1.kind == "func" {
         if len(t1.params) != len(t2.params) { return 0 }
@@ -150,6 +158,7 @@ def resolve_type_annotation(annotation_str: string) -> Type {
     
     # Handle bare aggregate type annotations
     if str_eq(annotation_str, "list") == 1 { return create_list_type(create_any_type()) }
+    if str_eq(annotation_str, "dict") == 1 { return create_dict_type() }
     if str_eq(annotation_str, "func") == 1 { return create_func_type([], create_any_type()) }
     if str_eq(annotation_str, "struct") == 1 { return create_struct_type("struct") }
     

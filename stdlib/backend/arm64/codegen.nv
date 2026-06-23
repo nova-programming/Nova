@@ -294,30 +294,65 @@ def is_string_expr(state: CodegenState, node: AstNode) -> int {
 def scan_vars(state: CodegenState, node: AstNode) {
     if node.kind == "Assignment" {
         register_var(state, node.val_str)
+        if node.left != 0 { scan_vars(state, node.left) }
+        return
+    }
+    if node.kind == "Block" {
+        i = 0
+        while i < len(node.body) { scan_vars(state, node.body[i]); i = i + 1 }
+        return
     }
     if node.kind == "IfElse" {
         i = 0
         while i < len(node.body) { scan_vars(state, node.body[i]); i = i + 1 }
         i = 0
         while i < len(node.else_body) { scan_vars(state, node.else_body[i]); i = i + 1 }
+        return
     }
     if node.kind == "While" {
         i = 0
         while i < len(node.body) { scan_vars(state, node.body[i]); i = i + 1 }
+        return
     }
     if node.kind == "ForLoop" {
         register_var(state, node.val_str)
         i = 0
         while i < len(node.body) { scan_vars(state, node.body[i]); i = i + 1 }
+        return
     }
     if node.kind == "ForIn" {
         register_var(state, node.val_str)
         i = 0
         while i < len(node.body) { scan_vars(state, node.body[i]); i = i + 1 }
+        return
     }
     if node.kind == "RawBlock" {
         i = 0
         while i < len(node.body) { scan_vars(state, node.body[i]); i = i + 1 }
+        return
+    }
+    if node.kind == "Print" {
+        if node.left != 0 { scan_vars(state, node.left) }
+        return
+    }
+    if node.kind == "Return" {
+        if node.left != 0 { scan_vars(state, node.left) }
+        return
+    }
+    if node.kind == "Throw" {
+        if node.left != 0 { scan_vars(state, node.left) }
+        return
+    }
+    if node.kind == "ListLiteral" {
+        i = 0
+        while i < len(node.args) { scan_vars(state, node.args[i]); i = i + 1 }
+        return
+    }
+    if node.kind == "MethodCall" {
+        if node.left != 0 { scan_vars(state, node.left) }
+        i = 0
+        while i < len(node.args) { scan_vars(state, node.args[i]); i = i + 1 }
+        return
     }
 }
 
@@ -392,6 +427,7 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
 
     emit(state, func_name + ":")
     emit(state, "    stp fp, lr, [sp, #-16]!")
+    emit(state, "    mov fp, sp")
     if stack_size > 0 {
         emit(state, "    sub sp, sp, #" + str(stack_size))
     }
@@ -514,6 +550,7 @@ def generate_assembly(ast: list, debug_mode: int, target_os: string) -> list {
 
     emit(state, entry + ":")
     emit(state, "    stp fp, lr, [sp, #-16]!")
+    emit(state, "    mov fp, sp")
     if state.local_offset > 0 {
         emit(state, "    sub sp, sp, #" + str(state.local_offset))
     }

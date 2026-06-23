@@ -202,7 +202,7 @@ def compile_to_file(input_path: string, output_path: string, debug_mode: int, ta
 }
 
 def write_lines(lines: list, path: string) {
-    fd = sys_open(path, "w")
+    fd = sys_open(path, "wb")
     i = 0
     while i < len(lines) {
         sys_write(fd, lines[i])

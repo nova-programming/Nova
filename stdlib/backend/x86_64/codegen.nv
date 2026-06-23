@@ -79,7 +79,7 @@ def new_codegen(tgt: int, target_os: string) -> CodegenState {
         state.si = "esi"
         state.di = "edi"
     } else {
-        state.bp = "rsp"
+        state.bp = "rbp"
         state.sp = "rsp"
         state.ax = "rax"
         state.bx = "rbx"
@@ -404,6 +404,16 @@ def is_float_expr(state: CodegenState, node: AstNode) -> int {
 def scan_vars(state: CodegenState, node: AstNode) {
     if node.kind == "Assignment" {
         register_var(state, node.val_str)
+        if node.left != 0 { scan_vars(state, node.left) }
+        return
+    }
+    if node.kind == "Block" {
+        i = 0
+        while i < len(node.body) {
+            scan_vars(state, node.body[i])
+            i = i + 1
+        }
+        return
     }
     if node.kind == "IfElse" {
         i = 0
@@ -416,6 +426,7 @@ def scan_vars(state: CodegenState, node: AstNode) {
             scan_vars(state, node.else_body[i])
             i = i + 1
         }
+        return
     }
     if node.kind == "While" {
         i = 0
@@ -423,6 +434,7 @@ def scan_vars(state: CodegenState, node: AstNode) {
             scan_vars(state, node.body[i])
             i = i + 1
         }
+        return
     }
     if node.kind == "ForLoop" {
         register_var(state, node.val_str)
@@ -431,6 +443,7 @@ def scan_vars(state: CodegenState, node: AstNode) {
             scan_vars(state, node.body[i])
             i = i + 1
         }
+        return
     }
     if node.kind == "ForIn" {
         register_var(state, node.val_str)
@@ -439,6 +452,7 @@ def scan_vars(state: CodegenState, node: AstNode) {
             scan_vars(state, node.body[i])
             i = i + 1
         }
+        return
     }
     if node.kind == "RawBlock" {
         i = 0
@@ -446,6 +460,36 @@ def scan_vars(state: CodegenState, node: AstNode) {
             scan_vars(state, node.body[i])
             i = i + 1
         }
+        return
+    }
+    if node.kind == "Print" {
+        if node.left != 0 { scan_vars(state, node.left) }
+        return
+    }
+    if node.kind == "Return" {
+        if node.left != 0 { scan_vars(state, node.left) }
+        return
+    }
+    if node.kind == "Throw" {
+        if node.left != 0 { scan_vars(state, node.left) }
+        return
+    }
+    if node.kind == "ListLiteral" {
+        i = 0
+        while i < len(node.args) {
+            scan_vars(state, node.args[i])
+            i = i + 1
+        }
+        return
+    }
+    if node.kind == "MethodCall" {
+        if node.left != 0 { scan_vars(state, node.left) }
+        i = 0
+        while i < len(node.args) {
+            scan_vars(state, node.args[i])
+            i = i + 1
+        }
+        return
     }
 }
 
@@ -475,10 +519,7 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     p = 0
     while p < len(node.params) {
         param_name = node.params[p]
-        arg_offset = 0 - (2 * psize + p * psize)
-        state.local_var_names.append(param_name)
-        state.local_vars.append(arg_offset)
-        state.local_var_regs.append("")
+        register_var(state, param_name)
         if p < len(node.param_types) {
             if node.param_types[p] == "string" {
                 state.string_vars.append(param_name)
@@ -496,28 +537,17 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     emit(state, "_" + node.val_str + ":")
     regs_size = len(state.used_regs) * psize
     
+    emit(state, "    push " + bp)
+    emit(state, "    mov " + bp + ", " + sp)
     if is_x64(state) == 1 {
-        state.local_offset = state.local_offset + 8
-        total_space = state.local_offset + regs_size
-        rem = total_space % 16
-        if rem != 0 {
-            pad = 16 - rem
-            state.local_offset = state.local_offset + pad
-        }
-        i = 0
-        while i < len(state.local_vars) {
-            state.local_vars[i] = state.local_vars[i] - state.local_offset - regs_size + 8
-            i = i + 1
-        }
-    } else {
-        emit(state, "    push " + bp)
-        emit(state, "    mov " + bp + ", " + sp)
-        total_space = state.local_offset + regs_size
-        rem = total_space % 16
-        if rem != 0 {
-            pad = 16 - rem
-            state.local_offset = state.local_offset + pad
-        }
+        emit(state, "    and " + sp + ", -16")
+    }
+    state.local_offset = state.local_offset + regs_size
+    total_space = state.local_offset
+    rem = total_space % 16
+    if rem != 0 {
+        pad = 16 - rem
+        state.local_offset = state.local_offset + pad
     }
     
     if state.local_offset > 0 {
@@ -541,11 +571,14 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
             elif p == 4 { arg_reg = "r8" }
             else { arg_reg = "r9" }
             if arg_reg != "" {
-                off = state.local_vars[p]
-                if off < 0 {
-                    emit(state, "    mov [%b + " + str(0 - off) + "], " + arg_reg)
+                var_reg = state.local_var_regs[p]
+                if var_reg != "" {
+                    emit(state, "    mov " + var_reg + ", " + arg_reg)
                 } else {
-                    emit(state, "    mov [%b - " + str(off) + "], " + arg_reg)
+                    off = state.local_vars[p]
+                    if off > 0 {
+                        emit(state, "    mov [%b - " + str(off) + "], " + arg_reg)
+                    }
                 }
             }
             p = p + 1
@@ -563,14 +596,8 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    pop " + state.used_regs[r])
         r = r - 1
     }
-    if is_x64(state) == 1 {
-        if state.local_offset > 0 {
-            emit(state, "    add " + sp + ", " + str(state.local_offset))
-        }
-    } else {
-        emit(state, "    mov " + sp + ", " + bp)
-        emit(state, "    pop " + bp)
-    }
+    emit(state, "    mov " + sp + ", " + bp)
+    emit(state, "    pop " + bp)
     emit(state, "    ret")
 
     state.local_var_names = old_var_names
@@ -668,24 +695,18 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     sp = reg32(state, "esp", "rsp")
 
     emit(state, entry + ":")
+    emit(state, "    push " + bp)
+    emit(state, "    mov " + bp + ", " + sp)
     if is_x64(state) == 1 {
         emit(state, "    and " + sp + ", -16")
-        state.local_offset = state.local_offset + 16
-        regs_size = len(state.used_regs) * 8
-        total_space = state.local_offset + regs_size
-        rem = total_space % 16
-        if rem != 0 {
-            pad = 16 - rem
-            state.local_offset = state.local_offset + pad
-        }
-        i = 0
-        while i < len(state.local_vars) {
-            state.local_vars[i] = state.local_vars[i] - state.local_offset - regs_size + 8
-            i = i + 1
-        }
-    } else {
-        emit(state, "    push " + bp)
-        emit(state, "    mov " + bp + ", " + sp)
+    }
+    regs_size = len(state.used_regs) * 8
+    state.local_offset = state.local_offset + regs_size
+    total_space = state.local_offset
+    rem = total_space % 16
+    if rem != 0 {
+        pad = 16 - rem
+        state.local_offset = state.local_offset + pad
     }
     if state.local_offset > 0 {
         emit(state, "    sub " + sp + ", " + str(state.local_offset))
@@ -708,14 +729,8 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         emit(state, "    pop " + state.used_regs[r])
         r = r - 1
     }
-    if is_x64(state) == 1 {
-        if state.local_offset > 0 {
-            emit(state, "    add " + sp + ", " + str(state.local_offset))
-        }
-    } else {
-        emit(state, "    mov " + sp + ", " + bp)
-        emit(state, "    pop " + bp)
-    }
+    emit(state, "    mov " + sp + ", " + bp)
+    emit(state, "    pop " + bp)
     emit(state, "    mov eax, 0")
     emit(state, "    ret")
 

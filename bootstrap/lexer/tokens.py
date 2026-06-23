@@ -82,6 +82,11 @@ TOKEN_SPEC = [
     ("LT",       r"<"),
 
     # Arithmetic & Assignment Operators
+    ("PLUSEQ",   r"\+="),
+    ("MINUSEQ",  r"-="),
+    ("STAREQ",   r"\*="),
+    ("SLASHEQ",  r"/="),
+    ("PERCENTEQ", r"%="),
     ("PLUS",     r"\+"),
     ("ARROW",    r"->"),
     ("MINUS",    r"-"),

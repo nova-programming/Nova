@@ -426,15 +426,25 @@ class Parser:
                 # Pointer property vs Data field
                 pointer_properties = ["value", "addr", "isValid", "isNull", "bytes", "value_byte", "value_word", "value_dword", "value_qword"]
                 if prop in pointer_properties:
-                    if self.current() and self.current()[0] == "EQUALS":
-                        self.eat("EQUALS")
+                    tok = self.current()
+                    if tok and tok[0] in ("EQUALS", "PLUSEQ", "MINUSEQ", "STAREQ", "SLASHEQ", "PERCENTEQ"):
+                        op = self.eat(tok[0])[1]
                         value = self.parse_expr()
+                        if op != "=":
+                            binop_op = op[:-1]
+                            access_node = PointerProperty(node, prop, line=line)
+                            value = BinOp(access_node, binop_op, value, line=line)
                         return PointerAssign(node, prop, value, line=line)
                     node = PointerProperty(node, prop, line=line)
                 else:
-                    if self.current() and self.current()[0] == "EQUALS":
-                        self.eat("EQUALS")
+                    tok = self.current()
+                    if tok and tok[0] in ("EQUALS", "PLUSEQ", "MINUSEQ", "STAREQ", "SLASHEQ", "PERCENTEQ"):
+                        op = self.eat(tok[0])[1]
                         value = self.parse_expr()
+                        if op != "=":
+                            binop_op = op[:-1]
+                            access_node = DataFieldAccess(node, prop, line=line)
+                            value = BinOp(access_node, binop_op, value, line=line)
                         return DataFieldAssign(node, prop, value, line=line)
                     node = DataFieldAccess(node, prop, line=line)
                 continue
@@ -459,9 +469,14 @@ class Parser:
                     continue
 
                 self.eat("RBRACK")
-                if self.current() and self.current()[0] == "EQUALS":
-                    self.eat("EQUALS")
+                tok = self.current()
+                if tok and tok[0] in ("EQUALS", "PLUSEQ", "MINUSEQ", "STAREQ", "SLASHEQ", "PERCENTEQ"):
+                    op = self.eat(tok[0])[1]
                     value = self.parse_expr()
+                    if op != "=":
+                        binop_op = op[:-1]
+                        access_node = ArrayIndex(node, index, line=line)
+                        value = BinOp(access_node, binop_op, value, line=line)
                     return ArrayIndexAssign(node, index, value, line=line)
                 node = ArrayIndex(node, index, line=line)
                 continue
@@ -617,10 +632,14 @@ class Parser:
             type_name = self.parse_type_annotation()
             expr.type_name = type_name
 
-        if self.current() and self.current()[0] == "EQUALS":
-            self.eat("EQUALS")
+        tok = self.current()
+        if tok and tok[0] in ("EQUALS", "PLUSEQ", "MINUSEQ", "STAREQ", "SLASHEQ", "PERCENTEQ"):
+            op = self.eat(tok[0])[1]
             value = self.parse_expr()
             if isinstance(expr, Variable):
+                if op != "=":
+                    binop_op = op[:-1]
+                    value = BinOp(expr, binop_op, value, line=line)
                 return Assignment(expr.name, value, type_name=expr.type_name, is_const=is_const, line=line)
         return expr
 

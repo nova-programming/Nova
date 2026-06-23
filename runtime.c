@@ -694,6 +694,11 @@ SYSCALL int _char_code(const char *s, int i) {
 }
 
 SYSCALL char *_str_sub(const char *s, int start, int end) {
+    if (!s) return 0;
+    int actual_len = 0;
+    while (s[actual_len] != '\0') actual_len++;
+    if (start < 0) start = 0;
+    if (end > actual_len) end = actual_len;
     int len = end - start;
     if (len < 0) len = 0;
 #if defined(_WIN32)

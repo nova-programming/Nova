@@ -30,6 +30,7 @@ data ParserState {
     tokens: list
     pos: int
     filename: string
+    comp_counter: int
 }
 
 def current_tok(state: ParserState) -> Token {
@@ -52,6 +53,168 @@ def eat_tok(state: ParserState, expected_kind: string) -> Token {
     }
     errors.err("Syntax", state.filename, tok.line, "expected " + expected_kind + " but got " + tok.kind, "check the syntax around this token — did you forget a closing brace, parenthesis, or keyword?", tok.col)
     return tok
+}
+
+def eat_prop_name(state: ParserState) -> Token {
+    tok = current_tok(state)
+    if tok.kind == "IDENT" {
+        state.pos = state.pos + 1
+        return tok
+    }
+    if tok.kind == "HAS" {
+        state.pos = state.pos + 1
+        return tok
+    }
+    if tok.kind == "OPEN" {
+        state.pos = state.pos + 1
+        return tok
+    }
+    if tok.kind == "READ" {
+        state.pos = state.pos + 1
+        return tok
+    }
+    if tok.kind == "WRITE" {
+        state.pos = state.pos + 1
+        return tok
+    }
+    if tok.kind == "CLOSE" {
+        state.pos = state.pos + 1
+        return tok
+    }
+    if tok.kind == "LEN" {
+        state.pos = state.pos + 1
+        return tok
+    }
+    if tok.kind == "STR" {
+        state.pos = state.pos + 1
+        return tok
+    }
+    errors.err("Syntax", state.filename, tok.line, "expected property name but got " + tok.kind, "property names must be identifiers or built-in method names", tok.col)
+    return tok
+}
+
+def make_var(name: string, line: int) -> AstNode {
+    n = AstNode()
+    n.kind = "Variable"
+    n.val_str = name
+    n.line = line
+    return n
+}
+
+def make_num(val: int, line: int) -> AstNode {
+    n = AstNode()
+    n.kind = "Number"
+    n.val_int = val
+    n.line = line
+    return n
+}
+
+def parse_list_comprehension(state: ParserState, expr: AstNode) -> AstNode {
+    eat_tok(state, "FOR")
+    var_name = eat_tok(state, "IDENT").val
+    eat_tok(state, "IN")
+    iterable = parse_expr(state)
+    filter_expr = 0
+    check = current_tok(state)
+    if check.kind == "IF" {
+        eat_tok(state, "IF")
+        filter_expr = parse_expr(state)
+    }
+    eat_tok(state, "RBRACK")
+    
+    c = state.comp_counter
+    state.comp_counter = c + 1
+    result_var_name = "__comp_" + str(c)
+    iter_var_name = "__iter_" + str(c)
+    index_var_name = "__i_" + str(c)
+    line = expr.line
+    
+    block = AstNode()
+    block.kind = "Block"
+    block.line = line
+    block.body = []
+    
+    # __comp_N = []
+    comp_list = AstNode()
+    comp_list.kind = "ListLiteral"
+    comp_list.line = line
+    comp_list.args = []
+    
+    assign1 = AstNode()
+    assign1.kind = "Assignment"
+    assign1.line = line
+    assign1.val_str = result_var_name
+    assign1.left = comp_list
+    block.body.append(assign1)
+    
+    # __iter_N = iterable
+    assign2 = AstNode()
+    assign2.kind = "Assignment"
+    assign2.line = line
+    assign2.val_str = iter_var_name
+    assign2.left = iterable
+    block.body.append(assign2)
+    
+    # ForLoop body: x = __iter_N[__i_N]; __comp_N.append(expr)
+    body_stmts = []
+    
+    target_assign = AstNode()
+    target_assign.kind = "Assignment"
+    target_assign.line = line
+    target_assign.val_str = var_name
+    index_node = AstNode()
+    index_node.kind = "ArrayIndex"
+    index_node.line = line
+    index_node.left = make_var(iter_var_name, line)
+    index_node.right = make_var(index_var_name, line)
+    target_assign.left = index_node
+    body_stmts.append(target_assign)
+    
+    append_call = AstNode()
+    append_call.kind = "MethodCall"
+    append_call.line = line
+    append_call.left = make_var(result_var_name, line)
+    append_call.val_str = "append"
+    append_call.args = [expr]
+    
+    if filter_expr != 0 {
+        if_node = AstNode()
+        if_node.kind = "IfElse"
+        if_node.line = line
+        if_node.cond = filter_expr
+        if_node.body = [append_call]
+        if_node.else_body = []
+        body_stmts.append(if_node)
+    } else {
+        body_stmts.append(append_call)
+    }
+    
+    # for __i_N = 0 to len(__iter_N) - 1 step 1
+    for_node = AstNode()
+    for_node.kind = "ForLoop"
+    for_node.line = line
+    for_node.val_str = index_var_name
+    for_node.val_int = 0
+    for_node.left = make_num(0, line)
+    
+    len_node = AstNode()
+    len_node.kind = "Len"
+    len_node.line = line
+    len_node.left = make_var(iter_var_name, line)
+    
+    for_node.right = AstNode()
+    for_node.right.kind = "BinOp"
+    for_node.right.line = line
+    for_node.right.val_str = "-"
+    for_node.right.left = len_node
+    for_node.right.right = make_num(1, line)
+    
+    for_node.cond = make_num(1, line)
+    for_node.body = body_stmts
+    block.body.append(for_node)
+    
+    block.body.append(make_var(result_var_name, line))
+    return block
 }
 
 # ---------------- EXPRESSIONS ----------------
@@ -99,13 +262,19 @@ def parse_primary(state: ParserState) -> AstNode {
         if check.kind != "RBRACK" {
             node.args.append(parse_expr(state))
             check = current_tok(state)
-            while check.kind == "COMMA" {
-                eat_tok(state, "COMMA")
-                node.args.append(parse_expr(state))
-                check = current_tok(state)
+            if check.kind == "FOR" {
+                node = parse_list_comprehension(state, node.args[0])
+            } else {
+                while check.kind == "COMMA" {
+                    eat_tok(state, "COMMA")
+                    node.args.append(parse_expr(state))
+                    check = current_tok(state)
+                }
+                eat_tok(state, "RBRACK")
             }
+        } else {
+            eat_tok(state, "RBRACK")
         }
-        eat_tok(state, "RBRACK")
     } elif tok.kind == "LBRACE" {
         eat_tok(state, "LBRACE")
         node.kind = "DictLiteral"
@@ -244,7 +413,7 @@ def parse_primary(state: ParserState) -> AstNode {
         next_tok = current_tok(state)
         if next_tok.kind == "DOT" {
             eat_tok(state, "DOT")
-            prop_tok = eat_tok(state, "IDENT")
+            prop_tok = eat_prop_name(state)
             next_after = current_tok(state)
             if next_after.kind == "LPAREN" {
                 # Method call: obj.method()
@@ -281,10 +450,27 @@ def parse_primary(state: ParserState) -> AstNode {
                 elif prop_tok.val == "value_qword" { is_ptr = 1 }
 
                 if is_ptr == 1 {
-                    if next_after.kind == "EQUALS" {
-                        # Pointer property assignment: ptr.value = new_val
-                        eat_tok(state, "EQUALS")
+                    if next_after.kind == "EQUALS" or next_after.kind == "PLUSEQ" or next_after.kind == "MINUSEQ" or next_after.kind == "STAREQ" or next_after.kind == "SLASHEQ" or next_after.kind == "PERCENTEQ" {
+                        # Pointer property assignment: ptr.value += new_val
+                        eat_tok(state, next_after.kind)
                         val_node = parse_expr(state)
+                        if next_after.kind != "EQUALS" {
+                            op_str = str_sub(next_after.val, 0, len(next_after.val) - 1)
+                            access_node = AstNode()
+                            access_node.line = tok.line
+                            access_node.col = tok.col
+                            access_node.kind = "PointerProperty"
+                            access_node.left = node
+                            access_node.val_str = prop_tok.val
+                            bin_node = AstNode()
+                            bin_node.line = tok.line
+                            bin_node.col = tok.col
+                            bin_node.kind = "BinOp"
+                            bin_node.val_str = op_str
+                            bin_node.left = access_node
+                            bin_node.right = val_node
+                            val_node = bin_node
+                        }
                         assign_node = AstNode()
                         assign_node.line = tok.line
                         assign_node.col = tok.col
@@ -304,10 +490,27 @@ def parse_primary(state: ParserState) -> AstNode {
                         node = access_node
                     }
                 } else {
-                    if next_after.kind == "EQUALS" {
-                        # Field assignment: obj.field = value
-                        eat_tok(state, "EQUALS")
+                    if next_after.kind == "EQUALS" or next_after.kind == "PLUSEQ" or next_after.kind == "MINUSEQ" or next_after.kind == "STAREQ" or next_after.kind == "SLASHEQ" or next_after.kind == "PERCENTEQ" {
+                        # Field assignment: obj.field += value
+                        eat_tok(state, next_after.kind)
                         val_node = parse_expr(state)
+                        if next_after.kind != "EQUALS" {
+                            op_str = str_sub(next_after.val, 0, len(next_after.val) - 1)
+                            access_node = AstNode()
+                            access_node.line = tok.line
+                            access_node.col = tok.col
+                            access_node.kind = "DataFieldAccess"
+                            access_node.left = node
+                            access_node.val_str = prop_tok.val
+                            bin_node = AstNode()
+                            bin_node.line = tok.line
+                            bin_node.col = tok.col
+                            bin_node.kind = "BinOp"
+                            bin_node.val_str = op_str
+                            bin_node.left = access_node
+                            bin_node.right = val_node
+                            val_node = bin_node
+                        }
                         assign_node = AstNode()
                         assign_node.line = tok.line
                         assign_node.col = tok.col
@@ -372,9 +575,26 @@ def parse_primary(state: ParserState) -> AstNode {
                 } else {
                     eat_tok(state, "RBRACK")
                     assign_tok = current_tok(state)
-                    if assign_tok.kind == "EQUALS" {
-                        eat_tok(state, "EQUALS")
+                    if assign_tok.kind == "EQUALS" or assign_tok.kind == "PLUSEQ" or assign_tok.kind == "MINUSEQ" or assign_tok.kind == "STAREQ" or assign_tok.kind == "SLASHEQ" or assign_tok.kind == "PERCENTEQ" {
+                        eat_tok(state, assign_tok.kind)
                         val_node = parse_expr(state)
+                        if assign_tok.kind != "EQUALS" {
+                            op_str = str_sub(assign_tok.val, 0, len(assign_tok.val) - 1)
+                            access_node = AstNode()
+                            access_node.line = tok.line
+                            access_node.col = tok.col
+                            access_node.kind = "ArrayIndex"
+                            access_node.left = node
+                            access_node.right = index_node
+                            bin_node = AstNode()
+                            bin_node.line = tok.line
+                            bin_node.col = tok.col
+                            bin_node.kind = "BinOp"
+                            bin_node.val_str = op_str
+                            bin_node.left = access_node
+                            bin_node.right = val_node
+                            val_node = bin_node
+                        }
                         array_assign = AstNode()
                         array_assign.line = tok.line
                         array_assign.col = tok.col
@@ -1030,10 +1250,21 @@ def parse_statement(state: ParserState) -> AstNode {
     
     expr = parse_expr(state)
     next_tok = current_tok(state)
-    if next_tok.kind == "EQUALS" {
-        eat_tok(state, "EQUALS")
+    if next_tok.kind == "EQUALS" or next_tok.kind == "PLUSEQ" or next_tok.kind == "MINUSEQ" or next_tok.kind == "STAREQ" or next_tok.kind == "SLASHEQ" or next_tok.kind == "PERCENTEQ" {
+        eat_tok(state, next_tok.kind)
         val_expr = parse_expr(state)
         if expr.kind == "Variable" {
+            if next_tok.kind != "EQUALS" {
+                op_str = str_sub(next_tok.val, 0, len(next_tok.val) - 1)
+                bin_node = AstNode()
+                bin_node.line = stmt_line
+                bin_node.col = stmt_col
+                bin_node.kind = "BinOp"
+                bin_node.val_str = op_str
+                bin_node.left = expr
+                bin_node.right = val_expr
+                val_expr = bin_node
+            }
             node = AstNode()
             node.line = stmt_line
             node.col = stmt_col
@@ -1188,6 +1419,7 @@ def parse(tokens: list, filename: string) -> list {
     state.tokens = tokens
     state.pos = 0
     state.filename = filename
+    state.comp_counter = 0
     program = []
     
     loop = 1

@@ -752,14 +752,12 @@ class Arm64Codegen:
             continue_label = self.next_label("L_for_cont")
             self.loop_labels.append((continue_label, end_label))
             self.assembly.append(f"{loop_label}:")
+            self.compile_expr(end_val)
+            self.assembly.append("    ldr x1, [sp], #16")
             if isinstance(offset, str):
                 self.assembly.append(f"    mov x0, {offset}")
             else:
                 self.assembly.append(f"    ldr x0, [sp, #{self.local_aligned - offset}]")
-            self.assembly.append("    str x0, [sp, #-16]!")
-            self.compile_expr(end_val)
-            self.assembly.append("    ldr x1, [sp], #16")
-            self.assembly.append("    ldr x0, [sp], #16")
             self.assembly.append("    cmp x0, x1")
             if node.is_downto:
                 self.assembly.append(f"    b.lt {end_label}")
@@ -836,11 +834,11 @@ class Arm64Codegen:
             self.assembly.append("    str w1, [x0]")
         elif isinstance(node, ArrayIndexAssign):
             self.compile_expr(node.value)
+            self.assembly.append("    ldr x0, [sp], #16")
             self.compile_expr(node.index)
+            self.assembly.append("    ldr x1, [sp], #16")
             self.compile_expr(node.base)
             self.assembly.append("    ldr x2, [sp], #16")
-            self.assembly.append("    ldr x1, [sp], #16")
-            self.assembly.append("    ldr x0, [sp], #16")
             self.assembly.append("    cmp w1, #0")
             self.assembly.append("    b.lt _out_of_bounds")
             self.assembly.append("    ldr w3, [x2]")
@@ -999,9 +997,9 @@ class Arm64Codegen:
             if isinstance(node.base, DataFieldAccess) and node.base.field_name in ['struct_names', 'prop_names', 'local_var_names']:
                 is_str = False
             self.compile_expr(node.index)
+            self.assembly.append("    ldr x0, [sp], #16")
             self.compile_expr(node.base)
             self.assembly.append("    ldr x1, [sp], #16")
-            self.assembly.append("    ldr x0, [sp], #16")
             if is_str:
                 self.assembly.append("    ldrb w0, [x0, x1]")
                 self.assembly.append("    lsl x0, x0, #1")
@@ -1067,9 +1065,9 @@ class Arm64Codegen:
             self.assembly.append("    str x0, [sp, #-16]!")
             for k, v in zip(node.keys, node.values):
                 self.compile_expr(v)
+                self.assembly.append("    ldr x2, [sp], #16")
                 self.compile_expr(k)
                 self.assembly.append("    ldr x1, [sp], #16")
-                self.assembly.append("    ldr x2, [sp], #16")
                 self.assembly.append("    ldr x0, [sp], #16")
                 self.assembly.append("    str x0, [sp, #-16]!")
                 self.assembly.append("    bl _dict_set")

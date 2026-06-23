@@ -70,8 +70,11 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    ldr %d, [sp], #16")
         emit(state, "    ldr %c, [sp], #16")
         emit(state, "    ldr %a, [sp], #16")
-        base_str = str(node.left.inferred_type)
-        if base_str == "dict" {
+        is_dict = 0
+        if node.left.inferred_type != 0 and node.left.inferred_type.kind == "dict" {
+            is_dict = 1
+        }
+        if is_dict == 1 {
             emit(state, "    str %a, [sp, #-16]!")
             emit(state, "    str %c, [sp, #-16]!")
             emit(state, "    str %d, [sp, #-16]!")
@@ -83,7 +86,7 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             emit(state, "    cmp %c, x1")
             emit(state, "    b.ge _out_of_bounds")
             ptr_sz = ptr_size(state)
-            emit(state, "    add %x, %d, #16")
+            emit(state, "    ldr %x, [%d, #8]")
             if ptr_sz == 8 {
                 emit(state, "    str %a, [%x, %c, lsl #3]")
             } else {
@@ -211,11 +214,9 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         state.loop_end_labels.append(end_label)
 
         emit(state, loop_label + ":")
-        emit(state, "    ldr %a, [%b, #" + str(offset) + "]")
-        emit(state, "    str %a, [sp, #-16]!")
         compile_expr(state, node.right)
         emit(state, "    ldr %x, [sp], #16")
-        emit(state, "    ldr %a, [sp], #16")
+        emit(state, "    ldr %a, [%b, #" + str(offset) + "]")
         emit(state, "    cmp %a, %x")
         if node.val_int == 1 {
             emit(state, "    b.lt " + end_label)
@@ -230,9 +231,9 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         }
 
         emit(state, cont_label + ":")
-        emit(state, "    ldr %a, [%b, #" + str(offset) + "]")
         compile_expr(state, node.cond)
         emit(state, "    ldr %x, [sp], #16")
+        emit(state, "    ldr %a, [%b, #" + str(offset) + "]")
         if node.val_int == 1 {
             emit(state, "    sub %a, %x")
         } else {

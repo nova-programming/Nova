@@ -409,6 +409,36 @@ def tokenize(src: string) -> list {
                     i = i + 2
                     matched = 2 
                 }
+                case "+=" { 
+                    tok.kind = "PLUSEQ"
+                    tok.val = two_char
+                    i = i + 2
+                    matched = 2 
+                }
+                case "-=" { 
+                    tok.kind = "MINUSEQ"
+                    tok.val = two_char
+                    i = i + 2
+                    matched = 2 
+                }
+                case "*=" { 
+                    tok.kind = "STAREQ"
+                    tok.val = two_char
+                    i = i + 2
+                    matched = 2 
+                }
+                case "/=" { 
+                    tok.kind = "SLASHEQ"
+                    tok.val = two_char
+                    i = i + 2
+                    matched = 2 
+                }
+                case "%=" { 
+                    tok.kind = "PERCENTEQ"
+                    tok.val = two_char
+                    i = i + 2
+                    matched = 2 
+                }
             }
         }
 

@@ -457,11 +457,20 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     if str_eq(k, "ArrayIndexAssign") == 1 {
         base_t = tc_visit(tc, node.left)
         right_t = tc_visit(tc, node.right)
-        tc_visit(tc, node.cond)
+        cond_t = tc_visit(tc, node.cond)
         if base_t != 0 and base_t.kind == "list" {
-            tc_unify(tc, base_t.element_type, right_t, node)
+            tc_unify(tc, base_t.element_type, cond_t, node)
         }
         return create_any_type()
+    }
+    if str_eq(k, "DictLiteral") == 1 {
+        i = 0
+        while i < len(node.args) {
+            tc_visit(tc, node.args[i])
+            i = i + 1
+        }
+        node.inferred_type = create_dict_type()
+        return node.inferred_type
     }
 
     if str_eq(k, "ListLiteral") == 1 {

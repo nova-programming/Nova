@@ -482,9 +482,17 @@ def compile_expr(state: CodegenState, node: AstNode) {
                     label_end = next_label(state, "L_cmp_end")
 
                     if node.val_str == "has" {
+                        is_dict = 0
+                        if node.left.inferred_type != 0 and node.left.inferred_type.kind == "dict" {
+                            is_dict = 1
+                        }
                         emit(state, "    push %x")
                         emit(state, "    push %a")
-                        emit_call(state, "_strstr", 2)
+                        if is_dict == 1 {
+                            emit_call(state, "_dict_has", 2)
+                        } else {
+                            emit_call(state, "_strstr", 2)
+                        }
                         emit(state, "    cmp eax, 0")
                         emit(state, "    jne " + label_true)
                     } else {
@@ -653,9 +661,17 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, label_end + ":")
         } else {
             if node.val_str == "has" {
+                is_dict = 0
+                if node.left.inferred_type != 0 and node.left.inferred_type.kind == "dict" {
+                    is_dict = 1
+                }
                 emit(state, "    push %x")
                 emit(state, "    push %a")
-                emit_call(state, "_strstr", 2)
+                if is_dict == 1 {
+                    emit_call(state, "_dict_has", 2)
+                } else {
+                    emit_call(state, "_strstr", 2)
+                }
                 emit(state, "    cmp eax, 0")
                 setcc = "setne"
             } else {
@@ -805,9 +821,9 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    mov %d, [%x+8]")
             data_off = idx_list * ptr_sz
             if ptr_sz == 8 {
-                emit(state, "    mov [%d + " + str(data_off) + "], rcx")
+                emit(state, "    mov [%d + " + str(data_off) + "], %a")
             } else {
-                emit(state, "    mov [%d + " + str(data_off) + "], ecx")
+                emit(state, "    mov [%d + " + str(data_off) + "], eax")
             }
             idx_list = idx_list + 1
         }
@@ -846,7 +862,17 @@ def compile_expr(state: CodegenState, node: AstNode) {
         compile_expr(state, node.left)
         emit(state, "    pop %d")
         emit(state, "    pop %c")
-        if is_str == 1 {
+        
+        is_dict = 0
+        if node.left.inferred_type != 0 and node.left.inferred_type.kind == "dict" {
+            is_dict = 1
+        }
+        if is_dict == 1 {
+            emit(state, "    push %c")
+            emit(state, "    push %d")
+            emit_call(state, "_dict_get", 2)
+            emit(state, "    push %a")
+        } elif is_str == 1 {
             emit(state, "    movzx eax, byte ptr [%d + %c]")
             emit(state, "    shl eax, 1")
             emit(state, "    mov %c, %a")
@@ -960,15 +986,9 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    push %x")
             emit(state, "    push %c")
             if is_x64(state) == 1 {
-                if sys_platform() == "windows" {
-                    emit(state, "    mov rcx, [%x+8]")
-                    emit(state, "    mov rdx, rsi")
-                } else {
-                    emit(state, "    mov rdi, [%x+8]")
-                    emit(state, "    mov rsi, rsi")
-                }
-                emit(state, "    sub %s, 32")
-                emit_call(state, "_realloc", 0)                emit(state, "    add %s, 32")
+                emit(state, "    mov rdi, [%x+8]")
+                emit(state, "    mov rsi, rsi")
+                emit_call(state, "_realloc", 0)
             } else {
                 emit(state, "    push %i")
                 emit(state, "    mov %d, [%x+8]")

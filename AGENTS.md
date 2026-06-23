@@ -266,11 +266,140 @@ galaxy publish             # Publish to registry
 - **Full suite**: 229 passed, 1 skipped, 13 subtests passed
 
 ### Performance & Consolidation (This Session — June 20, 2026)
+- **Root cause**: `nova.exe` crashed with `STATUS_ACCESS_VIOLATION` on startup because `_printf`/`_sys_get_args` from a stale `runtime.o` had debug markers and incomplete quote handling
+- **Quote handling**: `_sys_get_args` in `runtime.c` now tracks `in_quote` state — paths with spaces (e.g. `D:\...\Random Topic Practice\...`) are parsed as single args instead of being split into 4 tokens
+- **Runtime recompile fix**: `main.py:204-214` now deletes existing `runtime.o` before recompiling `runtime.c`, guaranteeing the linker always gets fresh object code
+- **Result**: `python main.py build nova.nv` produces a working `nova.exe` that correctly prints usage message (exit 0) and processes `build` subcommand
+- **`install.ps1`**: Downloads portable winlibs MinGW-w64 (~130MB) into `<InstallDir>/gcc/` if `gcc` not on PATH. Handles silent extraction of the `.zip` archive.
+- **`install.py`**: Same GCC bundling logic — downloads winlibs on Windows, warns with package manager instructions on Unix.
+- **`install.sh`**: Detects GCC presence after extraction, warns if missing with platform-specific install commands.
+- **`nova build` auto-fallback**: Tries `nova.exe assemble-link` first (verifies output exists), falls back to system/bundled GCC.
+
+### Local Variable / Parameter Layout Overlap Bug Fixed (This Session — June 2026)
+- **Root cause**: Local variables were assigned positive offsets (8, 16, 24…) but saved parameters used negative offsets (-16, -24, -32…). Both accessed via `[rbp - N]` — they silently overlapped. Example: `compile_file` stored `path` at `[rbp - 16]`, then `source = sys_read(fd)` overwrote `[rbp - 16]` with the file contents, destroying `path`.
+- **Fix**: Added `local_var_base = 16 + n_params * 8` shift. Local var offsets now start above saved parameter area, preventing overlap. Applied in both Python codegen (`codegen.py:scan_vars`) and self-hosted codegen (`codegen.nv:register_var`).
+- **Files changed** (4 files, ~30 lines):
+  - `compiler/backend/x86_64/codegen.py`: `scan_vars` offset shift (+base), `_main` local_var_base=32, init `self.local_var_base=16`
+  - `stdlib/backend/x86_64/codegen.nv`: Added `local_var_base` to `CodegenState`, `register_var` shift, `compile_function` save/restore + `sub rsp` adjustment
+- **Result**: `python main.py build hello.nv` now produces working `hello.exe`. `nova.exe` reaches tokenization phase when building.
+
+### Debug Prints Removed from runtime.c
+- `main()` wrapper (`runtime.c:330-338`) had `WriteFile(h, "1\n", ...)`, `WriteFile(h, "2\n", ...)`, `WriteFile(h, "3a\n", ...)` debug prints around `_main()` call. Removed — these caused "1\n2\n" prefix on all output (no functional purpose).
+
+### `_printf` `%d` Reads Wrong Register (This Session — June 2026)
+- **Root cause**: `_printf` in `runtime.c:56-57` read `%s` from `rsi` (2nd SysV reg = first variadic arg) but `%d` from `rdx` (3rd SysV reg = second variadic arg). The codegen always passes the value in `rsi` (since `printf(fmt, value)` only ever has one variadic arg), so `%d` read uninitialized garbage from `rdx`.
+- **Symptoms**: `print(len(s))` printed garbage (e.g. `1684949248`) while `print(s[0])` printed `"H"` correctly. All `%d` format outputs were corrupt; `%s` worked fine.
+- **Fix** (`runtime.c:67-69`): Changed `%d` handler to read from `arg_s` (= `rsi`) instead of `arg_d` (`rdx`). Unified both handlers to use the single `arg_s` source.
+- **`_sprintf` NOT affected**: Its signature `sprintf(buf, fmt, ...)` puts fmt in `rsi` (arg2) and first variadic arg in `rdx` (arg3) — so reading `%d` from `rdx` was correct there.
+- **Self-hosted codegen NOT affected**: It uses a stack-based `_printf` wrapper that reads args from `[rbp+16/24]` and delegates to CRT `printf`, bypassing the register confusion entirely.
+
+### `-mno-red-zone` for SYSCALL Functions
+- When GCC compiles a `__attribute__((sysv_abi))` function on Windows x64, it may omit `sub rsp` and access locals below `rsp` (assuming SysV red zone). Windows has no red zone — interrupt handlers can corrupt this data. Fixed by adding `-mno-red-zone` to `runtime.c` compilation command in `main.py`.
+
+### CI/CD Cross-Platform Fix (This Session — June 11, 2026)
+- **Root cause**: `runtime.c`'s `SYSCALL` macro was defined inside `#if defined(_WIN32)` (lines 9-13), but used on lines 315-555 inside `#if !defined(_WIN32)` (dict functions, heap fns) AND in the shared code section after `#endif`. On Linux/macOS, `SYSCALL` was undefined → `runtime.c` compilation failed silently (output captured but never displayed) → `runtime.o` not produced → linker errors (`undefined reference to _printf`, etc.)
+- **Fix** (`runtime.c:1-13`): Moved `SYSCALL` macro definition ABOVE the `#if defined(_WIN32)` block. It uses `__attribute__((sysv_abi))` for x86_64 and no-op otherwise — both work on all platforms.
+- **`.extern` declaration mismatch fixed** (`codegen.py:163-167`): `.extern` used `self._sym("printf")` = `printf` on Linux, but `call` sites hardcode `_printf`. All runtime.c wrappers define symbols with `_` prefix on ALL platforms, so `.extern` now always uses `_` prefix to match.
+- **Self-hosted tokenizer crash removed**: The x86 codegen (which had the crash) is now deleted. This bug is obsolete.
+- **Result**: All 190 tests pass. Native build verified on Windows; CI on Linux/macOS should now succeed.
+
+### Version Bump
+- **NOVA_VERSION**: `0.5.0` → `0.6.0`
+
+### GitHub Release Automation
+- **`.github/workflows/release.yml`** — triggers on `nova-v*` or `galaxy-v*` tags
+- Builds production-only `.zip` + `.tar.gz` archives containing only the files needed
+- Creates GitHub Release with archives attached
+- Auto-updates `versions/nova.json` or `versions/galaxy.json` in the galaxy-registry repo
+- Update commands (`nova update`, `galaxy update`) prefer release archives (lean download), fall back to full repo zip
+
+### SHA-256 Verification
+- **`galaxy install`** verifies file hashes against registry metadata after extraction
+- Registry package JSONs expanded with per-version file-level SHA-256 hashes
+- Warns on hash mismatch or missing files
+
+### Transitive Dependency Resolution
+- **`galaxy install pkg`** recursively installs dependencies from package metadata
+- Cycle detection via visited set — skips already-installed or in-progress packages
+- Dependencies installed before the parent package
+
+### Serverless Search API
+- **`api/search.js`** — Vercel Edge Function at `galaxy-registry.vercel.app/api/search?q=query`
+- Filters `packages/index.json` server-side, returns only matching results
+- `galaxy search` uses it by default, falls back to client-side index download
+
+### Website Documentation
+- **index.html**: Hero with one-liner install, Getting Started guide, tiered library browser, package detail views
+- **documentation.html**: Full Galaxy CLI reference (install, commands, templates, manifest, publishing)
+- **templates.html**: Dedicated template reference page with file structures, examples, schema
+- **admin.html**: Login-gated admin dashboard with tab system and GitHub Issues-based moderation
+
+### Infrastructure
+- `nova_ast/` renamed from `ast/` to fix Python stdlib collision
+- `_galaxy.py` is canonical CLI source; `galaxy/__init__.py`, `tools/galaxy.py` are thin re-export shims
+- `galaxy.cmd` updated as manual fallback wrapper
+- `pyproject.toml` console_scripts entry for `pip install`
+- GitHub foundry cross-repo linking (nova-programming/Nova + galaxy-registry)
+
+### Code Quality Fixes (This Session — June 2026)
+- **`_sys_write_raw` byte loop → `_fwrite`** (`codegen_x86.py:1555-1623`, `codegen.nv:469-537`): Replaced per-byte `_fputc` loop (150K calls for typical output) with buffer allocation + single `_fwrite` call. Allocates `malloc(length)` buffer, copies all bytes from list into buffer, calls `_fwrite(buf, 1, length, stream)`, then frees buffer. Eliminates 149,999 unnecessary function calls per output file.
+- **`_call_string_builtin` if-chain → dict dispatch** (`vm/machine.py:69-114`): Replaced 9 `if func_name == "..."` blocks with dict dispatch (`_STRING_HANDLERS`), each handler defined as a standalone module-level function. O(1) dispatch instead of O(n) linear scan.
+- **`peephole.py` removed** (`compiler/peephole.py`): Dead file — nothing imported it. Codegen has its own inline `peephole()` method.
+- **`compiler.nv` line-reading/writing dedup** (`stdlib/compiler.nv`): Extracted `write_lines(lines, path)` and `read_lines(path)` helper functions. Eliminated 4 copies of asm-write loop and 2 copies of file-reading + line-splitting logic. `compile_to_file`, `compile_to_exe`, `compile_to_bare`, `assemble_bare_file`, `assemble_link_file` all simplified.
+- **Lexer O(n²) string building fixed** (`stdlib/lexer.nv:185-213`): Replaced char-by-char concatenation in string literal parsing with `str_sub(src, start, i)` — O(n) instead of O(n²).
+- **Double-negative offset bug** (`codegen_x86.py:1812,1858`, `codegen.nv:710,756`): `mov eax, [ebp - -12]` → `mov eax, [ebp + 12]`. Root cause: variable store in Python codegen didn't handle negative offsets.
+- **Dead epilogue blocks removed** (`codegen_x86.py:4284-4440`): 17 dead `pop/pop/mov/pop/ret` sequences eliminated from `_emit_win32_runtime`.
+- **`_is_string_expr()` heuristics cleaned** (`codegen_x86.py:144,146`): Removed hardcoded variable name list (15 names) and field name list (15 names). Now relies solely on `inferred_type` and `struct_defs`.
+- **`string_vars` init fixed** (`codegen_x86.py:__init__`): Moved `self.string_vars = set()` to `__init__`, removed all `getattr(self, 'string_vars', set())` fallback patterns.
+- **Debug print removed** (`codegen_x86.py:get_prop_offset`): Removed `print(f"  REG: {name} -> offset {self.prop_offsets[name]}")`.
+- **Compiler.nv dedup**: 216→170 lines (21% reduction). Total diff: 176 insertions, 368 deletions across 7 files.
+
+### Installer PATH Fix (Previous Session)
+- **Root cause**: `_add_to_path_windows()` wrote PATH to registry + broadcast `WM_SETTINGCHANGE`, but child processes inherit the parent's environment block — they never re-read the registry. So `nova`/`galaxy` remained unavailable even in new terminal tabs until Explorer itself restarted.
+- **`install.py` fix**: After writing registry PATH, also updates `os.environ["PATH"]` so child processes of the installer see the change immediately.
+- **`use_nova.bat` helper**: New batch file in both `install.py` and `install.ps1` that prepends `%~dp0` to the current cmd.exe session's PATH. Created alongside `nova.bat`/`galaxy.bat`.
+- **Output improvement**: Both installers now print one-liners for immediate PATH refresh:
+  - cmd.exe: `call "%LOCALAPPDATA%\nova\use_nova.bat"`
+  - PowerShell: `$env:PATH = "$env:LOCALAPPDATA\nova;$env:PATH"`
+- **Test fix**: `test_launcher_execution_simulated` updated to skip `use_nova.bat` (helper script, not a python launcher).
+- **Registry cleanup**: Stale unit-test PATH entries (9 `nova-test-*` dirs) cleaned from registry.
+- **Website docs updated**: reference.html (enums, switch, dict, hex/bin, string interp, stringlib table) + examples.html (5 new examples). Committed + pushed to both repos on June 7, 2026.
+
+## Commands Reference
+```powershell
+# One-command install
+curl -O https://galaxy-registry.vercel.app/install.sh && bash install.sh
+
+# Use immediately without restarting terminal (Windows)
+call "%LOCALAPPDATA%\nova\use_nova.bat"    # cmd.exe
+$env:PATH = "$env:LOCALAPPDATA\nova;$env:PATH"   # PowerShell
+
+# Usage after install
+nova build hello.nv        # Compile Nova program
+nova --version             # Check Nova version
+nova update                # Update Nova compiler
+galaxy init library my-lib # Create a library
+galaxy install pkg         # Install from registry
+galaxy --version           # Check Galaxy version
+galaxy update              # Update Galaxy CLI
+galaxy upgrade [pkg]       # Update installed packages
+galaxy publish             # Publish to registry
+```
+### Phase 3: Performance & Consolidation (This Session — June 20, 2026)
 - **PE machine type bug fixed** (`stdlib/backend/x86_64/linker.nv:559`): COFF machine type was `0x014c` (i386) — changed to `0x8664` (AMD64). Self-hosted `nova.exe assemble-link` was producing PE files claiming to be 32-bit executables.
 - **Peephole optimizer fixed** (`stdlib/peephole.nv`): Added `rax` (64-bit) checks alongside `eax` — previously `push rax`/`pop rax` never matched, making optimizer ineffective on x86_64. Removed `xor eax, eax → mov eax, 0` anti-optimization (xor is faster on modern x86).
 - **Dict hash `%` → `& (cap-1)`** (`runtime.c:333-418`): 6 modulo operations replaced with bitwise AND. Cap is always power-of-2 (8→16→32...). 30-80× speedup per hash operation (AND = ~1 cycle vs DIV = ~30-80).
 - **`dict_free` added** (`runtime.c`): Frees keys, values, and header. `.extern _dict_free` added to all 4 codegen files + test assertions.
 - **`rep movsb` in string slice** (`stdlib/backend/x86_64/codegen.nv`, `bootstrap/compiler/backend/x86_64/codegen.py`): Replaced byte-by-byte copy loop with `rep movsb` (hardware-accelerated bulk copy). ARM64 bootstrap (`bootstrap/compiler/backend/arm64/codegen.py`): replaced byte loop with `_memcpy`. Self-hosted ARM64 already used `_memcpy`.
 - **`stdlib/codegen_common.nv`** — new shared module with `get_externs()` and `get_data_strings()` functions. Both `x86_64/codegen.nv` and `arm64/codegen.nv` import it, eliminating 53 lines of duplicated declarations across 2 files.
-- **Dead `emit_x86_64_runtime` removed** — empty function (leftover from `emit_win32_runtime` deletion) + its call site removed from `x86_64/codegen.nv`.
-- **Full suite**: 229 passed, 1 skipped, 13 subtests passed
+
+### Shorthand Operators & Dict Limits Fixes (This Session - June 2026)
+- **Shorthand Operators Added**: Implemented `+=`, `-=`, `*=`, `/=`, `%=` natively in the lexer and parser. They desugar immediately to `a = a + b` ensuring the AST and codegen layers did not need modifications.
+- **x86_64 Stack Frame Unification**: Cleaned up the x86_64 target `compile_function` and `_main` entry to uniformly emit `push rbp; mov rbp, rsp` across all modes, correctly shifting local offsets past saved register locations (`regs_size`) and applying precise alignment padding for 16-byte boundaries. 
+- **Array Limits & Realloc Windows ABI Bug**: The `append()` tests caused silent execution failure inside `_realloc`. Discovered that the codegen branch for `sys_platform() == "windows"` mistakenly switched to `rcx`/`rdx` Microsoft ABI registers for `_realloc`, despite `runtime.c` enforcing `__attribute__((sysv_abi))` on all runtime wrappers. Fixed to uniformly use SysV `rdi`/`rsi` which prevented `_realloc` from corrupting shadow memory.
+- **Dict "Index Out Of Bounds" Bug**: `test_limits.nv` crashed on `freqs[str(val)] = ...` due to Nova's type checker inferring `{}` as a `struct "dict"` rather than `kind = "dict"`. Fixed `types.nv` to accurately expose `create_dict_type()`, `type_checker.nv` to recognize `DictLiteral`, and updated the `has` operator in `codegen_expr.nv` to dispatch to `_dict_has` rather than falling back to `_strstr` for string comparisons.
+- **ARM64 Register Clobbering / Stack Bug**: Replaced relative stack addressing with robust frame-pointer mapping (`mov fp, sp`) directly after `stp fp, lr` push. Variable offsets are strictly preserved against register pushes/pops within the body. 
+
+**Next Instruction for Agent:**
+- Review the ARM64 code generation backends to confirm evaluation order and register clobbering are fully resolved following the recent stack frame migration.
+- Execute the CI/CD pipeline tests locally to ensure there are no regressions.

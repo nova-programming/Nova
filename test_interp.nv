@@ -1,4 +1,0 @@
-n = 42
-print("The answer is {n}")
-print(n)
-print("done")
