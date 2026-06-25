@@ -793,8 +793,8 @@ def parse_try_block(state: ParserState, stmt_line: int, stmt_col: int) -> AstNod
     node.col = stmt_col
     node.kind = "TRY"
     node.val_str = catch_var
-    node.args = body
-    node.cond = catch_body
+    node.body = body
+    node.else_body = catch_body
     return node
 }
 
@@ -1215,7 +1215,7 @@ def parse_statement(state: ParserState) -> AstNode {
             lib_path = eat_tok(state, "STRING").val
             eat_tok(state, "AS")
             node.val_str = eat_tok(state, "IDENT").val
-            node.cond = lib_path
+            node.name = lib_path
         } else {
             node.val_str = eat_tok(state, "IDENT").val
             check = current_tok(state)

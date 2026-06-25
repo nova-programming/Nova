@@ -220,7 +220,7 @@ def apply_relocs(code: list, fixups: list, labels: list, text_rva: int, data_rva
             }
         } else {
             print("UNRESOLVED fixup: [" + fixup.target + "] len=" + str(len(fixup.target)) + " at offset " + str(fixup.offset))
-            sys_flush(1)
+            sys_flush()
             # Dump matching or similar labels
             dump_j = 0
             found_any = 0
@@ -236,7 +236,7 @@ def apply_relocs(code: list, fixups: list, labels: list, text_rva: int, data_rva
                 print("  NO matching labels found!")
             }
             print("  total labels: " + str(len(labels)))
-            sys_flush(1)
+            sys_flush()
         }
         i = i + 1
     }
@@ -690,7 +690,7 @@ def link_bare(sections: list, load_addr: int) -> list {
     while i < len(labels) {
         if labels[i].defined == 0 {
             print("ERROR: Undefined symbol in bare-metal mode: " + labels[i].name)
-            sys_flush(1)
+            sys_flush()
             sys_exit(1)
         }
         i = i + 1

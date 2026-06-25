@@ -24,7 +24,11 @@ data CodegenState {
     struct_names: list
     struct_sizes: list
     struct_fields: list
+    str_lit_vals: list
+    str_lit_labels: list
     string_vars: list
+    global_field_names: list
+    next_global_offset: int
     local_var_regs: list
     used_regs: list
     reg_pool: list
@@ -58,6 +62,10 @@ def new_codegen(tgt: int, target_os: string) -> CodegenState {
     state.struct_sizes = []
     state.struct_fields = []
     state.string_vars = []
+    state.str_lit_vals = []
+    state.str_lit_labels = []
+    state.global_field_names = []
+    state.next_global_offset = 8
     state.local_var_regs = []
     state.used_regs = []
     state.reg_pool = []
@@ -93,6 +101,11 @@ def new_codegen(tgt: int, target_os: string) -> CodegenState {
 
 def is_x64(state: CodegenState) -> int {
     return state.target
+}
+
+def is_windows(state: CodegenState) -> int {
+    if str_eq(state.target_os, "windows") == 1 { return 1 }
+    return 0
 }
 
 def ptr_size(state: CodegenState) -> int {
@@ -174,15 +187,8 @@ def emit_call(state: CodegenState, func_name: string, arg_count: int) {
         if arg_count >= 4 { emit(state, "    pop rcx") }
         if arg_count >= 5 { emit(state, "    pop r8") }
         if arg_count >= 6 { emit(state, "    pop r9") }
-        # Extra args are already on stack if any, but Nova currently doesn't exceed 6 for standard calls.
         
-        # Variadic functions require AL to contain number of vector registers used (0).
         emit(state, "    xor eax, eax")
-        
-        # Ensure 16-byte alignment and 32 bytes shadow space
-        # We assume RSP is already 16-byte aligned before arguments were pushed,
-        # but wait! We popped the arguments, so RSP is back to where it was (aligned).
-        # We just need to allocate shadow space.
         emit(state, "    sub rsp, 32")
         emit(state, "    call " + func_name)
         emit(state, "    add rsp, 32")
@@ -205,16 +211,16 @@ def next_label(state: CodegenState, prefix: string) -> string {
 
 def add_string_literal(state: CodegenState, raw_val: string) -> string {
     i = 0
-    while i < len(state.local_var_names) {
-        if state.local_var_names[i] == raw_val {
-            return state.local_vars[i]
+    while i < len(state.str_lit_vals) {
+        if state.str_lit_vals[i] == raw_val {
+            return state.str_lit_labels[i]
         }
         i = i + 1
     }
     state.str_count = state.str_count + 1
     label = "str_const_" + str(state.str_count)
-    state.local_var_names.append(raw_val)
-    state.local_vars.append(label)
+    state.str_lit_vals.append(raw_val)
+    state.str_lit_labels.append(label)
     emit_data(state, label + ": .asciz " + raw_val)
     return label
 }
@@ -250,7 +256,7 @@ def register_var(state: CodegenState, name: string) -> int {
         i = i + 1
     }
     
-    if state.reg_pool_idx < 2 {
+    if 1 == 0 {
         reg = state.reg_pool[state.reg_pool_idx]
         state.reg_pool_idx = state.reg_pool_idx + 1
         state.local_var_names.append(name)
@@ -269,6 +275,21 @@ def register_var(state: CodegenState, name: string) -> int {
 }
 
 def get_prop_offset(state: CodegenState, struct_name: string, field_name: string) -> int {
+    if struct_name == "any" {
+        if field_name == "kind" { return 0 }
+        i = 0
+        while i < len(state.global_field_names) {
+            if state.global_field_names[i] == field_name {
+                return (i + 1) * 8
+            }
+            i = i + 1
+        }
+        offset = state.next_global_offset
+        state.global_field_names.append(field_name)
+        state.next_global_offset = state.next_global_offset + 8
+        return offset
+    }
+
     si = 0
     while si < len(state.struct_names) {
         if state.struct_names[si] == struct_name {

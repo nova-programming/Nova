@@ -290,8 +290,6 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     }
     
     if str_eq(k, "Function") == 1 {
-        # DEBUG: Function name is: " + node.val_str + " on line: " + str(node.line)
-        sys_flush(1)
         if str_eq(node.val_str, "main") == 1 {
             errors.err("ReservedName", "", node.line, "Cannot declare a function named 'main'", "the function name 'main' is reserved for the executable's entry point. Please rename it (e.g. to 'run' or 'start')", node.col)
             sys_exit(1)
@@ -537,22 +535,8 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     }
 
     # Default fallback
-    if node.left != 0 { tc_visit(tc, node.left) }
-    if node.right != 0 { tc_visit(tc, node.right) }
-    if node.cond != 0 { tc_visit(tc, node.cond) }
-    
-    # Check body for nodes like ForLoop
-    if node.body != 0 {
-        i = 0
-        while i < len(node.body) {
-            tc_visit(tc, node.body[i])
-            i = i + 1
-        }
-    }
-    
     return create_any_type()
 }
-
 def tc_check(tc: TypeChecker, ast: list) {
     tc_push_env(tc)
     

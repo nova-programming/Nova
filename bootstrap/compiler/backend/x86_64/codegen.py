@@ -1,6 +1,12 @@
 import os
 from nova_ast.nodes import *
 
+# Field-to-preferred-struct mapping: when a field exists in multiple structs at
+# different offsets and type info is unavailable (AnyType), use this struct's offset.
+_FIELD_PREFERRED = {
+    "params": "AstNode",
+}
+
 class X86_64Codegen:
     """x86_64 System V AMD64 codegen. Supports Windows (MinGW _-prefix) and Unix (bare symbols)."""
 
@@ -23,16 +29,44 @@ class X86_64Codegen:
         self.func_returns = {}
 
     def get_prop_offset(self, name):
-        if name not in self.prop_offsets:
-            self.prop_offsets[name] = len(self.prop_offsets) * 8
-        return self.prop_offsets[name]
+        """Fallback: scan ALL known structs for this field name, return per-struct offset.
+        Uses a two-tier strategy:
+        1. If a 'preferred' struct (defined in FIELD_PREFERRED_STRUCT) contains this
+           field, use its offset.
+        2. Otherwise, prefer the struct with the fewest fields (most specific size)."""
+        # Tier 1: field-specific overrides for fields that exist at different offsets
+        # in commonly-used structs (e.g. params in AstNode vs Type, name in NamedFunc vs Type)
+        preferred = _FIELD_PREFERRED.get(name)
+        if preferred is not None:
+            for sname, sdef in self.struct_defs.items():
+                if sname == preferred:
+                    for i, (fname, ftype) in enumerate(sdef.fields):
+                        if fname == name:
+                            return i * 8
+        # Tier 2: default heuristic — fewest fields
+        best = None
+        best_count = 9999
+        for sname, sdef in self.struct_defs.items():
+            for i, (fname, ftype) in enumerate(sdef.fields):
+                if fname == name:
+                    n = len(sdef.fields)
+                    if n < best_count:
+                        best = i * 8
+                        best_count = n
+        if best is not None:
+            return best
+        return 0
 
     def get_struct_prop_offset(self, struct_name, field_name):
+        """Look up field offset within a specific struct. Falls back to get_prop_offset."""
         if struct_name in self.struct_defs:
             d = self.struct_defs[struct_name]
             for i, (fname, ftype) in enumerate(d.fields):
                 if fname == field_name:
                     return i * 8
+            # Field not in this struct's definition — dynamically add it (matches self-hosted behavior)
+            d.fields.append((field_name, None))
+            return (len(d.fields) - 1) * 8
         return self.get_prop_offset(field_name)
 
     def is_leaf_expr(self, node):
@@ -192,11 +226,8 @@ class X86_64Codegen:
         for n in self.ast:
             if isinstance(n, Data):
                 self.struct_defs[n.name] = n
-                for field_name, field_type in n.fields:
-                    self.get_prop_offset(field_name)
             elif isinstance(n, ClassDef):
-                for field_name, field_type in n.fields:
-                    self.get_prop_offset(field_name)
+                self.struct_defs[n.name] = n
             elif isinstance(n, Function):
                 self.func_returns[n.name] = n.return_type
 
@@ -454,7 +485,14 @@ class X86_64Codegen:
             self.compile_expr(node.instance)
             self.assembly.append("    pop rax")
             self.assembly.append("    pop rbx")
-            offset = self.get_prop_offset(node.field_name)
+            struct_name = None
+            if hasattr(node.instance, 'inferred_type') and getattr(node.instance.inferred_type, 'name', None):
+                struct_name = node.instance.inferred_type.name
+            
+            if struct_name and struct_name != "any":
+                offset = self.get_struct_prop_offset(struct_name, node.field_name)
+            else:
+                offset = self.get_prop_offset(node.field_name)
             self.assembly.append(f"    mov [rax + {offset}], rbx")
         elif isinstance(node, Print):
             if self._is_file_expr(node.value):
@@ -988,7 +1026,7 @@ class X86_64Codegen:
                 self.assembly.append(f"    lea rax, [rip + {label}]")
                 self.assembly.append("    push rax")
             elif node.name in self.struct_defs:
-                struct_size = (max(self.prop_offsets.values()) + 8) if self.prop_offsets else 128
+                struct_size = len(self.struct_defs[node.name].fields) * 8
                 struct_size = max(struct_size, 16)
                 struct_size = (struct_size + 15) & ~15
                 self.assembly.append(f"    mov edi, {struct_size}")
@@ -1027,7 +1065,14 @@ class X86_64Codegen:
         elif isinstance(node, DataFieldAccess):
             self.compile_expr(node.instance)
             self.assembly.append("    pop rax")
-            offset = self.get_prop_offset(node.field_name)
+            struct_name = None
+            if hasattr(node.instance, 'inferred_type') and getattr(node.instance.inferred_type, 'name', None):
+                struct_name = node.instance.inferred_type.name
+            
+            if struct_name and struct_name != "any":
+                offset = self.get_struct_prop_offset(struct_name, node.field_name)
+            else:
+                offset = self.get_prop_offset(node.field_name)
             self.assembly.append(f"    mov rax, [rax + {offset}]")
             self.assembly.append("    push rax")
         elif isinstance(node, Alloc):

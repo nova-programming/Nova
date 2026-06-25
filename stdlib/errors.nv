@@ -5,7 +5,7 @@ def err(err_type: string, filename: string, line: int, msg: string, suggestion: 
         print("ERROR [line " + str(line) + ":" + str(col) + "] (" + err_type + "): " + msg)
     }
     print("  -> " + suggestion)
-    sys_flush(1)
+    sys_flush()
 }
 
 def warn(err_type: string, filename: string, line: int, msg: string, suggestion: string, col: int) {
@@ -15,5 +15,5 @@ def warn(err_type: string, filename: string, line: int, msg: string, suggestion:
         print("WARNING [line " + str(line) + ":" + str(col) + "] (" + err_type + "): " + msg)
     }
     print("  -> " + suggestion)
-    sys_flush(1)
+    sys_flush()
 }

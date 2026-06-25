@@ -37,8 +37,8 @@ def platform() -> string {
     return os_impl.sys_platform()
 }
 
-def flush(fd: int) {
-    os_impl.sys_flush(fd)
+def flush() {
+    os_impl.sys_flush()
 }
 
 def get_args() -> list {

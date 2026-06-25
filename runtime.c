@@ -90,7 +90,7 @@ SYSCALL int STR_PFX(printf)(const char *fmt, const void *arg_s) {
     return written;
 }
 
-SYSCALL int STR_PFX(fopen)(const char *path, const char *mode) {
+SYSCALL long long STR_PFX(fopen)(const char *path, const char *mode) {
     HANDLE h; DWORD access, disp;
     if (*mode == 'w') { access = 0x40000000; disp = 2; }
     else if (*mode == 'a') { access = 0xC0000000; disp = 4; }
@@ -98,16 +98,16 @@ SYSCALL int STR_PFX(fopen)(const char *path, const char *mode) {
     h = CreateFileA(path, access, 0, 0, disp, 0x80, 0);
     if (h == INVALID_HANDLE_VALUE) return 0;
     if (*mode == 'a') SetFilePointer(h, 0, 0, 2);
-    return (int)(intptr_t)h;
+    return (long long)(intptr_t)h;
 }
-SYSCALL int STR_PFX(fclose)(int s) { return CloseHandle((HANDLE)(intptr_t)s) ? 0 : -1; }
-SYSCALL int STR_PFX(fread)(void *b, int sz, int c, int s) { DWORD n; ReadFile((HANDLE)(intptr_t)s, b, sz*c, &n, 0); return n; }
-SYSCALL int STR_PFX(fwrite)(const void *b, int sz, int c, int s) { DWORD n; WriteFile((HANDLE)(intptr_t)s, b, sz*c, &n, 0); return n; }
-SYSCALL int STR_PFX(fputs)(const char *str, int s) { int n = lstrlenA(str); STR_PFX(fwrite)(str, 1, n, s); return n; }
-SYSCALL int STR_PFX(fputc)(int c, int s) { char ch = c; STR_PFX(fwrite)(&ch, 1, 1, s); return c; }
-SYSCALL int STR_PFX(fseek)(int s, long o, int w) { return SetFilePointer((HANDLE)(intptr_t)s, o, 0, w) == -1 ? -1 : 0; }
-SYSCALL long STR_PFX(ftell)(int s) { return SetFilePointer((HANDLE)(intptr_t)s, 0, 0, 1); }
-SYSCALL int STR_PFX(fflush)(int s) { if (s) FlushFileBuffers((HANDLE)(intptr_t)s); return 0; }
+SYSCALL int STR_PFX(fclose)(long long s) { return CloseHandle((HANDLE)(intptr_t)s) ? 0 : -1; }
+SYSCALL int STR_PFX(fread)(void *b, int sz, int c, long long s) { DWORD n; ReadFile((HANDLE)(intptr_t)s, b, sz*c, &n, 0); return n; }
+SYSCALL int STR_PFX(fwrite)(const void *b, int sz, int c, long long s) { DWORD n; WriteFile((HANDLE)(intptr_t)s, b, sz*c, &n, 0); return n; }
+SYSCALL int STR_PFX(fputs)(const char *str, long long s) { int n = lstrlenA(str); STR_PFX(fwrite)(str, 1, n, s); return n; }
+SYSCALL int STR_PFX(fputc)(int c, long long s) { char ch = c; STR_PFX(fwrite)(&ch, 1, 1, s); return c; }
+SYSCALL int STR_PFX(fseek)(long long s, long o, int w) { return SetFilePointer((HANDLE)(intptr_t)s, o, 0, w) == -1 ? -1 : 0; }
+SYSCALL long STR_PFX(ftell)(long long s) { return SetFilePointer((HANDLE)(intptr_t)s, 0, 0, 1); }
+SYSCALL int STR_PFX(fflush)(long long s) { if (s) FlushFileBuffers((HANDLE)(intptr_t)s); return 0; }
 SYSCALL void STR_PFX(exit)(int c) { ExitProcess(c); }
 SYSCALL int STR_PFX(system)(const char *c) { return system(c); }
 
@@ -218,9 +218,9 @@ SYSCALL void STR_PFX(out_of_bounds)(void) {
 }
 
 /* ============== Nova sys_* runtime (_c suffix to match Nova codegen naming) ============== */
-SYSCALL int _sys_open_c(const char *path, const char *mode) { return STR_PFX(fopen)(path, mode); }
-SYSCALL int _sys_close_c(int s) { return STR_PFX(fclose)(s); }
-SYSCALL char *_sys_read_c(int s) {
+SYSCALL long long _sys_open_c(const char *path, const char *mode) { return STR_PFX(fopen)(path, mode); }
+SYSCALL void _sys_close_c(long long s) { STR_PFX(fclose)(s); }
+SYSCALL char *_sys_read_c(long long s) {
     long len;
     char *buf;
     STR_PFX(fseek)(s, 0, 2);
@@ -231,7 +231,7 @@ SYSCALL char *_sys_read_c(int s) {
     buf[len] = '\0';
     return buf;
 }
-SYSCALL int _sys_write_c(int s, const char *str) { return STR_PFX(fputs)(str, s); }
+SYSCALL void _sys_write_c(long long s, const char *str) { STR_PFX(fputs)(str, s); }
 SYSCALL int _sys_write_raw_c(int s, void *arr) {
     int *iarr = (int*)arr;
     int len = iarr[0];
@@ -633,7 +633,7 @@ SYSCALL int _nova_get_tick_count(void) {
 }
 
 /* ===== Unix syscall helpers (_c suffix for Nova codegen naming compatibility) ===== */
-SYSCALL int _sys_open_c(const char *path, const char *mode) {
+SYSCALL long long _sys_open_c(const char *path, const char *mode) {
     int flags;
     if (*mode == 'w' || *mode == 'a') {
         flags = O_WRONLY | O_CREAT;
@@ -644,11 +644,11 @@ SYSCALL int _sys_open_c(const char *path, const char *mode) {
     return open(path, O_RDONLY);
 }
 
-SYSCALL void _sys_close_c(int fd) {
+SYSCALL void _sys_close_c(long long fd) {
     close(fd);
 }
 
-SYSCALL char *_sys_read_c(int fd) {
+SYSCALL char *_sys_read_c(long long fd) {
     off_t len = lseek(fd, 0, SEEK_END);
     lseek(fd, 0, SEEK_SET);
     char *buf = (char*)malloc((size_t)len + 1);
@@ -659,7 +659,7 @@ SYSCALL char *_sys_read_c(int fd) {
     return buf;
 }
 
-SYSCALL void _sys_write_c(int fd, const char *str) {
+SYSCALL void _sys_write_c(long long fd, const char *str) {
     int len = strlen(str);
     write(fd, str, (size_t)len);
 }

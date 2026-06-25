@@ -463,7 +463,7 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     state.reg_pool_idx = old_reg_pool_idx
 }
 
-def generate_assembly(ast: list, debug_mode: int, target_os: string) -> list {
+def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -> list {
     state = new_codegen(1, target_os)
 
     emit(state, ".text")
