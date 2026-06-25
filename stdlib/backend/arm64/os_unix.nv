@@ -45,8 +45,8 @@ def sys_free(ptr: int) {
     sys_free_c(ptr)
 }
 
-def sys_flush(fd: int) {
-    sys_flush_c(fd)
+def sys_flush() {
+    sys_flush_c()
 }
 
 def sys_exit(code: int) {

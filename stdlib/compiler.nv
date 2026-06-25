@@ -166,7 +166,7 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     is_x64 = 0
     if target_arch == "x86_64" { is_x64 = 1 }
     if target_arch == "arm64" {
-        asm = generate_assembly(ast, debug_mode, target_os)
+        asm = generate_assembly(ast, debug_mode, is_x64, target_os)
     } else {
         asm = generate_assembly(ast, debug_mode, is_x64, target_os)
     }
@@ -286,8 +286,8 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
     print("Compiled: " + input_path + " -> " + output_path)
 }
 
-def compile_to_bare(input_path: string, output_path: string, debug_mode: int, load_addr: int, entry_name: string, target_arch: string) {
-    asm = compile_file(input_path, debug_mode, target_arch)
+def compile_to_bare(input_path: string, output_path: string, debug_mode: int, load_addr: int, entry_name: string, target_arch: string, target_os: string) {
+    asm = compile_file(input_path, debug_mode, target_arch, target_os)
     if len(asm) == 0 { return }
     write_lines(asm, input_path + ".s")
     

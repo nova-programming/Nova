@@ -256,22 +256,12 @@ def register_var(state: CodegenState, name: string) -> int {
         i = i + 1
     }
     
-    if 1 == 0 {
-        reg = state.reg_pool[state.reg_pool_idx]
-        state.reg_pool_idx = state.reg_pool_idx + 1
-        state.local_var_names.append(name)
-        state.local_vars.append(0)
-        state.local_var_regs.append(reg)
-        state.used_regs.append(reg)
-        return 0
-    } else {
-        psize = ptr_size(state)
-        state.local_offset = state.local_offset + psize
-        state.local_var_names.append(name)
-        state.local_vars.append(state.local_offset)
-        state.local_var_regs.append("")
-        return state.local_offset
-    }
+    psize = ptr_size(state)
+    state.local_offset = state.local_offset + psize
+    state.local_var_names.append(name)
+    state.local_vars.append(state.local_offset)
+    state.local_var_regs.append("")
+    return state.local_offset
 }
 
 def get_prop_offset(state: CodegenState, struct_name: string, field_name: string) -> int {

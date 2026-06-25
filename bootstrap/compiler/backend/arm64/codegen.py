@@ -1,6 +1,12 @@
 import os
 from nova_ast.nodes import *
 
+# Field-to-preferred-struct mapping: when a field exists in multiple structs at
+# different offsets and type info is unavailable (AnyType), use this struct's offset.
+_FIELD_PREFERRED = {
+    "params": "AstNode",
+}
+
 class Arm64Codegen:
     """AArch64 (ARM64) codegen for Apple Silicon (macOS) and Windows ARM64. Full feature parity with x86_64."""
 
@@ -25,16 +31,37 @@ class Arm64Codegen:
         self._reg_pool = []
 
     def get_prop_offset(self, name):
-        if name not in self.prop_offsets:
-            self.prop_offsets[name] = len(self.prop_offsets) * 8
-        return self.prop_offsets[name]
+        """Fallback: scan ALL known structs for this field name, return per-struct offset.
+        Uses a two-tier strategy: preferred struct override, then fewest-fields heuristic."""
+        preferred = _FIELD_PREFERRED.get(name)
+        if preferred is not None:
+            for sname, sdef in self.struct_defs.items():
+                if sname == preferred:
+                    for i, (fname, ftype) in enumerate(sdef.fields):
+                        if fname == name:
+                            return i * 8
+        best = None
+        best_count = 9999
+        for sname, sdef in self.struct_defs.items():
+            for i, (fname, ftype) in enumerate(sdef.fields):
+                if fname == name:
+                    n = len(sdef.fields)
+                    if n < best_count:
+                        best = i * 8
+                        best_count = n
+        if best is not None:
+            return best
+        return 0
 
     def get_struct_prop_offset(self, struct_name, field_name):
+        """Look up field offset within a specific struct. Falls back to get_prop_offset."""
         if struct_name in self.struct_defs:
             d = self.struct_defs[struct_name]
             for i, (fname, ftype) in enumerate(d.fields):
                 if fname == field_name:
                     return i * 8
+            d.fields.append((field_name, None))
+            return (len(d.fields) - 1) * 8
         return self.get_prop_offset(field_name)
 
     def is_leaf_expr(self, node):
@@ -637,7 +664,13 @@ class Arm64Codegen:
             self.compile_expr(node.instance)
             self.assembly.append("    ldr x1, [sp], #16")
             self.assembly.append("    ldr x0, [sp], #16")
-            offset = self.get_prop_offset(node.field_name)
+            struct_name = None
+            if hasattr(node.instance, 'inferred_type') and getattr(node.instance.inferred_type, 'name', None):
+                struct_name = node.instance.inferred_type.name
+            if struct_name and struct_name != "any":
+                offset = self.get_struct_prop_offset(struct_name, node.field_name)
+            else:
+                offset = self.get_prop_offset(node.field_name)
             self.assembly.append(f"    str x1, [x0, #{offset}]")
         elif isinstance(node, Print):
             if self._is_file_expr(node.value):
@@ -931,7 +964,7 @@ class Arm64Codegen:
                 self.assembly.append(f"    add x0, x0, :lo12:{label}")
                 self.assembly.append("    str x0, [sp, #-16]!")
             elif node.name in self.struct_defs:
-                struct_size = (max(self.prop_offsets.values()) + 8) if self.prop_offsets else 128
+                struct_size = len(self.struct_defs[node.name].fields) * 8
                 struct_size = max(struct_size, 16)
                 struct_size = (struct_size + 15) & ~15
                 self.assembly.append(f"    mov x0, #{struct_size}")
@@ -969,7 +1002,13 @@ class Arm64Codegen:
         elif isinstance(node, DataFieldAccess):
             self.compile_expr(node.instance)
             self.assembly.append("    ldr x0, [sp], #16")
-            offset = self.get_prop_offset(node.field_name)
+            struct_name = None
+            if hasattr(node.instance, 'inferred_type') and getattr(node.instance.inferred_type, 'name', None):
+                struct_name = node.instance.inferred_type.name
+            if struct_name and struct_name != "any":
+                offset = self.get_struct_prop_offset(struct_name, node.field_name)
+            else:
+                offset = self.get_prop_offset(node.field_name)
             self.assembly.append(f"    ldr x0, [x0, #{offset}]")
             self.assembly.append("    str x0, [sp, #-16]!")
         elif isinstance(node, Alloc):
