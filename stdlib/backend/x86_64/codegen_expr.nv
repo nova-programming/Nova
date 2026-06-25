@@ -295,17 +295,12 @@ def compile_leaf_to_reg(state: CodegenState, node: AstNode, reg_name: string) {
         emit(state, "    mov " + reg_name + ", " + str(node.val_int))
     }
     if node.kind == "Variable" {
-        reg = find_var_reg(state, node.val_str)
-        if reg != "" {
-            emit(state, "    mov " + reg_name + ", " + reg)
+        offset = find_var_offset(state, node.val_str)
+        if offset < 0 {
+            abs_off = 0 - offset
+            emit(state, "    mov " + reg_name + ", [%b + " + str(abs_off) + "]")
         } else {
-            offset = find_var_offset(state, node.val_str)
-            if offset < 0 {
-                abs_off = 0 - offset
-                emit(state, "    mov " + reg_name + ", [%b + " + str(abs_off) + "]")
-            } else {
-                emit(state, "    mov " + reg_name + ", [%b - " + str(offset) + "]")
-            }
+            emit(state, "    mov " + reg_name + ", [%b - " + str(offset) + "]")
         }
     }
 }
@@ -329,19 +324,14 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    push " + str(node.val_int))
     }
     if node.kind == "Variable" {
-        reg = find_var_reg(state, node.val_str)
-        if reg != "" {
-            emit(state, "    push " + reg)
+        offset = find_var_offset(state, node.val_str)
+        if offset < 0 {
+            abs_off = 0 - offset
+            emit(state, "    mov %a, [%b + " + str(abs_off) + "]")
         } else {
-            offset = find_var_offset(state, node.val_str)
-            if offset < 0 {
-                abs_off = 0 - offset
-                emit(state, "    mov %a, [%b + " + str(abs_off) + "]")
-            } else {
-                emit(state, "    mov %a, [%b - " + str(offset) + "]")
-            }
-            emit(state, "    push %a")
+            emit(state, "    mov %a, [%b - " + str(offset) + "]")
         }
+        emit(state, "    push %a")
     }
     if node.kind == "BinOp" {
         if node.val_str == "and" {

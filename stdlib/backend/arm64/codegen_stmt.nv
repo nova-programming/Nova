@@ -26,13 +26,8 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         }
         compile_expr(state, node.left)
         emit(state, "    ldr %a, [sp], #16")
-        reg = find_var_reg(state, node.val_str)
-        if reg != "" {
-            emit(state, "    mov " + reg + ", %a")
-        } else {
-            offset = find_var_offset(state, node.val_str)
-            emit(state, "    str %a, [%b, #" + str(offset) + "]")
-        }
+        offset = find_var_offset(state, node.val_str)
+        emit(state, "    str %a, [%b, #" + str(offset) + "]")
     }
     if node.kind == "DataFieldAssign" {
         compile_expr(state, node.right)

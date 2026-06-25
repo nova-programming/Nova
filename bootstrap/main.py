@@ -15,7 +15,7 @@ from vm.compiler import Compiler
 from vm.machine import VirtualMachine
 from compiler.type_checker import TypeInferer, StaticTypeError
 
-NOVA_VERSION = "0.7.0"
+NOVA_VERSION = "0.8.0"
 REGISTRY_URL = "https://galaxy-registry.vercel.app"
 NOVA_ZIP_URL = "https://github.com/nova-programming/Nova/archive/refs/heads/main.zip"
 ZIP_PREFIX = "Nova-main"

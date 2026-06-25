@@ -31,8 +31,6 @@ data CodegenState {
     next_global_offset: int
     local_var_regs: list
     used_regs: list
-    reg_pool: list
-    reg_pool_idx: int
     target: int
     bp: string
     sp: string
@@ -68,15 +66,6 @@ def new_codegen(tgt: int, target_os: string) -> CodegenState {
     state.next_global_offset = 8
     state.local_var_regs = []
     state.used_regs = []
-    state.reg_pool = []
-    if tgt == 0 {
-        state.reg_pool.append("esi")
-        state.reg_pool.append("edi")
-    } else {
-        state.reg_pool.append("r12")
-        state.reg_pool.append("r13")
-    }
-    state.reg_pool_idx = 0
     if tgt == 0 {
         state.bp = "ebp"
         state.sp = "esp"
@@ -234,17 +223,6 @@ def find_var_offset(state: CodegenState, name: string) -> int {
         i = i + 1
     }
     return 0
-}
-
-def find_var_reg(state: CodegenState, name: string) -> string {
-    i = 0
-    while i < len(state.local_var_names) {
-        if state.local_var_names[i] == name {
-            return state.local_var_regs[i]
-        }
-        i = i + 1
-    }
-    return ""
 }
 
 def register_var(state: CodegenState, name: string) -> int {
@@ -513,7 +491,6 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     old_offset = state.local_offset
     old_string_vars = state.string_vars
     old_used_regs = state.used_regs
-    old_reg_pool_idx = state.reg_pool_idx
 
     state.local_var_names = []
     state.local_vars = []
@@ -521,7 +498,6 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     state.local_offset = 0
     state.string_vars = []
     state.used_regs = []
-    state.reg_pool_idx = 0
 
     psize = ptr_size(state)
     bp = reg32(state, "ebp", "rbp")
@@ -617,7 +593,6 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     state.local_offset = old_offset
     state.string_vars = old_string_vars
     state.used_regs = old_used_regs
-    state.reg_pool_idx = old_reg_pool_idx
 }
 
 # --- Main entry point ---
@@ -694,7 +669,6 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     state.local_var_regs = []
     state.local_offset = 0
     state.used_regs = []
-    state.reg_pool_idx = 0
     
     i = 0
     while i < len(top_level) {
