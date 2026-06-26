@@ -562,7 +562,7 @@ class Arm64Codegen:
         self.assembly.append("    ldr w2, [sp, #24]")
         self.assembly.append("    ldr x0, [sp, #64]")
         self.assembly.append("    ldr w1, [sp, #72]")
-        self.assembly.append("    add x0, x0, w1")
+        self.assembly.append("    add x0, x0, x1")
         self.assembly.append("    ldr x1, [sp, #16]")
         self.assembly.append("    str x1, [sp, #8]")
         self.assembly.append("    str w2, [sp, #40]")
