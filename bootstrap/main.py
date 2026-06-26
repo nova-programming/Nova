@@ -433,7 +433,7 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
         # Always recompile runtime.c to avoid stale object file issues
         if os.path.exists(runtime_o):
             os.remove(runtime_o)
-        rt_cmd = [gcc_path, "-O3", "-flto", "-c", runtime_c, "-o", runtime_o]
+        rt_cmd = [gcc_path, "-O3", "-c", runtime_c, "-o", runtime_o]
         if is_macos:
             rt_cmd += ["-D", "MACOS"]
             if target_arch == "arm64":
