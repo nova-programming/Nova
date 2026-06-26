@@ -411,13 +411,7 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
         i = i + 1
     }
 
-    func_name = node.val_str
-    if state.target_os == "windows" {
-        if func_name == "main" { func_name = "_main" }
-        elif func_name == "nova_start" { func_name = "_main" }
-    }
-
-    emit(state, func_name + ":")
+    emit(state, "_" + node.val_str + ":")
     emit(state, "    stp fp, lr, [sp, #-16]!")
     emit(state, "    mov fp, sp")
     if stack_size > 0 {

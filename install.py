@@ -18,6 +18,7 @@ import platform
 
 if sys.version_info < (3, 6):
     sys.exit("ERROR: Python 3.6+ is required. You have " + sys.version)
+import json
 import urllib.request
 import urllib.error
 import zipfile
@@ -31,7 +32,7 @@ NOVA_RELEASE_BASE = "https://github.com/nova-programming/Nova/releases/download"
 NOVA_ZIP_URL = "https://github.com/nova-programming/Nova/archive/refs/heads/main.zip"
 ZIP_PREFIX = "Nova-main"
 
-ALLOWED_ROOT_FILES = {"_galaxy.py", "nova.nv"}
+ALLOWED_ROOT_FILES = {"_galaxy.py", "nova.nv", "runtime.c"}
 ALLOWED_SUBDIRS = {
     "bootstrap", "stdlib", "tools", "galaxy",
 }
@@ -148,13 +149,34 @@ class _ProgressReader(io.RawIOBase):
         return n
 
 
+def _get_latest_release_url():
+    """Query GitHub API for the latest release tag, return download URL or None."""
+    api = "https://api.github.com/repos/nova-programming/Nova/releases/latest"
+    try:
+        req = urllib.request.Request(api, headers={
+            "User-Agent": "nova-installer/1.0",
+            "Accept": "application/json",
+        })
+        rsp = urllib.request.urlopen(req, timeout=15)
+        data = json.loads(rsp.read().decode())
+        tag = data.get("tag_name", "")
+        if tag:
+            is_unix = platform.system() != "Windows"
+            ext = ".tar.gz" if is_unix else ".zip"
+            return f"{NOVA_RELEASE_BASE}/{tag}/{tag}{ext}"
+    except Exception:
+        pass
+    return None
+
+
 def _download_zip():
     is_unix = platform.system() != "Windows"
     ext = ".tar.gz" if is_unix else ".zip"
-    urls_to_try = [
-        f"{NOVA_RELEASE_BASE}/nova-v0.8.0/nova-v0.8.0{ext}",
-        NOVA_ZIP_URL,
-    ]
+    urls_to_try = []
+    release_url = _get_latest_release_url()
+    if release_url:
+        urls_to_try.append(release_url)
+    urls_to_try.append(NOVA_ZIP_URL)
     last_err = None
     for url in urls_to_try:
         info(f"Connecting to GitHub...")

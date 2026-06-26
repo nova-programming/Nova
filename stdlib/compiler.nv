@@ -241,10 +241,26 @@ def read_lines(path: string) -> list {
     return result
 }
 
+def get_compiler_dir() -> string {
+    args = system.get_args()
+    exe = args[0]
+    i = len(exe) - 1
+    while i >= 0 {
+        if exe[i] == "/" or exe[i] == "\\" {
+            return str_sub(exe, 0, i)
+        }
+        i = i - 1
+    }
+    return "."
+}
+
 def compile_to_exe(input_path: string, output_path: string, debug_mode: int, target_arch: string, target_os: string) {
     asm = compile_file(input_path, debug_mode, target_arch, target_os)
     if len(asm) == 0 { return }
     write_lines(asm, input_path + ".s")
+    
+    compiler_dir = get_compiler_dir()
+    runtime_o_path = compiler_dir + "/runtime.o"
     
     is_windows = 0
     if target_os == "windows" { is_windows = 1 }
@@ -253,18 +269,16 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
     is_linux = 0
     if target_os == "linux" { is_linux = 1 }
     
-    # Choose GCC: native bundled, cross compiler, or system
     gcc_name = "gcc"
     if is_windows == 1 {
-        gcc_name = "gcc\\bin\\gcc.exe"
+        gcc_name = compiler_dir + "/gcc/bin/gcc.exe"
     } elif is_linux == 1 {
         gcc_name = "x86_64-linux-gnu-gcc"
-        # fall back to plain gcc
     }
     # Cross-compilation from Linux to Windows
     if is_windows == 1 and target_arch == "x86_64" {
         print("Using GCC to assemble and link...")
-        system.system_exec(gcc_name + " -O3 -flto " + input_path + ".s -o " + output_path + " -mconsole -lkernel32 -Wl,--stack,16777216 runtime.o")
+        system.system_exec(gcc_name + " -O3 -flto " + input_path + ".s -o " + output_path + " -mconsole -lkernel32 -Wl,--stack,16777216 " + runtime_o_path)
     } elif is_windows == 1 {
         print("Assembling...")
         assembled = assemble(asm)
@@ -275,7 +289,7 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
         sys_close(fd)
     } else {
         print("Using system GCC to assemble and link...")
-        gcc_cmd = gcc_name + " -O3 -flto " + input_path + ".s -o " + output_path + " runtime.o"
+        gcc_cmd = gcc_name + " -O3 -flto " + input_path + ".s -o " + output_path + " " + runtime_o_path
         if is_macos == 1 {
             gcc_cmd = gcc_cmd + " -Wl,-no_compact_unwind"
         } elif is_linux == 1 {

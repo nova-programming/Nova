@@ -9,9 +9,12 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.11"]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -28,53 +31,40 @@ jobs:
 
       - name: Run x86_64 codegen tests
         run: python -m unittest tests.test_codegen_x86_64 -v
-        if: matrix.os != 'macos-latest'
+        if: runner.os != 'macOS'
 
       - name: Run ARM64 codegen tests
         run: python -m unittest tests.test_codegen_arm64 -v
-        if: matrix.os == 'macos-latest'
+        if: runner.os == 'macOS'
 
       - name: Nova smoke test — version
         run: python bootstrap/main.py --version
 
       - name: Nova smoke test — VM execution
         run: |
-          mkdir -p /tmp/nova-ci
-          printf 'print("Hello from Nova CI")\n' > /tmp/nova-ci/hello.nv
-          python bootstrap/main.py dev /tmp/nova-ci/hello.nv
+          mkdir -p ./ci-tmp
+          printf 'print("Hello from Nova CI")\n' > ./ci-tmp/hello.nv
+          python bootstrap/main.py dev ./ci-tmp/hello.nv
 
       - name: Native compilation — generate assembly, compile runtime, assemble + link
+        if: runner.os != 'Windows'
         run: |
-          mkdir -p /tmp/nova-ci
-          printf 'print("Hello from Nova CI")\n' > /tmp/nova-ci/test_cc.nv
-          python bootstrap/main.py build /tmp/nova-ci/test_cc.nv
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            /tmp/nova-ci/test_cc.exe
-          else
-            /tmp/nova-ci/test_cc
-          fi
-        shell: bash
+          mkdir -p ./ci-tmp
+          printf 'print("Hello from Nova CI")\n' > ./ci-tmp/test_cc.nv
+          python bootstrap/main.py build ./ci-tmp/test_cc.nv
+          ./ci-tmp/test_cc
 
       - name: Self-hosted bootstrap — Nova builds a test program
+        if: runner.os != 'Windows'
         run: |
           python bootstrap/main.py build nova.nv
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            STAGE1="./nova.exe"
-            STAGE1_SAFE="./nova-stage1.exe"
-          else
-            STAGE1="./nova"
-            STAGE1_SAFE="./nova-stage1"
-          fi
+          STAGE1="./nova"
+          STAGE1_SAFE="./nova-stage1"
           mv "$STAGE1" "$STAGE1_SAFE"
-          mkdir -p /tmp/nova-ci
-          printf 'print("Self-hosted Nova OK")\n' > /tmp/nova-ci/selfhost.nv
-          $STAGE1_SAFE build /tmp/nova-ci/selfhost.nv
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            ./selfhost.exe
-          else
-            ./selfhost
-          fi
-        shell: bash
+          mkdir -p ./ci-tmp
+          printf 'print("Self-hosted Nova OK")\n' > ./ci-tmp/selfhost.nv
+          "$STAGE1_SAFE" build ./ci-tmp/selfhost.nv
+          ./ci-tmp/selfhost
 
       - name: Verify install.py imports cleanly
         run: python -c "import install; print('install.py OK')"

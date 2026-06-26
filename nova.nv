@@ -29,8 +29,12 @@ def str_to_int(s: string) -> int {
     return result
 }
 
+NOVA_VERSION = "0.8.0"
+plat = ""
+
     args = system.get_args()
 if len(args) < 2 {
+    print("Nova v" + NOVA_VERSION)
     print("Usage: nova build <file.nv>")
     print("")
     print("Compile a Nova source file to a native executable.")
@@ -40,6 +44,16 @@ if len(args) < 2 {
 cmd = args[1]
 print("argc is: " + str(len(args)))
 sys_flush()
+if cmd == "--version" or cmd == "version" {
+    print("Nova v" + NOVA_VERSION)
+    sys_exit(0)
+}
+if cmd == "update" {
+    print("Nova v" + NOVA_VERSION)
+    print("To update Nova, run: python main.py update")
+    print("Or re-run: python install.py")
+    sys_exit(0)
+}
 if cmd == "--uninstall" or cmd == "uninstall" or cmd == "remove" {
     print("To uninstall Nova, run: python main.py --uninstall")
     print("Or re-run: python install.py --uninstall")
@@ -64,6 +78,14 @@ if cmd == "build" {
                 print("Error: -arch requires an argument")
                 sys_exit(1)
             }
+        } elif args[i] == "--os" {
+            if i + 1 < len(args) {
+                plat = args[i + 1]
+                i = i + 1
+            } else {
+                print("Error: --os requires an argument")
+                sys_exit(1)
+            }
         } else {
             file_path = args[i]
         }
@@ -78,7 +100,7 @@ if cmd == "build" {
     out_len = len(file_path)
     print("out_len is " + str(out_len))
     sys_flush()
-    plat = sys_platform()
+    if len(plat) == 0 { plat = sys_platform() }
     if plat == "windows" {
         out_file = file_path[0 : out_len - 3] + ".exe"
     } else {
