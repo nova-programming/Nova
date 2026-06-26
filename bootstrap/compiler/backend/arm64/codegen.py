@@ -379,7 +379,7 @@ class Arm64Codegen:
     def generate(self):
         self.assembly.append(".text")
         self.assembly.append(".align 2")
-        entry = "_main" if self.target_os == "windows" else "main"
+        entry = "_main" if self.target_os != "linux" else "main"
         self.assembly.append(f".global {entry}")
 
         self.assembly.append(".extern _printf")
@@ -458,7 +458,7 @@ class Arm64Codegen:
         for fn in functions:
             self.compile_function(fn)
 
-        entry = "_main" if self.target_os == "windows" else "main"
+        entry = "_main" if self.target_os != "linux" else "main"
         self.assembly.append(f"{entry}:")
         self.assembly.append("    stp fp, lr, [sp, #-16]!")
 

@@ -183,7 +183,7 @@ class X86_64Codegen:
 
     def generate(self):
         self.assembly.append(".intel_syntax noprefix")
-        entry = "_main" if self.target_os == "windows" else "main"
+        entry = "_main" if self.target_os != "linux" else "main"
         self.assembly.append(f".global {entry}")
 
         for c_sym in ["printf", "malloc", "free", "realloc", "fopen", "fclose",
@@ -236,7 +236,7 @@ class X86_64Codegen:
         for fn in functions:
             self.compile_function(fn)
 
-        entry = "_main" if self.target_os == "windows" else "main"
+        entry = "_main" if self.target_os != "linux" else "main"
         self.assembly.append(f"{entry}:")
         self.assembly.append("    push rbp")
         self.assembly.append("    mov rbp, rsp")
