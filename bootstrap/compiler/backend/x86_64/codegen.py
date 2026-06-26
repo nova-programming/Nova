@@ -259,6 +259,10 @@ class X86_64Codegen:
 
         self.assembly.append("    mov [rbp - 8], rdi")
         self.assembly.append("    mov [rbp - 16], rsi")
+        self.assembly.append("    lea rax, [rip + __nova_argc]")
+        self.assembly.append("    mov [rax], rdi")
+        self.assembly.append("    lea rax, [rip + __nova_argv]")
+        self.assembly.append("    mov [rax], rsi")
 
         for node in top_level:
             self.compile_stmt(node)
@@ -274,6 +278,14 @@ class X86_64Codegen:
         self._emit_out_of_bounds()
 
         self.peephole()
+
+        self.data_section.append(".globl __nova_argc")
+        self.data_section.append(".align 8")
+        self.data_section.append("__nova_argc:")
+        self.data_section.append("    .quad 0")
+        self.data_section.append(".globl __nova_argv")
+        self.data_section.append("__nova_argv:")
+        self.data_section.append("    .quad 0")
 
         self.assembly.append(".data")
         for line in self.data_section:

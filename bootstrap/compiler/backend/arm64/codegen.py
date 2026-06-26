@@ -480,6 +480,12 @@ class Arm64Codegen:
 
         self.assembly.append(f"    str w0, [sp, #{aligned - 8}]")
         self.assembly.append(f"    str x1, [sp, #{aligned - 16}]")
+        self.assembly.append(f"    adrp x2, __nova_argc@PAGE")
+        self.assembly.append(f"    add x2, x2, __nova_argc@PAGEOFF")
+        self.assembly.append(f"    str x0, [x2]")
+        self.assembly.append(f"    adrp x2, __nova_argv@PAGE")
+        self.assembly.append(f"    add x2, x2, __nova_argv@PAGEOFF")
+        self.assembly.append(f"    str x1, [x2]")
 
         for node in top_level:
             self.compile_stmt(node)
@@ -495,6 +501,14 @@ class Arm64Codegen:
         self._emit_out_of_bounds()
 
         self.peephole()
+
+        self.data_section.append(".globl __nova_argc")
+        self.data_section.append(".align 3")
+        self.data_section.append("__nova_argc:")
+        self.data_section.append("    .quad 0")
+        self.data_section.append(".globl __nova_argv")
+        self.data_section.append("__nova_argv:")
+        self.data_section.append("    .quad 0")
 
         self.assembly.append(".data")
         for line in self.data_section:

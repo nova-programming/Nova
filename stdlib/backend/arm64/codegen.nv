@@ -476,6 +476,14 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         char_idx = char_idx + 1
     }
 
+    emit_data(state, ".globl __nova_argc")
+    emit_data(state, ".align 3")
+    emit_data(state, "__nova_argc:")
+    emit_data(state, "    .quad 0")
+    emit_data(state, ".globl __nova_argv")
+    emit_data(state, "__nova_argv:")
+    emit_data(state, "    .quad 0")
+
     i = 0
     while i < len(ast) {
         node = ast[i]
@@ -535,6 +543,12 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     emit(state, entry + ":")
     emit(state, "    stp fp, lr, [sp, #-16]!")
     emit(state, "    mov fp, sp")
+    emit(state, "    adrp x2, __nova_argc@PAGE")
+    emit(state, "    add x2, x2, __nova_argc@PAGEOFF")
+    emit(state, "    str x0, [x2]")
+    emit(state, "    adrp x2, __nova_argv@PAGE")
+    emit(state, "    add x2, x2, __nova_argv@PAGEOFF")
+    emit(state, "    str x1, [x2]")
     if state.local_offset > 0 {
         emit(state, "    sub sp, sp, #" + str(state.local_offset))
     }

@@ -626,7 +626,7 @@ SYSCALL char *_nova_read_file(int fd) {
     return buf;
 }
 
-SYSCALL int _nova_get_tick_count(void) {
+SYSCALL int _sys_get_tick_count_c(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);

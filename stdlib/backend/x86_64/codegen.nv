@@ -625,6 +625,14 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         char_idx = char_idx + 1
     }
 
+    emit_data(state, ".globl __nova_argc")
+    emit_data(state, ".align 8")
+    emit_data(state, "__nova_argc:")
+    emit_data(state, "    .quad 0")
+    emit_data(state, ".globl __nova_argv")
+    emit_data(state, "__nova_argv:")
+    emit_data(state, "    .quad 0")
+
     emit(state, ".text")
 
     functions = []
@@ -682,6 +690,10 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     emit(state, entry + ":")
     emit(state, "    push " + bp)
     emit(state, "    mov " + bp + ", " + sp)
+    emit(state, "    lea rax, [rip + __nova_argc]")
+    emit(state, "    mov [rax], rdi")
+    emit(state, "    lea rax, [rip + __nova_argv]")
+    emit(state, "    mov [rax], rsi")
     if is_x64(state) == 1 {
         emit(state, "    and " + sp + ", -16")
     }
