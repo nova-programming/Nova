@@ -502,11 +502,11 @@ class Arm64Codegen:
 
         self.peephole()
 
-        self.data_section.append(".globl __nova_argc")
+        self.data_section.append(".global __nova_argc")
         self.data_section.append(".align 3")
         self.data_section.append("__nova_argc:")
         self.data_section.append("    .quad 0")
-        self.data_section.append(".globl __nova_argv")
+        self.data_section.append(".global __nova_argv")
         self.data_section.append("__nova_argv:")
         self.data_section.append("    .quad 0")
 

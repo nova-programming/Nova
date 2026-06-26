@@ -418,7 +418,7 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
     is_macos = target_os == "macos"
     is_windows = target_os == "windows"
     
-    cmd = [gcc_path, "-O3", "-flto", asm_file, "-o", exe_file]
+    cmd = [gcc_path, "-O3", asm_file, "-o", exe_file]
     
     if is_windows:
         cmd += ["-mconsole", "-lkernel32", "-Wl,--stack,16777216"]

@@ -279,11 +279,11 @@ class X86_64Codegen:
 
         self.peephole()
 
-        self.data_section.append(".globl __nova_argc")
+        self.data_section.append(".global __nova_argc")
         self.data_section.append(".align 8")
         self.data_section.append("__nova_argc:")
         self.data_section.append("    .quad 0")
-        self.data_section.append(".globl __nova_argv")
+        self.data_section.append(".global __nova_argv")
         self.data_section.append("__nova_argv:")
         self.data_section.append("    .quad 0")
 
@@ -1165,9 +1165,9 @@ class X86_64Codegen:
             self.assembly.append("    mov [rax + 16], rcx")
             self.assembly.append("    mov rdi, rcx")
             self.assembly.append("    mov rsi, rdx")
-            self.assembly.append("    sub rsp, 32")
+            self.assembly.append("    sub rsp, 40")
             self.assembly.append("    call _fopen")
-            self.assembly.append("    add rsp, 32")
+            self.assembly.append("    add rsp, 40")
             self.assembly.append("    pop rbx")
             self.assembly.append("    push rbx")
             self.assembly.append("    mov [rbx], eax")
@@ -1194,9 +1194,9 @@ class X86_64Codegen:
             self.assembly.append("    add rsp, 32")
             self.assembly.append("    push rax") # push list struct
             self.assembly.append(f"    mov edi, {req_cap}")
-            self.assembly.append("    sub rsp, 32")
+            self.assembly.append("    sub rsp, 40")
             self.assembly.append("    call _malloc")
-            self.assembly.append("    add rsp, 32")
+            self.assembly.append("    add rsp, 40")
             self.assembly.append("    pop rbx") # rbx = list struct
             self.assembly.append("    push rbx") # save list struct for expression result
             self.assembly.append(f"    mov dword ptr [rbx], {n}")
@@ -1356,17 +1356,17 @@ class X86_64Codegen:
             self.assembly.append("    pop rdx")
             self.assembly.append("    push rdx")  # save value
             self.assembly.append("    mov edi, 32")
-            self.assembly.append("    sub rsp, 32")
+            self.assembly.append("    sub rsp, 8")
             self.assembly.append("    call _malloc")
             self.assembly.append("    mov rdi, rax")
-            self.assembly.append("    add rsp, 32")
+            self.assembly.append("    add rsp, 8")
             self.assembly.append("    pop rdx")  # restore value
             self.assembly.append("    lea rsi, [rip + fmt_int_pure]")
             self.assembly.append("    push rdi")  # save buffer pointer
             self.assembly.append("    xor eax, eax")
-            self.assembly.append("    sub rsp, 32")
+            self.assembly.append("    sub rsp, 8")
             self.assembly.append("    call _sprintf")
-            self.assembly.append("    add rsp, 32")
+            self.assembly.append("    add rsp, 8")
             self.assembly.append("    pop rax")  # restore buffer pointer
             self.assembly.append("    push rax")
         elif isinstance(node, Block):

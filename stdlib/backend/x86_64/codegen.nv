@@ -625,11 +625,11 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         char_idx = char_idx + 1
     }
 
-    emit_data(state, ".globl __nova_argc")
+    emit_data(state, ".global __nova_argc")
     emit_data(state, ".align 8")
     emit_data(state, "__nova_argc:")
     emit_data(state, "    .quad 0")
-    emit_data(state, ".globl __nova_argv")
+    emit_data(state, ".global __nova_argv")
     emit_data(state, "__nova_argv:")
     emit_data(state, "    .quad 0")
 
