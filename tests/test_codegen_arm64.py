@@ -57,13 +57,18 @@ class TestArm64CodegenOutput(unittest.TestCase):
         self.assertGreater(add_count, 0, "Expected ADD @PAGEOFF for string literals")
 
     def test_printf_call_arm64(self):
-        """printf must be called with w0=0 for varargs (no SIMD args)."""
+        """printf is called with format in x0; no w0 clobber (w0 aliases x0 on ARM64)."""
         asm = compile_to_asm('print("hello")')
         self.assertIn("adrp x0, fmt_str@PAGE", asm)
         self.assertIn("add x0, x0, fmt_str@PAGEOFF", asm)
         self.assertIn("ldr x1, [sp], #16", asm)
-        self.assertIn("mov w0, #0", asm)
         self.assertIn("bl _printf", asm)
+        # Verify w0 is NOT set between loading fmt_str and calling printf
+        # (mov w0 clears x0, destroying the format string pointer)
+        idx_fmt = asm.index("add x0, x0, fmt_str@PAGEOFF")
+        idx_call = asm.index("bl _printf")
+        between = asm[idx_fmt:idx_call]
+        self.assertNotIn("mov w0, #0", between)
 
     def test_print_int(self):
         """Print integer uses fmt_int."""
