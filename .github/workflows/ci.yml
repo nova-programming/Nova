@@ -65,7 +65,7 @@ jobs:
           mkdir -p ./ci-tmp
           printf 'print("Self-hosted Nova OK")\n' > ./ci-tmp/selfhost.nv
 
-      - name: Self-hosted bootstrap — Debug: Does stage1 even start?
+      - name: "Self-hosted bootstrap — Debug: Does stage1 even start?"
         if: runner.os != 'Windows'
         run: |
           ./nova-stage1 --version; echo "exit=$?"
