@@ -400,6 +400,14 @@ galaxy publish             # Publish to registry
 - **Dict "Index Out Of Bounds" Bug**: `test_limits.nv` crashed on `freqs[str(val)] = ...` due to Nova's type checker inferring `{}` as a `struct "dict"` rather than `kind = "dict"`. Fixed `types.nv` to accurately expose `create_dict_type()`, `type_checker.nv` to recognize `DictLiteral`, and updated the `has` operator in `codegen_expr.nv` to dispatch to `_dict_has` rather than falling back to `_strstr` for string comparisons.
 - **ARM64 Register Clobbering / Stack Bug**: Replaced relative stack addressing with robust frame-pointer mapping (`mov fp, sp`) directly after `stp fp, lr` push. Variable offsets are strictly preserved against register pushes/pops within the body. 
 
+### Phase 8: macOS ARM64 SIGSEGV Fix + Linux Self-Hosted Bootstrap Fix (This Session — June 27, 2026)
+- **macOS ARM64 SIGSEGV root cause** (`bootstrap/compiler/backend/arm64/codegen.py`): `mov w0,#0` before `printf`/`sprintf` calls clobbered `x0` (the format string pointer). On ARM64, `w0` aliases the lower 32 bits of `x0` — writing `w0` zero-extends and destroys `x0`. Every `Print`/`PrintD`/`out_of_bounds` call resulted in `printf(NULL, ...)` → SIGSEGV.
+- **Fix**: Removed all `mov w0,#0` instructions before `bl _printf`/`bl _sprintf` calls. Also rewrote `StrConvert` handler (dangling stack pointer + wrong `_sprintf` arg order). Updated `test_printf_call_arm64` assertion to verify `mov w0,#0` is NOT present between fmt_str load and printf call.
+- **`compile_to_exe` Linux GCC name fixed** (`stdlib/compiler.nv:276`): `gcc_name` was `"x86_64-linux-gnu-gcc"` (cross-compilation prefix) instead of `"gcc"` for native Linux. On Ubuntu CI runners the cross-toolchain doesn't exist — GCC invocation failed silently.
+- **`-flto` removed from self-hosted compile_to_exe** (`stdlib/compiler.nv:281,292`): Matches Python bootstrap fix from `f38dd64`. LTO with assembly-only input files can cause issues with certain GCC versions on Linux.
+- **CI status**: Commit `40bfd61` (ARM64 fix) — Ubuntu x86_64 still fails on self-hosted bootstrap (SIGSEGV, never passed any CI run); macOS/Windows cancelled by fail-fast. Commit `5bd4a82` (Linux fixes) pushed to CI for verification.
+- **All 245 tests pass** (1 skipped).
+
 **Next Instruction for Agent:**
-- Review the ARM64 code generation backends to confirm evaluation order and register clobbering are fully resolved following the recent stack frame migration.
-- Execute the CI/CD pipeline tests locally to ensure there are no regressions.
+- Check CI results for commit `5bd4a82` to verify Ubuntu self-hosted bootstrap fix
+- If CI still fails on Linux, investigate the persistent self-hosted compiler SIGSEGV — previous commit messages indicated crash at `nova.nv:107` (`file_path[0 : out_len - 3]` string slice), but root cause may be earlier memory corruption

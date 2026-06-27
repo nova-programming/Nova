@@ -1,0 +1,5 @@
+file_path = "./ci-tmp/selfhost.nv"
+out_len = len(file_path)
+print("out_len is " + str(out_len))
+out_file = file_path[0 : out_len - 3]
+print("out_file is " + out_file)
