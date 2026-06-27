@@ -144,6 +144,12 @@ class TestNativeExec:
             "int\nstring\n"
         )
 
+    def test_string_slice(self):
+        _build_and_run(
+            's = "hello world"\nprint(s[0:5])\nprint(s[6:11])\nprint(s[0])',
+            "hello\nworld\nh\n"
+        )
+
     def test_try_catch(self):
         _build_and_run(
             'try { throw("err") } catch e { print("caught") }',

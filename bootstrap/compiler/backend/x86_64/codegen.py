@@ -331,7 +331,6 @@ class X86_64Codegen:
         self.assembly.append("    mov r12, rdi") # base string
         self.assembly.append("    mov ebx, esi") # start index
         self.assembly.append("    mov ecx, edx") # end index
-        self.assembly.append("    mov rsi, r12")
         self.assembly.append("    sub ecx, ebx")
         self.assembly.append("    cmp ecx, 0")
         self.assembly.append("    jge L_slice_alloc_64")
@@ -348,6 +347,7 @@ class X86_64Codegen:
         self.assembly.append("    mov rsp, r13")
         self.assembly.append("    pop rcx")
         self.assembly.append("    mov rdi, rax")
+        self.assembly.append("    mov rsi, r12") # reload base from callee-saved r12
         self.assembly.append("    add rsi, rbx")
         self.assembly.append("    push rdi")
         self.assembly.append("    push rcx")
