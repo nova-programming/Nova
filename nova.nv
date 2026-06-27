@@ -32,7 +32,12 @@ def str_to_int(s: string) -> int {
 NOVA_VERSION = "0.8.0"
 plat = ""
 
+# DEBUG: marker before get_args
+system.file_write(2, "M1:before_get_args\n")
     args = system.get_args()
+# DEBUG: marker after get_args
+system.file_write(2, "M2:after_get_args\n")
+system.file_write(2, "M3:before_len_check\n")
 if len(args) < 2 {
     print("Nova v" + NOVA_VERSION)
     print("Usage: nova build <file.nv>")
@@ -41,24 +46,31 @@ if len(args) < 2 {
     sys_exit(0)
 }
 
+system.file_write(2, "M4:len_ok\n")
 cmd = args[1]
+system.file_write(2, "M5:cmd_assigned\n")
 print("argc is: " + str(len(args)))
 sys_flush()
 if cmd == "--version" or cmd == "version" {
+    system.file_write(2, "M6:version\n")
     print("Nova v" + NOVA_VERSION)
     sys_exit(0)
 }
+system.file_write(2, "M7:after_version_check\n")
 if cmd == "update" {
+    system.file_write(2, "M8:update\n")
     print("Nova v" + NOVA_VERSION)
     print("To update Nova, run: python main.py update")
     print("Or re-run: python install.py")
     sys_exit(0)
 }
+system.file_write(2, "M9:after_update_check\n")
 if cmd == "--uninstall" or cmd == "uninstall" or cmd == "remove" {
     print("To uninstall Nova, run: python main.py --uninstall")
     print("Or re-run: python install.py --uninstall")
     sys_exit(0)
 }
+system.file_write(2, "M10:before_build_dispatch\n")
 if cmd == "build" {
     file_path = ""
     debug_mode = 0
