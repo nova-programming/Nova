@@ -118,10 +118,15 @@ if cmd == "build" {
         sys_exit(1)
     }
     system.file_write(2, "M13:has_path\n")
+    system.file_write(2, "M13a:before_print_file\n")
     print("file is " + file_path)
+    system.file_write(2, "M13b:after_print_file\n")
     sys_flush()
+    system.file_write(2, "M13c:after_flush\n")
     out_len = len(file_path)
+    system.file_write(2, "M13d:after_len\n")
     print("out_len is " + str(out_len))
+    system.file_write(2, "M13e:after_print_out_len\n")
     sys_flush()
     system.file_write(2, "M14:len_printed\n")
     if len(plat) == 0 { plat = sys_platform() }
