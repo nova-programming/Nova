@@ -273,12 +273,12 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
     if is_windows == 1 {
         gcc_name = compiler_dir + "/gcc/bin/gcc.exe"
     } elif is_linux == 1 {
-        gcc_name = "x86_64-linux-gnu-gcc"
+        gcc_name = "gcc"
     }
     # Cross-compilation from Linux to Windows
     if is_windows == 1 and target_arch == "x86_64" {
         print("Using GCC to assemble and link...")
-        system.system_exec(gcc_name + " -O3 -flto " + input_path + ".s -o " + output_path + " -mconsole -lkernel32 -Wl,--stack,16777216 " + runtime_o_path)
+        system.system_exec(gcc_name + " -O3 " + input_path + ".s -o " + output_path + " -mconsole -lkernel32 -Wl,--stack,16777216 " + runtime_o_path)
     } elif is_windows == 1 {
         print("Assembling...")
         assembled = assemble(asm)
@@ -289,7 +289,7 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
         sys_close(fd)
     } else {
         print("Using system GCC to assemble and link...")
-        gcc_cmd = gcc_name + " -O3 -flto " + input_path + ".s -o " + output_path + " " + runtime_o_path
+        gcc_cmd = gcc_name + " -O3 " + input_path + ".s -o " + output_path + " " + runtime_o_path
         if is_macos == 1 {
             gcc_cmd = gcc_cmd + " -Wl,-no_compact_unwind"
         } elif is_linux == 1 {
