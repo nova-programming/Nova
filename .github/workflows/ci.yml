@@ -65,13 +65,26 @@ jobs:
           mkdir -p ./ci-tmp
           printf 'print("Self-hosted Nova OK")\n' > ./ci-tmp/selfhost.nv
 
+      - name: Self-hosted bootstrap — Debug: Does stage1 even start?
+        if: runner.os != 'Windows'
+        run: |
+          ./nova-stage1 --version; echo "exit=$?"
+          ./nova-stage1 2>&1; echo "exit=$?"
+
       - name: Self-hosted bootstrap — Stage1 compiles a test program
         if: runner.os != 'Windows'
-        run: ./nova-stage1 build ./ci-tmp/selfhost.nv
+        run: |
+          set -o pipefail
+          ./nova-stage1 build ./ci-tmp/selfhost.nv 2>&1; rc=$?
+          echo "## Stage1 build exit code: $rc" >> $GITHUB_STEP_SUMMARY
+          exit $rc
 
       - name: Self-hosted bootstrap — Run compiled output
         if: runner.os != 'Windows'
-        run: ./ci-tmp/selfhost
+        run: |
+          ./ci-tmp/selfhost 2>&1; rc=$?
+          echo "## Selfhost exit code: $rc" >> $GITHUB_STEP_SUMMARY
+          exit $rc
 
       - name: Verify install.py imports cleanly
         run: python -c "import install; print('install.py OK')"
