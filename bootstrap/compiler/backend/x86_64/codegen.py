@@ -1340,7 +1340,7 @@ class X86_64Codegen:
                 self.assembly.append("    pop rdi")
                 self.assembly.append("    pop rsi")
                 self.assembly.append("    pop rdx")
-                self.assembly.append("    call _slice_string")
+                self.assembly.append("    call _str_sub")
                 self.assembly.append("    push rax")
             else:
                 self.compile_expr(node.end)
