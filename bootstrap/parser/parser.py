@@ -716,6 +716,8 @@ class Parser:
             if stmt:
                 body.append(stmt)
             self.skip_newlines()
+            if self.current() and self.current()[0] == "SEMICOLON":
+                self.eat("SEMICOLON")
         self.eat("RBRACE")
         return body
 
