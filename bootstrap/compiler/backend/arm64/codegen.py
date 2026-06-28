@@ -907,6 +907,8 @@ class Arm64Codegen:
                 if isinstance(line, str): self.assembly.append(line)
                 elif type(line).__name__ == "String": self.assembly.append(line.value)
                 else: self.compile_stmt(line)
+        elif isinstance(node, Variable) and node.name == "pass":
+            pass  # no-op statement
         else:
             self.compile_expr(node)
             self.assembly.append("    add sp, sp, #16")

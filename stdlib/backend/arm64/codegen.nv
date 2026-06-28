@@ -503,7 +503,7 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         if node.kind == "Function" {
             functions.append(node)
         } elif node.kind == "StructDef" {
-            pass
+            # no-op - struct defs are handled by scan_vars
         } else {
             top_level.append(node)
         }
