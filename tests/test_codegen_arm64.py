@@ -196,7 +196,9 @@ class TestArm64CodegenOutput(unittest.TestCase):
 
     def test_return_statement(self):
         asm = compile_to_asm("def add(a, b) { return a + b }\nprint(add(1, 2))")
-        self.assertIn("ldr x0, [sp], #16", asm)
+        # Peephole removes dead str x0/[sp,#-16]! / ldr x0/[sp],#16 pair.
+        # Second arg remains: ldr x1, [sp], #16 pops 2 into x1, x0=1 from movz.
+        self.assertIn("ldr x1, [sp], #16", asm)
         self.assertNotIn("mov sp, fp", asm)
         self.assertIn("ldp fp, lr, [sp], #16", asm)
         self.assertIn("ret", asm)

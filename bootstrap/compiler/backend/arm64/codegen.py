@@ -524,7 +524,7 @@ class Arm64Codegen:
         self.assembly.append("    ldr x0, [sp, #48]")
         self.assembly.append("    bl _strlen")
         self.assembly.append("    mov x19, x0")
-        self.assembly.append("    ldr x0, [sp, #56]")
+        self.assembly.append("    ldr x0, [sp, #64]")
         self.assembly.append("    bl _strlen")
         self.assembly.append("    add x19, x19, x0")
         self.assembly.append("    add x0, x19, #1")
@@ -533,7 +533,7 @@ class Arm64Codegen:
         self.assembly.append("    ldr x1, [sp, #48]")
         self.assembly.append("    mov x0, x0")
         self.assembly.append("    bl _strcpy")
-        self.assembly.append("    ldr x1, [sp, #56]")
+        self.assembly.append("    ldr x1, [sp, #64]")
         self.assembly.append("    ldr x0, [sp, #8]")
         self.assembly.append("    bl _strcat")
         self.assembly.append("    ldr x0, [sp, #8]")
@@ -548,8 +548,8 @@ class Arm64Codegen:
         self.assembly.append("    sub sp, sp, #48")
         self.assembly.append("    str x19, [sp, #32]")
         self.assembly.append("    ldr x0, [sp, #64]")
-        self.assembly.append("    ldr w1, [sp, #72]")
-        self.assembly.append("    ldr w2, [sp, #80]")
+        self.assembly.append("    ldr w1, [sp, #80]")
+        self.assembly.append("    ldr w2, [sp, #96]")
         self.assembly.append("    sub w2, w2, w1")
         self.assembly.append("    cmp w2, #0")
         self.assembly.append("    b.ge L_slice_alloc_arm")
@@ -561,7 +561,7 @@ class Arm64Codegen:
         self.assembly.append("    str x0, [sp, #16]")
         self.assembly.append("    ldr w2, [sp, #24]")
         self.assembly.append("    ldr x0, [sp, #64]")
-        self.assembly.append("    ldr w1, [sp, #72]")
+        self.assembly.append("    ldr w1, [sp, #80]")
         self.assembly.append("    add x0, x0, x1")
         self.assembly.append("    ldr x1, [sp, #16]")
         self.assembly.append("    str x1, [sp, #8]")
@@ -918,7 +918,8 @@ class Arm64Codegen:
             if isinstance(node.value, float):
                 import struct
                 bits = struct.unpack('<I', struct.pack('<f', node.value))[0]
-                self.assembly.append(f"    mov w0, #{bits}")
+                self.assembly.append(f"    movz w0, #{bits & 0xFFFF}")
+                self.assembly.append(f"    movk w0, #{(bits >> 16) & 0xFFFF}, lsl #16")
                 self.assembly.append("    str x0, [sp, #-16]!")
             else:
                 val = int(node.value)
@@ -969,8 +970,8 @@ class Arm64Codegen:
                     if it is not None:
                         arg_type = str(it)
                 label = self.add_string_literal(arg_type)
-                self.assembly.append(f"    adrp x0, {label}")
-                self.assembly.append(f"    add x0, x0, :lo12:{label}")
+                self.assembly.append(f"    adrp x0, {label}@PAGE")
+                self.assembly.append(f"    add x0, x0, {label}@PAGEOFF")
                 self.assembly.append("    str x0, [sp, #-16]!")
             elif node.name in self.struct_defs:
                 struct_size = len(self.struct_defs[node.name].fields) * 8
@@ -984,22 +985,22 @@ class Arm64Codegen:
                     self.compile_expr(arg)
                 n_args = len(node.args)
                 if n_args >= 1:
-                    self.assembly.append("    ldr x1, [sp], #16")
-                if n_args >= 2:
-                    self.assembly.append("    ldr x2, [sp], #16")
-                if n_args >= 3:
-                    self.assembly.append("    ldr x3, [sp], #16")
-                if n_args >= 4:
-                    self.assembly.append("    ldr x4, [sp], #16")
-                if n_args >= 5:
-                    self.assembly.append("    ldr x5, [sp], #16")
-                if n_args >= 6:
-                    self.assembly.append("    ldr x6, [sp], #16")
-                if n_args >= 7:
-                    self.assembly.append("    ldr x7, [sp], #16")
-                if n_args >= 1:
                     self.assembly.append("    ldr x0, [sp], #16")
-                else:
+                if n_args >= 2:
+                    self.assembly.append("    ldr x1, [sp], #16")
+                if n_args >= 3:
+                    self.assembly.append("    ldr x2, [sp], #16")
+                if n_args >= 4:
+                    self.assembly.append("    ldr x3, [sp], #16")
+                if n_args >= 5:
+                    self.assembly.append("    ldr x4, [sp], #16")
+                if n_args >= 6:
+                    self.assembly.append("    ldr x5, [sp], #16")
+                if n_args >= 7:
+                    self.assembly.append("    ldr x6, [sp], #16")
+                if n_args >= 8:
+                    self.assembly.append("    ldr x7, [sp], #16")
+                if n_args == 0:
                     self.assembly.append("    mov x0, #0")
 
                 if hasattr(node, 'module') and node.module:
@@ -1137,7 +1138,8 @@ class Arm64Codegen:
                 self.assembly.append("    str x1, [sp, #-16]!")
                 self.assembly.append("    str x0, [sp, #-16]!")
                 self.assembly.append("    str x1, [sp, #-16]!")
-                self.assembly.append("    lsl x0, x3, #1")
+                self.assembly.append("    mov x0, x1")
+                self.assembly.append("    lsl x1, x3, #1")
                 self.assembly.append("    bl _realloc")
                 self.assembly.append("    ldr x1, [sp], #16")
                 self.assembly.append("    ldr w3, [x1, #8]")

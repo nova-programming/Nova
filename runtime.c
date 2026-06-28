@@ -586,12 +586,11 @@ SYSCALL void *_sys_get_args_c(void) {
     return list;
 }
 #elif defined(MACOS)
+#include <crt_externs.h>
 SYSCALL const char *_sys_platform_c(void) { return "macos"; }
 SYSCALL void *_sys_get_args_c(void) {
-    extern int *__NSGetArgc(void);
-    extern char ***__NSGetArgv(void);
-    int n = *__NSGetArgc();
-    char **argv = *__NSGetArgv();
+    int n = *_NSGetArgc();
+    char **argv = *_NSGetArgv();
     void *list = malloc(16);
     if (!list) return 0;
     void *data = malloc((size_t)n * sizeof(intptr_t));
