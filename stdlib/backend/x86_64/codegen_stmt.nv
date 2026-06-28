@@ -121,27 +121,19 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         }
     }
     if node.kind == "Print" {
-        system.file_write(2, "GEN:print_start\n")
         compile_expr(state, node.left)
-        system.file_write(2, "GEN:compile_expr_done\n")
         if is_string_expr(state, node.left) == 1 {
-            system.file_write(2, "GEN:is_string\n")
             push_data_label(state, "fmt_str")
         } else {
             if is_float_expr(state, node.left) == 1 {
-                system.file_write(2, "GEN:is_float\n")
                 push_data_label(state, "fmt_float")
             } else {
-                system.file_write(2, "GEN:is_int\n")
                 push_data_label(state, "fmt_int")
             }
         }
-        system.file_write(2, "GEN:fmt_pushed\n")
         emit_call(state, "_printf", 2)
-        system.file_write(2, "GEN:printf_done\n")
         emit(state, "    push 0")
         emit_call(state, "_fflush", 1)
-        system.file_write(2, "GEN:print_done\n")
     }
     if node.kind == "Return" {
         compile_expr(state, node.left)
