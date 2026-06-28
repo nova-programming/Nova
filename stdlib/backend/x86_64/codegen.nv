@@ -600,6 +600,7 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
 def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -> list {
     system.file_write(2, "GEN:start\n")
     state = new_codegen(tgt, target_os)
+    system.file_write(2, "GEN:after_new_codegen\n")
 
     emit(state, ".intel_syntax noprefix")
     system.file_write(2, "GEN:syntax\n")

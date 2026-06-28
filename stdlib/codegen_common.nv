@@ -5,7 +5,8 @@ def get_externs() -> list {
             "_strcat", "_strstr", "_memset", "_memcpy", "_sprintf",
             "_dict_new", "_dict_get", "_dict_set", "_dict_has", "_dict_remove",
             "_dict_keys", "_dict_values", "_dict_items", "_dict_free",
-            "_abs", "_min", "_max", "_file_exists", "_file_size", "_file_type", "_now", "_call"]
+            "_abs", "_min", "_max", "_file_exists", "_file_size", "_file_type", "_now", "_call",
+            "_str_sub", "_char_code"]
 }
 
 def get_data_strings() -> list {
