@@ -210,7 +210,7 @@ def add_string_literal(state: CodegenState, raw_val: string) -> string {
     label = "str_const_" + str(state.str_count)
     state.str_lit_vals.append(raw_val)
     state.str_lit_labels.append(label)
-    emit_data(state, label + ": .asciz " + raw_val)
+    emit_data(state, label + ": .asciz \"" + raw_val + "\"")
     return label
 }
 

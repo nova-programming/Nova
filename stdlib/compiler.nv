@@ -140,22 +140,11 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     }
 
     print("Reading file: " + path)
-    system.file_write(2, "COMP:after_read_print\n")
-    plen = len(path)
-    system.file_write(2, "COMP:after_plen\n")
-    plen_str = str(plen)
-    system.file_write(2, "COMP:after_plen_str\n")
-    print("path len = " + plen_str)
-    system.file_write(2, "COMP:after_len_print\n")
     fd = sys_open(path, "r")
-    system.file_write(2, "COMP:after_open\n")
     source = sys_read(fd)
-    system.file_write(2, "COMP:after_read\n")
     sys_close(fd)
-    system.file_write(2, "COMP:after_close\n")
 
     tokens = tokenize(source)
-    system.file_write(2, "COMP:after_tokenize\n")
     tok_count = len(tokens)
     tok_str = str(tok_count)
     print("Tokens: " + tok_str)
@@ -167,20 +156,15 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     system.file_write(2, "COMP:after_parse\n")
     
     print("Resolving imports...")
-    system.file_write(2, "COMP:before_resolve\n")
     visited = []
     ast = resolve_imports(ast, visited, target_arch, target_os)
-    system.file_write(2, "COMP:after_resolve\n")
 
     print("Type checking...")
-    system.file_write(2, "COMP:before_typecheck\n")
     tc = TypeChecker()
     tc_init(tc)
     tc_check(tc, ast)
-    system.file_write(2, "COMP:after_typecheck\n")
 
     print("Generating assembly...")
-    system.file_write(2, "COMP:before_codegen\n")
     is_x64 = 0
     if target_arch == "x86_64" { is_x64 = 1 }
     if target_arch == "arm64" {
@@ -188,10 +172,8 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     } else {
         asm = generate_assembly(ast, debug_mode, is_x64, target_os)
     }
-    system.file_write(2, "COMP:after_codegen\n")
 
     print("Compilation finished.")
-    system.file_write(2, "COMP:after_compile_finished\n")
 
     # Update build cache
     new_cached_lines = cached_lines
