@@ -49,6 +49,11 @@ def _find_gcc(target_os=None, target_arch="x86_64"):
     """Find GCC: bundled dir first, then system PATH. Supports cross-compilation."""
     host = _host_os()
     gcc_name = "gcc.exe" if host == "windows" else "gcc"
+    # On macOS, prefer clang over gcc (gcc may be a stub that exits 1 silently)
+    if host == "macos":
+        clang = shutil.which("clang")
+        if clang:
+            return clang
 
     # Native: bundled dir first
     bundled = os.path.join(BUNDLED_GCC_DIR, "bin", gcc_name)
