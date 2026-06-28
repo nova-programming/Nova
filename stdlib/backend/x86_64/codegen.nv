@@ -210,7 +210,22 @@ def add_string_literal(state: CodegenState, raw_val: string) -> string {
     system.file_write(2, "GEN:add_str_lit_loop_done\n")
     state.str_count = state.str_count + 1
     system.file_write(2, "GEN:str_count_inc\n")
-    label = "str_const_" + str(state.str_count)
+    system.file_write(2, "GEN:before_label\n")
+    cnt = state.str_count
+    system.file_write(2, "GEN:cnt_loaded\n")
+    if cnt == 0 { sys = "0" }
+    elif cnt == 1 { sys = "1" }
+    elif cnt == 2 { sys = "2" }
+    elif cnt == 3 { sys = "3" }
+    elif cnt == 4 { sys = "4" }
+    elif cnt == 5 { sys = "5" }
+    elif cnt == 6 { sys = "6" }
+    elif cnt == 7 { sys = "7" }
+    elif cnt == 8 { sys = "8" }
+    elif cnt == 9 { sys = "9" }
+    else { sys = str(cnt) }
+    system.file_write(2, "GEN:sys_set\n")
+    label = "str_const_" + sys
     system.file_write(2, "GEN:label_created\n")
     state.str_lit_vals.append(raw_val)
     state.str_lit_labels.append(label)
