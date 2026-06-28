@@ -243,18 +243,6 @@ def read_lines(path: string) -> list {
 }
 
 def get_compiler_dir() -> string {
-    args = system.get_args()
-    exe = args[0]
-    exe_len = len(exe)
-    i = exe_len - 1
-    while i >= 0 {
-        c = str_sub(exe, i, i + 1)
-        if c == "/" or c == "\\" {
-            result = str_sub(exe, 0, i)
-            return result
-        }
-        i = i - 1
-    }
     return "."
 }
 
