@@ -1,6 +1,6 @@
 
 
-def byte_extract(val: int, shift: int) -> int {
+def asm_byte_extract(val: int, shift: int) -> int {
     remaining = val
     i = 0
     while i <= shift {

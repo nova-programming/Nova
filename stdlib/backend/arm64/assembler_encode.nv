@@ -17,7 +17,7 @@ def cond_code(name: string) -> int {
     return 0
 }
 
-def append_u32(state, val: int) {
+def asm_append_u32(state, val: int) {
     state.code.append(val % 256)
     val = val / 256
     state.code.append(val % 256)
@@ -48,7 +48,7 @@ def encode_add_imm(state, ops: list) {
         if sf == 0 { base = 0x11000000 }
         val = base | (rn << 5) | rd
         add_fixup(state, len(state.code), imm_op.label, 6)
-        append_u32(state, val)
+        asm_append_u32(state, val)
         return
     }
     imm_op = parse_operand(ops[2])
@@ -65,7 +65,7 @@ def encode_add_imm(state, ops: list) {
     base = 0x91000000
     if sf == 0 { base = 0x11000000 }
     val = base | (shift << 22) | ((imm & 0xFFF) << 10) | (rn << 5) | rd
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_sub_imm(state, ops: list) {
@@ -85,7 +85,7 @@ def encode_sub_imm(state, ops: list) {
     base = 0xD1000000
     if sf == 0 { base = 0x51000000 }
     val = base | (shift << 22) | ((imm & 0xFFF) << 10) | (rn << 5) | rd
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_bitmask_enc(val: int, sf: int) -> int {
@@ -156,7 +156,7 @@ def encode_and_imm(state, ops: list) {
         base = 0x92000000
         if sf == 0 { base = 0x12000000 }
         val = base | encoded | (rn << 5) | rd
-        append_u32(state, val)
+        asm_append_u32(state, val)
     }
 }
 
@@ -175,7 +175,7 @@ def encode_cmp_imm(state, ops: list) {
     base = 0xF1000000
     if sf == 0 { base = 0x71000000 }
     val = base | (shift << 22) | ((imm & 0xFFF) << 10) | (rn << 5) | 31
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_mov_imm(state, ops: list) {
@@ -192,7 +192,7 @@ def encode_mov_imm(state, ops: list) {
     base = 0xD2800000
     if sf == 0 { base = 0x52800000 }
     val = base | (hw << 21) | ((remaining & 0xFFFF) << 5) | rd
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_add_reg(state, ops: list) {
@@ -207,7 +207,7 @@ def encode_add_reg(state, ops: list) {
     base = 0x8B000000
     if sf == 0 { base = 0x0B000000 }
     val = base | (rm << 16) | (rn << 5) | rd
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_sub_reg(state, ops: list) {
@@ -222,7 +222,7 @@ def encode_sub_reg(state, ops: list) {
     base = 0xCB000000
     if sf == 0 { base = 0x4B000000 }
     val = base | (rm << 16) | (rn << 5) | rd
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_and_reg(state, ops: list) {
@@ -237,7 +237,7 @@ def encode_and_reg(state, ops: list) {
     base = 0x8A000000
     if sf == 0 { base = 0x0A000000 }
     val = base | (rm << 16) | (rn << 5) | rd
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_orr_reg(state, ops: list) {
@@ -252,7 +252,7 @@ def encode_orr_reg(state, ops: list) {
     base = 0xAA000000
     if sf == 0 { base = 0x2A000000 }
     val = base | (rm << 16) | (rn << 5) | rd
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_eor_reg(state, ops: list) {
@@ -267,7 +267,7 @@ def encode_eor_reg(state, ops: list) {
     base = 0xCA000000
     if sf == 0 { base = 0x4A000000 }
     val = base | (rm << 16) | (rn << 5) | rd
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_cmp_reg(state, ops: list) {
@@ -280,7 +280,7 @@ def encode_cmp_reg(state, ops: list) {
     base = 0xEB000000
     if sf == 0 { base = 0x6B000000 }
     val = base | (rm << 16) | (rn << 5) | 31
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_mov_reg(state, ops: list) {
@@ -288,7 +288,7 @@ def encode_mov_reg(state, ops: list) {
         xd = parse_operand(ops[0])
         rd = xd.reg
         val = 0xAA0003E0 | rd
-        append_u32(state, val)
+        asm_append_u32(state, val)
         return
     }
     xd = parse_operand(ops[0])
@@ -304,7 +304,7 @@ def encode_mov_reg(state, ops: list) {
     base = 0xAA0003E0
     if sf == 0 { base = 0x2A0003E0 }
     val = base | (rm << 16) | rd
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_mul(state, ops: list) {
@@ -319,7 +319,7 @@ def encode_mul(state, ops: list) {
     base = 0x9B007C00
     if sf == 0 { base = 0x1B007C00 }
     val = base | (rm << 16) | (rn << 5) | rd
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_msub(state, ops: list) {
@@ -336,7 +336,7 @@ def encode_msub(state, ops: list) {
     base = 0x9B000000
     if sf == 0 { base = 0x1B000000 }
     val = base | (rm << 16) | (ra << 10) | (rn << 5) | rd
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_sdiv(state, ops: list) {
@@ -351,7 +351,7 @@ def encode_sdiv(state, ops: list) {
     base = 0x9AC00C00
     if sf == 0 { base = 0x1AC00C00 }
     val = base | (rm << 16) | (rn << 5) | rd
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_lsl_reg(state, ops: list) {
@@ -366,7 +366,7 @@ def encode_lsl_reg(state, ops: list) {
     base = 0x9AC08000
     if sf == 0 { base = 0x1AC08000 }
     val = base | (rm << 16) | (rn << 5) | rd
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_lsl_imm(state, ops: list) {
@@ -387,7 +387,7 @@ def encode_lsl_imm(state, ops: list) {
         imms = (63 - s) & 63
         val = 0xD3800000 | (immr << 16) | (imms << 10) | (rn << 5) | rd
     }
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_asr_reg(state, ops: list) {
@@ -402,7 +402,7 @@ def encode_asr_reg(state, ops: list) {
     base = 0x9AC08800
     if sf == 0 { base = 0x1AC08800 }
     val = base | (rm << 16) | (rn << 5) | rd
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_mvn(state, ops: list) {
@@ -415,7 +415,7 @@ def encode_mvn(state, ops: list) {
     base = 0xAA2003E0
     if sf == 0 { base = 0x2A2003E0 }
     val = base | (rm << 16) | rd
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_neg(state, ops: list) {
@@ -428,7 +428,7 @@ def encode_neg(state, ops: list) {
     base = 0xCB0003E0
     if sf == 0 { base = 0x4B0003E0 }
     val = base | (rn << 16) | rd
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_csel(state, ops: list) {
@@ -445,7 +445,7 @@ def encode_csel(state, ops: list) {
     base = 0x9A800000
     if sf == 0 { base = 0x1A800000 }
     val = base | (1 << 21) | (rm << 16) | (1 << 15) | (1 << 14) | ((cc >> 3) << 13) | (((cc >> 2) & 1) << 12) | (1 << 11) | (((cc >> 1) & 1) << 10) | (rn << 5) | rd
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_cset(state, ops: list) {
@@ -459,7 +459,7 @@ def encode_cset(state, ops: list) {
     base = 0x9A800000
     if sf == 0 { base = 0x1A800000 }
     val = base | (31 << 16) | ((inv_cc >> 3) << 13) | (((inv_cc >> 2) & 1) << 12) | (1 << 11) | (((inv_cc >> 1) & 1) << 10) | (31 << 5) | rd
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_mem_ldr_str(state, size_code: int, is_load: int, ops: list) {
@@ -494,7 +494,7 @@ def encode_mem_ldr_str(state, size_code: int, is_load: int, ops: list) {
             if is_load == 0 { base = 0xF8200000 }
         }
         val = base | (mem.mem_offset_reg << 16) | (option << 13) | (mem.mem_offset_shift << 12) | (2 << 10) | (mem.mem_base << 5) | rt.reg
-        append_u32(state, val)
+        asm_append_u32(state, val)
         return
     }
     rn = mem.mem_base
@@ -522,7 +522,7 @@ def encode_mem_ldr_str(state, size_code: int, is_load: int, ops: list) {
             if size_code == 3 { base = 0xF9000000 }
         }
         val = base | ((scaled & 0xFFF) << 10) | (rn << 5) | rt.reg
-        append_u32(state, val)
+        asm_append_u32(state, val)
         return
     }
     base = 0x38400000
@@ -542,7 +542,7 @@ def encode_mem_ldr_str(state, size_code: int, is_load: int, ops: list) {
         base = base | (1 << 24)
     }
     val = base | ((imm & 0x1FF) << 12) | (rn << 5) | rt.reg
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_ldr(state, ops: list) {
@@ -590,7 +590,7 @@ def encode_ldp(state, ops: list) {
     if mem.writeback == 1 { base = 0xA9C00000 }
     if mem.writeback == 2 { base = 0xA8C00000 }
     val = base | ((imm7 & 0x7F) << 15) | (rt2.reg << 10) | (rn << 5) | rt1.reg
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_stp(state, ops: list) {
@@ -604,7 +604,7 @@ def encode_stp(state, ops: list) {
     if mem.writeback == 1 { base = 0xA9800000 }
     if mem.writeback == 2 { base = 0xA8800000 }
     val = base | ((imm7 & 0x7F) << 15) | (rt2.reg << 10) | (rn << 5) | rt1.reg
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_adrp(state, ops: list) {
@@ -612,21 +612,21 @@ def encode_adrp(state, ops: list) {
     label_op = parse_operand(ops[1])
     rd = xd.reg
     off = len(state.code)
-    append_u32(state, 0x90000000 | rd)
+    asm_append_u32(state, 0x90000000 | rd)
     add_fixup(state, off, label_op.label, 5)
 }
 
 def encode_b(state, ops: list) {
     label_op = parse_operand(ops[0])
     off = len(state.code)
-    append_u32(state, 0x14000000)
+    asm_append_u32(state, 0x14000000)
     add_fixup(state, off, label_op.label, 4)
 }
 
 def encode_bl(state, ops: list) {
     label_op = parse_operand(ops[0])
     off = len(state.code)
-    append_u32(state, 0x94000000)
+    asm_append_u32(state, 0x94000000)
     add_fixup(state, off, label_op.label, 4)
 }
 
@@ -638,7 +638,7 @@ def encode_bcond(state, ops: list) {
         cond_name = ops[1]
         cc = cond_code(cond_name)
     }
-    append_u32(state, 0x54000000 | cc)
+    asm_append_u32(state, 0x54000000 | cc)
     add_fixup(state, off, label_op.label, 7)
 }
 
@@ -647,7 +647,7 @@ def encode_fadd(state, ops: list) {
     rn = parse_operand(ops[1])
     rm = parse_operand(ops[2])
     val = 0x1E602800 | (rm.reg << 16) | (rn.reg << 5) | rd.reg
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_fsub(state, ops: list) {
@@ -655,7 +655,7 @@ def encode_fsub(state, ops: list) {
     rn = parse_operand(ops[1])
     rm = parse_operand(ops[2])
     val = 0x1E606800 | (rm.reg << 16) | (rn.reg << 5) | rd.reg
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_fmul(state, ops: list) {
@@ -663,7 +663,7 @@ def encode_fmul(state, ops: list) {
     rn = parse_operand(ops[1])
     rm = parse_operand(ops[2])
     val = 0x1E600800 | (rm.reg << 16) | (rn.reg << 5) | rd.reg
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_fdiv(state, ops: list) {
@@ -671,14 +671,14 @@ def encode_fdiv(state, ops: list) {
     rn = parse_operand(ops[1])
     rm = parse_operand(ops[2])
     val = 0x1E601800 | (rm.reg << 16) | (rn.reg << 5) | rd.reg
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def encode_fcmp(state, ops: list) {
     rn = parse_operand(ops[0])
     rm = parse_operand(ops[1])
     val = 0x1EC03800 | (rm.reg << 16) | (rn.reg << 5)
-    append_u32(state, val)
+    asm_append_u32(state, val)
 }
 
 def emit_instruction(state, line: AsmLine) {
@@ -835,7 +835,7 @@ def emit_instruction(state, line: AsmLine) {
         }
         label_op = parse_operand(line.operands[0])
         off = len(state.code)
-        append_u32(state, 0x54000000 | cond_code_val)
+        asm_append_u32(state, 0x54000000 | cond_code_val)
         add_fixup(state, off, label_op.label, 7)
         return
     }
@@ -860,7 +860,7 @@ def emit_instruction(state, line: AsmLine) {
         return
     }
     if line.mnemonic == "ret" {
-        append_u32(state, 0xD65F03C0)
+        asm_append_u32(state, 0xD65F03C0)
         return
     }
 }

@@ -1,6 +1,6 @@
 import system
 
-def read_u32(state, off: int) -> int {
+def asm_read_u32(state, off: int) -> int {
     b0 = state.code[off]
     b1 = state.code[off + 1]
     b2 = state.code[off + 2]
@@ -8,7 +8,7 @@ def read_u32(state, off: int) -> int {
     return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
 }
 
-def write_u32(state, off: int, val: int) {
+def asm_write_u32(state, off: int, val: int) {
     state.code[off] = val % 256
     val = val / 256
     state.code[off + 1] = val % 256
@@ -185,30 +185,30 @@ def resolve_fixups(state) {
             if fixup.size == 4 {
                 rel = target_off - (fixup.offset + 4)
                 imm26 = (rel / 4) & 0x3FFFFFF
-                val = read_u32(state, fixup.offset) | imm26
-                write_u32(state, fixup.offset, val)
+                val = asm_read_u32(state, fixup.offset) | imm26
+                asm_write_u32(state, fixup.offset, val)
             }
             if fixup.size == 5 {
                 page_diff = (target_off >> 12) - (fixup.offset >> 12)
                 imm21 = page_diff & 0x1FFFFF
                 immlo = imm21 & 3
                 immhi = imm21 >> 2
-                val = read_u32(state, fixup.offset) & 0x9F00001F
+                val = asm_read_u32(state, fixup.offset) & 0x9F00001F
                 val = val | (immlo << 29) | (immhi << 5)
-                write_u32(state, fixup.offset, val)
+                asm_write_u32(state, fixup.offset, val)
             }
             if fixup.size == 6 {
                 imm12 = target_off & 0xFFF
-                val = read_u32(state, fixup.offset) & 0xFFC003FF
+                val = asm_read_u32(state, fixup.offset) & 0xFFC003FF
                 val = val | (imm12 << 10)
-                write_u32(state, fixup.offset, val)
+                asm_write_u32(state, fixup.offset, val)
             }
             if fixup.size == 7 {
                 rel = target_off - (fixup.offset + 4)
                 imm19 = (rel / 4) & 0x7FFFF
-                val = read_u32(state, fixup.offset) & 0xFF00001F
+                val = asm_read_u32(state, fixup.offset) & 0xFF00001F
                 val = val | (imm19 << 5)
-                write_u32(state, fixup.offset, val)
+                asm_write_u32(state, fixup.offset, val)
             }
         }
         i = i + 1

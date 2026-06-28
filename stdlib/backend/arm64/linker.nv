@@ -318,7 +318,11 @@ def is_kernel32_func(name: string) -> int {
     return 0
 }
 
-def link(code: list, data_sec: list, labels: list, fixups: list) -> list {
+def link(sections: list) -> list {
+    code = sections[0]
+    data_sec = sections[1]
+    labels = sections[2]
+    fixups = sections[3]
     section_align = 4096
     file_align = 512
     image_base = 4194304
