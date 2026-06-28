@@ -627,6 +627,10 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
 
     emit_data(state, "char_strings:")
     char_idx = 0
+    emit_data(state, "    .byte 0")
+    emit_data(state, "    .byte 0")
+    system.file_write(2, "GEN:char_0_done\n")
+    char_idx = 1
     while char_idx < 256 {
         emit_data(state, "    .byte " + str(char_idx))
         emit_data(state, "    .byte 0")
