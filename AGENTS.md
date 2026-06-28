@@ -405,9 +405,21 @@ galaxy publish             # Publish to registry
 - **Fix**: Removed all `mov w0,#0` instructions before `bl _printf`/`bl _sprintf` calls. Also rewrote `StrConvert` handler (dangling stack pointer + wrong `_sprintf` arg order). Updated `test_printf_call_arm64` assertion to verify `mov w0,#0` is NOT present between fmt_str load and printf call.
 - **`compile_to_exe` Linux GCC name fixed** (`stdlib/compiler.nv:276`): `gcc_name` was `"x86_64-linux-gnu-gcc"` (cross-compilation prefix) instead of `"gcc"` for native Linux. On Ubuntu CI runners the cross-toolchain doesn't exist — GCC invocation failed silently.
 - **`-flto` removed from self-hosted compile_to_exe** (`stdlib/compiler.nv:281,292`): Matches Python bootstrap fix from `f38dd64`. LTO with assembly-only input files can cause issues with certain GCC versions on Linux.
-- **CI status**: Commit `40bfd61` (ARM64 fix) — Ubuntu x86_64 still fails on self-hosted bootstrap (SIGSEGV, never passed any CI run); macOS/Windows cancelled by fail-fast. Commit `5bd4a82` (Linux fixes) pushed to CI for verification.
 - **All 245 tests pass** (1 skipped).
 
+### Phase 9: Linux SIGSEGV Debug Markers + str() Workaround (This Session — June 28, 2026)
+- **CI status**: Commit `5bd4a82` — Ubuntu x86_64 still fails on self-hosted bootstrap (SIGSEGV); macOS/Windows cancelled by fail-fast. `fail-fast: false` added to CI matrix to show all OS results.
+- **Fine-grained debug markers**: Added `system.file_write(2, "GEN:...")` calls to `generate_assembly`, `compile_stmt`, `compile_expr`, and `add_string_literal` in `codegen.nv`, `codegen_stmt.nv`, `codegen_expr.nv` to pinpoint the crash location in the stage1 binary on Linux.
+- **Crash pinpointed**: `GEN:str_count_inc` succeeds but `GEN:label_created` does not — the crash is at `str(state.str_count)` in `add_string_literal` (`codegen.nv:213`). The `str()` function (compiled as StrConvert by Python bootstrap → calls `_malloc(32)` + `_sprintf(buf, "%d", val)`) causes SIGSEGV in the native stage1 binary on Linux.
+- **Stack alignment verified**: Traced the full call chain from `_add_string_literal` → string concat `"str_const_" + ...` → `StrConvert` → `_malloc` / `_sprintf`. All `call` sites appear correctly 16-byte aligned. Alignment is likely not the root cause.
+- **Workaround (`af17930`)**: Replaced `str(state.str_count)` in `add_string_literal` with a manual if-elif-else chain for str_count 0-9, falling back to `str(cnt)` for larger values. For `selfhost.nv` (the CI test), str_count=1 avoids `str()` entirely.
+- **`.rept`/`.set` confirmed working**: Linux GAS 2.34 supports `.rept` + `.set` — the data section completes without error. The crash is after `GEN:data_done` in the `.text` section.
+- **macOS duplicate label**: `L_append_no_realloc_arm` still duplicated in ARM64 codegen — needs label uniquing.
+- **Markers NOT yet removed** — needed for further debugging if the workaround doesn't resolve the crash.
+
 **Next Instruction for Agent:**
-- Check CI results for commit `5bd4a82` to verify Ubuntu self-hosted bootstrap fix
-- If CI still fails on Linux, investigate the persistent self-hosted compiler SIGSEGV — previous commit messages indicated crash at `nova.nv:107` (`file_path[0 : out_len - 3]` string slice), but root cause may be earlier memory corruption
+- Check CI results for commit `af17930` to see if avoiding `str()` in `add_string_literal` fixes the Linux SIGSEGV
+- If `GEN:sys_set` appears (new marker between if-chain and label assignment), the crash was in `str()`
+- If `GEN:sys_set` does NOT appear, the crash is elsewhere (inside the if-elif-else chain itself, e.g., the `==` comparison operator)
+- If CI passes: remove all `GEN:...` debug markers and fix macOS duplicate label issue
+- If CI still fails on Linux: examine new marker output to identify the exact crash point
