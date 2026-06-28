@@ -176,7 +176,12 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     # Update build cache
     new_cached_lines = cached_lines
     system.file_write(2, "GEN:cache_assigned\n")
-    new_entry = path + "=" + str(current_size)
+    system.file_write(2, "GEN:before_concat\n")
+    tmp_str = path + "="
+    system.file_write(2, "GEN:concat_done\n")
+    tmp_sz = str(current_size)
+    system.file_write(2, "GEN:str_done\n")
+    new_entry = tmp_str + tmp_sz
     system.file_write(2, "GEN:new_entry_done\n")
     found = 0
     i = 0
