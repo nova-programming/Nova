@@ -245,7 +245,7 @@ def parse_primary(state: ParserState) -> AstNode {
     } elif tok.kind == "STRING" {
         eat_tok(state, "STRING")
         node.kind = "String"
-        node.val_str = tok.val
+        node.val_str = str_sub(tok.val, 1, len(tok.val) - 1)
     } elif tok.kind == "TRUE" {
         eat_tok(state, "TRUE")
         node.kind = "Boolean"
