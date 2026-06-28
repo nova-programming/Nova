@@ -317,8 +317,11 @@ def compile_expr(state: CodegenState, node: AstNode) {
         }
     }
     if node.kind == "String" {
+        system.file_write(2, "GEN:string_expr_start\n")
         label = add_string_literal(state, node.val_str)
+        system.file_write(2, "GEN:add_str_lit_ret\n")
         push_data_label(state, label)
+        system.file_write(2, "GEN:push_data_done\n")
     }
     if node.kind == "Boolean" {
         emit(state, "    push " + str(node.val_int))
