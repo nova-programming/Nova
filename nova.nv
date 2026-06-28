@@ -32,10 +32,8 @@ def str_to_int(s: string) -> int {
 NOVA_VERSION = "0.8.0"
 plat = ""
 
-# DEBUG: marker before get_args
 system.file_write(2, "M1:before_get_args\n")
     args = system.get_args()
-# DEBUG: marker after get_args
 system.file_write(2, "M2:after_get_args\n")
 system.file_write(2, "M3:before_len_check\n")
 if len(args) < 2 {
@@ -49,16 +47,6 @@ if len(args) < 2 {
 system.file_write(2, "M4:len_ok\n")
 cmd = args[1]
 system.file_write(2, "M5:cmd_assigned\n")
-system.file_write(2, "M5a:before_args_len\n")
-argc_len = len(args)
-system.file_write(2, "M5b:len_done\n")
-argc_str = str(argc_len)
-system.file_write(2, "M5c:str_done\n")
-print("argc is: " + argc_str)
-system.file_write(2, "M5d:after_print\n")
-sys_flush()
-system.file_write(2, "M5e:after_flush\n")
-system.file_write(2, "M5c:after_flush\n")
 if cmd == "--version" or cmd == "version" {
     system.file_write(2, "M6:version\n")
     print("Nova v" + NOVA_VERSION)
@@ -125,7 +113,6 @@ if cmd == "build" {
     system.file_write(2, "M13c:after_flush\n")
     out_len = len(file_path)
     system.file_write(2, "M13d:after_len\n")
-    # Test str() separately first
     system.file_write(2, "M13x:before_str\n")
     t_str = str(out_len)
     system.file_write(2, "M13y:after_str\n")
