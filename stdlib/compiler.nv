@@ -265,12 +265,18 @@ def get_compiler_dir() -> string {
 }
 
 def compile_to_exe(input_path: string, output_path: string, debug_mode: int, target_arch: string, target_os: string) {
+    system.file_write(2, "GEN:exe_start\n")
     asm = compile_file(input_path, debug_mode, target_arch, target_os)
+    system.file_write(2, "GEN:file_done\n")
     if len(asm) == 0 { return }
+    system.file_write(2, "GEN:write_asm\n")
     write_lines(asm, input_path + ".s")
+    system.file_write(2, "GEN:wrote_asm\n")
     
     compiler_dir = get_compiler_dir()
+    system.file_write(2, "GEN:got_dir\n")
     runtime_o_path = compiler_dir + "/runtime.o"
+    system.file_write(2, "GEN:runtime_path\n")
     
     is_windows = 0
     if target_os == "windows" { is_windows = 1 }
@@ -278,6 +284,7 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
     if target_os == "macos" { is_macos = 1 }
     is_linux = 0
     if target_os == "linux" { is_linux = 1 }
+    system.file_write(2, "GEN:os_detected\n")
     
     gcc_name = "gcc"
     if is_windows == 1 {
@@ -285,10 +292,15 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
     } elif is_linux == 1 {
         gcc_name = "gcc"
     }
+    system.file_write(2, "GEN:gcc_name\n")
     # Cross-compilation from Linux to Windows
     if is_windows == 1 and target_arch == "x86_64" {
         print("Using GCC to assemble and link...")
-        system.system_exec(gcc_name + " -O3 " + input_path + ".s -o " + output_path + " -mconsole -lkernel32 -Wl,--stack,16777216 " + runtime_o_path)
+        system.file_write(2, "GEN:gcc_cmd_build\n")
+        gcc_cmd = gcc_name + " -O3 " + input_path + ".s -o " + output_path + " -mconsole -lkernel32 -Wl,--stack,16777216 " + runtime_o_path
+        system.file_write(2, "GEN:before_exec\n")
+        system.system_exec(gcc_cmd)
+        system.file_write(2, "GEN:after_exec\n")
     } elif is_windows == 1 {
         print("Assembling...")
         assembled = assemble(asm)
@@ -299,13 +311,16 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
         sys_close(fd)
     } else {
         print("Using system GCC to assemble and link...")
+        system.file_write(2, "GEN:building_gcc_cmd\n")
         gcc_cmd = gcc_name + " -O3 " + input_path + ".s -o " + output_path + " " + runtime_o_path
         if is_macos == 1 {
             gcc_cmd = gcc_cmd + " -Wl,-no_compact_unwind"
         } elif is_linux == 1 {
             gcc_cmd = gcc_cmd + " -no-pie"
         }
+        system.file_write(2, "GEN:gcc_cmd_ready\n")
         system.system_exec(gcc_cmd)
+        system.file_write(2, "GEN:after_exec\n")
     }
     print("Compiled: " + input_path + " -> " + output_path)
 }

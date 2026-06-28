@@ -421,8 +421,9 @@ galaxy publish             # Publish to registry
   - `str w32, [x1, #8]` — `w32` is not a valid ARM64 register (max is `w30`). Python bootstrap ARM64 codegen bug.
 
 **Next Instruction for Agent:**
-- Check CI for commit `2a7955d` — new `GEN:cache_*` markers will show exactly where in the cache-update code the crash occurs on Linux.
-- If crash is at `GEN:cache_assigned` but before `GEN:new_entry_done`, it's in `str(current_size)` or `path + "="` concat.
-- If crash is in `save_cache`, investigate `sys_open`/`sys_write`/`sys_close` in the post-codegen context.
-- On macOS: fix `L_append_no_realloc_arm` by making label unique (add `next_label` counter). Fix `w32` register by checking for valid ARM64 register range.
+- Check CI for commit `e4549f2` — `GEN:exe_start` through `GEN:after_exec` markers will show exactly where `compile_to_exe` crashes after `compile_file` returns.
+- If markers up to `GEN:gcc_cmd_ready` fire but `GEN:after_exec` does not, the crash is in `system.system_exec()` → likely `runtime.o` not found or GCC crash.
+- If markers fail before `GEN:gcc_cmd_ready`, the crash is in `write_lines(asm, ...)`, string concatenation for gcc_cmd, or `get_compiler_dir()`.
+- **Most likely**: the crash is in `write_lines` — writing 1000+ lines (string + append each) after `generate_assembly` heap churn could trigger latent corruption.
+- On macOS: `str w32` bug fixed (ListLiteral used n/list_size as register names). `L_append_no_realloc_arm` fixed (uses `next_label()` now).
 - If CI passes: remove all `GEN:...` markers and finalize.
