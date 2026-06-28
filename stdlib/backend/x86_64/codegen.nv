@@ -598,6 +598,7 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
 # --- Main entry point ---
 
 def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -> list {
+    system.file_write(2, "GEN:start\n")
     state = new_codegen(tgt, target_os)
 
     emit(state, ".intel_syntax noprefix")
@@ -633,6 +634,7 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     emit_data(state, "__nova_argv:")
     emit_data(state, "    .quad 0")
 
+    system.file_write(2, "GEN:data_section_done\n")
     emit(state, ".text")
 
     functions = []
@@ -666,11 +668,14 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         i = i + 1
     }
 
+    system.file_write(2, "GEN:before_compile_functions\n")
     i_f = 0
     while i_f < len(functions) {
         compile_function(state, functions[i_f], debug_mode)
         i_f = i_f + 1
     }
+
+    system.file_write(2, "GEN:after_compile_functions\n")
 
     state.local_var_names = []
     state.local_vars = []
@@ -684,6 +689,7 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         i = i + 1
     }
 
+    system.file_write(2, "GEN:after_scan_vars\n")
     bp = reg32(state, "ebp", "rbp")
     sp = reg32(state, "esp", "rsp")
 
@@ -715,11 +721,13 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         r = r + 1
     }
 
+    system.file_write(2, "GEN:before_main_body\n")
     i = 0
     while i < len(top_level) {
         compile_stmt(state, top_level[i], debug_mode)
         i = i + 1
     }
+    system.file_write(2, "GEN:after_main_body\n")
     
     r = len(state.used_regs) - 1
     while r >= 0 {
