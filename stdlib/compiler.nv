@@ -171,10 +171,13 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     }
 
     print("Compilation finished.")
+    system.file_write(2, "GEN:cache_start\n")
 
     # Update build cache
     new_cached_lines = cached_lines
+    system.file_write(2, "GEN:cache_assigned\n")
     new_entry = path + "=" + str(current_size)
+    system.file_write(2, "GEN:new_entry_done\n")
     found = 0
     i = 0
     while i < len(new_cached_lines) {
@@ -186,8 +189,11 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
         }
         i = i + 1
     }
+    system.file_write(2, "GEN:cache_loop_done\n")
     if found == 0 { new_cached_lines.append(new_entry) }
+    system.file_write(2, "GEN:cache_append_done\n")
     save_cache(cache_file, new_cached_lines)
+    system.file_write(2, "GEN:cache_saved\n")
 
     return asm
 }
