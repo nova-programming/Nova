@@ -442,7 +442,13 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
             rt_cmd += ["-mno-red-zone"]
         else:
             rt_cmd += ["-D", "LINUX_WRAP"]
-        subprocess.run(rt_cmd, capture_output=True, text=True)
+        print(f"Compiling runtime.c: {' '.join(rt_cmd)}")
+        rt_res = subprocess.run(rt_cmd, capture_output=True, text=True)
+        if rt_res.returncode != 0:
+            print("  [WARN] runtime.c compilation failed:")
+            if rt_res.stderr:
+                for line in rt_res.stderr.strip().split("\n"):
+                    print("    " + line)
         if os.path.exists(runtime_o):
             cmd += [runtime_o]
     
