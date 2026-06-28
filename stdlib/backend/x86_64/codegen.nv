@@ -633,6 +633,7 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     emit_data(state, "__nova_argv:")
     emit_data(state, "    .quad 0")
 
+    system.file_write(2, "GEN:data_done\n")
     emit(state, ".text")
 
     functions = []
