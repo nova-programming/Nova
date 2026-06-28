@@ -408,18 +408,21 @@ galaxy publish             # Publish to registry
 - **All 245 tests pass** (1 skipped).
 
 ### Phase 9: Linux SIGSEGV Debug Markers + str() Workaround (This Session — June 28, 2026)
-- **CI status**: Commit `5bd4a82` — Ubuntu x86_64 still fails on self-hosted bootstrap (SIGSEGV); macOS/Windows cancelled by fail-fast. `fail-fast: false` added to CI matrix to show all OS results.
-- **Fine-grained debug markers**: Added `system.file_write(2, "GEN:...")` calls to `generate_assembly`, `compile_stmt`, `compile_expr`, and `add_string_literal` in `codegen.nv`, `codegen_stmt.nv`, `codegen_expr.nv` to pinpoint the crash location in the stage1 binary on Linux.
-- **Crash pinpointed**: `GEN:str_count_inc` succeeds but `GEN:label_created` does not — the crash is at `str(state.str_count)` in `add_string_literal` (`codegen.nv:213`). The `str()` function (compiled as StrConvert by Python bootstrap → calls `_malloc(32)` + `_sprintf(buf, "%d", val)`) causes SIGSEGV in the native stage1 binary on Linux.
-- **Stack alignment verified**: Traced the full call chain from `_add_string_literal` → string concat `"str_const_" + ...` → `StrConvert` → `_malloc` / `_sprintf`. All `call` sites appear correctly 16-byte aligned. Alignment is likely not the root cause.
-- **Workaround (`af17930`)**: Replaced `str(state.str_count)` in `add_string_literal` with a manual if-elif-else chain for str_count 0-9, falling back to `str(cnt)` for larger values. For `selfhost.nv` (the CI test), str_count=1 avoids `str()` entirely.
-- **`.rept`/`.set` confirmed working**: Linux GAS 2.34 supports `.rept` + `.set` — the data section completes without error. The crash is after `GEN:data_done` in the `.text` section.
-- **macOS duplicate label**: `L_append_no_realloc_arm` still duplicated in ARM64 codegen — needs label uniquing.
-- **Markers NOT yet removed** — needed for further debugging if the workaround doesn't resolve the crash.
+- **CI status**: Commit `af17930` — `fail-fast: false` shows all OS results:
+  - **Ubuntu**: SIGSEGV still present but **shifted** — ALL GEN markers pass through `GEN:helpers_start`. The crash is now AFTER code generation completes. Root cause is NOT `str()` alone.
+  - **macOS**: ARM64 assembly errors: duplicate `L_append_no_realloc_arm` labels + invalid register `w32` in `str w32, [x1, #8]` at `nova.s:717`. Waiting on `fail-fast: false` macOS output.
+  - **Windows**: Passes all tests.
+- **Fine-grained debug markers**: Added `system.file_write(2, "GEN:...")` calls throughout `codegen.nv`, `codegen_stmt.nv`, `codegen_expr.nv` — every phase now emits markers.
+- **`str()` workaround (`af17930`)**: Replaced `str(state.str_count)` with manual if-elif-else chain for 0-9, avoiding `str()` for `selfhost.nv` (str_count=1). This fixed the GEN:str_count_inc → GEN:label_created gap — both markers now fire.
+- **New markers in cache-update code (`2a7955d`)**: Added `GEN:cache_start`, `GEN:cache_assigned`, `GEN:new_entry_done`, `GEN:cache_loop_done`, `GEN:cache_append_done`, `GEN:cache_saved` after `print("Compilation finished.")` to pinpoint the post-codegen crash in `compile_file` (`stdlib/compiler.nv:173-193`).
+- **Post-codegen crash hypothesis**: The crash is in the build cache update section — possibly in `str(current_size)`, list operations, or `save_cache`. Previous `str()` calls on `tok_count` and `cached_size_str` worked fine, suggesting it's NOT a generic `str()` bug.
+- **macOS ARM64 issues**:
+  - `L_append_no_realloc_arm` label duplicated 100+ times in self-hosted ARM64 codegen — needs a unique label counter.
+  - `str w32, [x1, #8]` — `w32` is not a valid ARM64 register (max is `w30`). Python bootstrap ARM64 codegen bug.
 
 **Next Instruction for Agent:**
-- Check CI results for commit `af17930` to see if avoiding `str()` in `add_string_literal` fixes the Linux SIGSEGV
-- If `GEN:sys_set` appears (new marker between if-chain and label assignment), the crash was in `str()`
-- If `GEN:sys_set` does NOT appear, the crash is elsewhere (inside the if-elif-else chain itself, e.g., the `==` comparison operator)
-- If CI passes: remove all `GEN:...` debug markers and fix macOS duplicate label issue
-- If CI still fails on Linux: examine new marker output to identify the exact crash point
+- Check CI for commit `2a7955d` — new `GEN:cache_*` markers will show exactly where in the cache-update code the crash occurs on Linux.
+- If crash is at `GEN:cache_assigned` but before `GEN:new_entry_done`, it's in `str(current_size)` or `path + "="` concat.
+- If crash is in `save_cache`, investigate `sys_open`/`sys_write`/`sys_close` in the post-codegen context.
+- On macOS: fix `L_append_no_realloc_arm` by making label unique (add `next_label` counter). Fix `w32` register by checking for valid ARM64 register range.
+- If CI passes: remove all `GEN:...` markers and finalize.
