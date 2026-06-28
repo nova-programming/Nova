@@ -1100,8 +1100,10 @@ class Arm64Codegen:
             self.assembly.append("    str x0, [sp, #-16]!")
             self.assembly.append("    ldr x1, [sp], #16")
             self.assembly.append("    str x1, [sp, #-16]!")
-            self.assembly.append(f"    str w{n}, [x1]")
-            self.assembly.append(f"    str w{list_size}, [x1, #8]")
+            self.assembly.append(f"    mov w2, #{n}")
+            self.assembly.append("    str w2, [x1]")
+            self.assembly.append(f"    mov w2, #{list_size}")
+            self.assembly.append("    str w2, [x1, #8]")
             self.assembly.append("    add x2, x1, #16")
             for i, elem in enumerate(node.elements):
                 self.compile_expr(elem)
@@ -1121,6 +1123,7 @@ class Arm64Codegen:
                 self.assembly.append("    bl _dict_set")
         elif isinstance(node, MethodCall):
             if node.method_name == "append":
+                no_realloc = self.next_label("L_append_no_realloc")
                 self.compile_expr(node.args[0])
                 self.compile_expr(node.instance)
                 self.assembly.append("    ldr x1, [sp], #16")
@@ -1130,7 +1133,7 @@ class Arm64Codegen:
                 self.assembly.append("    str w2, [x1]")
                 self.assembly.append("    ldr w3, [x1, #8]")
                 self.assembly.append("    cmp w2, w3")
-                self.assembly.append("    b.lt L_append_no_realloc_arm")
+                self.assembly.append(f"    b.lt {no_realloc}")
                 self.assembly.append("    str x1, [sp, #-16]!")
                 self.assembly.append("    str x0, [sp, #-16]!")
                 self.assembly.append("    str x1, [sp, #-16]!")
@@ -1144,7 +1147,7 @@ class Arm64Codegen:
                 self.assembly.append("    mov x1, x0")
                 self.assembly.append("    ldr x0, [sp], #16")
                 self.assembly.append("    ldr x1, [sp], #16")
-                self.assembly.append("L_append_no_realloc_arm:")
+                self.assembly.append(f"{no_realloc}:")
                 self.assembly.append("    ldr w3, [x1]")
                 self.assembly.append("    add x2, x1, #16")
                 self.assembly.append("    sub w3, w3, #1")
