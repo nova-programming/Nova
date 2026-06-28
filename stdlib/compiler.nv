@@ -257,15 +257,23 @@ def get_compiler_dir() -> string {
     system.file_write(2, "GEN:got_args\n")
     exe = args[0]
     system.file_write(2, "GEN:got_exe\n")
-    i = len(exe) - 1
+    exe_len = len(exe)
     system.file_write(2, "GEN:got_len\n")
+    exe_len_s = str(exe_len)
+    system.file_write(2, "GEN:got_len_s\n")
+    i = exe_len - 1
+    system.file_write(2, "GEN:i_init\n")
     while i >= 0 {
-        if exe[i] == "/" or exe[i] == "\\" {
-            result = str_sub(exe, 0, i)
+        system.file_write(2, "GEN:loop_start\n")
+        c = exe[i]
+        system.file_write(2, "GEN:got_char\n")
+        if c == "/" or c == "\\" {
             system.file_write(2, "GEN:found_slash\n")
+            result = str_sub(exe, 0, i)
             return result
         }
         i = i - 1
+        system.file_write(2, "GEN:i_dec\n")
     }
     system.file_write(2, "GEN:no_slash\n")
     return "."
