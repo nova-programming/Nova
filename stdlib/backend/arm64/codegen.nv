@@ -469,12 +469,12 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     }
 
     emit_data(state, "char_strings:")
-    char_idx = 0
-    while char_idx < 256 {
-        emit_data(state, "    .byte " + str(char_idx))
-        emit_data(state, "    .byte 0")
-        char_idx = char_idx + 1
-    }
+    emit_data(state, ".set i, 0")
+    emit_data(state, ".rept 256")
+    emit_data(state, "    .byte i")
+    emit_data(state, "    .byte 0")
+    emit_data(state, "    .set i, i + 1")
+    emit_data(state, ".endr")
 
     emit_data(state, ".global __nova_argc")
     emit_data(state, ".align 3")

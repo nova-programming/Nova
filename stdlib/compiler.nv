@@ -148,12 +148,9 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     tok_count = len(tokens)
     tok_str = str(tok_count)
     print("Tokens: " + tok_str)
-    system.file_write(2, "COMP:after_tok_print\n")
     
     print("Parsing...")
-    system.file_write(2, "COMP:before_parse\n")
     ast = parse(tokens, path)
-    system.file_write(2, "COMP:after_parse\n")
     
     print("Resolving imports...")
     visited = []

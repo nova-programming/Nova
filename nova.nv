@@ -32,10 +32,7 @@ def str_to_int(s: string) -> int {
 NOVA_VERSION = "0.8.0"
 plat = ""
 
-system.file_write(2, "M1:before_get_args\n")
     args = system.get_args()
-system.file_write(2, "M2:after_get_args\n")
-system.file_write(2, "M3:before_len_check\n")
 if len(args) < 2 {
     print("Nova v" + NOVA_VERSION)
     print("Usage: nova build <file.nv>")
@@ -44,31 +41,23 @@ if len(args) < 2 {
     sys_exit(0)
 }
 
-system.file_write(2, "M4:len_ok\n")
 cmd = args[1]
-system.file_write(2, "M5:cmd_assigned\n")
 if cmd == "--version" or cmd == "version" {
-    system.file_write(2, "M6:version\n")
     print("Nova v" + NOVA_VERSION)
     sys_exit(0)
 }
-system.file_write(2, "M7:after_version_check\n")
 if cmd == "update" {
-    system.file_write(2, "M8:update\n")
     print("Nova v" + NOVA_VERSION)
     print("To update Nova, run: python main.py update")
     print("Or re-run: python install.py")
     sys_exit(0)
 }
-system.file_write(2, "M9:after_update_check\n")
 if cmd == "--uninstall" or cmd == "uninstall" or cmd == "remove" {
     print("To uninstall Nova, run: python main.py --uninstall")
     print("Or re-run: python install.py --uninstall")
     sys_exit(0)
 }
-system.file_write(2, "M10:before_build_dispatch\n")
 if cmd == "build" {
-    system.file_write(2, "M11:in_build\n")
     file_path = ""
     debug_mode = 0
     bench_mode = 0
@@ -100,47 +89,25 @@ if cmd == "build" {
         }
         i = i + 1
     }
-    system.file_write(2, "M12:after_loop\n")
     if len(file_path) == 0 {
         print("Usage: nova build [-d] [-b] <file.nv>")
         sys_exit(1)
     }
-    system.file_write(2, "M13:has_path\n")
-    system.file_write(2, "M13a:before_print_file\n")
-    print("file is " + file_path)
-    system.file_write(2, "M13b:after_print_file\n")
-    sys_flush()
-    system.file_write(2, "M13c:after_flush\n")
-    out_len = len(file_path)
-    system.file_write(2, "M13d:after_len\n")
-    system.file_write(2, "M13x:before_str\n")
-    t_str = str(out_len)
-    system.file_write(2, "M13y:after_str\n")
-    t_concat = "out_len is " + t_str
-    system.file_write(2, "M13z:after_concat\n")
-    print(t_concat)
-    system.file_write(2, "M13e:after_print_out_len\n")
-    sys_flush()
-    system.file_write(2, "M14:len_printed\n")
     if len(plat) == 0 { plat = sys_platform() }
-    system.file_write(2, "M14b:platform_set\n")
+    out_len = len(file_path)
     if plat == "windows" {
         out_file = file_path[0 : out_len - 3] + ".exe"
     } else {
         out_file = file_path[0 : out_len - 3]
     }
-    system.file_write(2, "M15:out_file_set\n")
-    print("out_file is " + out_file)
-    sys_flush()
+    print("Compiling " + file_path + " -> " + out_file)
     
     start_ticks = 0
     if bench_mode == 1 {
         start_ticks = sys_get_tick_count()
     }
     
-    system.file_write(2, "M16:before_compile\n")
     compile_to_exe(file_path, out_file, debug_mode, target_arch, plat)
-    system.file_write(2, "M17:after_compile\n")
     
     if bench_mode == 1 {
         end_ticks = sys_get_tick_count()
