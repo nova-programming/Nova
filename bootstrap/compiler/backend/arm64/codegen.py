@@ -874,11 +874,11 @@ class Arm64Codegen:
             self.assembly.append("    str w1, [x0]")
         elif isinstance(node, ArrayIndexAssign):
             self.compile_expr(node.value)
-            self.assembly.append("    ldr x0, [sp], #16")
             self.compile_expr(node.index)
-            self.assembly.append("    ldr x1, [sp], #16")
             self.compile_expr(node.base)
             self.assembly.append("    ldr x2, [sp], #16")
+            self.assembly.append("    ldr x1, [sp], #16")
+            self.assembly.append("    ldr x0, [sp], #16")
             self.assembly.append("    cmp w1, #0")
             self.assembly.append("    b.lt _out_of_bounds")
             self.assembly.append("    ldr w3, [x2]")
@@ -1045,9 +1045,9 @@ class Arm64Codegen:
             is_str = self._is_string_expr(node.base) or base_type == 'string'
             if isinstance(node.base, DataFieldAccess) and node.base.field_name in ['struct_names', 'prop_names', 'local_var_names']:
                 is_str = False
+            self.compile_expr(node.base)
             self.compile_expr(node.index)
             self.assembly.append("    ldr x0, [sp], #16")
-            self.compile_expr(node.base)
             self.assembly.append("    ldr x1, [sp], #16")
             if is_str:
                 self.assembly.append("    ldrb w0, [x0, x1]")
