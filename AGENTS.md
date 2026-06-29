@@ -420,10 +420,15 @@ galaxy publish             # Publish to registry
   - `L_append_no_realloc_arm` label duplicated 100+ times in self-hosted ARM64 codegen — needs a unique label counter.
   - `str w32, [x1, #8]` — `w32` is not a valid ARM64 register (max is `w30`). Python bootstrap ARM64 codegen bug.
 
+### Phase 10: macOS ARM64 runtime.c memset Forward Declaration Fix (This Session — June 29, 2026)
+- **CI status** (commit `27ead74`): macOS ARM64 CI shows `runtime.c:321:15: error: expected parameter declarator` — `runtime.c` fails to compile with exit code 1 (now visible because `capture_output=True` was removed).
+- **Root cause** (`runtime.c:321`): `SYSCALL void *memset(void *, int, size_t);` forward declaration conflicts with Apple's Xcode 16.4 fortified `_string.h` header, which defines `memset` as a macro expanding to `__builtin___memset_chk(dest, ch, count, __darwin_obsz0(dest))`. The SYSCALL attribute + macro expansion produces an invalid declaration with wrong parameter count.
+- **Fix**: Added `#if !defined(__APPLE__)` guard around the `memset` forward declaration only. On `__APPLE__`, `<string.h>` is already included (via line 269's `#elif defined(LINUX_WRAP) || defined(MACOS)` block), so `memset` is properly declared by system headers. `malloc` and `free` forward declarations remain unchanged (they are not fortified macros).
+- **`__APPLE__` predefined**: Clang on macOS automatically defines `__APPLE__`, so no `-D` flag is needed. This macro is NOT defined on Windows or Linux.
+- **Status**: Waiting for CI on next commit to confirm the fix.
+
 **Next Instruction for Agent:**
-- Check CI for commit `e4549f2` — `GEN:exe_start` through `GEN:after_exec` markers will show exactly where `compile_to_exe` crashes after `compile_file` returns.
-- If markers up to `GEN:gcc_cmd_ready` fire but `GEN:after_exec` does not, the crash is in `system.system_exec()` → likely `runtime.o` not found or GCC crash.
-- If markers fail before `GEN:gcc_cmd_ready`, the crash is in `write_lines(asm, ...)`, string concatenation for gcc_cmd, or `get_compiler_dir()`.
-- **Most likely**: the crash is in `write_lines` — writing 1000+ lines (string + append each) after `generate_assembly` heap churn could trigger latent corruption.
-- On macOS: `str w32` bug fixed (ListLiteral used n/list_size as register names). `L_append_no_realloc_arm` fixed (uses `next_label()` now).
-- If CI passes: remove all `GEN:...` markers and finalize.
+1. Push the memset forward declaration fix to GitHub and trigger CI.
+2. If CI passes macOS ARM64 `runtime.c` compilation, the next blocker will be linking (undefined `_sys_exit_c` from `runtime.o` or `sys_calls.nv` issues).
+3. If CI still fails on macOS ARM64 with a different error, investigate the new error from the now-visible compiler output.
+4. On success, remove all `GEN:...` debug markers introduced in Phase 9 and finalize.

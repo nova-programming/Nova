@@ -318,7 +318,12 @@ SYSCALL int _sprintf(char *b, const char *fmt, ...) {
 #if !defined(_WIN32)
 SYSCALL void *malloc(size_t);
 SYSCALL void free(void *);
+/* Apple defines memset as a fortified macro (__builtin___memset_chk with extra
+ * args) in <string.h> — a forward declaration with SYSCALL attribute would expand
+ * through the macro and cause parameter mismatch. Rely on the system header. */
+#if !defined(__APPLE__)
 SYSCALL void *memset(void *, int, size_t);
+#endif
 #endif
 /* strcmp, strlen, strcpy are defined above on Windows, in <string.h> on macOS/Linux */
 /* Dict layout (24 bytes): [count:4][pad/capacity:4][keys_ptr:8][values_ptr:8] */
