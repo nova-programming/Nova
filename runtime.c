@@ -273,7 +273,7 @@ int main(void) {
 #include <time.h>
 #include <unistd.h>
 
-#if defined(LINUX_WRAP)
+#if defined(LINUX_WRAP) || defined(MACOS)
 SYSCALL int _printf(const char *fmt, ...) {
     va_list ap; va_start(ap, fmt);
     int n = vprintf(fmt, ap); va_end(ap);
@@ -309,7 +309,7 @@ SYSCALL int _sprintf(char *b, const char *fmt, ...) {
     return n;
 }
 
-#endif /* defined(LINUX_WRAP) */
+#endif /* defined(LINUX_WRAP) || defined(MACOS) */
 #endif /* defined(_WIN32) / defined(LINUX_WRAP) || defined(MACOS) */
 
 /* ==================== Dict runtime functions (all platforms) ==================== */

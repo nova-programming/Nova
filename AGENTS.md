@@ -420,15 +420,15 @@ galaxy publish             # Publish to registry
   - `L_append_no_realloc_arm` label duplicated 100+ times in self-hosted ARM64 codegen — needs a unique label counter.
   - `str w32, [x1, #8]` — `w32` is not a valid ARM64 register (max is `w30`). Python bootstrap ARM64 codegen bug.
 
-### Phase 10: macOS ARM64 runtime.c memset Forward Declaration Fix (This Session — June 29, 2026)
-- **CI status** (commit `27ead74`): macOS ARM64 CI shows `runtime.c:321:15: error: expected parameter declarator` — `runtime.c` fails to compile with exit code 1 (now visible because `capture_output=True` was removed).
-- **Root cause** (`runtime.c:321`): `SYSCALL void *memset(void *, int, size_t);` forward declaration conflicts with Apple's Xcode 16.4 fortified `_string.h` header, which defines `memset` as a macro expanding to `__builtin___memset_chk(dest, ch, count, __darwin_obsz0(dest))`. The SYSCALL attribute + macro expansion produces an invalid declaration with wrong parameter count.
-- **Fix**: Added `#if !defined(__APPLE__)` guard around the `memset` forward declaration only. On `__APPLE__`, `<string.h>` is already included (via line 269's `#elif defined(LINUX_WRAP) || defined(MACOS)` block), so `memset` is properly declared by system headers. `malloc` and `free` forward declarations remain unchanged (they are not fortified macros).
-- **`__APPLE__` predefined**: Clang on macOS automatically defines `__APPLE__`, so no `-D` flag is needed. This macro is NOT defined on Windows or Linux.
+### Phase 10: macOS ARM64 runtime.c Missing Libc Wrappers (This Session — June 29, 2026)
+- **CI status** (commit `0c6827d` — memset fix): `runtime.c` compilation now succeeds on macOS ARM64, but ALL symbols from `runtime.o` are undefined at link time: `_file_exists`, `_str_sub`, `_sys_*_c`, `_system_c`, etc.
+- **Root cause**: The 22 libc wrapper functions (`_printf`→`vprintf`, `_malloc`→`malloc`, `_strlen`→`strlen`, etc.) at `runtime.c:276-312` were guarded by `#if defined(LINUX_WRAP)` only — **not compiled on macOS**. On macOS ARM64 (Mach-O), the C library does NOT add `_` prefix to C symbols (unlike x86_64 Mach-O), so `printf` is exported as `printf`, not `_printf`. The codegen always emits `_printf`, `_malloc` etc. — without the C wrappers, these symbols hit a defunct Mach-O symbol lookup and ALL fail.
+- **Fix**: Changed `#if defined(LINUX_WRAP)` to `#if defined(LINUX_WRAP) || defined(MACOS)` at line 276 so the 22 libc wrappers (and `_system_c`) are compiled on macOS too. The `SYSCALL` attribute is empty on ARM64 so it's harmless.
+- **Note**: The `_sys_*_c` bridge functions (`_sys_open_c`, `_sys_exit_c`, etc.) were already under `#if defined(LINUX_WRAP) || defined(MACOS)` and the unconditional builtins (`_str_sub`, `_file_exists`, etc.) were always compiled — they were NOT the cause of the error. The real issue was that the libc `_`-prefixed wrappers were missing, causing EVERY symbol from `runtime.o` to fail linker resolution.
 - **Status**: Waiting for CI on next commit to confirm the fix.
 
 **Next Instruction for Agent:**
-1. Push the memset forward declaration fix to GitHub and trigger CI.
-2. If CI passes macOS ARM64 `runtime.c` compilation, the next blocker will be linking (undefined `_sys_exit_c` from `runtime.o` or `sys_calls.nv` issues).
-3. If CI still fails on macOS ARM64 with a different error, investigate the new error from the now-visible compiler output.
+1. Push the libc wrappers fix (`#if defined(LINUX_WRAP)` → `#if defined(LINUX_WRAP) || defined(MACOS)`) to GitHub and trigger CI.
+2. If CI passes macOS ARM64 linking, the next blocker will likely be runtime errors in the compiled stage1 compiler (assembly bugs, syscall mismatches).
+3. If CI still fails on macOS ARM64 with a different error, investigate the new error.
 4. On success, remove all `GEN:...` debug markers introduced in Phase 9 and finalize.
