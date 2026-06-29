@@ -447,3 +447,14 @@ galaxy publish             # Publish to registry
 3. Verify `nova-stage1 build test.nv` produces a working `test` binary on macOS ARM64.
 4. If successful on macOS, also verify Ubuntu x86_64 CI still passes (no regression).
 5. On full CI success, clean up `GEN:...` debug markers from Phase 9 stdlib files.
+
+### Phase 12: macOS ARM64 "Index Out Of Bounds" ForIn/Append/Pop List Layout Fix (This Session — June 30, 2026)
+- **Root cause**: Phase 11 changed ARM64 list layout from inline (`base+16+i*8`) to indirect (16-byte header + separate data buffer at `[base+8]`). ArrayIndex, ArrayIndexAssign, and ListLiteral were updated, but **ForIn, MethodCall("append"), and MethodCall("pop") were missed** — they still used the old inline layout.
+- **ForIn loop** (`codegen.py:839`): `add x2, x3, #16` → `ldr x2, [x3, #8]`. Caused loop variable to read garbage (list header + 16 bytes of whatever follows the header), crashing downstream when used as array index ("Index Out Of Bounds").
+- **Append capacity check** (`codegen.py:1138`): `ldr w3, [x1, #8]` → `ldr w3, [x1, #4]`. In indirect layout, offset 8 holds the data pointer (64-bit), not the capacity. Offset 4 holds capacity. This bug made the `b.lt no_realloc` check always-true (data pointer >> small count), so realloc was never triggered — latent but harmless.
+- **Append element store** (`codegen.py:1157`): `add x2, x1, #16` → `ldr x2, [x1, #8]`. Stored appended element at `list_ptr + 16` (past header) instead of `data_ptr + index`.
+- **Pop element load** (`codegen.py:1167`): `add x3, x1, #16` → `ldr x3, [x1, #8]`. Same inline→indirect fix for element read.
+- **Append realloc path** (`codegen.py:1148-1151`): Fixed capacity offset (8→4) and data pointer indirection (`add x2, x0, #16`→`ldr x2, [x0, #8]`). Dead code before fix (always-true b.lt), now correctly reachable.
+- **Files changed**: `bootstrap/compiler/backend/arm64/codegen.py` — 5 edits across 7 instructions.
+- **Tests**: All 246 pass (1 skipped, pre-existing).
+- **Commit**: TBD
