@@ -12,7 +12,7 @@
 - **Galaxy Package Manager**: Fully implemented and live at [galaxy-registry.vercel.app](https://galaxy-registry.vercel.app)
 - **Compiler**: Stable, tree-shaking + variable-to-register promotion + self-hosted bootstrap working + 7 built-in functions + cross-platform GCC fallback + exceptions + list comprehensions + REPL + cross-compilation
 - **Installer**: Native `install.sh` (bash, uses only curl+tar) + `install.ps1` (PowerShell) + `install.py` (Python fallback) — no dependencies required
-- **Version**: v0.7.0. `nova --version` / `galaxy --version` + self-update via registry endpoints
+- **Version**: v0.9.0. `nova --version` / `galaxy --version` + self-update via registry endpoints
 
 ## What Was Accomplished
 
@@ -425,10 +425,25 @@ galaxy publish             # Publish to registry
 - **Root cause**: The 22 libc wrapper functions (`_printf`→`vprintf`, `_malloc`→`malloc`, `_strlen`→`strlen`, etc.) at `runtime.c:276-312` were guarded by `#if defined(LINUX_WRAP)` only — **not compiled on macOS**. On macOS ARM64 (Mach-O), the C library does NOT add `_` prefix to C symbols (unlike x86_64 Mach-O), so `printf` is exported as `printf`, not `_printf`. The codegen always emits `_printf`, `_malloc` etc. — without the C wrappers, these symbols hit a defunct Mach-O symbol lookup and ALL fail.
 - **Fix**: Changed `#if defined(LINUX_WRAP)` to `#if defined(LINUX_WRAP) || defined(MACOS)` at line 276 so the 22 libc wrappers (and `_system_c`) are compiled on macOS too. The `SYSCALL` attribute is empty on ARM64 so it's harmless.
 - **Note**: The `_sys_*_c` bridge functions (`_sys_open_c`, `_sys_exit_c`, etc.) were already under `#if defined(LINUX_WRAP) || defined(MACOS)` and the unconditional builtins (`_str_sub`, `_file_exists`, etc.) were always compiled — they were NOT the cause of the error. The real issue was that the libc `_`-prefixed wrappers were missing, causing EVERY symbol from `runtime.o` to fail linker resolution.
-- **Status**: Waiting for CI on next commit to confirm the fix.
+- **Status**: Confirmed — linker fix works. Clean compile of `nova-stage1` on macOS ARM64.
+- **Next blocker**: Runtime crash `"Index Out Of Bounds"` when `nova-stage1 --version` runs.
+
+### Phase 11: macOS ARM64 List Layout Fix (This Session — June 30, 2026)
+- **Linker fix confirmed**: `__asm__` aliases work — `nm` shows both `__name` (C export) and `_name` (alias) symbols. `nova-stage1` binary compiles and runs.
+- **Runtime crash root cause** (`bootstrap/compiler/backend/arm64/codegen.py:1059-1067`): **x0/x1 register swap in ArrayIndex list read path**. After popping `x0=index, x1=base`, the code used `w1` (lower 32 bits of list ptr) for bounds check against zero instead of `w0` (actual index). When the heap address's lower 32 bits ≥ 0x80000000 (interpreted as negative signed), the incorrect `b.lt _out_of_bounds` triggered — causing the `"Index Out Of Bounds"` crash.
+- **Secondary bug — layout mismatch**: ARM64 `ListLiteral` used inline elements (`base+16+i*8`) while `_sys_get_args_c` and x86_64 codegen used indirect storage (data pointer at `base+8`). ArrayIndex/ArrayIndexAssign also used inline, creating incompatibility.
+- **Fixes applied** (`bootstrap/compiler/backend/arm64/codegen.py`):
+  - `ArrayIndex` list path: `cmp w1,#0` → `cmp w0,#0`, `ldr w2,[x0]` → `ldr w2,[x1]`, `add x2,x0,#16` → `ldr x2,[x1,#8]`, `ldr x0,[x2,x1,lsl#3]` → `ldr x0,[x2,w0,uxtw#3]`
+  - `ArrayIndexAssign`: `add x3,x2,#16` → `ldr x3,[x2,#8]` (data ptr indirection)
+  - `ListLiteral`: Changed from single-inline `malloc(list_size)` with elements at `base+16` to indirect dual-allocation (16-byte header + separate data buffer), matching x86_64 layout
+- **Self-hosted ARM64 bounds check** (`stdlib/backend/arm64/codegen_expr.nv:832-841`): Added missing bounds check (`cmp %c,#0`, `ldr w1,[%d]`, `cmp %c,x1`) to ArrayIndex list read path
+- **Test updated** (`tests/test_codegen_arm64.py:216`): `test_list_literal` now verifies `str x1,[x2,#8]` (data ptr) and `str x0,[x1,#0]` (element storage) instead of `add x2,x1,#16`
+- **All 246 tests pass** (1 skipped, pre-existing).
+- **Version bump**: Nova v0.8.0 → v0.9.0
 
 **Next Instruction for Agent:**
-1. Push the libc wrappers fix (`#if defined(LINUX_WRAP)` → `#if defined(LINUX_WRAP) || defined(MACOS)`) to GitHub and trigger CI.
-2. If CI passes macOS ARM64 linking, the next blocker will likely be runtime errors in the compiled stage1 compiler (assembly bugs, syscall mismatches).
-3. If CI still fails on macOS ARM64 with a different error, investigate the new error.
-4. On success, remove all `GEN:...` debug markers introduced in Phase 9 and finalize.
+1. Push the ARM64 list layout fix (x0/x1 swap + indirect layout) to GitHub and trigger CI.
+2. On macOS ARM64, verify `nova-stage1 --version` no longer crashes with "Index Out Of Bounds".
+3. Verify `nova-stage1 build test.nv` produces a working `test` binary on macOS ARM64.
+4. If successful on macOS, also verify Ubuntu x86_64 CI still passes (no regression).
+5. On full CI success, clean up `GEN:...` debug markers from Phase 9 stdlib files.

@@ -830,6 +830,11 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    add %a, %a, %c")
             emit(state, "    str %a, [sp, #-16]!")
         } else {
+            emit(state, "    cmp %c, #0")
+            emit(state, "    b.lt _out_of_bounds")
+            emit(state, "    ldr w1, [%d]")
+            emit(state, "    cmp %c, x1")
+            emit(state, "    b.ge _out_of_bounds")
             ptr_sz = ptr_size(state)
             emit(state, "    ldr %d, [%d, #8]")
             if ptr_sz == 8 {
