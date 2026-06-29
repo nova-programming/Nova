@@ -312,6 +312,45 @@ SYSCALL int _sprintf(char *b, const char *fmt, ...) {
 #endif /* defined(LINUX_WRAP) || defined(MACOS) */
 #endif /* defined(_WIN32) / defined(LINUX_WRAP) || defined(MACOS) */
 
+/* ==================== Assembly alias for Mach-O (macOS ARM64) ==================== */
+/* On ARM64 Mach-O, Clang prepends an underscore to all C symbols.
+ * So C function `_abs` exports as Mach-O `__abs`, while assembly
+ * references `_abs` (single underscore). These aliases bridge the gap. */
+#if defined(MACOS) && defined(__aarch64__)
+__asm__(".globl _abs\n.set _abs, __abs");
+__asm__(".globl _call\n.set _call, __call");
+__asm__(".globl _char_code\n.set _char_code, __char_code");
+__asm__(".globl _dict_new\n.set _dict_new, __dict_new");
+__asm__(".globl _dict_has\n.set _dict_has, __dict_has");
+__asm__(".globl _dict_get\n.set _dict_get, __dict_get");
+__asm__(".globl _dict_set\n.set _dict_set, __dict_set");
+__asm__(".globl _dict_remove\n.set _dict_remove, __dict_remove");
+__asm__(".globl _dict_keys\n.set _dict_keys, __dict_keys");
+__asm__(".globl _dict_values\n.set _dict_values, __dict_values");
+__asm__(".globl _dict_items\n.set _dict_items, __dict_items");
+__asm__(".globl _file_exists\n.set _file_exists, __file_exists");
+__asm__(".globl _file_size\n.set _file_size, __file_size");
+__asm__(".globl _file_type\n.set _file_type, __file_type");
+__asm__(".globl _max\n.set _max, __max");
+__asm__(".globl _min\n.set _min, __min");
+__asm__(".globl _now\n.set _now, __now");
+__asm__(".globl _slice_list\n.set _slice_list, __slice_list");
+__asm__(".globl _str_sub\n.set _str_sub, __str_sub");
+__asm__(".globl _sys_alloc_c\n.set _sys_alloc_c, __sys_alloc_c");
+__asm__(".globl _sys_close_c\n.set _sys_close_c, __sys_close_c");
+__asm__(".globl _sys_exit_c\n.set _sys_exit_c, __sys_exit_c");
+__asm__(".globl _sys_flush_c\n.set _sys_flush_c, __sys_flush_c");
+__asm__(".globl _sys_free_c\n.set _sys_free_c, __sys_free_c");
+__asm__(".globl _sys_get_args_c\n.set _sys_get_args_c, __sys_get_args_c");
+__asm__(".globl _sys_get_tick_count_c\n.set _sys_get_tick_count_c, __sys_get_tick_count_c");
+__asm__(".globl _sys_open_c\n.set _sys_open_c, __sys_open_c");
+__asm__(".globl _sys_platform_c\n.set _sys_platform_c, __sys_platform_c");
+__asm__(".globl _sys_read_c\n.set _sys_read_c, __sys_read_c");
+__asm__(".globl _sys_write_c\n.set _sys_write_c, __sys_write_c");
+__asm__(".globl _sys_write_raw_c\n.set _sys_write_raw_c, __sys_write_raw_c");
+__asm__(".globl _system_c\n.set _system_c, __system_c");
+#endif
+
 /* ==================== Dict runtime functions (all platforms) ==================== */
 /* Forward declarations for dict functions (Linux/macOS need these since malloc/free/memset
  * aren't defined yet. On Windows they're already defined above.) */
