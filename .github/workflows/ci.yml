@@ -71,7 +71,7 @@ jobs:
         run: |
           if [ "${{ runner.os }}" = "macOS" ]; then
             echo "=== lldb backtrace ==="
-            lldb -b -o "run --version" -o "bt all" -o "frame variable" -o "quit" ./nova-stage1 2>&1 || true
+            printf 'run --version\nbt all\nframe variable\nquit\n' | lldb ./nova-stage1 2>&1 || true
             echo "=== end lldb ==="
           fi
           ./nova-stage1 --version; echo "exit=$?"
