@@ -456,10 +456,12 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
             # Debug: show symbols in runtime.o on macOS
             if is_macos:
                 try:
-                    nm_res = subprocess.run(["nm", runtime_o], capture_output=True, text=True, timeout=10)
-                    print(f"  [DEBUG] nm runtime.o (stdout): {nm_res.stdout[:2000]}")
+                    nm_res = subprocess.run(["nm", "-g", runtime_o], capture_output=True, text=True, timeout=10)
+                    for line in nm_res.stdout.splitlines():
+                        print(f"  [NM] {line}")
                     if nm_res.stderr:
-                        print(f"  [DEBUG] nm runtime.o (stderr): {nm_res.stderr[:500]}")
+                        for line in nm_res.stderr.splitlines():
+                            print(f"  [NM_ERR] {line}")
                 except Exception as e:
                     print(f"  [DEBUG] nm failed: {e}")
     
