@@ -453,6 +453,15 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
             print(f"  [WARN] runtime.c compilation failed (exit {rt_res.returncode})")
         if os.path.exists(runtime_o):
             cmd += [runtime_o]
+            # Debug: show symbols in runtime.o on macOS
+            if is_macos:
+                try:
+                    nm_res = subprocess.run(["nm", runtime_o], capture_output=True, text=True, timeout=10)
+                    print(f"  [DEBUG] nm runtime.o (stdout): {nm_res.stdout[:2000]}")
+                    if nm_res.stderr:
+                        print(f"  [DEBUG] nm runtime.o (stderr): {nm_res.stderr[:500]}")
+                except Exception as e:
+                    print(f"  [DEBUG] nm failed: {e}")
     
     print(f"Running command: {' '.join(cmd)}")
     res = subprocess.run(cmd, capture_output=True, text=True)
