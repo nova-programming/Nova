@@ -1132,32 +1132,35 @@ class Arm64Codegen:
                 self.compile_expr(node.instance)
                 self.assembly.append("    ldr x1, [sp], #16")
                 self.assembly.append("    ldr x0, [sp], #16")
-                self.assembly.append("    ldr w2, [x1]")
-                self.assembly.append("    add w2, w2, #1")
-                self.assembly.append("    str w2, [x1]")
-                self.assembly.append("    ldr w3, [x1, #4]")
-                self.assembly.append("    cmp w2, w3")
+                # x1 = list_ptr, x0 = value
+                # Compare (count+1)*8 <= capacity_bytes to decide realloc
+                self.assembly.append("    ldr w2, [x1]")             # w2 = count
+                self.assembly.append("    add w3, w2, #1")           # w3 = count + 1
+                self.assembly.append("    lsl w3, w3, #3")           # w3 = (count+1)*8 = new byte size
+                self.assembly.append("    ldr w4, [x1, #4]")         # w4 = capacity_bytes
+                self.assembly.append("    cmp w3, w4")
                 self.assembly.append(f"    b.lt {no_realloc}")
-                self.assembly.append("    str x1, [sp, #-16]!")
-                self.assembly.append("    str x0, [sp, #-16]!")
-                self.assembly.append("    str x1, [sp, #-16]!")
-                self.assembly.append("    mov x0, x1")
-                self.assembly.append("    lsl x1, x3, #1")
+                # Realloc path: realloc(data_ptr, capacity*2)
+                self.assembly.append("    lsl w4, w4, #1")           # w4 = capacity * 2 = new_capacity_bytes
+                self.assembly.append("    ldr x2, [x1, #8]")         # x2 = data_ptr
+                self.assembly.append("    str x0, [sp, #-16]!")      # save value
+                self.assembly.append("    str x1, [sp, #-16]!")      # save list_ptr
+                self.assembly.append("    mov x0, x2")               # x0 = data_ptr (arg1)
+                self.assembly.append("    mov x1, x4")               # x1 = new_size (arg2)
                 self.assembly.append("    bl _realloc")
-                self.assembly.append("    ldr x1, [sp], #16")
-                self.assembly.append("    ldr w3, [x1, #4]")
-                self.assembly.append("    lsl w3, w3, #1")
-                self.assembly.append("    str w3, [x1, #4]")
-                self.assembly.append("    ldr x2, [x0, #8]")
-                self.assembly.append("    mov x1, x0")
-                self.assembly.append("    ldr x0, [sp], #16")
-                self.assembly.append("    ldr x1, [sp], #16")
+                self.assembly.append("    mov x2, x0")               # x2 = new data_ptr
+                self.assembly.append("    ldr x1, [sp], #16")        # restore list_ptr
+                self.assembly.append("    ldr x0, [sp], #16")        # restore value
+                self.assembly.append("    str x2, [x1, #8]")         # update data_ptr in header
+                self.assembly.append("    str w4, [x1, #4]")         # update capacity in header
+                # Common store path (post-increment count)
                 self.assembly.append(f"{no_realloc}:")
-                self.assembly.append("    ldr w3, [x1]")
-                self.assembly.append("    ldr x2, [x1, #8]")
-                self.assembly.append("    sub w3, w3, #1")
-                self.assembly.append("    str x0, [x2, x3, lsl #3]")
-                self.assembly.append("    str x1, [sp, #-16]!")
+                self.assembly.append("    ldr w3, [x1]")             # w3 = count
+                self.assembly.append("    ldr x2, [x1, #8]")         # x2 = data_ptr
+                self.assembly.append("    str x0, [x2, w3, uxtw #3]") # data[count] = value
+                self.assembly.append("    add w3, w3, #1")           # count++
+                self.assembly.append("    str w3, [x1]")             # store count
+                self.assembly.append("    str x1, [sp, #-16]!")      # push list_ptr (expression result)
             elif node.method_name == "pop":
                 self.compile_expr(node.instance)
                 self.assembly.append("    ldr x1, [sp], #16")
