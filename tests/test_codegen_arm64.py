@@ -192,7 +192,7 @@ class TestArm64CodegenOutput(unittest.TestCase):
 
     def test_slice_string_helper(self):
         asm = compile_to_asm('print("abc"[1:2])')
-        self.assertIn("_slice_string:", asm)
+        self.assertIn("bl _str_sub", asm)
 
     def test_return_statement(self):
         asm = compile_to_asm("def add(a, b) { return a + b }\nprint(add(1, 2))")
