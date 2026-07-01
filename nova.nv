@@ -59,6 +59,7 @@ if cmd == "--uninstall" or cmd == "uninstall" or cmd == "remove" {
 }
 if cmd == "build" {
     file_path = ""
+    plat = ""
     debug_mode = 0
     bench_mode = 0
     target_arch = "x86_64"
