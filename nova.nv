@@ -58,15 +58,10 @@ if cmd == "--uninstall" or cmd == "uninstall" or cmd == "remove" {
     sys_exit(0)
 }
 if cmd == "build" {
-    print("[DBG-1] entering build block")
-    sys_flush()
-    print("[DBG-2] before file_path")
     file_path = ""
-    print("[DBG-3] before target_arch")
     debug_mode = 0
     bench_mode = 0
     target_arch = "x86_64"
-    print("[DBG-4] before while loop")
 
     i = 2
     while i < len(args) {
@@ -95,29 +90,17 @@ if cmd == "build" {
         }
         i = i + 1
     }
-    system.file_write(2, "[DBG-7c] after arg loop\n")
-    sys_flush()
     if len(file_path) == 0 {
         print("Usage: nova build [-d] [-b] <file.nv>")
         sys_exit(1)
     }
-    print("[DBG] before sys_platform")
-    sys_flush()
     if len(plat) == 0 { plat = sys_platform() }
-    print("[DBG] after sys_platform: " + plat)
-    sys_flush()
     out_len = len(file_path)
-    print("[DBG] file_path len: " + str(out_len))
-    sys_flush()
     if plat == "windows" {
-        print("[DBG] plat is windows")
         out_file = file_path[0 : out_len - 3] + ".exe"
     } else {
-        print("[DBG] plat is NOT windows")
         out_file = file_path[0 : out_len - 3]
     }
-    print("[DBG] out_file: " + out_file)
-    sys_flush()
     print("Compiling " + file_path + " -> " + out_file)
     
     start_ticks = 0
@@ -125,13 +108,7 @@ if cmd == "build" {
         start_ticks = sys_get_tick_count()
     }
     
-    print("[DBG] Starting compile_to_exe " + file_path)
-    sys_flush()
-    print("[DBG] calling compile_to_exe")
-    sys_flush()
     compile_to_exe(file_path, out_file, debug_mode, target_arch, plat)
-    print("[DBG] compile_to_exe returned")
-    sys_flush()
     
     if bench_mode == 1 {
         end_ticks = sys_get_tick_count()
