@@ -494,3 +494,15 @@ galaxy publish             # Publish to registry
 - **Commit**: `949b057` — pushed.
 - **CI status** (run `28451632121`, commit `949b057`):
   - **macOS ARM64**: `nova-stage1 --version` now crashes with `EXC_BAD_ACCESS` in `strlen(NULL)` inside `printf`, called from `or_end_3906` (OR expression label in Nova `--version` check). The `--version` path (`cmd == "--version" or cmd == "version"`) contains no string slicing, so the crash is **not directly caused** by the slice fix. Hypothesis: pre-existing heap corruption from the partially-fixed append bug, made visible by the ASLR heap layout on this particular CI runner. Previous CI run (commit `fb0040e`) happened to have a lucky heap layout that made `--version` work. **Re-running CI to check consistency**.
+
+### Phase 13: ARM64 sp-relative Variable Offset Corruption Fix (This Session — July 2, 2026)
+- **Root cause**: ARM64 codegen uses `ldr xN, [sp, #K]` for local variable access (frame-pointer-free optimization). When `compile_expr(A)` pushes result to stack (changing `sp`), a subsequent `compile_expr(B)` reads variable `B` at the wrong offset from the now-shifted `sp` — returning garbage. On x86_64, this doesn't happen because variables use `[rbp - offset]` (frame-pointer relative, `rbp` never changes during expr evaluation).
+- **Symptom**: macOS ARM64 `nova-stage1` crashes with `"Index Out Of Bounds"` inside `args[i]` in the `while i < len(args)` arg-parsing loop — `i` was read as garbage because `compile_expr(node.base)` (compiling `args`) pushed to stack before `compile_expr(node.index)` read variable `i`.
+- **Fix** (`bootstrap/compiler/backend/arm64/codegen.py`): Replaced all pairs/triples of sequential `compile_expr` calls with `_compile_expr_to_reg` (reads variables while `sp` is at base, then pushes register values to stack). Affected 16 handlers:
+  - `ArrayIndex` (crash site), `ArrayIndexAssign`, `Slice`, `Append`, `WriteFile`
+  - `DataFieldAssign`, `PointerAssign`, `Read`/`Write` method calls
+  - All 7 dict method handlers (`get`, `has`, `set`, `remove`, `keys`, `values`, `items`)
+  - String concat, string comparison, float binary ops, float comparison
+- **Test fix**: `cset x0, eq` → `cset x\d+, eq` regex in ARM64 compare tests (register allocation changed from x0 to x2 due to allocator changes). All 67 ARM64 tests pass.
+- **Commit**: `7eb0121` — pushed. Awaiting CI.
+- **Debug markers**: Kept `[DBG]` prints in `nova.nv` until CI confirms the fix.
