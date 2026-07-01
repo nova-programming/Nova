@@ -66,7 +66,7 @@ jobs:
             otool -s __DATA __data ./ci-tmp/test_cc 2>&1 | head -60 || true
             echo "=== lldb test_cc (printf args) ==="
             lldb --batch \
-              -o "br s -n _printf" \
+              -o "br s -a \"\`_main + 64\`\" -o 1" \
               -o "run" \
               -o "register read x0 x1 x2" \
               -o "memory read -f s -c 64 \$x0" \
@@ -119,7 +119,7 @@ jobs:
             otool -s __DATA __data ./nova-stage1 2>&1 | head -60 || true
             echo "=== lldb printf inspection (stage1 --version) ==="
             lldb --batch \
-              -o "br s -n _printf" \
+              -o "br s -n _printf -s libsystem_c.dylib" \
               -o "run --version" \
               -o "register read x0 x1 x2" \
               -o "memory read -f s -c 64 \$x0" \
