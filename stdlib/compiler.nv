@@ -147,13 +147,18 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
         }
     }
 
-    print("Reading file: " + path)
+    print("[DBG:compile_file] opening: " + path)
     sys_flush()
     fd = sys_open(path, "r")
-    print("[DBG:compile_file] after sys_open")
+    print("[DBG:compile_file] after sys_open fd=" + str(fd))
+    sys_flush()
+    print("[DBG:compile_file] calling sys_read")
     sys_flush()
     source = sys_read(fd)
-    print("[DBG:compile_file] after sys_read, len=" + str(len(source)))
+    print("[DBG:compile_file] after sys_read")
+    sys_flush()
+    src_len = len(source)
+    print("[DBG:compile_file] source len=" + str(src_len))
     sys_flush()
     sys_close(fd)
 
