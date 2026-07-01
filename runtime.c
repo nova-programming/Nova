@@ -323,7 +323,6 @@ SYSCALL int _fseek(int s, long o, int w) { return fseek((FILE*)(intptr_t)s, o, w
 SYSCALL long _ftell(int s) { return ftell((FILE*)(intptr_t)s); }
 SYSCALL int _fflush(int s) { return fflush((FILE*)(intptr_t)s); }
 SYSCALL void _exit(int c) { exit(c); }
-SYSCALL int _system_c(const char *c) { return system(c); }
 #endif /* defined(LINUX_WRAP) */
 
 #endif /* defined(_WIN32) / defined(LINUX_WRAP) / MACOS */
