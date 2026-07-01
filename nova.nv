@@ -58,20 +58,17 @@ if cmd == "--uninstall" or cmd == "uninstall" or cmd == "remove" {
     sys_exit(0)
 }
 if cmd == "build" {
-    system.file_write(2, "[DBG-1] entering build block\n")
-    system.file_write(2, "[DBG-2] before sys_flush\n")
+    print("[DBG-1] entering build block")
     sys_flush()
-    system.file_write(2, "[DBG-3] after sys_flush\n")
+    print("[DBG-2] before file_path")
     file_path = ""
-    system.file_write(2, "[DBG-4] after file_path\n")
+    print("[DBG-3] before target_arch")
     debug_mode = 0
     bench_mode = 0
-    system.file_write(2, "[DBG-5] after bench_mode\n")
     target_arch = "x86_64"
-    system.file_write(2, "[DBG-6] after target_arch\n")
+    print("[DBG-4] before while loop")
 
     i = 2
-    system.file_write(2, "[DBG-7] before while loop\n")
     while i < len(args) {
         if args[i] == "-d" or args[i] == "--debug" {
             debug_mode = 1
