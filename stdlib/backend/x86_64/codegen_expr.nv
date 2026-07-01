@@ -912,7 +912,11 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    push %d")
         emit(state, "    push %c")
         emit(state, "    push %x")
-        emit_call(state, "_str_sub", 3)
+        if is_string_expr(state, node.left) == 1 {
+            emit_call(state, "_str_sub", 3)
+        } else {
+            emit_call(state, "_slice_list", 3)
+        }
         emit(state, "    push %a")
         return
     }

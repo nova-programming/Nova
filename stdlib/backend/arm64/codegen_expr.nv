@@ -865,7 +865,11 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    str %d, [sp, #-16]!")
         emit(state, "    str %c, [sp, #-16]!")
         emit(state, "    str %x, [sp, #-16]!")
-        emit_call(state, "_str_sub", 3)
+        if is_string_expr(state, node.left) == 1 {
+            emit_call(state, "_str_sub", 3)
+        } else {
+            emit_call(state, "_slice_list", 3)
+        }
         emit(state, "    str %a, [sp, #-16]!")
         return
     }

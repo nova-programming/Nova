@@ -487,10 +487,20 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     i = 0
     while i < len(ast) {
         node = ast[i]
-        if node.kind == "StructDef" {
+        if node.kind == "Data" {
             state.struct_names.append(node.val_str)
-            state.struct_sizes.append(0)
             state.struct_fields.append([])
+            max_off = 0
+            j = 0
+            while j < len(node.params) {
+                off = get_prop_offset(state, node.val_str, node.params[j])
+                if off + ptr_size(state) > max_off {
+                    max_off = off + ptr_size(state)
+                }
+                j = j + 1
+            }
+            if max_off == 0 { max_off = 4 }
+            state.struct_sizes.append(max_off)
         }
         i = i + 1
     }
@@ -502,7 +512,7 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         node = ast[i]
         if node.kind == "Function" {
             functions.append(node)
-        } elif node.kind == "StructDef" {
+        } elif node.kind == "Data" {
             # no-op - struct defs are handled by scan_vars
         } else {
             top_level.append(node)

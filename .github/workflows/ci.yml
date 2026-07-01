@@ -64,23 +64,6 @@ jobs:
             otool -tV ./ci-tmp/test_cc 2>&1 | head -40 || true
             echo "=== DATA section hex dump ==="
             otool -s __DATA __data ./ci-tmp/test_cc 2>&1 | head -60 || true
-            echo "=== lldb test_cc (printf args) ==="
-            lldb --batch \
-              -o "br s -n _main -o 1" \
-              -o "run" \
-              -o "thread step-instruction -c 16" \
-              -o "register read x0 x1" \
-              -o "memory read -f s -c 64 \$x0" \
-              -o "memory read -f s -c 64 \$x1" \
-              -o "bt all" \
-              ./ci-tmp/test_cc 2>&1 || true
-            echo "=== lldb test_cc (raw run) ==="
-            lldb --batch \
-              -o "target create ./ci-tmp/test_cc" \
-              -o "run" \
-              -o "bt all" \
-              -o "register read x0 x1 x2 x3 x4 x5 fp lr" \
-              ./ci-tmp/test_cc 2>&1 || true
             echo "=== run ==="
             ./ci-tmp/test_cc
           fi
@@ -110,22 +93,10 @@ jobs:
         run: |
           set +e
           if [ "${{ runner.os }}" = "macOS" ]; then
-            echo "=== Generated assembly (first 200 lines) ==="
-            head -200 ./nova.s
-            echo "=== nm stage1 (first 80 lines) ==="
-            nm ./nova-stage1 2>&1 | head -80
-            echo "=== otool -tv _main ==="
-            otool -tV ./nova-stage1 2>&1 | head -100
-            echo "=== DATA section hex dump ==="
-            otool -s __DATA __data ./nova-stage1 2>&1 | head -60 || true
-            echo "=== lldb printf inspection (stage1 --version) ==="
-            lldb --batch \
-              -o "target create ./nova-stage1" \
-              -o "run --version" \
-              -o "register read x0 x1" \
-              -o "bt all" \
-              ./nova-stage1 2>&1 || true
-            echo "=== end lldb ==="
+            echo "=== nm stage1 (first 30 lines) ==="
+            nm ./nova-stage1 2>&1 | head -30
+            echo "=== otool -tv _main (first 30 lines) ==="
+            otool -tV ./nova-stage1 2>&1 | head -30
           fi
           ./nova-stage1 --version; echo "version exit=$?"
           ./nova-stage1 2>&1; echo "plain exit=$?"

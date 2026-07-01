@@ -421,6 +421,7 @@ class Arm64Codegen:
         self.assembly.append(".extern _file_type")
         self.assembly.append(".extern _now")
         self.assembly.append(".extern _str_sub")
+        self.assembly.append(".extern _slice_list")
         self.assembly.append(".extern _call")
 
         self.data_section.append(".align 3")
@@ -1188,10 +1189,13 @@ class Arm64Codegen:
             self.compile_expr(node.end)
             self.compile_expr(node.start)
             self.compile_expr(node.base)
-            self.assembly.append("    ldr x0, [sp], #16")   # x0 = string
+            self.assembly.append("    ldr x0, [sp], #16")   # x0 = base
             self.assembly.append("    ldr x1, [sp], #16")   # x1 = start
             self.assembly.append("    ldr x2, [sp], #16")   # x2 = end
-            self.assembly.append("    bl _str_sub")
+            if self._is_string_expr(node):
+                self.assembly.append("    bl _str_sub")
+            else:
+                self.assembly.append("    bl _slice_list")
             self.assembly.append("    str x0, [sp, #-16]!")
         elif isinstance(node, StrConvert):
             self.compile_expr(node.target)

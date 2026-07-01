@@ -274,9 +274,10 @@ int main(void) {
 #include <unistd.h>
 
 #if defined(LINUX_WRAP) || defined(MACOS)
-SYSCALL int _printf(const char *fmt, ...) {
-    va_list ap; va_start(ap, fmt);
-    int n = vprintf(fmt, ap); va_end(ap);
+/* Fixed-arg signature: callers always pass fmt + one variadic arg (x0=fmt, x1=arg).
+ * Non-variadic bypasses AAPCS64 register save area requirement for ARM64. */
+SYSCALL int _printf(const char *fmt, int64_t arg) {
+    int n = fprintf(stdout, fmt, arg);
     fflush(stdout);
     return n;
 }
@@ -303,10 +304,9 @@ SYSCALL long _ftell(int s) { return ftell((FILE*)(intptr_t)s); }
 SYSCALL int _fflush(int s) { return fflush((FILE*)(intptr_t)s); }
 SYSCALL void _exit(int c) { exit(c); }
 SYSCALL int _system_c(const char *c) { return system(c); }
-SYSCALL int _sprintf(char *b, const char *fmt, ...) {
-    va_list ap; va_start(ap, fmt);
-    int n = vsprintf(b, fmt, ap); va_end(ap);
-    return n;
+/* Fixed-arg signature — same reasoning as _printf above */
+SYSCALL int _sprintf(char *b, const char *fmt, int64_t arg) {
+    return sprintf(b, fmt, arg);
 }
 
 #endif /* defined(LINUX_WRAP) || defined(MACOS) */
@@ -317,17 +317,6 @@ SYSCALL int _sprintf(char *b, const char *fmt, ...) {
  * So C function `_abs` exports as Mach-O `__abs`, while assembly
  * references `_abs` (single underscore). These aliases bridge the gap. */
 #if defined(MACOS) && defined(__aarch64__)
-__asm__(".globl _abs\n.set _abs, __abs");
-__asm__(".globl _call\n.set _call, __call");
-__asm__(".globl _char_code\n.set _char_code, __char_code");
-__asm__(".globl _dict_new\n.set _dict_new, __dict_new");
-__asm__(".globl _dict_has\n.set _dict_has, __dict_has");
-__asm__(".globl _dict_get\n.set _dict_get, __dict_get");
-__asm__(".globl _dict_set\n.set _dict_set, __dict_set");
-__asm__(".globl _dict_remove\n.set _dict_remove, __dict_remove");
-__asm__(".globl _dict_keys\n.set _dict_keys, __dict_keys");
-__asm__(".globl _dict_values\n.set _dict_values, __dict_values");
-__asm__(".globl _dict_items\n.set _dict_items, __dict_items");
 __asm__(".globl _abs\n.set _abs, __abs");
 __asm__(".globl _call\n.set _call, __call");
 __asm__(".globl _char_code\n.set _char_code, __char_code");
