@@ -107,7 +107,11 @@ if cmd == "build" {
         start_ticks = sys_get_tick_count()
     }
     
+    print("[DBG] Starting compile_to_exe " + file_path)
+    sys_flush()
     compile_to_exe(file_path, out_file, debug_mode, target_arch, plat)
+    print("[DBG] compile_to_exe done")
+    sys_flush()
     
     if bench_mode == 1 {
         end_ticks = sys_get_tick_count()

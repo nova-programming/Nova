@@ -119,9 +119,17 @@ def cache_key(cache_lines: list, path: string) -> string {
 }
 
 def compile_file(path: string, debug_mode: int, target_arch: string, target_os: string) -> list {
+    print("[DBG:compile_file] start")
+    sys_flush()
     cache_file = cache_path(path)
+    print("[DBG:compile_file] after cache_path")
+    sys_flush()
     cached_lines = load_cache(cache_file)
+    print("[DBG:compile_file] after load_cache")
+    sys_flush()
     current_size = file_size(path)
+    print("[DBG:compile_file] after file_size")
+    sys_flush()
     cached_size_str = cache_key(cached_lines, path)
     cached_size = 0
     if cached_size_str != "" {
@@ -140,28 +148,48 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     }
 
     print("Reading file: " + path)
+    sys_flush()
     fd = sys_open(path, "r")
+    print("[DBG:compile_file] after sys_open")
+    sys_flush()
     source = sys_read(fd)
+    print("[DBG:compile_file] after sys_read, len=" + str(len(source)))
+    sys_flush()
     sys_close(fd)
 
+    print("[DBG:compile_file] tokenize start")
+    sys_flush()
     tokens = tokenize(source)
+    print("[DBG:compile_file] after tokenize")
+    sys_flush()
     tok_count = len(tokens)
     tok_str = str(tok_count)
     print("Tokens: " + tok_str)
+    sys_flush()
     
     print("Parsing...")
+    sys_flush()
     ast = parse(tokens, path)
+    print("[DBG:compile_file] after parse")
+    sys_flush()
     
     print("Resolving imports...")
+    sys_flush()
     visited = []
     ast = resolve_imports(ast, visited, target_arch, target_os)
+    print("[DBG:compile_file] after resolve_imports")
+    sys_flush()
 
     print("Type checking...")
+    sys_flush()
     tc = TypeChecker()
     tc_init(tc)
     tc_check(tc, ast)
+    print("[DBG:compile_file] after type_check")
+    sys_flush()
 
     print("Generating assembly...")
+    sys_flush()
     is_x64 = 0
     if target_arch == "x86_64" { is_x64 = 1 }
     if target_arch == "arm64" {
@@ -169,8 +197,11 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     } else {
         asm = generate_assembly(ast, debug_mode, is_x64, target_os)
     }
+    print("[DBG:compile_file] after generate_assembly")
+    sys_flush()
 
     print("Compilation finished.")
+    sys_flush()
 
     # Update build cache
     new_cached_lines = cached_lines
