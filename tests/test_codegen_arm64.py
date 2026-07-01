@@ -211,10 +211,12 @@ class TestArm64CodegenOutput(unittest.TestCase):
 
     def test_list_literal(self):
         asm = compile_to_asm("print([1, 2, 3])")
-        self.assertIn("bl _malloc", asm)
-        self.assertIn("str w", asm)
+        self.assertGreaterEqual(asm.count("bl _malloc"), 2)
+        self.assertIn("str w3, [x2]", asm)
+        self.assertIn("str w3, [x2, #4]", asm)
         self.assertIn("str x1, [x2, #8]", asm)
         self.assertIn("str x0, [x1, #0]", asm)
+        self.assertIn("str x0, [x1, #8]", asm)
 
     def test_len_string(self):
         asm = compile_to_asm('print(len("abc"))')

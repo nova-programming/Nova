@@ -441,12 +441,32 @@ galaxy publish             # Publish to registry
 - **All 246 tests pass** (1 skipped, pre-existing).
 - **Version bump**: Nova v0.8.0 → v0.9.0
 
+### Phase 15: Self-Hosted ARM64 Codegen Fracture Fix (This Session — July 1, 2026)
+
+- **Root cause**: The self-hosted ARM64 codegen (`stdlib/backend/arm64/codegen_expr.nv`, `codegen_stmt.nv`) used **inline** list layout (single malloc for header+data, elements at `list+16+i*8`) while the bootstrap ARM64 codegen (`bootstrap/compiler/backend/arm64/codegen.py`) used **indirect** layout (16-byte header with separate data buffer, data_ptr at `[header+8]`). When the self-hosted compiler ran `build` on ARM64, ListLiteral, ForIn, Append, and Pop wrote/read elements using inline offsets, but ArrayIndex/ArrayIndexAssign used indirect dereference — guaranteed crash on any list operation.
+
+- **ListLiteral** (`codegen_expr.nv:743-777`): Changed from single `malloc(total_sz)` with elements at `list+16` to header `malloc(16)` + data `malloc(req_cap)` with `data_ptr` at `[header+8]`, `count` at `[header+0]`, `capacity` at `[header+4]`. Element store loop uses data_ptr + `i*ptr_sz`.
+
+- **Append** (`codegen_expr.nv:923-967`):
+  - **Capacity check**: `ldr w1, [%x, #8]` → `ldr w4, [%x, #4]` (header[4] = capacity in bytes). Removed `add x3, x3, #16` (no header size added to needed bytes). Changed `b.le` → `b.lt` to match bootstrap behavior (realloc needed when at exact capacity).
+  - **Element store**: `add %d, %x, #16` → `ldr %d, [%x, #8]` (indirect data_ptr).
+  - **Realloc path**: `b.le` clobbered `%x` (x1 on ARM64, w1 aliases x1) — `ldr w1, [%x, #8]` destroyed the list pointer. Realloc also targeted the wrong thing (header instead of data buffer). Fixed: save `%x` (list_ptr) and `%c` (value) on stack before realloc; load `%d` (data_ptr) from `[%x, #8]`; push args for `realloc(data_ptr, new_cap)` in correct order (new_cap first, data_ptr on top for x0); after call, reload list_ptr from stack, update `header[8]` and `header[4]`.
+  - **ARM64 register aliasing**: `%a`=x0, `%x`=x1, `%c`=x2, `%d`=x3, `%i`=x4, `%j`=x5, `%b`=sp.
+
+- **Pop** (`codegen_expr.nv:967-979`): `add %d, %x, #16` → `ldr %d, [%x, #8]` (indirect data_ptr).
+
+- **ForIn** (`codegen_stmt.nv:244-288`): `add %x, %d, #16` → `ldr %x, [%d, #8]` (indirect data_ptr).
+
+- **Test update** (`tests/test_codegen_arm64.py:212-217`): Updated `test_list_literal` to check for indirect layout patterns: `str w3, [x2]` (count), `str w3, [x2, #4]` (capacity), `str x1, [x2, #8]` (data_ptr), `str x0, [x1, #0]` (data[0]).
+
+- **All 67 ARM64 codegen tests pass**, all 54 x86_64 codegen tests pass, all 13 exception tests pass, all 17 type_call tests pass. Total: 175+ tests pass (galaxy and native_exec tests require network/GCC, skipped locally).
+
 **Next Instruction for Agent:**
-1. Push the ARM64 list layout fix (x0/x1 swap + indirect layout) to GitHub and trigger CI.
-2. On macOS ARM64, verify `nova-stage1 --version` no longer crashes with "Index Out Of Bounds".
+1. Commit the self-hosted ARM64 codegen indirect layout fixes and push to trigger CI.
+2. On macOS ARM64, verify `nova-stage1 --version` no longer crashes.
 3. Verify `nova-stage1 build test.nv` produces a working `test` binary on macOS ARM64.
-4. If successful on macOS, also verify Ubuntu x86_64 CI still passes (no regression).
-5. On full CI success, clean up `GEN:...` debug markers from Phase 9 stdlib files.
+4. On CI green, clean up `GEN:...` debug markers from Phase 9 stdlib files.
+5. If `--version` crash persists, investigate ARM64 heap corruption in `_concat_strings` or `_sys_get_args_c` with register dump from CI.
 
 ### Phase 12: macOS ARM64 "Index Out Of Bounds" ForIn/Append/Pop List Layout Fix (This Session — June 30, 2026)
 - **Root cause**: Phase 11 changed ARM64 list layout from inline (`base+16+i*8`) to indirect (16-byte header + separate data buffer at `[base+8]`). ArrayIndex, ArrayIndexAssign, and ListLiteral were updated, but **ForIn, MethodCall("append"), and MethodCall("pop") were missed** — they still used the old inline layout.
@@ -458,3 +478,19 @@ galaxy publish             # Publish to registry
 - **Files changed**: `bootstrap/compiler/backend/arm64/codegen.py` — 5 edits across 7 instructions.
 - **Tests**: All 246 pass (1 skipped, pre-existing).
 - **Commit**: TBD
+
+### Phase 13: ARM64 Append Double Bug + _slice_string/_str_sub Rewrite (This Session — June 30, 2026)
+- **Append fix was actually TWO bugs, not one** (`bootstrap/compiler/backend/arm64/codegen.py`):
+  - **Bug 1 (unit mismatch)**: Capacity check `ldr w3, [x1, #4]` reads element count, `cmp w1, w3` compares capacity (bytes) to count (elements). After fixing offset to `[x1, #4]`, the `cmp w1, w3` is now element vs element — **but capacity was still in bytes**. Fixed by using `w4=[x1, #0]` (capacity in elements) and comparing `cmp w4, w3`.
+  - **Bug 2 (wrong realloc target)**: Realloc path reallocated the **header** (`mov x0, x1`) instead of the **data buffer** (`ldr x0, [x1, #8]`). After realloc, `str x0, [x1, #8]` also clobbered `x1` (list_ptr) with the byte-size argument before using it. Fixed by: (a) saving list_ptr in `x5`, (b) loading data buffer ptr from `[x5, #8]` and passing that to realloc, (c) after realloc, saving new buffer back to `[x5, #8]`, (d) storing new element at `data_ptr[index]` via `str x1, [x5, x3, lsl #3]`.
+  - **Pre/post increment**: Moved `str w4, [x5, #4]` (save incremented count) to before the element store (pre-increment → post-increment to match x86_64 behavior).
+- **Commit**: `fb0040e` — pushed, CI showed `--version` exits 0 on macOS ARM64.
+
+### Phase 14: ARM64 String Slice → _str_sub (This Session — June 30, 2026)
+- **Root cause** (`bootstrap/compiler/backend/arm64/codegen.py:545-583`): `_slice_string` was a hand-written assembly helper that read string slice arguments from **fixed stack offsets** (sp+64, sp+80, sp+96). The caller (Slice handler in `codegen_expr.nv`) passed arguments via **registers** in standard ARM64 ABI (x0=string, x1=start, x2=end). Since nobody wrote to those stack offsets, `_slice_string` read garbage → corrupted slice results whenever the compiler used string slicing internally (e.g., `file_path[0:out_len-3]` in `compile_to_exe`).
+- **Fix**: Replaced `_slice_string` with existing C function `_str_sub` (defined in `runtime.c`, used by x86_64 codegen). Changed Slice handler from push/pop/stack-adjust dance (11 instructions) to simple register-based call to `_str_sub(x0=string, x1=start, x2=end)` (4 instructions). Removed `_emit_slice_string()` method entirely.
+- **Cleanup**: Dead `str x2, ...` / `str x1, ...` / `str x0, ...` push sequence in Slice handler removed (was re-pushing what was just popped for `_slice_string`'s caller-cleanup ABI). No stack manipulation needed for `_str_sub` since it uses standard ABI with callee cleanup.
+- **Tests**: All 246 pass (1 skipped). `test_slice_string_helper` updated to expect `bl _str_sub` instead of `bl _slice_string`.
+- **Commit**: `949b057` — pushed.
+- **CI status** (run `28451632121`, commit `949b057`):
+  - **macOS ARM64**: `nova-stage1 --version` now crashes with `EXC_BAD_ACCESS` in `strlen(NULL)` inside `printf`, called from `or_end_3906` (OR expression label in Nova `--version` check). The `--version` path (`cmd == "--version" or cmd == "version"`) contains no string slicing, so the crash is **not directly caused** by the slice fix. Hypothesis: pre-existing heap corruption from the partially-fixed append bug, made visible by the ASLR heap layout on this particular CI runner. Previous CI run (commit `fb0040e`) happened to have a lucky heap layout that made `--version` work. **Re-running CI to check consistency**.

@@ -743,36 +743,45 @@ def compile_expr(state: CodegenState, node: AstNode) {
     if node.kind == "ListLiteral" {
         cap = len(node.args)
         ptr_sz = ptr_size(state)
-        total_sz = 1048576
-        
-        req_sz = 16 + (cap * ptr_sz)
-        if req_sz > total_sz {
-            total_sz = req_sz
+        req_cap = 16
+        if cap > 0 {
+            req_cap = cap * ptr_sz
         }
         
-        emit(state, "    mov %a, " + str(total_sz))
+        emit(state, "    mov %a, 16")
+        emit(state, "    str %a, [sp, #-16]!")
+        emit_call(state, "_malloc", 1)
+        emit(state, "    mov %x, %a")
+        
+        emit(state, "    mov %a, " + str(req_cap))
         emit(state, "    str %a, [sp, #-16]!")
         emit_call(state, "_malloc", 1)
         
-        emit(state, "    mov w1, " + str(len(node.args)))
-        emit(state, "    str w1, [%a]")
-        emit(state, "    mov w1, " + str(total_sz))
-        emit(state, "    str w1, [%a, #8]")
-        emit(state, "    str %a, [sp, #-16]!")
+        emit(state, "    mov w1, " + str(cap))
+        emit(state, "    str w1, [%x]")
+        emit(state, "    mov w1, " + str(req_cap))
+        emit(state, "    str w1, [%x, #4]")
+        emit(state, "    str %a, [%x, #8]")
+        emit(state, "    str %x, [sp, #-16]!")
         
         idx_list = 0
         while idx_list < len(node.args) {
-            compile_expr(state, node.args[idx_list])
-            emit(state, "    ldr %c, [sp], #16")
-            emit(state, "    ldr %a, [sp], #16")
+            emit(state, "    ldr %x, [sp], #16")
+            emit(state, "    ldr %d, [%x, #8]")
+            emit(state, "    str %x, [sp, #-16]!")
+            emit(state, "    str %d, [sp, #-16]!")
             
-            data_off = 16 + (idx_list * ptr_sz)
+            compile_expr(state, node.args[idx_list])
+            
+            emit(state, "    ldr %c, [sp], #16")
+            emit(state, "    ldr %d, [sp], #16")
+            emit(state, "    ldr %x, [sp], #16")
+            
+            data_off = idx_list * ptr_sz
             if ptr_sz == 8 {
-                emit(state, "    str %c, [%a, #" + str(data_off) + "]")
-            } else {
-                emit(state, "    str w0, [%a, #" + str(data_off) + "]")
+                emit(state, "    str %c, [%d, #" + str(data_off) + "]")
             }
-            emit(state, "    str %a, [sp, #-16]!")
+            emit(state, "    str %x, [sp, #-16]!")
             idx_list = idx_list + 1
         }
     }
@@ -925,26 +934,26 @@ def compile_expr(state: CodegenState, node: AstNode) {
             } else {
                 emit(state, "    lsl x3, x3, #2")
             }
-            emit(state, "    add x3, x3, #16")
-            emit(state, "    ldr w1, [%x, #8]")
-            emit(state, "    cmp x3, x1")
+            emit(state, "    ldr w4, [%x, #4]")
+            emit(state, "    cmp x3, x4")
             no_realloc = next_label(state, "L_no_realloc")
-            emit(state, "    b.le " + no_realloc)
+            emit(state, "    b.lt " + no_realloc)
             
-            emit(state, "    lsl w1, w1, #1")
+            emit(state, "    lsl w4, w4, #1")
             emit(state, "    str %x, [sp, #-16]!")
             emit(state, "    str %c, [sp, #-16]!")
-            emit(state, "    str %i, [sp, #-16]!")
-            emit(state, "    str %x, [sp, #-16]!")
+            emit(state, "    ldr %d, [%x, #8]")
+            emit(state, "    str x4, [sp, #-16]!")
+            emit(state, "    str %d, [sp, #-16]!")
             emit_call(state, "_realloc", 2)
-            emit(state, "    ldr %c, [sp], #16")
             emit(state, "    ldr %x, [sp], #16")
-            emit(state, "    mov %x, %a")
-            emit(state, "    str w1, [%x, #8]")
+            emit(state, "    str x0, [%x, #8]")
+            emit(state, "    str w4, [%x, #4]")
+            emit(state, "    ldr %c, [sp], #16")
             
             emit(state, no_realloc + ":")
             emit(state, "    ldr w0, [%x]")
-            emit(state, "    add %d, %x, #16")
+            emit(state, "    ldr %d, [%x, #8]")
             if ptr_sz == 8 {
                 emit(state, "    str %c, [%d, x0, lsl #3]")
             } else {
@@ -962,7 +971,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    ldr w0, [%x]")
             emit(state, "    sub w0, w0, #1")
             emit(state, "    str w0, [%x]")
-            emit(state, "    add %d, %x, #16")
+            emit(state, "    ldr %d, [%x, #8]")
             if ptr_sz == 8 {
                 emit(state, "    ldr %c, [%d, x0, lsl #3]")
             } else {

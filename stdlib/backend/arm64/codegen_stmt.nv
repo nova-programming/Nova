@@ -261,7 +261,7 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    b.ge " + end_label)
         
         emit(state, "    ldr w0, [sp]")
-        emit(state, "    add %x, %d, #16")
+        emit(state, "    ldr %x, [%d, #8]")
         if ptr_sz == 8 {
             emit(state, "    ldr %a, [%x, x0, lsl #3]")
         } else {
