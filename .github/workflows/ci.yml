@@ -62,7 +62,18 @@ jobs:
             nm ./ci-tmp/test_cc 2>&1 || true
             echo "=== otool -tv _main ==="
             otool -tV ./ci-tmp/test_cc 2>&1 | head -40 || true
-            echo "=== lldb test_cc ==="
+            echo "=== DATA section hex dump ==="
+            otool -s __DATA __data ./ci-tmp/test_cc 2>&1 | head -60 || true
+            echo "=== lldb test_cc (printf args) ==="
+            lldb --batch \
+              -o "br s -n _printf" \
+              -o "run" \
+              -o "register read x0 x1 x2" \
+              -o "memory read -f s -c 64 \$x0" \
+              -o "memory read -f s -c 64 \$x1" \
+              -o "bt all" \
+              ./ci-tmp/test_cc 2>&1 || true
+            echo "=== lldb test_cc (raw run) ==="
             lldb --batch \
               -o "target create ./ci-tmp/test_cc" \
               -o "run" \
@@ -104,12 +115,16 @@ jobs:
             nm ./nova-stage1 2>&1 | head -80
             echo "=== otool -tv _main ==="
             otool -tV ./nova-stage1 2>&1 | head -100
-            echo "=== lldb --version crash ==="
+            echo "=== DATA section hex dump ==="
+            otool -s __DATA __data ./nova-stage1 2>&1 | head -60 || true
+            echo "=== lldb printf inspection (stage1 --version) ==="
             lldb --batch \
-              -o "target create ./nova-stage1" \
+              -o "br s -n _printf" \
               -o "run --version" \
+              -o "register read x0 x1 x2" \
+              -o "memory read -f s -c 64 \$x0" \
+              -o "memory read -f s -c 64 \$x1" \
               -o "bt all" \
-              -o "register read x0 x1 x2 x3 x4 x5 fp lr" \
               ./nova-stage1 2>&1 || true
             echo "=== end lldb ==="
           fi
