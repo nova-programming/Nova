@@ -70,8 +70,13 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           if [ "${{ runner.os }}" = "macOS" ]; then
-            echo "=== lldb backtrace ==="
-            lldb --batch -o "target stop-hook add -o 'bt all' -o 'frame variable'" -o "run --version" ./nova-stage1 2>&1 || true
+            echo "=== lldb --version crash backtrace ==="
+            lldb --batch \
+              -o "target create ./nova-stage1" \
+              -o "run --version" \
+              -o "bt all" \
+              -o "register read x0 x1 x2 x3 x4 x5 fp lr" \
+              ./nova-stage1 2>&1 || true
             echo "=== end lldb ==="
           fi
           ./nova-stage1 --version; echo "exit=$?"
