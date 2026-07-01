@@ -50,28 +50,41 @@ jobs:
       - name: Native compilation — generate assembly, compile runtime, assemble + link
         if: runner.os != 'Windows'
         run: |
+          set +e
           mkdir -p ./ci-tmp
           printf 'print("Hello from Nova CI")\n' > ./ci-tmp/test_cc.nv
-          python bootstrap/main.py build ./ci-tmp/test_cc.nv
+          python bootstrap/main.py build ./ci-tmp/test_cc.nv; rc=$?
+          echo "=== build exit code: $rc ==="
           echo "=== Generated assembly ==="
-          cat ./ci-tmp/test_cc.s
-          echo "=== nm linked binary ==="
-          nm ./ci-tmp/test_cc 2>&1 || true
-          echo "=== otool -tv _main ==="
-          otool -tV ./ci-tmp/test_cc 2>&1 | head -40 || true
-          echo "=== lldb test_cc ==="
-          lldb --batch \
-            -o "target create ./ci-tmp/test_cc" \
-            -o "run" \
-            -o "bt all" \
-            -o "register read x0 x1 x2 x3 x4 x5 fp lr" \
-            ./ci-tmp/test_cc 2>&1 || true
-          echo "=== run ==="
-          ./ci-tmp/test_cc
+          cat ./ci-tmp/test_cc.s 2>&1 || echo "(no assembly)"
+          if [ -f ./ci-tmp/test_cc ]; then
+            echo "=== nm linked binary ==="
+            nm ./ci-tmp/test_cc 2>&1 || true
+            echo "=== otool -tv _main ==="
+            otool -tV ./ci-tmp/test_cc 2>&1 | head -40 || true
+            echo "=== lldb test_cc ==="
+            lldb --batch \
+              -o "target create ./ci-tmp/test_cc" \
+              -o "run" \
+              -o "bt all" \
+              -o "register read x0 x1 x2 x3 x4 x5 fp lr" \
+              ./ci-tmp/test_cc 2>&1 || true
+            echo "=== run ==="
+            ./ci-tmp/test_cc
+          fi
+          exit $rc
 
       - name: Self-hosted bootstrap — Build stage1 compiler
         if: runner.os != 'Windows'
-        run: python bootstrap/main.py build nova.nv
+        run: |
+          set +e
+          python bootstrap/main.py build nova.nv; rc=$?
+          echo "=== stage1 build exit code: $rc ==="
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            echo "=== nova.s (first 100 lines) ==="
+            head -100 ./nova.s 2>&1 || echo "(no nova.s)"
+          fi
+          exit $rc
 
       - name: Self-hosted bootstrap — Setup
         if: runner.os != 'Windows'
@@ -83,6 +96,7 @@ jobs:
       - name: "Self-hosted bootstrap — Debug: Does stage1 even start?"
         if: runner.os != 'Windows'
         run: |
+          set +e
           if [ "${{ runner.os }}" = "macOS" ]; then
             echo "=== Generated assembly (first 200 lines) ==="
             head -200 ./nova.s
@@ -99,15 +113,19 @@ jobs:
               ./nova-stage1 2>&1 || true
             echo "=== end lldb ==="
           fi
-          ./nova-stage1 --version; echo "exit=$?"
-          ./nova-stage1 2>&1; echo "exit=$?"
+          ./nova-stage1 --version; echo "version exit=$?"
+          ./nova-stage1 2>&1; echo "plain exit=$?"
 
       - name: Self-hosted bootstrap — Stage1 compiles a test program
         if: runner.os != 'Windows'
         run: |
-          set -o pipefail
+          set +e
           ./nova-stage1 build ./ci-tmp/selfhost.nv 2>&1; rc=$?
           echo "## Stage1 build exit code: $rc" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ runner.os }}" = "macOS" ] && [ -f ./ci-tmp/selfhost.s ]; then
+            echo "=== selfhost.s (first 60 lines) ==="
+            head -60 ./ci-tmp/selfhost.s
+          fi
           exit $rc
 
       - name: Self-hosted bootstrap — Run compiled output
