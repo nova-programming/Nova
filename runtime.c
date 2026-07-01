@@ -349,6 +349,28 @@ __asm__(".globl _sys_read_c\n.set _sys_read_c, __sys_read_c");
 __asm__(".globl _sys_write_c\n.set _sys_write_c, __sys_write_c");
 __asm__(".globl _sys_write_raw_c\n.set _sys_write_raw_c, __sys_write_raw_c");
 __asm__(".globl _system_c\n.set _system_c, __system_c");
+/* Libc wrappers — must be aliased or assembly calls go to system printf (variadic!) */
+__asm__(".globl _printf\n.set _printf, __printf");
+__asm__(".globl _sprintf\n.set _sprintf, __sprintf");
+__asm__(".globl _malloc\n.set _malloc, __malloc");
+__asm__(".globl _free\n.set _free, __free");
+__asm__(".globl _realloc\n.set _realloc, __realloc");
+__asm__(".globl _strlen\n.set _strlen, __strlen");
+__asm__(".globl _strcmp\n.set _strcmp, __strcmp");
+__asm__(".globl _strcpy\n.set _strcpy, __strcpy");
+__asm__(".globl _strcat\n.set _strcat, __strcat");
+__asm__(".globl _memset\n.set _memset, __memset");
+__asm__(".globl _strstr\n.set _strstr, __strstr");
+__asm__(".globl _fopen\n.set _fopen, __fopen");
+__asm__(".globl _fclose\n.set _fclose, __fclose");
+__asm__(".globl _fwrite\n.set _fwrite, __fwrite");
+__asm__(".globl _fread\n.set _fread, __fread");
+__asm__(".globl _fputs\n.set _fputs, __fputs");
+__asm__(".globl _fputc\n.set _fputc, __fputc");
+__asm__(".globl _fseek\n.set _fseek, __fseek");
+__asm__(".globl _ftell\n.set _ftell, __ftell");
+__asm__(".globl _fflush\n.set _fflush, __fflush");
+__asm__(".globl _exit\n.set _exit, __exit");
 #endif
 
 /* ==================== Dict runtime functions (all platforms) ==================== */
