@@ -66,8 +66,9 @@ jobs:
             otool -s __DATA __data ./ci-tmp/test_cc 2>&1 | head -60 || true
             echo "=== lldb test_cc (printf args) ==="
             lldb --batch \
-              -o "br s -a \`_main + 64\` -o 1" \
+              -o "br s -n _main -o 1" \
               -o "run" \
+              -o "thread step-instruction -c 16" \
               -o "register read x0 x1" \
               -o "memory read -f s -c 64 \$x0" \
               -o "memory read -f s -c 64 \$x1" \
