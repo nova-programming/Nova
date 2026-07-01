@@ -361,7 +361,6 @@ __asm__(".globl _sys_platform_c\n.set _sys_platform_c, __sys_platform_c");
 __asm__(".globl _sys_read_c\n.set _sys_read_c, __sys_read_c");
 __asm__(".globl _sys_write_c\n.set _sys_write_c, __sys_write_c");
 __asm__(".globl _sys_write_raw_c\n.set _sys_write_raw_c, __sys_write_raw_c");
-__asm__(".globl _system_c\n.set _system_c, __system_c");
 /* Non-variadic printf/sprintf — must be aliased or assembly calls resolve
  * to the system's variadic printf (which reads garbage from the register
  * save area on ARM64 AAPCS64). Only these two are aliased; other libc
