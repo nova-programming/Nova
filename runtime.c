@@ -287,6 +287,9 @@ SYSCALL int _printf(const char *fmt, int64_t arg) {
 SYSCALL int _sprintf(char *b, const char *fmt, int64_t arg) {
     return sprintf(b, fmt, arg);
 }
+/* _system_c: called from Nova stdlib's system_exec(). Safe to alias on macOS
+ * because it calls system() -> Mach-O _system (not aliased), no recursion. */
+SYSCALL int _system_c(const char *c) { return system(c); }
 #endif
 
 /* Linux-only libc wrappers: on Linux, libc exports `printf` (no underscore),
@@ -370,6 +373,7 @@ __asm__(".globl _sys_write_raw_c\n.set _sys_write_raw_c, __sys_write_raw_c");
  * malloc() → `bl _malloc` → back to _malloc. */
 __asm__(".globl _printf\n.set _printf, __printf");
 __asm__(".globl _sprintf\n.set _sprintf, __sprintf");
+__asm__(".globl _system_c\n.set _system_c, __system_c");
 #endif
 
 /* ==================== Dict runtime functions (all platforms) ==================== */
