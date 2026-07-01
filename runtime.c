@@ -273,14 +273,31 @@ int main(void) {
 #include <time.h>
 #include <unistd.h>
 
-#if defined(LINUX_WRAP) || defined(MACOS)
 /* Fixed-arg signature: callers always pass fmt + one variadic arg (x0=fmt, x1=arg).
- * Non-variadic bypasses AAPCS64 register save area requirement for ARM64. */
+ * Non-variadic bypasses AAPCS64 register save area requirement for ARM64.
+ * macOS also needs these because system printf is variadic and our assembly
+ * doesn't set up the register save area required by AAPCS64 variadic calls. */
+#if defined(LINUX_WRAP) || defined(MACOS)
 SYSCALL int _printf(const char *fmt, int64_t arg) {
     int n = fprintf(stdout, fmt, arg);
     fflush(stdout);
     return n;
 }
+/* Fixed-arg signature — same reasoning as _printf above */
+SYSCALL int _sprintf(char *b, const char *fmt, int64_t arg) {
+    return sprintf(b, fmt, arg);
+}
+#endif
+
+/* Linux-only libc wrappers: on Linux, libc exports `printf` (no underscore),
+ * but our codegen emits `_printf`, `_malloc`, etc. These wrappers bridge
+ * the naming gap. On macOS, libc exports `_printf`, `_malloc`, etc. directly
+ * (Mach-O adds the underscore), so no wrappers needed — the codegen's
+ * `bl _malloc` resolves to system `malloc` automatically.
+ * IMPORTANT: Do NOT define wrappers for functions like malloc/free/strlen
+ * on macOS — calling malloc() inside _malloc() would compile to `bl _malloc`
+ * which aliases back to _malloc, causing infinite recursion. */
+#if defined(LINUX_WRAP)
 SYSCALL void *_malloc(size_t s) { return malloc(s); }
 SYSCALL void _free(void *p) { free(p); }
 SYSCALL void *_realloc(void *p, size_t s) { return realloc(p, s); }
@@ -304,13 +321,9 @@ SYSCALL long _ftell(int s) { return ftell((FILE*)(intptr_t)s); }
 SYSCALL int _fflush(int s) { return fflush((FILE*)(intptr_t)s); }
 SYSCALL void _exit(int c) { exit(c); }
 SYSCALL int _system_c(const char *c) { return system(c); }
-/* Fixed-arg signature — same reasoning as _printf above */
-SYSCALL int _sprintf(char *b, const char *fmt, int64_t arg) {
-    return sprintf(b, fmt, arg);
-}
+#endif /* defined(LINUX_WRAP) */
 
-#endif /* defined(LINUX_WRAP) || defined(MACOS) */
-#endif /* defined(_WIN32) / defined(LINUX_WRAP) || defined(MACOS) */
+#endif /* defined(_WIN32) / defined(LINUX_WRAP) / MACOS */
 
 /* ==================== Assembly alias for Mach-O (macOS ARM64) ==================== */
 /* On ARM64 Mach-O, Clang prepends an underscore to all C symbols.
@@ -349,28 +362,15 @@ __asm__(".globl _sys_read_c\n.set _sys_read_c, __sys_read_c");
 __asm__(".globl _sys_write_c\n.set _sys_write_c, __sys_write_c");
 __asm__(".globl _sys_write_raw_c\n.set _sys_write_raw_c, __sys_write_raw_c");
 __asm__(".globl _system_c\n.set _system_c, __system_c");
-/* Libc wrappers — must be aliased or assembly calls go to system printf (variadic!) */
+/* Non-variadic printf/sprintf — must be aliased or assembly calls resolve
+ * to the system's variadic printf (which reads garbage from the register
+ * save area on ARM64 AAPCS64). Only these two are aliased; other libc
+ * wrappers (malloc, strlen, fwrite, etc.) are NOT defined on macOS since
+ * system libc exports them at the same Mach-O symbol name directly.
+ * Defining _malloc on macOS would cause infinite recursion: _malloc calls
+ * malloc() → `bl _malloc` → back to _malloc. */
 __asm__(".globl _printf\n.set _printf, __printf");
 __asm__(".globl _sprintf\n.set _sprintf, __sprintf");
-__asm__(".globl _malloc\n.set _malloc, __malloc");
-__asm__(".globl _free\n.set _free, __free");
-__asm__(".globl _realloc\n.set _realloc, __realloc");
-__asm__(".globl _strlen\n.set _strlen, __strlen");
-__asm__(".globl _strcmp\n.set _strcmp, __strcmp");
-__asm__(".globl _strcpy\n.set _strcpy, __strcpy");
-__asm__(".globl _strcat\n.set _strcat, __strcat");
-__asm__(".globl _memset\n.set _memset, __memset");
-__asm__(".globl _strstr\n.set _strstr, __strstr");
-__asm__(".globl _fopen\n.set _fopen, __fopen");
-__asm__(".globl _fclose\n.set _fclose, __fclose");
-__asm__(".globl _fwrite\n.set _fwrite, __fwrite");
-__asm__(".globl _fread\n.set _fread, __fread");
-__asm__(".globl _fputs\n.set _fputs, __fputs");
-__asm__(".globl _fputc\n.set _fputc, __fputc");
-__asm__(".globl _fseek\n.set _fseek, __fseek");
-__asm__(".globl _ftell\n.set _ftell, __ftell");
-__asm__(".globl _fflush\n.set _fflush, __fflush");
-__asm__(".globl _exit\n.set _exit, __exit");
 #endif
 
 /* ==================== Dict runtime functions (all platforms) ==================== */
