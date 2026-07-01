@@ -64,8 +64,7 @@ if cmd == "build" {
     debug_mode = 0
     bench_mode = 0
     target_arch = "x86_64"
-    print("[DBG] before arg loop")
-    sys_flush()
+
     i = 2
     while i < len(args) {
         if args[i] == "-d" or args[i] == "--debug" {
@@ -93,7 +92,7 @@ if cmd == "build" {
         }
         i = i + 1
     }
-    print("[DBG] after arg loop")
+    system.file_write(2, "[DBG-7c] after arg loop\n")
     sys_flush()
     if len(file_path) == 0 {
         print("Usage: nova build [-d] [-b] <file.nv>")

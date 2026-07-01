@@ -164,12 +164,12 @@ class TestArm64CodegenOutput(unittest.TestCase):
     def test_compare_str_eq(self):
         asm = compile_to_asm('print("abc" == "def")')
         self.assertIn("bl _strcmp", asm)
-        self.assertIn("cset x0, eq", asm)
+        self.assertRegex(asm, r'cset x\d+, eq')
 
     def test_compare_float_eq(self):
         asm = compile_to_asm("print(1.5 == 2.5)")
         self.assertIn("fcmp d0, d1", asm)
-        self.assertIn("cset x0, eq", asm)
+        self.assertRegex(asm, r'cset x\d+, eq')
 
     def test_data_fields(self):
         """Struct field access uses 8-byte offsets on ARM64."""

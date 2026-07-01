@@ -222,8 +222,12 @@ class Arm64Codegen:
             self.assembly.append(f"{label_end}:")
             return result_reg
         elif self._is_float_expr(node.left) or self._is_float_expr(node.right):
-            self.compile_expr(node.left)
-            self.compile_expr(node.right)
+            left_reg = self._compile_expr_to_reg(node.left)
+            right_reg = self._compile_expr_to_reg(node.right)
+            self.assembly.append(f"    str {left_reg}, [sp, #-16]!")
+            self.assembly.append(f"    str {right_reg}, [sp, #-16]!")
+            self._free_reg(left_reg)
+            self._free_reg(right_reg)
             self.assembly.append("    ldr d1, [sp]")
             self.assembly.append("    ldr d0, [sp, #16]")
             self.assembly.append("    add sp, sp, #32")
@@ -238,8 +242,12 @@ class Arm64Codegen:
             self.assembly.append(f"    ldr {reg}, [sp], #8")
             return reg
         elif node.op == "+" and (self._is_string_expr(node.left) or self._is_string_expr(node.right)):
-            self.compile_expr(node.left)
-            self.compile_expr(node.right)
+            left_reg = self._compile_expr_to_reg(node.left)
+            right_reg = self._compile_expr_to_reg(node.right)
+            self.assembly.append(f"    str {left_reg}, [sp, #-16]!")
+            self.assembly.append(f"    str {right_reg}, [sp, #-16]!")
+            self._free_reg(left_reg)
+            self._free_reg(right_reg)
             self.assembly.append("    ldr x1, [sp], #16")
             self.assembly.append("    ldr x0, [sp], #16")
             self.assembly.append("    str x1, [sp, #-16]!")
@@ -287,8 +295,12 @@ class Arm64Codegen:
                 is_str_cmp = True
 
         if is_float_cmp:
-            self.compile_expr(node.left)
-            self.compile_expr(node.right)
+            left_reg = self._compile_expr_to_reg(node.left)
+            right_reg = self._compile_expr_to_reg(node.right)
+            self.assembly.append(f"    str {left_reg}, [sp, #-16]!")
+            self.assembly.append(f"    str {right_reg}, [sp, #-16]!")
+            self._free_reg(left_reg)
+            self._free_reg(right_reg)
             self.assembly.append("    ldr d1, [sp]")
             self.assembly.append("    ldr d0, [sp, #16]")
             self.assembly.append("    add sp, sp, #32")
@@ -299,8 +311,12 @@ class Arm64Codegen:
             self.assembly.append(f"    cset {reg}, {cond}")
             return reg
         elif is_str_cmp:
-            self.compile_expr(node.left)
-            self.compile_expr(node.right)
+            left_reg = self._compile_expr_to_reg(node.left)
+            right_reg = self._compile_expr_to_reg(node.right)
+            self.assembly.append(f"    str {left_reg}, [sp, #-16]!")
+            self.assembly.append(f"    str {right_reg}, [sp, #-16]!")
+            self._free_reg(left_reg)
+            self._free_reg(right_reg)
             self.assembly.append("    ldr x1, [sp], #16")
             self.assembly.append("    ldr x0, [sp], #16")
             self.assembly.append("    str x1, [sp, #-16]!")
@@ -634,8 +650,12 @@ class Arm64Codegen:
             if self._is_string_expr(node.value):
                 self.string_vars.add(node.name)
         elif isinstance(node, DataFieldAssign):
-            self.compile_expr(node.value)
-            self.compile_expr(node.instance)
+            val_reg = self._compile_expr_to_reg(node.value)
+            inst_reg = self._compile_expr_to_reg(node.instance)
+            self.assembly.append(f"    str {val_reg}, [sp, #-16]!")
+            self.assembly.append(f"    str {inst_reg}, [sp, #-16]!")
+            self._free_reg(val_reg)
+            self._free_reg(inst_reg)
             self.assembly.append("    ldr x1, [sp], #16")
             self.assembly.append("    ldr x0, [sp], #16")
             struct_name = None
@@ -828,15 +848,25 @@ class Arm64Codegen:
             self.assembly.append("    ldr x0, [sp], #16")
             self.assembly.append("    bl _free")
         elif isinstance(node, PointerAssign):
-            self.compile_expr(node.value)
-            self.compile_expr(node.ptr)
+            val_reg = self._compile_expr_to_reg(node.value)
+            ptr_reg = self._compile_expr_to_reg(node.ptr)
+            self.assembly.append(f"    str {val_reg}, [sp, #-16]!")
+            self.assembly.append(f"    str {ptr_reg}, [sp, #-16]!")
+            self._free_reg(val_reg)
+            self._free_reg(ptr_reg)
             self.assembly.append("    ldr x1, [sp], #16")
             self.assembly.append("    ldr x0, [sp], #16")
             self.assembly.append("    str w1, [x0]")
         elif isinstance(node, ArrayIndexAssign):
-            self.compile_expr(node.value)
-            self.compile_expr(node.index)
-            self.compile_expr(node.base)
+            val_reg = self._compile_expr_to_reg(node.value)
+            idx_reg = self._compile_expr_to_reg(node.index)
+            base_reg = self._compile_expr_to_reg(node.base)
+            self.assembly.append(f"    str {val_reg}, [sp, #-16]!")
+            self.assembly.append(f"    str {idx_reg}, [sp, #-16]!")
+            self.assembly.append(f"    str {base_reg}, [sp, #-16]!")
+            self._free_reg(val_reg)
+            self._free_reg(idx_reg)
+            self._free_reg(base_reg)
             self.assembly.append("    ldr x2, [sp], #16")
             self.assembly.append("    ldr x1, [sp], #16")
             self.assembly.append("    ldr x0, [sp], #16")
@@ -848,8 +878,12 @@ class Arm64Codegen:
             self.assembly.append("    ldr x3, [x2, #8]")
             self.assembly.append("    str x0, [x3, x1, lsl #3]")
         elif isinstance(node, WriteFile):
-            self.compile_expr(node.content)
-            self.compile_expr(node.file)
+            cnt_reg = self._compile_expr_to_reg(node.content)
+            file_reg = self._compile_expr_to_reg(node.file)
+            self.assembly.append(f"    str {cnt_reg}, [sp, #-16]!")
+            self.assembly.append(f"    str {file_reg}, [sp, #-16]!")
+            self._free_reg(cnt_reg)
+            self._free_reg(file_reg)
             self.assembly.append("    ldr x1, [sp], #16")
             self.assembly.append("    ldr x0, [sp], #16")
             self.assembly.append("    bl _fputs")
@@ -1006,8 +1040,14 @@ class Arm64Codegen:
             is_str = self._is_string_expr(node.base) or base_type == 'string'
             if isinstance(node.base, DataFieldAccess) and node.base.field_name in ['struct_names', 'prop_names', 'local_var_names']:
                 is_str = False
-            self.compile_expr(node.base)
-            self.compile_expr(node.index)
+            # Use _compile_expr_to_reg to read variables with sp at base
+            # (compile_expr pushes to stack and changes sp, corrupting sp-relative variable loads)
+            base_reg = self._compile_expr_to_reg(node.base)
+            index_reg = self._compile_expr_to_reg(node.index)
+            self.assembly.append(f"    str {base_reg}, [sp, #-16]!")
+            self.assembly.append(f"    str {index_reg}, [sp, #-16]!")
+            self._free_reg(base_reg)
+            self._free_reg(index_reg)
             self.assembly.append("    ldr x0, [sp], #16")
             self.assembly.append("    ldr x1, [sp], #16")
             if is_str:
@@ -1089,8 +1129,12 @@ class Arm64Codegen:
         elif isinstance(node, MethodCall):
             if node.method_name == "append":
                 no_realloc = self.next_label("L_append_no_realloc")
-                self.compile_expr(node.args[0])
-                self.compile_expr(node.instance)
+                arg_reg = self._compile_expr_to_reg(node.args[0])
+                inst_reg = self._compile_expr_to_reg(node.instance)
+                self.assembly.append(f"    str {arg_reg}, [sp, #-16]!")
+                self.assembly.append(f"    str {inst_reg}, [sp, #-16]!")
+                self._free_reg(arg_reg)
+                self._free_reg(inst_reg)
                 self.assembly.append("    ldr x1, [sp], #16")
                 self.assembly.append("    ldr x0, [sp], #16")
                 # x1 = list_ptr, x0 = value
@@ -1145,8 +1189,12 @@ class Arm64Codegen:
                 self.assembly.append("    bl _sys_read_c")
                 self.assembly.append("    str x0, [sp, #-16]!")
             elif node.method_name == "write":
-                self.compile_expr(node.args[0])
-                self.compile_expr(node.instance)
+                arg_reg = self._compile_expr_to_reg(node.args[0])
+                inst_reg = self._compile_expr_to_reg(node.instance)
+                self.assembly.append(f"    str {arg_reg}, [sp, #-16]!")
+                self.assembly.append(f"    str {inst_reg}, [sp, #-16]!")
+                self._free_reg(arg_reg)
+                self._free_reg(inst_reg)
                 self.assembly.append("    ldr x1, [sp], #16")
                 self.assembly.append("    ldr x0, [sp], #16")
                 self.assembly.append("    bl _fputs")
@@ -1160,9 +1208,14 @@ class Arm64Codegen:
                 self.assembly.append("    ldr x0, [sp], #16")
                 self.assembly.append("    bl _fflush")
             elif node.method_name in ("get", "has", "set", "remove", "keys", "values", "items"):
+                # Use _compile_expr_to_reg for args+instance to avoid sp-relative corruption
                 for arg in node.args:
-                    self.compile_expr(arg)
-                self.compile_expr(node.instance)
+                    arg_reg = self._compile_expr_to_reg(arg)
+                    self.assembly.append(f"    str {arg_reg}, [sp, #-16]!")
+                    self._free_reg(arg_reg)
+                inst_reg = self._compile_expr_to_reg(node.instance)
+                self.assembly.append(f"    str {inst_reg}, [sp, #-16]!")
+                self._free_reg(inst_reg)
                 self.assembly.append("    ldr x0, [sp], #16")
                 if len(node.args) >= 1:
                     self.assembly.append("    ldr x1, [sp], #16")
@@ -1186,9 +1239,15 @@ class Arm64Codegen:
                 self.assembly.append("    ldr w0, [x0]")
                 self.assembly.append("    str x0, [sp, #-16]!")
         elif isinstance(node, Slice):
-            self.compile_expr(node.end)
-            self.compile_expr(node.start)
-            self.compile_expr(node.base)
+            end_reg = self._compile_expr_to_reg(node.end)
+            start_reg = self._compile_expr_to_reg(node.start)
+            base_reg = self._compile_expr_to_reg(node.base)
+            self.assembly.append(f"    str {end_reg}, [sp, #-16]!")    # push end (bottom)
+            self.assembly.append(f"    str {start_reg}, [sp, #-16]!")   # push start
+            self.assembly.append(f"    str {base_reg}, [sp, #-16]!")    # push base (top)
+            self._free_reg(end_reg)
+            self._free_reg(start_reg)
+            self._free_reg(base_reg)
             self.assembly.append("    ldr x0, [sp], #16")   # x0 = base
             self.assembly.append("    ldr x1, [sp], #16")   # x1 = start
             self.assembly.append("    ldr x2, [sp], #16")   # x2 = end
