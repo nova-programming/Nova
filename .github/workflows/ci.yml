@@ -53,6 +53,20 @@ jobs:
           mkdir -p ./ci-tmp
           printf 'print("Hello from Nova CI")\n' > ./ci-tmp/test_cc.nv
           python bootstrap/main.py build ./ci-tmp/test_cc.nv
+          echo "=== Generated assembly ==="
+          cat ./ci-tmp/test_cc.s
+          echo "=== nm linked binary ==="
+          nm ./ci-tmp/test_cc 2>&1 || true
+          echo "=== otool -tv _main ==="
+          otool -tV ./ci-tmp/test_cc 2>&1 | head -40 || true
+          echo "=== lldb test_cc ==="
+          lldb --batch \
+            -o "target create ./ci-tmp/test_cc" \
+            -o "run" \
+            -o "bt all" \
+            -o "register read x0 x1 x2 x3 x4 x5 fp lr" \
+            ./ci-tmp/test_cc 2>&1 || true
+          echo "=== run ==="
           ./ci-tmp/test_cc
 
       - name: Self-hosted bootstrap — Build stage1 compiler
@@ -70,7 +84,13 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           if [ "${{ runner.os }}" = "macOS" ]; then
-            echo "=== lldb --version crash backtrace ==="
+            echo "=== Generated assembly (first 200 lines) ==="
+            head -200 ./nova.s
+            echo "=== nm stage1 (first 80 lines) ==="
+            nm ./nova-stage1 2>&1 | head -80
+            echo "=== otool -tv _main ==="
+            otool -tV ./nova-stage1 2>&1 | head -100
+            echo "=== lldb --version crash ==="
             lldb --batch \
               -o "target create ./nova-stage1" \
               -o "run --version" \
