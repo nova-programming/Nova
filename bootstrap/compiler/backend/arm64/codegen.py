@@ -1228,16 +1228,23 @@ class Arm64Codegen:
                 call_node.line = node.line
                 self.compile_expr(call_node)
         elif isinstance(node, Len):
+            target_reg = self._compile_expr_to_reg(node.target)
+            temp_reg = self._alloc_reg()
+            self.assembly.append(f"    str x0, [sp, #-16]!")
+            self.assembly.append(f"    str {target_reg}, [sp, #-16]!")
+            self.assembly.append("    ldr x0, [sp], #16")
             if self._is_string_expr(node.target):
-                self.compile_expr(node.target)
-                self.assembly.append("    ldr x0, [sp], #16")
+                self.assembly.append("    str x0, [sp, #-16]!")
                 self.assembly.append("    bl _strlen")
                 self.assembly.append("    str x0, [sp, #-16]!")
             else:
-                self.compile_expr(node.target)
-                self.assembly.append("    ldr x0, [sp], #16")
                 self.assembly.append("    ldr w0, [x0]")
                 self.assembly.append("    str x0, [sp, #-16]!")
+            self.assembly.append(f"    ldr {temp_reg}, [sp], #16")
+            self.assembly.append("    ldr x0, [sp], #16")
+            self.assembly.append(f"    str {temp_reg}, [sp, #-16]!")
+            self._free_reg(temp_reg)
+            self._free_reg(target_reg)
         elif isinstance(node, Slice):
             end_reg = self._compile_expr_to_reg(node.end)
             start_reg = self._compile_expr_to_reg(node.start)

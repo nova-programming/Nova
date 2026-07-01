@@ -495,7 +495,7 @@ galaxy publish             # Publish to registry
 - **CI status** (run `28451632121`, commit `949b057`):
   - **macOS ARM64**: `nova-stage1 --version` now crashes with `EXC_BAD_ACCESS` in `strlen(NULL)` inside `printf`, called from `or_end_3906` (OR expression label in Nova `--version` check). The `--version` path (`cmd == "--version" or cmd == "version"`) contains no string slicing, so the crash is **not directly caused** by the slice fix. Hypothesis: pre-existing heap corruption from the partially-fixed append bug, made visible by the ASLR heap layout on this particular CI runner. Previous CI run (commit `fb0040e`) happened to have a lucky heap layout that made `--version` work. **Re-running CI to check consistency**.
 
-### Phase 13: ARM64 sp-relative Variable Offset Corruption Fix (This Session — July 2, 2026)
+### Phase 13a: ARM64 sp-relative Variable Offset Corruption Fix (This Session — July 2, 2026)
 - **Root cause**: ARM64 codegen uses `ldr xN, [sp, #K]` for local variable access (frame-pointer-free optimization). When `compile_expr(A)` pushes result to stack (changing `sp`), a subsequent `compile_expr(B)` reads variable `B` at the wrong offset from the now-shifted `sp` — returning garbage. On x86_64, this doesn't happen because variables use `[rbp - offset]` (frame-pointer relative, `rbp` never changes during expr evaluation).
 - **Symptom**: macOS ARM64 `nova-stage1` crashes with `"Index Out Of Bounds"` inside `args[i]` in the `while i < len(args)` arg-parsing loop — `i` was read as garbage because `compile_expr(node.base)` (compiling `args`) pushed to stack before `compile_expr(node.index)` read variable `i`.
 - **Fix** (`bootstrap/compiler/backend/arm64/codegen.py`): Replaced all pairs/triples of sequential `compile_expr` calls with `_compile_expr_to_reg` (reads variables while `sp` is at base, then pushes register values to stack). Affected 16 handlers:
@@ -504,5 +504,11 @@ galaxy publish             # Publish to registry
   - All 7 dict method handlers (`get`, `has`, `set`, `remove`, `keys`, `values`, `items`)
   - String concat, string comparison, float binary ops, float comparison
 - **Test fix**: `cset x0, eq` → `cset x\d+, eq` regex in ARM64 compare tests (register allocation changed from x0 to x2 due to allocator changes). All 67 ARM64 tests pass.
-- **Commit**: `7eb0121` — pushed. Awaiting CI.
+- **CI results (commit 7eb0121)**: Ubuntu x86_64 — FIXED (arg loop passes, sys_platform() returns "linux", later segfault is a different pre-existing bug). macOS ARM64 — crash changed from "Index Out Of Bounds" to "Bus error: 10" (later crash, different root cause).
+- **Print() debug markers added to `nova.nv`**: Replaced `system.file_write(2, ...)` markers with `print()` to avoid potential `_sys_write_c` misalignment bug on macOS ARM64. CI shows all 4 markers fire before crash.
 - **Debug markers**: Kept `[DBG]` prints in `nova.nv` until CI confirms the fix.
+
+### Phase 13b: Len Handler x0 Clobbering Bug Fix (This Session — July 2, 2026)
+- **Root cause** (`bootstrap/compiler/backend/arm64/codegen.py`): `Len` handler used `ldr x0, [sp], #16` (hardcoded x0) to pop the target pointer, then `ldr w0, [x0]` or `bl _strlen` — all clobbering x0. But `_compile_expr_to_reg(node.left)` in the int comparison path had already returned x0 holding the left operand value. When `_compile_expr_to_reg(Len(...))` was called for the right operand, the Len handler's x0 use corrupted the left operand. Compare became `cmp len_result, len_result` instead of `cmp i, len(args)` — the while loop exited immediately without iterating.
+- **Fix**: Len handler now saves x0 at entry (`str x0, [sp, #-16]!`), computes len (pushes result to stack), pops result into a temp register, restores x0 (`ldr x0, [sp], #16`), then pushes result back for the `_compile_expr_to_reg` fallback to pop into the right operand register.
+- **Verification**: `cmp x0, x3` = `cmp i, len(args)` in generated assembly. All 246 tests pass (1 skipped).
