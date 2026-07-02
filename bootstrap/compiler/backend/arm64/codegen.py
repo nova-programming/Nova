@@ -30,6 +30,18 @@ class Arm64Codegen:
         self.func_returns = {}
         self._reg_pool = []
 
+    def _emit_fp_access(self, f, op, reg, neg_offset):
+        """Emit `op reg, [fp, #neg_offset]`, handling ARM64's [-256,255] limit.
+        Falls back to `sub/add x15, fp, #abs; op reg, [x15]` for large offsets."""
+        if neg_offset < -256:
+            f.append(f"    sub x15, fp, #{-neg_offset}")
+            f.append(f"    {op} {reg}, [x15]")
+        elif neg_offset > 255:
+            f.append(f"    add x15, fp, #{neg_offset}")
+            f.append(f"    {op} {reg}, [x15]")
+        else:
+            f.append(f"    {op} {reg}, [fp, #{neg_offset}]")
+
     def get_prop_offset(self, name):
         """Fallback: scan ALL known structs for this field name, return per-struct offset.
         Uses a two-tier strategy: preferred struct override, then fewest-fields heuristic."""
@@ -163,7 +175,7 @@ class Arm64Codegen:
             if isinstance(offset, str):
                 self.assembly.append(f"    mov {reg}, {offset}")
             else:
-                self.assembly.append(f"    ldr {reg}, [fp, #{-offset}]")
+                self._emit_fp_access(self.assembly, "ldr", reg, -offset)
             return reg
         elif isinstance(node, UnaryOp):
             in_reg = self._compile_expr_to_reg(node.value)
@@ -621,7 +633,7 @@ class Arm64Codegen:
             if i < 8:
                 param_name = param[0] if isinstance(param, (list, tuple)) else param
                 offset = self.local_vars[param_name]
-                self.assembly.append(f"    str x{i}, [fp, #{-offset}]")
+                self._emit_fp_access(self.assembly, "str", f"x{i}", -offset)
 
         for stmt in fn.body:
             self.compile_stmt(stmt)
@@ -648,7 +660,7 @@ class Arm64Codegen:
             if isinstance(offset, str):
                 self.assembly.append(f"    mov {offset}, x0")
             else:
-                self.assembly.append(f"    str x0, [fp, #{-offset}]")
+                self._emit_fp_access(self.assembly, "str", "x0", -offset)
             if self._is_string_expr(node.value):
                 self.string_vars.add(node.name)
         elif isinstance(node, DataFieldAssign):
@@ -944,7 +956,7 @@ class Arm64Codegen:
             if isinstance(offset, str):
                 self.assembly.append(f"    mov x0, {offset}")
             else:
-                self.assembly.append(f"    ldr x0, [fp, #{-offset}]")
+                self._emit_fp_access(self.assembly, "ldr", "x0", -offset)
             self.assembly.append("    str x0, [sp, #-16]!")
         elif isinstance(node, BinOp):
             reg = self._compile_binop_to_reg(node)
