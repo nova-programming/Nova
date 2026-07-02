@@ -69,8 +69,13 @@ def cache_path(path: string) -> string {
     sys_flush()
     slash = 0
     i = 0
-    print("[DBG:cache_path] before while")
+    print("[DBG:cache_path] test_literal_int")
+    print(42)
+    print("[DBG:cache_path] test_variable_i")
     print(i)
+    print("[DBG:cache_path] test_variable_slash")
+    print(slash)
+    print("[DBG:cache_path] test_len_path")
     print(len(path))
     sys_flush()
     while i < len(path) {
