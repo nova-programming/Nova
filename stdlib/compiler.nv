@@ -78,10 +78,10 @@ def cache_path(path: string) -> string {
     print("[DBG:cache_path] test_len_path")
     print(len(path))
     print("[DBG:cache_path] after_len_print")
-    print("[DBG:cache_path] before_flush")
-    sys_flush()
-    print("[DBG:cache_path] after_flush")
-    print("[DBG:cache_path] test_while_cond")
+    print("[DBG:cache_path] before_while_cond")
+    print(i)
+    print(path)
+    print(len(path))
     sys_flush()
     while i < len(path) {
         if path[i] == "/" or path[i] == "\\" { 
