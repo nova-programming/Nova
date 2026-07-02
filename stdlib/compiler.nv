@@ -65,42 +65,12 @@ def resolve_imports(ast: list, visited: list, target_arch: string, target_os: st
 }
 
 def cache_path(path: string) -> string {
-    print("[DBG:cache_path] start")
-    sys_flush()
     slash = 0
     i = 0
-    print("[DBG:cache_path] test_literal_int")
-    print(42)
-    print("[DBG:cache_path] test_variable_i")
-    print(i)
-    print("[DBG:cache_path] test_variable_slash")
-    print(slash)
-    print("[DBG:cache_path] test_len_path")
-    print("[DBG:cache_path] path_value")
-    print(path)
-    print("[DBG:cache_path] after_path_print")
-    print("[DBG: path[0] = ]")
-    print(path[0])
-    print("[DBG: after path[0]]")
-    l = len(path)
-    print("[DBG:cache_path] after_len")
-    print(l)
-    print("[DBG:cache_path] after_print_l")
-    print("[DBG:cache_path] before_flush")
-    sys_flush()
-    print("[DBG:cache_path] after_flush")
-    print("[DBG:cache_path] test_while_cond")
-    sys_flush()
     while i < len(path) {
-        if path[i] == "/" or path[i] == "\\" { 
-            print("[DBG:cache_path] found slash at")
-            print(i)
-            slash = i 
-        }
+        if path[i] == "/" or path[i] == "\\" { slash = i }
         i = i + 1
     }
-    print("[DBG:cache_path] after while")
-    sys_flush()
     if slash > 0 { return str_sub(path, 0, slash + 1) + ".nova_cache.txt" }
     return ".nova_cache.txt"
 }
@@ -177,54 +147,21 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
         }
     }
 
-    print("[DBG:compile_file] opening: " + path)
-    sys_flush()
     fd = sys_open(path, "r")
-    print("[DBG:compile_file] after sys_open fd=" + str(fd))
-    sys_flush()
-    print("[DBG:compile_file] calling sys_read")
-    sys_flush()
     source = sys_read(fd)
-    print("[DBG:compile_file] after sys_read")
-    sys_flush()
-    src_len = len(source)
-    print("[DBG:compile_file] source len=" + str(src_len))
-    sys_flush()
     sys_close(fd)
 
-    print("[DBG:compile_file] tokenize start")
-    sys_flush()
     tokens = tokenize(source)
-    print("[DBG:compile_file] after tokenize")
-    sys_flush()
-    tok_count = len(tokens)
-    tok_str = str(tok_count)
-    print("Tokens: " + tok_str)
-    sys_flush()
     
-    print("Parsing...")
-    sys_flush()
     ast = parse(tokens, path)
-    print("[DBG:compile_file] after parse")
-    sys_flush()
     
-    print("Resolving imports...")
-    sys_flush()
     visited = []
     ast = resolve_imports(ast, visited, target_arch, target_os)
-    print("[DBG:compile_file] after resolve_imports")
-    sys_flush()
 
-    print("Type checking...")
-    sys_flush()
     tc = TypeChecker()
     tc_init(tc)
     tc_check(tc, ast)
-    print("[DBG:compile_file] after type_check")
-    sys_flush()
 
-    print("Generating assembly...")
-    sys_flush()
     is_x64 = 0
     if target_arch == "x86_64" { is_x64 = 1 }
     if target_arch == "arm64" {
@@ -232,10 +169,6 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     } else {
         asm = generate_assembly(ast, debug_mode, is_x64, target_os)
     }
-    print("[DBG:compile_file] after generate_assembly")
-    sys_flush()
-
-    print("Compilation finished.")
     sys_flush()
 
     # Update build cache

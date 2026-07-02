@@ -273,15 +273,46 @@ int main(void) {
 #include <time.h>
 #include <unistd.h>
 
-/* Fixed-arg signature: callers always pass fmt + one variadic arg (x0=fmt, x1=arg).
- * Non-variadic bypasses AAPCS64 register save area requirement for ARM64.
- * macOS also needs these because system printf is variadic and our assembly
- * doesn't set up the register save area required by AAPCS64 variadic calls. */
+/* Custom printf: processes fmt manually and writes to fd 1 via write().
+ * Avoids va_list/AAPCS64 register save area issues on ARM64 that can occur
+ * with fprintf(stdout, ...) when called from hand-written assembly. */
 #if defined(LINUX_WRAP) || defined(MACOS)
 SYSCALL int _printf(const char *fmt, int64_t arg) {
-    int n = fprintf(stdout, fmt, arg);
-    fflush(stdout);
-    return n;
+    int written = 0;
+    while (*fmt) {
+        if (*fmt == '%') {
+            fmt++;
+            switch (*fmt) {
+                case 's': {
+                    const char *s = (const char*)arg;
+                    if (s) { int n = strlen(s); write(1, s, n); written += n; }
+                    break;
+                }
+                case 'd': {
+                    char buf[32];
+                    int val = (int)arg, neg = 0, pos = 30, dlen;
+                    buf[31] = 0;
+                    if (val < 0) { neg = 1; val = -val; }
+                    do { buf[pos--] = '0' + (val % 10); val /= 10; } while (val);
+                    if (neg) buf[pos--] = '-';
+                    pos++; dlen = 31 - pos;
+                    write(1, buf + pos, dlen);
+                    written += dlen;
+                    break;
+                }
+                case '%':
+                    write(1, "%", 1);
+                    written++;
+                    break;
+                default: break;
+            }
+        } else {
+            write(1, fmt, 1);
+            written++;
+        }
+        fmt++;
+    }
+    return written;
 }
 /* Fixed-arg signature — same reasoning as _printf above */
 SYSCALL int _sprintf(char *b, const char *fmt, int64_t arg) {
