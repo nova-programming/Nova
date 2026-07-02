@@ -305,14 +305,15 @@ SYSCALL int _system_c(const char *c) { return system(c); }
  * MACOS: libc exports `_printf` etc. directly (Mach-O underscore).
  *        Memory functions (malloc/free/realloc) must NOT be wrapped on macOS
  *        because `malloc()` inside `_malloc()` calls `_malloc` → infinite loop.
- *        String functions use manual loops to avoid any built-in/call confusion. */
+ *        String functions ARE safe because compilers recognize them as
+ *        built-ins — `strlen(s)` does not call `_strlen`. */
 #if defined(LINUX_WRAP) || defined(MACOS)
-SYSCALL size_t _strlen(const char *s) { size_t n = 0; while (s[n]) n++; return n; }
-SYSCALL int _strcmp(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *(unsigned char*)a - *(unsigned char*)b; }
-SYSCALL char *_strcpy(char *d, const char *s) { char *r = d; while ((*d++ = *s++)); return r; }
-SYSCALL char *_strcat(char *d, const char *s) { char *r = d; while (*d) d++; while ((*d++ = *s++)); return r; }
-SYSCALL void *_memset(void *p, int c, size_t n) { unsigned char *q = (unsigned char*)p; for (size_t i = 0; i < n; i++) q[i] = (unsigned char)c; return p; }
-SYSCALL char *_strstr(const char *h, const char *n) { if (!*n) return (char*)h; for (; *h; h++) { const char *a = h, *b = n; while (*b && *a == *b) { a++; b++; } if (!*b) return (char*)h; } return 0; }
+SYSCALL size_t _strlen(const char *s) { return strlen(s); }
+SYSCALL int _strcmp(const char *a, const char *b) { return strcmp(a, b); }
+SYSCALL char *_strcpy(char *d, const char *s) { return strcpy(d, s); }
+SYSCALL char *_strcat(char *d, const char *s) { return strcat(d, s); }
+SYSCALL void *_memset(void *p, int c, size_t n) { return memset(p, c, n); }
+SYSCALL char *_strstr(const char *h, const char *n) { return strstr(h, n); }
 #endif
 #if defined(LINUX_WRAP)
 SYSCALL void *_malloc(size_t s) { return malloc(s); }
