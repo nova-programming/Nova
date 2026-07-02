@@ -1234,7 +1234,6 @@ class Arm64Codegen:
             self.assembly.append(f"    str {target_reg}, [sp, #-16]!")
             self.assembly.append("    ldr x0, [sp], #16")
             if self._is_string_expr(node.target):
-                self.assembly.append("    str x0, [sp, #-16]!")
                 self.assembly.append("    bl _strlen")
                 self.assembly.append("    str x0, [sp, #-16]!")
             else:
