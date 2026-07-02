@@ -1103,14 +1103,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
             } else {
                 push_data_label(state, "fmt_int_pure")
             }
-            emit(state, "    str %a, [sp, #-16]!")
-            
-            ptr_sz = ptr_size(state)
-            if ptr_sz == 8 {
-                emit(state, "    ldr %c, [%s, #16]")
-            } else {
-                emit(state, "    ldr %c, [%s, #8]")
-            }
+            emit(state, "    ldr %c, [sp, #32]")
             emit(state, "    str %c, [sp, #-16]!")
             
             emit_call(state, "_sprintf", 3)
