@@ -1234,7 +1234,13 @@ class Arm64Codegen:
             self.assembly.append(f"    str {target_reg}, [sp, #-16]!")
             self.assembly.append("    ldr x0, [sp], #16")
             if self._is_string_expr(node.target):
-                self.assembly.append("    bl _strlen")
+                ldr_label = self.next_label("L_strlen")
+                self.assembly.append(f"    mov x9, x0")
+                self.assembly.append(f"{ldr_label}:")
+                self.assembly.append(f"    ldrb w10, [x0], #1")
+                self.assembly.append(f"    cbnz w10, {ldr_label}")
+                self.assembly.append(f"    sub x0, x0, x9")
+                self.assembly.append(f"    sub x0, x0, #1")
                 self.assembly.append("    str x0, [sp, #-16]!")
             else:
                 self.assembly.append("    ldr w0, [x0]")

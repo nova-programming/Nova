@@ -76,13 +76,22 @@ def cache_path(path: string) -> string {
     print("[DBG:cache_path] test_variable_slash")
     print(slash)
     print("[DBG:cache_path] test_len_path")
-    print(i)
-    print(slash)
-    print(path)
-    print(35)
-    print("[DBG:cache_path] after_tests")
+    print(len(path))
+    print("[DBG:cache_path] after_len_print")
+    print("[DBG:cache_path] before_flush")
     sys_flush()
-    while i < 5 {
+    print("[DBG:cache_path] after_flush")
+    print("[DBG:cache_path] test_while_cond")
+    sys_flush()
+    while i < len(path) {
+        if path[i] == "/" or path[i] == "\\" { 
+            print("[DBG:cache_path] found slash at")
+            print(i)
+            slash = i 
+        }
+        i = i + 1
+    }
+    print("[DBG:cache_path] after while")
     sys_flush()
     if slash > 0 { return str_sub(path, 0, slash + 1) + ".nova_cache.txt" }
     return ".nova_cache.txt"
