@@ -1086,27 +1086,24 @@ def compile_expr(state: CodegenState, node: AstNode) {
         
         if node.val_str == "str" {
             compile_expr(state, node.args[0])
-            emit(state, "    ldr %x, [sp], #16")
-            if is_float_expr(state, node.args[0]) == 1 {
-                emit(state, "    mov %a, 32")
-            } else {
-                emit(state, "    mov %a, 16")
-            }
-            emit(state, "    str %a, [sp, #-16]!")
-            emit_call(state, "_malloc", 1)
+            emit(state, "    mov %a, 32")
+            emit(state, "    bl _malloc")
             
             emit(state, "    str %a, [sp, #-16]!")
             
-            emit(state, "    str %x, [sp, #-16]!")
             if is_float_expr(state, node.args[0]) == 1 {
                 push_data_label(state, "fmt_float_pure")
             } else {
                 push_data_label(state, "fmt_int_pure")
             }
-            emit(state, "    ldr %c, [sp, #32]")
-            emit(state, "    str %c, [sp, #-16]!")
             
-            emit_call(state, "_sprintf", 3)
+            emit(state, "    ldr %x, [sp], #16")
+            emit(state, "    ldr %a, [sp], #16")
+            emit(state, "    ldr %c, [sp], #16")
+            
+            emit(state, "    str %a, [sp, #-16]!")
+            
+            emit(state, "    bl _sprintf")
             
             return
         }
