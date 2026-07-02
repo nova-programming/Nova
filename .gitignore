@@ -31,3 +31,9 @@ Thumbs.db
 
 # GCC bundle
 gcc/
+
+# CI log files
+*_log.txt
+*_log2.txt
+*_log3.txt
+full_*.txt

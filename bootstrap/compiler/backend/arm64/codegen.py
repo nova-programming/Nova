@@ -782,7 +782,7 @@ class Arm64Codegen:
             if isinstance(offset, str):
                 self.assembly.append(f"    mov {offset}, x0")
             else:
-                self.assembly.append(f"    str x0, [sp, #{self.local_aligned - offset}]")
+                self._emit_fp_access(self.assembly, "str", "x0", -offset)
             loop_label = self.next_label("L_for")
             end_label = self.next_label("L_for_end")
             continue_label = self.next_label("L_for_cont")
@@ -793,7 +793,7 @@ class Arm64Codegen:
             if isinstance(offset, str):
                 self.assembly.append(f"    mov x0, {offset}")
             else:
-                self.assembly.append(f"    ldr x0, [sp, #{self.local_aligned - offset}]")
+                self._emit_fp_access(self.assembly, "ldr", "x0", -offset)
             self.assembly.append("    cmp x0, x1")
             if node.is_downto:
                 self.assembly.append(f"    b.lt {end_label}")
@@ -806,9 +806,9 @@ class Arm64Codegen:
             if isinstance(offset, str):
                 self.assembly.append(f"    add {offset}, {offset}, x1")
             else:
-                self.assembly.append(f"    ldr x0, [sp, #{self.local_aligned - offset}]")
+                self._emit_fp_access(self.assembly, "ldr", "x0", -offset)
                 self.assembly.append("    add x0, x0, x1")
-                self.assembly.append(f"    str x0, [sp, #{self.local_aligned - offset}]")
+                self._emit_fp_access(self.assembly, "str", "x0", -offset)
             self.assembly.append(f"    b {loop_label}")
             self.assembly.append(f"{end_label}:")
             self.loop_labels.pop()
@@ -822,12 +822,12 @@ class Arm64Codegen:
             self.assembly.append("    str x0, [sp, #-16]!")
             offset = self.local_vars[node.var_name]
             if not isinstance(offset, str):
-                self.assembly.append(f"    str xzr, [sp, #{self.local_aligned - offset}]")
+                self._emit_fp_access(self.assembly, "str", "xzr", -offset)
             self.assembly.append(f"{loop_label}:")
             if isinstance(offset, str):
                 self.assembly.append(f"    ldr w0, {offset}")
             else:
-                self.assembly.append(f"    ldr w0, [sp, #{self.local_aligned - offset}]")
+                self._emit_fp_access(self.assembly, "ldr", "w0", -offset)
             self.assembly.append("    ldr x1, [sp], #16")
             self.assembly.append("    str x1, [sp, #-16]!")
             self.assembly.append("    cmp w0, w1")
@@ -836,18 +836,18 @@ class Arm64Codegen:
             if isinstance(offset, str):
                 self.assembly.append(f"    ldr w1, {offset}")
             else:
-                self.assembly.append(f"    ldr x1, [sp, #{self.local_aligned - offset}]")
+                self._emit_fp_access(self.assembly, "ldr", "x1", -offset)
             self.assembly.append("    ldr x0, [x2, x1, lsl #3]")
             if not isinstance(offset, str):
-                self.assembly.append(f"    str x0, [sp, #{self.local_aligned - 8}]")
+                self._emit_fp_access(self.assembly, "str", "x0", -8)
             self.assembly.append("    str x0, [sp, #-16]!")
             for s in node.body: self.compile_stmt(s)
             if isinstance(offset, str):
                 self.assembly.append(f"    add {offset}, {offset}, #1")
             else:
-                self.assembly.append(f"    ldr x0, [sp, #{self.local_aligned - offset}]")
+                self._emit_fp_access(self.assembly, "ldr", "x0", -offset)
                 self.assembly.append("    add x0, x0, #1")
-                self.assembly.append(f"    str x0, [sp, #{self.local_aligned - offset}]")
+                self._emit_fp_access(self.assembly, "str", "x0", -offset)
             self.assembly.append(f"    b {loop_label}")
             self.assembly.append(f"{end_label}:")
             self.assembly.append("    add sp, sp, #16")
