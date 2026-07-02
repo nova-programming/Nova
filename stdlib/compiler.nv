@@ -121,13 +121,8 @@ def cache_key(cache_lines: list, path: string) -> string {
 def compile_file(path: string, debug_mode: int, target_arch: string, target_os: string) -> list {
     cache_file = cache_path(path)
     cached_lines = load_cache(cache_file)
-    system.file_write(2, "CF:load_cache\n")
-    system.file_write(2, "CF:before_file_size\n")
     current_size = file_size(path)
-    system.file_write(2, "CF:file_size\n")
-    system.file_write(2, "CF:before_cache_key\n")
     cached_size_str = cache_key(cached_lines, path)
-    system.file_write(2, "CF:after_cache_key\n")
     cached_size = 0
     if cached_size_str != "" {
         if cached_size_str == str(current_size) {
