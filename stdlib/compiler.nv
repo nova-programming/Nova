@@ -65,8 +65,10 @@ def resolve_imports(ast: list, visited: list, target_arch: string, target_os: st
 }
 
 def cache_path(path: string) -> string {
+    system.file_write(2, "CP:start\n")
     slash = 0
     i = 0
+    system.file_write(2, "CP:before_loop\n")
     while i < len(path) {
         if path[i] == "/" or path[i] == "\\" { slash = i }
         i = i + 1
@@ -120,8 +122,9 @@ def cache_key(cache_lines: list, path: string) -> string {
 
 def compile_file(path: string, debug_mode: int, target_arch: string, target_os: string) -> list {
     system.file_write(2, "CF:start\n")
+    system.file_write(2, "CF:before_cache_path\n")
     cache_file = cache_path(path)
-    system.file_write(2, "CF:cache_path\n")
+    system.file_write(2, "CF:after_cache_path\n")
     cached_lines = load_cache(cache_file)
     system.file_write(2, "CF:load_cache\n")
     current_size = file_size(path)
