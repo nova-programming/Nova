@@ -614,14 +614,15 @@ class Arm64Codegen:
         old_string_vars = self.string_vars.copy()
         self.local_vars = {}
         self.string_vars = set()
+        self.local_offset = 0
+
         for i, param in enumerate(fn.params):
             param_name = param[0] if isinstance(param, (list, tuple)) else param
             param_type = param[1] if isinstance(param, (list, tuple)) and len(param) > 1 else None
-            self.local_vars[param_name] = -(16 + i * 8)
+            self.local_offset += 8
+            self.local_vars[param_name] = self.local_offset
             if param_type == 'string':
                 self.string_vars.add(param_name)
-
-        self.local_offset = 0
         for stmt in fn.body:
             self.scan_vars(stmt)
 
