@@ -300,16 +300,24 @@ SYSCALL int _system_c(const char *c) { return system(c); }
  * IMPORTANT: Do NOT define wrappers for functions like malloc/free/strlen
  * on macOS — calling malloc() inside _malloc() would compile to `bl _malloc`
  * which aliases back to _malloc, causing infinite recursion. */
+/* Platform-specific string/libc wrappers.
+ * LINUX: libc exports `printf` (no underscore), so ALL wrappers are needed.
+ * MACOS: libc exports `_printf` etc. directly (Mach-O underscore).
+ *        Memory functions (malloc/free/realloc) must NOT be wrapped on macOS
+ *        because `malloc()` inside `_malloc()` calls `_malloc` → infinite loop.
+ *        String functions use manual loops to avoid any built-in/call confusion. */
+#if defined(LINUX_WRAP) || defined(MACOS)
+SYSCALL size_t _strlen(const char *s) { size_t n = 0; while (s[n]) n++; return n; }
+SYSCALL int _strcmp(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *(unsigned char*)a - *(unsigned char*)b; }
+SYSCALL char *_strcpy(char *d, const char *s) { char *r = d; while ((*d++ = *s++)); return r; }
+SYSCALL char *_strcat(char *d, const char *s) { char *r = d; while (*d) d++; while ((*d++ = *s++)); return r; }
+SYSCALL void *_memset(void *p, int c, size_t n) { unsigned char *q = (unsigned char*)p; for (size_t i = 0; i < n; i++) q[i] = (unsigned char)c; return p; }
+SYSCALL char *_strstr(const char *h, const char *n) { if (!*n) return (char*)h; for (; *h; h++) { const char *a = h, *b = n; while (*b && *a == *b) { a++; b++; } if (!*b) return (char*)h; } return 0; }
+#endif
 #if defined(LINUX_WRAP)
 SYSCALL void *_malloc(size_t s) { return malloc(s); }
 SYSCALL void _free(void *p) { free(p); }
 SYSCALL void *_realloc(void *p, size_t s) { return realloc(p, s); }
-SYSCALL size_t _strlen(const char *s) { return strlen(s); }
-SYSCALL int _strcmp(const char *a, const char *b) { return strcmp(a, b); }
-SYSCALL char *_strcpy(char *d, const char *s) { return strcpy(d, s); }
-SYSCALL char *_strcat(char *d, const char *s) { return strcat(d, s); }
-SYSCALL void *_memset(void *p, int c, size_t n) { return memset(p, c, n); }
-SYSCALL char *_strstr(const char *h, const char *n) { return strstr(h, n); }
 SYSCALL int _fopen(const char *p, const char *m) {
     FILE *f = fopen(p, m);
     return f ? (intptr_t)f : 0;
