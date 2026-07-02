@@ -42,10 +42,10 @@ class TestArm64CodegenOutput(unittest.TestCase):
         self.assertIn(".extern _exit", asm)
 
     def test_main_prologue_arm64(self):
-        """_main uses sp-based frame: stp fp/lr only, no mov fp,sp"""
+        """_main uses fp-based frame: stp fp/lr then mov fp,sp"""
         asm = compile_to_asm('print("hello")')
         self.assertIn("stp fp, lr, [sp, #-16]!", asm)
-        self.assertNotIn("mov fp, sp", asm)
+        self.assertIn("mov fp, sp", asm)
         self.assertIn("sub sp, sp, #", asm)
 
     def test_string_literal_pic(self):

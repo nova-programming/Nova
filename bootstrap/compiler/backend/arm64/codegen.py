@@ -163,7 +163,7 @@ class Arm64Codegen:
             if isinstance(offset, str):
                 self.assembly.append(f"    mov {reg}, {offset}")
             else:
-                self.assembly.append(f"    ldr {reg}, [sp, #{self.local_aligned - offset}]")
+                self.assembly.append(f"    ldr {reg}, [fp, #{-offset}]")
             return reg
         elif isinstance(node, UnaryOp):
             in_reg = self._compile_expr_to_reg(node.value)
@@ -479,6 +479,7 @@ class Arm64Codegen:
         entry = "_main" if self.target_os != "linux" else "main"
         self.assembly.append(f"{entry}:")
         self.assembly.append("    stp fp, lr, [sp, #-16]!")
+        self.assembly.append("    mov fp, sp")
 
         self.local_vars = {}
         self.local_offset = 0
@@ -594,6 +595,7 @@ class Arm64Codegen:
     def compile_function(self, fn):
         self.assembly.append(f"_{fn.name}:")
         self.assembly.append("    stp fp, lr, [sp, #-16]!")
+        self.assembly.append("    mov fp, sp")
 
         old_local_vars = self.local_vars.copy()
         old_string_vars = self.string_vars.copy()
@@ -619,7 +621,7 @@ class Arm64Codegen:
             if i < 8:
                 param_name = param[0] if isinstance(param, (list, tuple)) else param
                 offset = self.local_vars[param_name]
-                self.assembly.append(f"    str x{i}, [sp, #{aligned - offset}]")
+                self.assembly.append(f"    str x{i}, [fp, #{-offset}]")
 
         for stmt in fn.body:
             self.compile_stmt(stmt)
@@ -646,7 +648,7 @@ class Arm64Codegen:
             if isinstance(offset, str):
                 self.assembly.append(f"    mov {offset}, x0")
             else:
-                self.assembly.append(f"    str x0, [sp, #{self.local_aligned - offset}]")
+                self.assembly.append(f"    str x0, [fp, #{-offset}]")
             if self._is_string_expr(node.value):
                 self.string_vars.add(node.name)
         elif isinstance(node, DataFieldAssign):
@@ -942,7 +944,7 @@ class Arm64Codegen:
             if isinstance(offset, str):
                 self.assembly.append(f"    mov x0, {offset}")
             else:
-                self.assembly.append(f"    ldr x0, [sp, #{self.local_aligned - offset}]")
+                self.assembly.append(f"    ldr x0, [fp, #{-offset}]")
             self.assembly.append("    str x0, [sp, #-16]!")
         elif isinstance(node, BinOp):
             reg = self._compile_binop_to_reg(node)
