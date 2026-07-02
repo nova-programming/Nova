@@ -32,13 +32,14 @@ class Arm64Codegen:
 
     def _emit_fp_access(self, f, op, reg, neg_offset):
         """Emit `op reg, [fp, #neg_offset]`, handling ARM64's [-256,255] limit.
-        Falls back to `sub/add x15, fp, #abs; op reg, [x15]` for large offsets."""
+        Falls back to `sub/add x16, fp, #abs; op reg, [x16]` for large offsets.
+        Uses x16 (IP0, not in register pool) to avoid clobbering allocated regs."""
         if neg_offset < -256:
-            f.append(f"    sub x15, fp, #{-neg_offset}")
-            f.append(f"    {op} {reg}, [x15]")
+            f.append(f"    sub x16, fp, #{-neg_offset}")
+            f.append(f"    {op} {reg}, [x16]")
         elif neg_offset > 255:
-            f.append(f"    add x15, fp, #{neg_offset}")
-            f.append(f"    {op} {reg}, [x15]")
+            f.append(f"    add x16, fp, #{neg_offset}")
+            f.append(f"    {op} {reg}, [x16]")
         else:
             f.append(f"    {op} {reg}, [fp, #{neg_offset}]")
 
