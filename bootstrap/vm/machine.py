@@ -1,6 +1,5 @@
 """Custom Virtual Machine to execute Nova bytecode"""
 
-import re
 import struct
 import ctypes
 import os

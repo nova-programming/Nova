@@ -257,7 +257,9 @@ def _extract_tar(data: bytes) -> int:
                 rel = name
             if not rel or not _should_extract(rel):
                 continue
-            dst = os.path.join(INSTALL_DIR, rel)
+            dst = os.path.abspath(os.path.join(INSTALL_DIR, rel))
+            if not dst.startswith(os.path.abspath(INSTALL_DIR) + os.sep):
+                continue
             dst_dir = os.path.dirname(dst)
             os.makedirs(dst_dir, exist_ok=True)
             with tf.extractfile(m) as src, open(dst, "wb") as df:
@@ -292,7 +294,9 @@ def _extract_zip(zip_data: bytes) -> int:
             if not _should_extract(rel):
                 continue
 
-            dst = os.path.join(INSTALL_DIR, rel)
+            dst = os.path.abspath(os.path.join(INSTALL_DIR, rel))
+            if not dst.startswith(os.path.abspath(INSTALL_DIR) + os.sep):
+                continue
             dst_dir = os.path.dirname(dst)
             os.makedirs(dst_dir, exist_ok=True)
             with zf.open(name) as src, open(dst, "wb") as df:
@@ -341,7 +345,9 @@ def _install_gcc_if_missing():
                 if not name.startswith(prefix):
                     continue
                 rel = name[len(prefix):]
-                dst = os.path.join(GCC_DIR, rel)
+                dst = os.path.abspath(os.path.join(GCC_DIR, rel))
+                if not dst.startswith(os.path.abspath(GCC_DIR) + os.sep):
+                    continue
                 dst_dir = os.path.dirname(dst)
                 os.makedirs(dst_dir, exist_ok=True)
                 with zf.open(name) as src, open(dst, "wb") as df:

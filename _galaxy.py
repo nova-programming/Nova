@@ -13,10 +13,8 @@ import urllib.error
 import urllib.parse
 import zipfile
 import io
-import textwrap
 import webbrowser
 import shutil
-import platform
 from pathlib import Path
 
 GALAXY_VERSION = "0.8.0"
@@ -352,7 +350,9 @@ def _install_package(pkg_name, visited=None):
                 rel_path = m.filename[len(top_dir)+1:]
                 if not rel_path:
                     continue
-                target = os.path.join(dest_dir, rel_path)
+                target = os.path.abspath(os.path.join(dest_dir, rel_path))
+                if not target.startswith(os.path.abspath(dest_dir) + os.sep):
+                    continue
                 if m.is_dir():
                     os.makedirs(target, exist_ok=True)
                 else:

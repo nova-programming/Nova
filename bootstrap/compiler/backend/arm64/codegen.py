@@ -26,6 +26,7 @@ class Arm64Codegen:
         self.loop_labels = []
         self.prop_offsets = {}
         self.struct_defs = {}
+        self._prop_offset_cache = {}
         self.string_vars = set()
         self.func_returns = {}
         self._reg_pool = []
@@ -45,7 +46,15 @@ class Arm64Codegen:
 
     def get_prop_offset(self, name):
         """Fallback: scan ALL known structs for this field name, return per-struct offset.
-        Uses a two-tier strategy: preferred struct override, then fewest-fields heuristic."""
+        Uses a two-tier strategy:
+        1. If a 'preferred' struct (defined in FIELD_PREFERRED_STRUCT) contains this
+           field, use its offset.
+        2. Otherwise, prefer the struct with the fewest fields (most specific size)."""
+        if name in self._prop_offset_cache:
+            return self._prop_offset_cache[name]
+        
+        # Tier 1: field-specific overrides for fields that exist at different offsets
+        # in commonly-used structs (e.g. params in AstNode vs Type, name in NamedFunc vs Type)
         preferred = _FIELD_PREFERRED.get(name)
         if preferred is not None:
             for sname, sdef in self.struct_defs.items():
@@ -63,7 +72,9 @@ class Arm64Codegen:
                         best = i * 8
                         best_count = n
         if best is not None:
+            self._prop_offset_cache[name] = best
             return best
+        self._prop_offset_cache[name] = 0
         return 0
 
     def get_struct_prop_offset(self, struct_name, field_name):
