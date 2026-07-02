@@ -70,16 +70,13 @@ def cache_path(path: string) -> string {
     slash = 0
     i = 0
     print("[DBG:cache_path] before while")
-    sys_flush()
-    print("[DBG:cache_path] i=")
-    print(str(i))
-    print("[DBG:cache_path] len=")
-    print(str(len(path)))
+    print(i)
+    print(len(path))
     sys_flush()
     while i < len(path) {
         if path[i] == "/" or path[i] == "\\" { 
             print("[DBG:cache_path] found slash at")
-            print(str(i))
+            print(i)
             slash = i 
         }
         i = i + 1
