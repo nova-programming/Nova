@@ -976,8 +976,13 @@ class Arm64Codegen:
                 self.assembly.append("    bl _malloc")
                 self.assembly.append("    str x0, [sp, #-16]!")
             else:
+                arg_regs = []
                 for arg in reversed(node.args):
-                    self.compile_expr(arg)
+                    reg = self._compile_expr_to_reg(arg)
+                    arg_regs.append(reg)
+                for reg in arg_regs:
+                    self.assembly.append(f"    str {reg}, [sp, #-16]!")
+                    self._free_reg(reg)
                 n_args = len(node.args)
                 if n_args >= 1:
                     self.assembly.append("    ldr x0, [sp], #16")
