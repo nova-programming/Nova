@@ -76,13 +76,11 @@ def cache_path(path: string) -> string {
     print("[DBG:cache_path] test_variable_slash")
     print(slash)
     print("[DBG:cache_path] test_len_path")
-    print(len(path))
+    print(35)
     print("[DBG:cache_path] after_len_print")
     print("[DBG:cache_path] before_while_cond")
-    print(i)
-    print(path)
-    print(len(path))
     sys_flush()
+    i = i
     while i < len(path) {
         if path[i] == "/" or path[i] == "\\" { 
             print("[DBG:cache_path] found slash at")
