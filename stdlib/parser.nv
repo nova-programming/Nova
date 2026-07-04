@@ -1427,6 +1427,7 @@ def desugar_enums(program: list) -> list {
 }
 
 def parse(tokens: list, filename: string) -> list {
+    file_write(2, "PARSE:enter\n")
     state = ParserState()
     state.tokens = tokens
     state.pos = 0
