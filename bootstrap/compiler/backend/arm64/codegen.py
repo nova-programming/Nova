@@ -1113,7 +1113,7 @@ class Arm64Codegen:
                 self.assembly.append("    str x0, [sp, #-16]!")
             elif node.property == "value_byte":
                 self.assembly.append("    ldr x0, [sp], #16")
-                self.assembly.append("    ldrb x0, [x0]")
+                self.assembly.append("    ldrb w0, [x0]")
                 self.assembly.append("    str x0, [sp, #-16]!")
             elif node.property == "addr":
                 pass
@@ -1135,7 +1135,7 @@ class Arm64Codegen:
             self.assembly.append("    ldr x0, [sp], #16")
             self.assembly.append("    ldr x1, [sp], #16")
             if is_str:
-                self.assembly.append("    ldrb x0, [x0, x1]")
+                self.assembly.append("    ldrb w0, [x0, x1]")
                 self.assembly.append("    lsl x0, x0, #1")
                 self.assembly.append("    adrp x1, char_strings@PAGE")
                 self.assembly.append("    add x1, x1, char_strings@PAGEOFF")
@@ -1152,7 +1152,7 @@ class Arm64Codegen:
                 self.assembly.append("    cmp x0, x2")
                 self.assembly.append("    b.ge _out_of_bounds")
                 self.assembly.append("    ldr x2, [x1, #8]")
-                self.assembly.append("    ldr x0, [x2, x0, uxtw #3]")
+                self.assembly.append("    ldr x0, [x2, x0, lsl #3]")
                 self.assembly.append("    str x0, [sp, #-16]!")
         elif isinstance(node, Openf):
             self.assembly.append("    mov x0, #24")
@@ -1252,7 +1252,7 @@ class Arm64Codegen:
                 self.assembly.append(f"{no_realloc}:")
                 self.assembly.append("    ldr w3, [x1]")             # w3 = count (32-bit)
                 self.assembly.append("    ldr x2, [x1, #8]")         # x2 = data_ptr
-                self.assembly.append("    str x0, [x2, x3, uxtw #3]") # data[count] = value
+                self.assembly.append("    str x0, [x2, x3, lsl #3]") # data[count] = value
                 self.assembly.append("    add w3, w3, #1")           # w3 = count++ (32-bit)
                 self.assembly.append("    str w3, [x1]")             # store count (32-bit)
                 self.assembly.append("    str x1, [sp, #-16]!")      # push list_ptr (expression result)

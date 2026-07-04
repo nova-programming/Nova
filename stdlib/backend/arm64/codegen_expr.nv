@@ -685,7 +685,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    ldr %d, [sp], #16")
         if node.val_str == "value_byte" {
             emit(state, "    mov x0, x3")
-            emit(state, "    ldrb x0, [x0]")
+            emit(state, "    ldrb w0, [x0]")
         } else {
             if node.val_str == "value_word" {
                 emit(state, "    mov x0, x3")
@@ -841,7 +841,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit_call(state, "_dict_get", 2)
             emit(state, "    str %a, [sp, #-16]!")
         } elif is_str == 1 {
-            emit(state, "    ldrb x0, [%d, %c]")
+            emit(state, "    ldrb w0, [%d, %c]")
             emit(state, "    lsl x0, x0, #1")
             emit(state, "    lsl %c, %c, #1")
             emit(state, "    adrp %a, char_strings")
