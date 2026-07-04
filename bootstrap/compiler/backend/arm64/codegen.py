@@ -203,7 +203,15 @@ class Arm64Codegen:
         elif isinstance(node, Compare):
             return self._compile_compare_to_reg(node)
         # Fallback: push to stack, pop into register
-        self.compile_expr(node)
+        # Save x0 because compile_expr's internal handlers hardcode x0
+        # (Variable loads, Len results, etc.). Without this save, the left
+        # operand value (in x0) gets clobbered when the right operand uses
+        # the fallback path.
+        self.assembly.append("    str x0, [sp, #-16]!")   # Save x0
+        self.compile_expr(node)                             # Push result to stack
+        self.assembly.append("    ldr x16, [sp], #16")    # Pop result into x16 (temp)
+        self.assembly.append("    ldr x0, [sp], #16")     # Restore x0
+        self.assembly.append("    str x16, [sp, #-16]!")   # Push result back
         reg = self._alloc_reg()
         self.assembly.append(f"    ldr {reg}, [sp], #16")
         return reg
