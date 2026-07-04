@@ -372,8 +372,8 @@ long long _oob_line;
 SYSCALL void _out_of_bounds(void) {
     if (_oob_file_ptr) {
         _printf("error: Index Out Of Bounds at ", 0);
-        _printf("%s", (void*)_oob_file_ptr);
-        _printf(" line %d\n", (void*)(intptr_t)_oob_line);
+        _printf("%s", _oob_file_ptr);
+        _printf(" line %d\n", _oob_line);
     } else {
         _printf("error: Index Out Of Bounds\n", 0);
     }
