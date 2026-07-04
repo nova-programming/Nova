@@ -2,8 +2,8 @@ import system
 import compiler
 
 def dbg(msg: string) {
-    system.file_write(2, "DBG " + msg + "\n")
-    system.flush()
+    file_write(2, "DBG " + msg + "\n")
+    flush()
 }
 
 def str_to_int(s: string) -> int {
