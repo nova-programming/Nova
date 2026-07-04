@@ -850,13 +850,12 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    str %a, [sp, #-16]!")
         } else {
             oob_lbl = next_label(state, "L_oob")
+            after_lbl = next_label(state, "L_after_oob")
             emit(state, "    cmp %c, #0")
             emit(state, "    b.lt " + oob_lbl)
             emit(state, "    ldr w1, [%d]")
             emit(state, "    cmp %c, x1")
             emit(state, "    b.ge " + oob_lbl)
-            emit(state, oob_lbl + ":")
-            emit(state, "    b _out_of_bounds")
             ptr_sz = ptr_size(state)
             emit(state, "    ldr %d, [%d, #8]")
             if ptr_sz == 8 {
@@ -865,6 +864,10 @@ def compile_expr(state: CodegenState, node: AstNode) {
                 emit(state, "    ldr %a, [%d, %c, lsl #2]")
             }
             emit(state, "    str %a, [sp, #-16]!")
+            emit(state, "    b " + after_lbl)
+            emit(state, oob_lbl + ":")
+            emit(state, "    b _out_of_bounds")
+            emit(state, after_lbl + ":")
         }
         return
     }
