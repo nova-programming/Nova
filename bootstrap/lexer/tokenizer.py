@@ -33,6 +33,7 @@ KEYWORDS = {
     "int": "TYPE_INT", "float": "TYPE_FLOAT", "bool": "TYPE_BOOL",
     "string": "TYPE_STRING", "const": "CONST", "enum": "ENUM",
     "str": "STR",
+    "@raw": "RAW", "@export": "EXPORT",
 }
 
 ESCAPE_MAP = {
