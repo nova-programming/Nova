@@ -366,6 +366,20 @@ SYSCALL int _fflush(int s) { return fflush((FILE*)(intptr_t)s); }
 SYSCALL void _exit(int c) { exit(c); }
 #endif /* defined(LINUX_WRAP) */
 
+/* Out-of-bounds globals and handler (also in Windows section above) */
+long long _oob_file_ptr;
+long long _oob_line;
+SYSCALL void _out_of_bounds(void) {
+    if (_oob_file_ptr) {
+        _printf("error: Index Out Of Bounds at ", 0);
+        _printf("%s", (void*)_oob_file_ptr);
+        _printf(" line %d\n", (void*)(intptr_t)_oob_line);
+    } else {
+        _printf("error: Index Out Of Bounds\n", 0);
+    }
+    exit(1);
+}
+
 #endif /* defined(_WIN32) / defined(LINUX_WRAP) / MACOS */
 
 /* ==================== Assembly alias for Mach-O (macOS ARM64) ==================== */
@@ -414,6 +428,9 @@ __asm__(".globl _sys_write_raw_c\n.set _sys_write_raw_c, __sys_write_raw_c");
 __asm__(".globl _printf\n.set _printf, __printf");
 __asm__(".globl _sprintf\n.set _sprintf, __sprintf");
 __asm__(".globl _system_c\n.set _system_c, __system_c");
+__asm__(".globl _oob_file_ptr\n.set _oob_file_ptr, __oob_file_ptr");
+__asm__(".globl _oob_line\n.set _oob_line, __oob_line");
+__asm__(".globl _out_of_bounds\n.set _out_of_bounds, __out_of_bounds");
 #endif
 
 /* ==================== Dict runtime functions (all platforms) ==================== */
