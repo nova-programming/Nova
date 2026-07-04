@@ -334,7 +334,7 @@ def compile_leaf_to_reg(state: CodegenState, node: AstNode, reg_name: string) {
     }
     if node.kind == "Variable" {
         offset = find_var_offset(state, node.val_str)
-        emit(state, "    ldr " + reg_name + ", [%b, #" + str(offset) + "]")
+        emit_fp_load(state, reg_name, offset)
     }
 }
 
@@ -371,7 +371,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
     }
     if node.kind == "Variable" {
         offset = find_var_offset(state, node.val_str)
-        emit(state, "    ldr %a, [%b, #" + str(offset) + "]")
+        emit_fp_load(state, "x0", offset)
         emit(state, "    str %a, [sp, #-16]!")
     }
     if node.kind == "BinOp" {

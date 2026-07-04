@@ -74,7 +74,7 @@ def emit(state: CodegenState, line: string) {
         if i + 1 < len(line) and line[i] == "%" {
             nextc = line[i + 1]
             if nextc == "b" {
-                result = result + "sp"
+                result = result + "fp"
                 i = i + 2
             } elif nextc == "s" {
                 result = result + "sp"
@@ -107,6 +107,28 @@ def emit(state: CodegenState, line: string) {
         }
     }
     state.asm_lines.append(result)
+}
+
+def emit_fp_load(state: CodegenState, reg: string, offset: int) {
+    abs_off = -offset
+    if abs_off <= 255 {
+        emit(state, "    ldr " + reg + ", [fp, #" + str(offset) + "]")
+    } else {
+        emit(state, "    mov x16, #" + str(abs_off))
+        emit(state, "    sub x16, fp, x16")
+        emit(state, "    ldr " + reg + ", [x16]")
+    }
+}
+
+def emit_fp_store(state: CodegenState, reg: string, offset: int) {
+    abs_off = -offset
+    if abs_off <= 255 {
+        emit(state, "    str " + reg + ", [fp, #" + str(offset) + "]")
+    } else {
+        emit(state, "    mov x16, #" + str(abs_off))
+        emit(state, "    sub x16, fp, x16")
+        emit(state, "    str " + reg + ", [x16]")
+    }
 }
 
 def clean_n(state: CodegenState, n: int) {
@@ -406,10 +428,10 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     }
     state.local_offset = stack_size
 
-    # Convert offsets from fp-relative to sp-relative
+    # Convert offsets to fp-relative (negative from fp)
     i = 0
     while i < len(state.local_vars) {
-        state.local_vars[i] = stack_size - state.local_vars[i]
+        state.local_vars[i] = -(state.local_vars[i])
         state.var_name_map.set(state.local_var_names[i], state.local_vars[i])
         i = i + 1
     }
@@ -426,7 +448,7 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     while p < len(node.params) {
         if p < 8 {
             param_offset = state.local_vars[p]
-            emit(state, "    str x" + str(p) + ", [sp, #" + str(param_offset) + "]")
+            emit_fp_store(state, "x" + str(p), param_offset)
         }
         p = p + 1
     }
@@ -544,7 +566,7 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         i = i + 1
     }
 
-    # Align and convert offsets for sp-relative access
+    # Align and convert offsets for fp-relative access
     stack_size = state.local_offset
     if stack_size % 16 != 0 {
         stack_size = stack_size + (16 - (stack_size % 16))
@@ -552,7 +574,7 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     state.local_offset = stack_size
     i = 0
     while i < len(state.local_vars) {
-        state.local_vars[i] = stack_size - state.local_vars[i]
+        state.local_vars[i] = -(state.local_vars[i])
         state.var_name_map.set(state.local_var_names[i], state.local_vars[i])
         i = i + 1
     }
