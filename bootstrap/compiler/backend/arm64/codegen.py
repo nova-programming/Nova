@@ -912,11 +912,15 @@ class Arm64Codegen:
             self.assembly.append(f"    add x16, x16, _oob_line@PAGEOFF")
             self.assembly.append(f"    mov x17, #{node.line}")
             self.assembly.append(f"    str x17, [x16]")
+            oob_lbl = f"L_oob_{self.label_count}"
+            self.label_count += 1
             self.assembly.append("    cmp x1, #0")
-            self.assembly.append("    b.lt _out_of_bounds")
+            self.assembly.append(f"    b.lt {oob_lbl}")
             self.assembly.append("    ldr w3, [x2]")
             self.assembly.append("    cmp x1, x3")
-            self.assembly.append("    b.ge _out_of_bounds")
+            self.assembly.append(f"    b.ge {oob_lbl}")
+            self.assembly.append(f"{oob_lbl}:")
+            self.assembly.append("    b _out_of_bounds")
             self.assembly.append("    ldr x3, [x2, #8]")
             self.assembly.append("    str x0, [x3, x1, lsl #3]")
         elif isinstance(node, WriteFile):
@@ -1146,11 +1150,15 @@ class Arm64Codegen:
                 self.assembly.append(f"    add x16, x16, _oob_line@PAGEOFF")
                 self.assembly.append(f"    mov x17, #{node.line}")
                 self.assembly.append(f"    str x17, [x16]")
+                oob_lbl = f"L_oob_{self.label_count}"
+                self.label_count += 1
                 self.assembly.append("    cmp x0, #0")
-                self.assembly.append("    b.lt _out_of_bounds")
+                self.assembly.append(f"    b.lt {oob_lbl}")
                 self.assembly.append("    ldr w2, [x1]")
                 self.assembly.append("    cmp x0, x2")
-                self.assembly.append("    b.ge _out_of_bounds")
+                self.assembly.append(f"    b.ge {oob_lbl}")
+                self.assembly.append(f"{oob_lbl}:")
+                self.assembly.append("    b _out_of_bounds")
                 self.assembly.append("    ldr x2, [x1, #8]")
                 self.assembly.append("    ldr x0, [x2, x0, lsl #3]")
                 self.assembly.append("    str x0, [sp, #-16]!")
