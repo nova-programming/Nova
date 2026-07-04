@@ -913,7 +913,6 @@ class Arm64Codegen:
             self.assembly.append(f"    mov x17, #{node.line}")
             self.assembly.append(f"    str x17, [x16]")
             oob_lbl = f"L_oob_{self.label_count}"
-            self.label_count += 1
             after_lbl = f"L_after_oob_{self.label_count}"
             self.label_count += 1
             self.assembly.append("    cmp x1, #0")
@@ -1154,6 +1153,7 @@ class Arm64Codegen:
                 self.assembly.append(f"    add x16, x16, _oob_line@PAGEOFF")
                 self.assembly.append(f"    mov x17, #{node.line}")
                 self.assembly.append(f"    str x17, [x16]")
+                oob_lbl = f"L_oob_{self.label_count}"
                 after_lbl = f"L_after_oob_{self.label_count}"
                 self.label_count += 1
                 self.assembly.append("    cmp x0, #0")
