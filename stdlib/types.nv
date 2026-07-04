@@ -143,25 +143,21 @@ def types_equal(t1: Type, t2: Type) -> int {
     return 0
 }
 
-type_annotation_map = {
-    "any": create_any_type(),
-    "dyn": create_dyn_type(),
-    "int": create_scalar_type("int"),
-    "float": create_scalar_type("float"),
-    "bool": create_scalar_type("bool"),
-    "string": create_scalar_type("string"),
-    "byte": create_scalar_type("byte"),
-    "void": create_scalar_type("void"),
-    "list": create_list_type(create_any_type()),
-    "dict": create_dict_type(),
-    "func": create_func_type([], create_any_type()),
-    "struct": create_struct_type("struct")
-}
-
 def resolve_type_annotation(annotation_str: string) -> Type {
     if len(annotation_str) == 0 { return create_any_type() }
     
-    if type_annotation_map.has(annotation_str) { return type_annotation_map.get(annotation_str) }
+    if annotation_str == "any" { return create_any_type() }
+    if annotation_str == "dyn" { return create_dyn_type() }
+    if annotation_str == "int" { return create_scalar_type("int") }
+    if annotation_str == "float" { return create_scalar_type("float") }
+    if annotation_str == "bool" { return create_scalar_type("bool") }
+    if annotation_str == "string" { return create_scalar_type("string") }
+    if annotation_str == "byte" { return create_scalar_type("byte") }
+    if annotation_str == "void" { return create_scalar_type("void") }
+    if annotation_str == "list" { return create_list_type(create_any_type()) }
+    if annotation_str == "dict" { return create_dict_type() }
+    if annotation_str == "func" { return create_func_type([], create_any_type()) }
+    if annotation_str == "struct" { return create_struct_type("struct") }
     
     # Check for list[T]
     if str_starts_with(annotation_str, "list[") == 1 {
