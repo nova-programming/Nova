@@ -63,7 +63,7 @@ SYSCALL int STR_PFX(printf)(const char *fmt, const void *arg_s) {
                 }
                 case 'd': {
                     char buf[32];
-                    int val = (int)(long long)arg_s;
+                    long long val = (long long)arg_s;
                     int neg = 0, pos = 30, dlen;
                     buf[31] = 0;
                     if (val < 0) { neg = 1; val = -val; }
@@ -211,9 +211,19 @@ SYSCALL int STR_PFX(sprintf)(char *b, const char *fmt, long long arg_d) {
     *out = 0;
     return out - b;
 }
+/* Out-of-bounds globals (set by codegen before each bounds check) */
+long long _oob_file_ptr;
+long long _oob_line;
+
 /* Out-of-bounds handler */
 SYSCALL void STR_PFX(out_of_bounds)(void) {
-    STR_PFX(printf)("Index Out Of Bounds\n", 0);
+    if (_oob_file_ptr) {
+        STR_PFX(printf)("error: Index Out Of Bounds at ", 0);
+        STR_PFX(printf)("%s", (void*)_oob_file_ptr);
+        STR_PFX(printf)(" line %d\n", (void*)(intptr_t)_oob_line);
+    } else {
+        STR_PFX(printf)("error: Index Out Of Bounds\n", 0);
+    }
     STR_PFX(exit)(1);
 }
 
@@ -784,6 +794,11 @@ SYSCALL void _sys_exit_c(int code) {
     _exit(code);
 }
 #endif
+
+/* ==================== Exception handling (manual stack unwind) ==================== */
+long long _try_catch_sp;
+long long _catch_ip;
+long long _exception_val;
 
 /* ==================== String helper functions ==================== */
 SYSCALL int _char_code(const char *s, int i) {

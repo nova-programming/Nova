@@ -57,18 +57,18 @@ class TestArm64CodegenOutput(unittest.TestCase):
         self.assertGreater(add_count, 0, "Expected ADD @PAGEOFF for string literals")
 
     def test_printf_call_arm64(self):
-        """printf is called with format in x0; no w0 clobber (w0 aliases x0 on ARM64)."""
+        """printf is called with format in x0; no x0 clobber (x0 aliases x0 on ARM64)."""
         asm = compile_to_asm('print("hello")')
         self.assertIn("adrp x0, fmt_str@PAGE", asm)
         self.assertIn("add x0, x0, fmt_str@PAGEOFF", asm)
         self.assertIn("ldr x1, [sp], #16", asm)
         self.assertIn("bl _printf", asm)
-        # Verify w0 is NOT set between loading fmt_str and calling printf
-        # (mov w0 clears x0, destroying the format string pointer)
+        # Verify x0 is NOT set between loading fmt_str and calling printf
+        # (mov x0 clears x0, destroying the format string pointer)
         idx_fmt = asm.index("add x0, x0, fmt_str@PAGEOFF")
         idx_call = asm.index("bl _printf")
         between = asm[idx_fmt:idx_call]
-        self.assertNotIn("mov w0, #0", between)
+        self.assertNotIn("mov x0, #0", between)
 
     def test_print_int(self):
         """Print integer uses fmt_int."""
@@ -179,10 +179,10 @@ class TestArm64CodegenOutput(unittest.TestCase):
 
     def test_out_of_bounds_helper(self):
         asm = compile_to_asm("print(1)")
-        self.assertIn("_out_of_bounds:", asm)
-        self.assertIn('oob_msg:', asm)
-        self.assertIn("bl _printf", asm)
-        self.assertIn("bl _exit", asm)
+        self.assertNotIn("_out_of_bounds:", asm)
+        self.assertIn(".extern _oob_file_ptr", asm)
+        self.assertIn(".extern _oob_line", asm)
+        self.assertIn("source_path_str:", asm)
 
     def test_concat_strings_helper(self):
         asm = compile_to_asm('print("a" + "b")')
@@ -204,9 +204,9 @@ class TestArm64CodegenOutput(unittest.TestCase):
         self.assertIn("ret", asm)
 
     def test_main_receives_argc_argv(self):
-        """_main should store w0/x1 (argc/argv) into the local frame."""
+        """_main should store x0/x1 (argc/argv) into the local frame."""
         asm = compile_to_asm('print("hello")')
-        self.assertIn("str w0, [sp, #", asm)
+        self.assertIn("str x0, [sp, #", asm)
         self.assertIn("str x1, [sp, #", asm)
 
     def test_list_literal(self):
@@ -327,7 +327,7 @@ class TestArm64CodegenOutput(unittest.TestCase):
 
     def test_ptr_value(self):
         asm = compile_to_asm("x = alloc(4)\np = ptr(x)\nprint(p.value)")
-        self.assertIn("ldr w0, [x0]", asm)
+        self.assertIn("ldr x0, [x0]", asm)
 
     def test_ptr_addr(self):
         asm = compile_to_asm("x = alloc(4)\np = ptr(x)\nq = p.addr")

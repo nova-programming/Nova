@@ -8,6 +8,8 @@ data TypeChecker {
     env_stack: list
     structs: list
     functions: list
+    func_name_map: dict
+    struct_name_map: dict
     current_ret: Type
 }
 
@@ -29,6 +31,8 @@ def tc_init(tc: TypeChecker) {
     tc.env_stack = []
     tc.structs = []
     tc.functions = []
+    tc.func_name_map = {}
+    tc.struct_name_map = {}
     tc.current_ret = 0
     
     # sys_alloc(size: int) -> any
@@ -137,29 +141,21 @@ def tc_add_func(tc: TypeChecker, name: string, typ: Type) {
     nf.name = name
     nf.typ = typ
     tc.functions.append(nf)
+    tc.func_name_map.set(name, typ)
 }
 
 def tc_find_func(tc: TypeChecker, name: string) -> Type {
-    i = 0
-    while i < len(tc.functions) {
-        nf = tc.functions[i]
-        if str_eq(nf.name, name) == 1 { return nf.typ }
-        i = i + 1
-    }
+    if tc.func_name_map.has(name) { return tc.func_name_map.get(name) }
     return 0
 }
 
 def tc_add_struct(tc: TypeChecker, typ: Type) {
     tc.structs.append(typ)
+    tc.struct_name_map.set(typ.name, typ)
 }
 
 def tc_find_struct(tc: TypeChecker, name: string) -> Type {
-    i = 0
-    while i < len(tc.structs) {
-        t = tc.structs[i]
-        if str_eq(t.name, name) == 1 { return t }
-        i = i + 1
-    }
+    if tc.struct_name_map.has(name) { return tc.struct_name_map.get(name) }
     return 0
 }
 
@@ -238,15 +234,16 @@ def tc_visit(tc: TypeChecker, node: AstNode) -> Type {
 
 def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     if node == 0 { return create_any_type() }
-    k = node.kind
-    if str_eq(k, "Number") == 1 {
+    kind_handlers = {"Number": 1, "String": 2, "Boolean": 3, "Variable": 4, "BinOp": 5, "Compare": 6, "Assignment": 7, "Function": 8, "Return": 9, "Print": 10, "PrintD": 11, "TRY": 12, "THROW": 13, "Call": 14, "IfElse": 15, "While": 16, "MethodCall": 17, "DataFieldAccess": 18, "DataFieldAssign": 19, "ArrayIndex": 20, "ArrayIndexAssign": 21, "DictLiteral": 22, "ListLiteral": 23, "RawBlock": 24, "ForLoop": 25, "ForIn": 26}
+    h = kind_handlers.get(node.kind)
+    if h == 1 {
         if node.is_float == 1 { return create_scalar_type("float") }
         return create_scalar_type("int")
     }
-    if str_eq(k, "String") == 1 { return create_scalar_type("string") }
-    if str_eq(k, "Boolean") == 1 { return create_scalar_type("bool") }
+    if h == 2 { return create_scalar_type("string") }
+    if h == 3 { return create_scalar_type("bool") }
     
-    if str_eq(k, "Variable") == 1 {
+    if h == 4 {
         t = tc_get_var(tc, node.val_str)
         if t == 0 {
             t = create_any_type()
@@ -255,7 +252,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return t
     }
     
-    if str_eq(k, "BinOp") == 1 {
+    if h == 5 {
         t1 = tc_visit(tc, node.left)
         t2 = tc_visit(tc, node.right)
         tc_unify(tc, t1, t2, node)
@@ -271,14 +268,14 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return t1
     }
     
-    if str_eq(k, "Compare") == 1 {
+    if h == 6 {
         t1 = tc_visit(tc, node.left)
         t2 = tc_visit(tc, node.right)
         tc_unify(tc, t1, t2, node)
         return create_scalar_type("int")
     }
     
-    if str_eq(k, "Assignment") == 1 {
+    if h == 7 {
         t = tc_visit(tc, node.left)
         existing = tc_get_var(tc, node.val_str)
         if existing == 0 {
@@ -289,7 +286,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return 0
     }
     
-    if str_eq(k, "Function") == 1 {
+    if h == 8 {
         if str_eq(node.val_str, "main") == 1 {
             errors.err("ReservedName", "", node.line, "Cannot declare a function named 'main'", "the function name 'main' is reserved for the executable's entry point. Please rename it (e.g. to 'run' or 'start')", node.col)
             sys_exit(1)
@@ -322,7 +319,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return create_any_type()
     }
     
-    if str_eq(k, "Return") == 1 {
+    if h == 9 {
         if node != 0 and node.left != 0 {
             t = tc_visit(tc, node.left)
         } else {
@@ -331,17 +328,17 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return t
     }
     
-    if str_eq(k, "Print") == 1 {
+    if h == 10 {
         tc_visit(tc, node.left)
         return create_any_type()
     }
     
-    if str_eq(k, "PrintD") == 1 {
+    if h == 11 {
         tc_visit(tc, node.left)
         return create_any_type()
     }
     
-    if str_eq(k, "TRY") == 1 {
+    if h == 12 {
         i = 0
         while i < len(node.args) {
             tc_visit(tc, node.args[i])
@@ -355,14 +352,14 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return create_any_type()
     }
     
-    if str_eq(k, "THROW") == 1 {
+    if h == 13 {
         if node.left != 0 {
             tc_visit(tc, node.left)
         }
         return create_any_type()
     }
     
-    if str_eq(k, "Call") == 1 {
+    if h == 14 {
         if tc_find_struct(tc, node.val_str) != 0 {
             i = 0
             while i < len(node.args) {
@@ -394,7 +391,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return create_any_type()
     }
     
-    if str_eq(k, "IfElse") == 1 {
+    if h == 15 {
         tc_visit(tc, node.cond)
         
         tc_push_env(tc)
@@ -416,7 +413,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return create_any_type()
     }
     
-    if str_eq(k, "While") == 1 {
+    if h == 16 {
         tc_visit(tc, node.cond)
         i = 0
         while i < len(node.body) {
@@ -426,7 +423,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return create_any_type()
     }
     
-    if str_eq(k, "MethodCall") == 1 {
+    if h == 17 {
         tc_visit(tc, node.left)
         i = 0
         while i < len(node.args) {
@@ -436,18 +433,18 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return create_any_type()
     }
 
-    if str_eq(k, "DataFieldAccess") == 1 {
+    if h == 18 {
         inst_t = tc_visit(tc, node.left)
         return create_any_type()
     }
 
-    if str_eq(k, "DataFieldAssign") == 1 {
+    if h == 19 {
         inst_t = tc_visit(tc, node.left)
         tc_visit(tc, node.right)
         return create_any_type()
     }
 
-    if str_eq(k, "ArrayIndex") == 1 {
+    if h == 20 {
         base_t = tc_visit(tc, node.left)
         tc_visit(tc, node.right)
         if base_t != 0 and base_t.kind == "list" {
@@ -456,7 +453,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return create_any_type()
     }
 
-    if str_eq(k, "ArrayIndexAssign") == 1 {
+    if h == 21 {
         base_t = tc_visit(tc, node.left)
         right_t = tc_visit(tc, node.right)
         cond_t = tc_visit(tc, node.cond)
@@ -465,7 +462,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         }
         return create_any_type()
     }
-    if str_eq(k, "DictLiteral") == 1 {
+    if h == 22 {
         i = 0
         while i < len(node.args) {
             tc_visit(tc, node.args[i])
@@ -475,7 +472,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return node.inferred_type
     }
 
-    if str_eq(k, "ListLiteral") == 1 {
+    if h == 23 {
         elem_t = create_any_type()
         is_het = 0
         i = 0
@@ -496,7 +493,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return create_list_type(elem_t)
     }
 
-    if str_eq(k, "RawBlock") == 1 {
+    if h == 24 {
         i = 0
         while i < len(node.body) {
             tc_visit(tc, node.body[i])
@@ -505,7 +502,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return create_any_type()
     }
 
-    if str_eq(k, "ForLoop") == 1 {
+    if h == 25 {
         tc_push_env(tc)
         tc_set_var(tc, node.val_str, create_scalar_type("int"))
         i = 0
@@ -517,7 +514,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return create_any_type()
     }
 
-    if str_eq(k, "ForIn") == 1 {
+    if h == 26 {
         tc_push_env(tc)
         coll_t = tc_visit(tc, node.left)
         loop_t = create_any_type()

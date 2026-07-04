@@ -185,8 +185,55 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     return asm
 }
 
-def compile_to_file(input_path: string, output_path: string, debug_mode: int, target_os: string) {
-    asm = compile_file(input_path, debug_mode, "x86_64", target_os)
+def _find_gcc(target_os: string, target_arch: string, compiler_dir: string) -> string {
+    host = sys_platform()
+    # On macOS native, prefer clang
+    if host == "macos" and target_os == "macos" {
+        if file_exists("clang") == 1 or file_exists("/usr/bin/clang") == 1 {
+            return "clang"
+        }
+    }
+    # Bundled GCC (Windows)
+    if host == "windows" {
+        bundled = compiler_dir + "/gcc/bin/gcc.exe"
+        if file_exists(bundled) == 1 { return bundled }
+    }
+    # Cross-compilation: look for target-specific cross-toolchain
+    if host != target_os {
+        cross_key = target_os + "_" + target_arch
+        if cross_key == "linux_x86_64" { return "x86_64-linux-gnu-gcc" }
+        if cross_key == "linux_arm64" { return "aarch64-linux-gnu-gcc" }
+        if cross_key == "windows_x86_64" { return "x86_64-w64-mingw32-gcc" }
+        if cross_key == "windows_arm64" { return "aarch64-w64-mingw32-gcc" }
+        if cross_key == "macos_x86_64" { return "x86_64-apple-darwin-gcc" }
+        if cross_key == "macos_arm64" { return "aarch64-apple-darwin-gcc" }
+    }
+    return "gcc"
+}
+
+def _compile_runtime(gcc_name: string, target_os: string, target_arch: string, compiler_dir: string) {
+    runtime_c_path = compiler_dir + "/runtime.c"
+    runtime_o_path = compiler_dir + "/runtime.o"
+    if file_exists(runtime_c_path) == 0 { return }
+    # Remove stale runtime.o
+    if file_exists(runtime_o_path) == 1 {
+        sys_system("rm -f " + runtime_o_path)
+    }
+    cmd = gcc_name + " -O3 -c " + runtime_c_path + " -o " + runtime_o_path
+    if target_os == "macos" {
+        cmd = cmd + " -D MACOS"
+        if target_arch == "arm64" { cmd = cmd + " -arch arm64" }
+    } elif target_os == "linux" {
+        cmd = cmd + " -D LINUX_WRAP"
+    } elif target_os == "windows" {
+        cmd = cmd + " -mno-red-zone"
+    }
+    print("Compiling runtime.c: " + cmd)
+    system.system_exec(cmd)
+}
+
+def compile_to_file(input_path: string, output_path: string, debug_mode: int, target_arch: string, target_os: string) {
+    asm = compile_file(input_path, debug_mode, target_arch, target_os)
     if len(asm) == 0 { return }
     write_lines(asm, output_path)
     print("Compiled: " + input_path + " -> " + output_path)
@@ -243,6 +290,8 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
     write_lines(asm, input_path + ".s")
     
     compiler_dir = get_compiler_dir()
+    gcc_name = _find_gcc(target_os, target_arch, compiler_dir)
+    _compile_runtime(gcc_name, target_os, target_arch, compiler_dir)
     runtime_o_path = compiler_dir + "/runtime.o"
     
     is_windows = 0
@@ -252,13 +301,6 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
     is_linux = 0
     if target_os == "linux" { is_linux = 1 }
     
-    gcc_name = "gcc"
-    if is_windows == 1 {
-        gcc_name = compiler_dir + "/gcc/bin/gcc.exe"
-    } elif is_linux == 1 {
-        gcc_name = "gcc"
-    }
-    # Cross-compilation from Linux to Windows
     if is_windows == 1 and target_arch == "x86_64" {
         print("Using GCC to assemble and link...")
         system.system_exec(gcc_name + " -O3 " + input_path + ".s -o " + output_path + " -mconsole -lkernel32 -Wl,--stack,16777216 " + runtime_o_path)
@@ -271,9 +313,10 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
         sys_write_raw(fd, exe_bytes)
         sys_close(fd)
     } else {
-        print("Using system GCC to assemble and link...")
+        print("Using GCC to assemble and link...")
         gcc_cmd = gcc_name + " -O3 " + input_path + ".s -o " + output_path + " " + runtime_o_path
         if is_macos == 1 {
+            if target_arch == "arm64" { gcc_cmd = gcc_cmd + " -arch arm64" }
             gcc_cmd = gcc_cmd + " -Wl,-no_compact_unwind"
         } elif is_linux == 1 {
             gcc_cmd = gcc_cmd + " -no-pie"

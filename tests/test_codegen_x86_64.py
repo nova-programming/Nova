@@ -59,11 +59,11 @@ class TestX86_64CodegenOutput(unittest.TestCase):
         self.assertEqual(push_offset_count, 0, "Expected NO 'push offset' in x86_64 codegen")
 
     def test_printf_call_systemv(self):
-        """printf must be called via System V ABI (args in rdi, rsi, xor eax)."""
+        """printf must be called via System V ABI (args in rdi, rsi, xor rax)."""
         asm = compile_to_asm('print("hello")')
         self.assertIn("lea rdi, [rip + fmt_str]", asm)
         self.assertIn("pop rsi", asm)
-        self.assertIn("mov eax, 0", asm)
+        self.assertIn("mov rax, 0", asm)
         self.assertIn("call _printf", asm)
 
     def test_print_int(self):
@@ -81,42 +81,42 @@ class TestX86_64CodegenOutput(unittest.TestCase):
     def test_printf_zero_vector_regs(self):
         """printf requires RAX=0 to specify 0 vector registers used."""
         asm = compile_to_asm("print(42)")
-        # Peephole replaces xor eax, eax with mov eax, 0
-        self.assertIn("mov eax, 0", asm)
+        # Peephole replaces xor rax, rax with mov rax, 0
+        self.assertIn("mov rax, 0", asm)
         self.assertIn("call _printf", asm)
 
     def test_binary_ops(self):
         """Binary ops fold memory operands for leaf variables."""
         asm = compile_to_asm("a = 10\nb = 20\nprint(a + b)")
-        self.assertRegex(asm, r"add e\w\w, e\w\w")
+        self.assertRegex(asm, r"add r\w\w, r\w\w")
         self.assertIn("push rax", asm)
 
     def test_binary_sub(self):
         asm = compile_to_asm("a = 10\nb = 5\nprint(a - b)")
-        self.assertRegex(asm, r"sub e\w\w, e\w\w")
+        self.assertRegex(asm, r"sub r\w\w, r\w\w")
 
     def test_binary_mul(self):
         asm = compile_to_asm("a = 10\nb = 5\nprint(a * b)")
-        self.assertRegex(asm, r"imul e\w\w, e\w\w")
+        self.assertRegex(asm, r"imul r\w\w, r\w\w")
 
     def test_binary_div_idiv(self):
-        """Division uses cdq/idiv for signed 32-bit."""
+        """Division uses cqo/idiv for signed 32-bit."""
         asm = compile_to_asm("a = 100\nb = 3\nprint(a / b)")
-        self.assertIn("cdq", asm)
-        self.assertRegex(asm, r"idiv e\w\w")
+        self.assertIn("cqo", asm)
+        self.assertRegex(asm, r"idiv r\w\w")
 
     def test_unary_neg(self):
         asm = compile_to_asm("print(-5)")
-        self.assertIn("neg eax", asm)
+        self.assertIn("neg rax", asm)
 
     def test_unary_not(self):
         asm = compile_to_asm("print(not 0)")
         self.assertIn("sete al", asm)
-        self.assertIn("movzx eax, al", asm)
+        self.assertIn("movzx rax, al", asm)
 
     def test_if_else(self):
         asm = compile_to_asm("if 1 { print(1) } else { print(0) }")
-        self.assertIn("cmp eax, 0", asm)
+        self.assertIn("cmp rax, 0", asm)
         self.assertIn("je L_else", asm)
         self.assertIn("jmp L_end", asm)
 
@@ -141,7 +141,7 @@ class TestX86_64CodegenOutput(unittest.TestCase):
 
     def test_compare_eq(self):
         asm = compile_to_asm("a = 1\nb = 2\nprint(a == b)")
-        self.assertRegex(asm, r"cmp e\w\w, e\w\w")
+        self.assertRegex(asm, r"cmp r\w\w, r\w\w")
         self.assertIn("sete al", asm)
 
     def test_compare_neq(self):
@@ -166,10 +166,10 @@ class TestX86_64CodegenOutput(unittest.TestCase):
 
     def test_out_of_bounds_helper(self):
         asm = compile_to_asm("print(1)")
-        self.assertIn("_out_of_bounds:", asm)
-        self.assertIn('lea rdi, [rip + oob_msg]', asm)
-        self.assertIn("call _printf", asm)
-        self.assertIn("call _exit", asm)
+        self.assertNotIn("_out_of_bounds:", asm)
+        self.assertIn(".extern _oob_file_ptr", asm)
+        self.assertIn(".extern _oob_line", asm)
+        self.assertIn("source_path_str:", asm)
 
     def test_concat_strings_helper(self):
         asm = compile_to_asm('print("a" + "b")')
@@ -207,7 +207,7 @@ class TestX86_64CodegenOutput(unittest.TestCase):
     def test_list_literal(self):
         asm = compile_to_asm("print([1, 2, 3])")
         self.assertIn("call _malloc", asm)  # allocate list struct
-        self.assertIn("dword ptr [rbx]", asm)   # store length
+        self.assertIn("dword ptr [rbx]", asm)   # store length (32-bit)
         self.assertIn("[rbx + 8]", asm)  # data pointer
 
     def test_dict_literal(self):
@@ -223,7 +223,7 @@ class TestX86_64CodegenOutput(unittest.TestCase):
     def test_no_32bit_registers_for_pointers(self):
         """64-bit pointers must use 64-bit register loads."""
         asm = compile_to_asm('print("hello")')
-        # String access via rax (64-bit pointer), never eax
+        # String access via rax (64-bit pointer), never rax
         self.assertIn("lea rax, [rip + str_", asm)
 
     def test_no_ebp_esp_in_32bit_mode(self):
@@ -264,7 +264,7 @@ class TestX86_64CodegenOutput(unittest.TestCase):
 
     def test_ptr_value(self):
         asm = compile_to_asm("x = alloc(4)\np = ptr(x)\nprint(p.value)")
-        self.assertIn("mov eax, [rdx]", asm)
+        self.assertIn("mov rax, [rdx]", asm)
         self.assertIn("push rax", asm)
 
     def test_ptr_addr(self):

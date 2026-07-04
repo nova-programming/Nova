@@ -10,11 +10,12 @@ _FIELD_PREFERRED = {
 class Arm64Codegen:
     """AArch64 (ARM64) codegen for Apple Silicon (macOS) and Windows ARM64. Full feature parity with x86_64."""
 
-    def __init__(self, ast_nodes, module_names=None, debug_mode=0, target_os="windows"):
+    def __init__(self, ast_nodes, module_names=None, debug_mode=0, target_os="windows", source_path=""):
         self.ast = ast_nodes
         self.debug_mode = debug_mode
         self.module_names = module_names or []
         self.target_os = target_os
+        self.source_path = source_path
         self.assembly = []
         self.data_section = []
         self.string_literals = {}
@@ -22,11 +23,11 @@ class Arm64Codegen:
         self.label_count = 0
         self.local_vars = {}
         self.local_offset = 0
-        self.local_aligned = 0
         self.loop_labels = []
         self.prop_offsets = {}
         self.struct_defs = {}
         self._prop_offset_cache = {}
+        self._tmp_reg_stack = []
         self.string_vars = set()
         self.func_returns = {}
         self._reg_pool = []
@@ -162,14 +163,14 @@ class Arm64Codegen:
             else:
                 val = int(node.value)
                 if val < 0: val = (1 << 64) + val
-                w0 = val & 0xFFFF
-                w1 = (val >> 16) & 0xFFFF
-                w2 = (val >> 32) & 0xFFFF
-                w3 = (val >> 48) & 0xFFFF
-                self.assembly.append(f"    movz {reg}, #{w0}")
-                if w1: self.assembly.append(f"    movk {reg}, #{w1}, lsl 16")
-                if w2: self.assembly.append(f"    movk {reg}, #{w2}, lsl 32")
-                if w3: self.assembly.append(f"    movk {reg}, #{w3}, lsl 48")
+                x0 = val & 0xFFFF
+                x1 = (val >> 16) & 0xFFFF
+                x2 = (val >> 32) & 0xFFFF
+                x3 = (val >> 48) & 0xFFFF
+                self.assembly.append(f"    movz {reg}, #{x0}")
+                if x1: self.assembly.append(f"    movk {reg}, #{x1}, lsl 16")
+                if x2: self.assembly.append(f"    movk {reg}, #{x2}, lsl 32")
+                if x3: self.assembly.append(f"    movk {reg}, #{x3}, lsl 48")
             return reg
         elif isinstance(node, Boolean):
             reg = self._alloc_reg()
@@ -463,6 +464,11 @@ class Arm64Codegen:
         self.assembly.append(".extern _str_sub")
         self.assembly.append(".extern _slice_list")
         self.assembly.append(".extern _call")
+        self.assembly.append(".extern _try_catch_sp")
+        self.assembly.append(".extern _catch_ip")
+        self.assembly.append(".extern _exception_val")
+        self.assembly.append(".extern _oob_file_ptr")
+        self.assembly.append(".extern _oob_line")
 
         self.data_section.append(".align 3")
         self.data_section.append('fmt_int: .asciz "%d\\n"')
@@ -477,6 +483,10 @@ class Arm64Codegen:
         self.data_section.append('str_fmode_wp: .asciz "w+"')
         self.data_section.append('str_fmode_w: .asciz "w"')
 
+        if self.source_path:
+            self.data_section.append(f'source_path_str: .asciz "{self.source_path}"')
+        else:
+            self.data_section.append('source_path_str: .asciz "unknown"')
         self.data_section.append("char_strings:")
         for i in range(256):
             self.data_section.append(f"    .byte {i}")
@@ -505,6 +515,13 @@ class Arm64Codegen:
         self.assembly.append("    stp fp, lr, [sp, #-16]!")
         self.assembly.append("    mov fp, sp")
 
+        # Set _oob_file_ptr for error messages
+        self.assembly.append("    adrp x16, source_path_str@PAGE")
+        self.assembly.append("    add x16, x16, source_path_str@PAGEOFF")
+        self.assembly.append("    adrp x17, _oob_file_ptr@PAGE")
+        self.assembly.append("    add x17, x17, _oob_file_ptr@PAGEOFF")
+        self.assembly.append("    str x16, [x17]")
+
         self.local_vars = {}
         self.local_offset = 0
 
@@ -521,7 +538,7 @@ class Arm64Codegen:
         if aligned > 0:
             self.assembly.append(f"    sub sp, sp, #{aligned}")
 
-        self.assembly.append(f"    str w0, [sp, #{aligned - 8}]")
+        self.assembly.append(f"    str x0, [sp, #{aligned - 8}]")
         self.assembly.append(f"    str x1, [sp, #{aligned - 16}]")
         self.assembly.append(f"    adrp x2, __nova_argc@PAGE")
         self.assembly.append(f"    add x2, x2, __nova_argc@PAGEOFF")
@@ -536,7 +553,7 @@ class Arm64Codegen:
         if aligned > 0:
             self.assembly.append(f"    add sp, sp, #{aligned}")
         self.assembly.append("    ldp fp, lr, [sp], #16")
-        self.assembly.append("    mov w0, #0")
+        self.assembly.append("    mov x0, #0")
         self.assembly.append("    ret")
 
         self._emit_concat_strings()
@@ -585,13 +602,7 @@ class Arm64Codegen:
         self.assembly.append("    ret")
 
     def _emit_out_of_bounds(self):
-        self.data_section.append('oob_msg: .asciz "Index Out Of Bounds\\n"')
-        self.assembly.append("_out_of_bounds:")
-        self.assembly.append("    adrp x0, oob_msg@PAGE")
-        self.assembly.append("    add x0, x0, oob_msg@PAGEOFF")
-        self.assembly.append("    bl _printf")
-        self.assembly.append("    mov w0, #1")
-        self.assembly.append("    bl _exit")
+        pass
 
     def scan_vars(self, node):
         if isinstance(node, Assignment):
@@ -703,7 +714,7 @@ class Arm64Codegen:
                 self.assembly.append("    add x0, x0, fmt_str@PAGEOFF")
                 self.assembly.append("    ldr x1, [sp], #16")
                 self.assembly.append("    bl _printf")
-                self.assembly.append("    mov w0, #0")
+                self.assembly.append("    mov x0, #0")
                 self.assembly.append("    bl _fflush")
             else:
                 self.compile_expr(node.value)
@@ -718,7 +729,7 @@ class Arm64Codegen:
                     self.assembly.append("    add x0, x0, fmt_int@PAGEOFF")
                 self.assembly.append("    ldr x1, [sp], #16")
                 self.assembly.append("    bl _printf")
-                self.assembly.append("    mov w0, #0")
+                self.assembly.append("    mov x0, #0")
                 self.assembly.append("    bl _fflush")
         elif isinstance(node, PrintD):
             if self.debug_mode == 1:
@@ -729,7 +740,7 @@ class Arm64Codegen:
                 self.assembly.append("    bl _printf")
                 self.assembly.append("    adrp x0, fmt_int_pure@PAGE")
                 self.assembly.append("    add x0, x0, fmt_int_pure@PAGEOFF")
-                self.assembly.append(f"    mov w1, #{node.line}")
+                self.assembly.append(f"    mov x1, #{node.line}")
                 self.assembly.append("    bl _printf")
                 self.assembly.append("    adrp x0, fmt_str@PAGE")
                 self.assembly.append("    add x0, x0, fmt_str@PAGEOFF")
@@ -748,9 +759,9 @@ class Arm64Codegen:
                     self.assembly.append("    add x0, x0, fmt_int_pure@PAGEOFF")
                 self.assembly.append("    ldr x1, [sp], #16")
                 self.assembly.append("    bl _printf")
-                self.assembly.append("    mov w0, #10")
+                self.assembly.append("    mov x0, #10")
                 self.assembly.append("    bl _fputc")
-                self.assembly.append("    mov w0, #0")
+                self.assembly.append("    mov x0, #0")
                 self.assembly.append("    bl _fflush")
         elif isinstance(node, Return):
             self.compile_expr(node.value)
@@ -837,16 +848,16 @@ class Arm64Codegen:
                 self._emit_fp_access(self.assembly, "str", "xzr", -offset)
             self.assembly.append(f"{loop_label}:")
             if isinstance(offset, str):
-                self.assembly.append(f"    ldr w0, {offset}")
+                self.assembly.append(f"    ldr x0, {offset}")
             else:
-                self._emit_fp_access(self.assembly, "ldr", "w0", -offset)
+                self._emit_fp_access(self.assembly, "ldr", "x0", -offset)
             self.assembly.append("    ldr x1, [sp], #16")
             self.assembly.append("    str x1, [sp, #-16]!")
-            self.assembly.append("    cmp w0, w1")
+            self.assembly.append("    cmp x0, x1")
             self.assembly.append(f"    b.ge {end_label}")
             self.assembly.append("    ldr x2, [x3, #8]")
             if isinstance(offset, str):
-                self.assembly.append(f"    ldr w1, {offset}")
+                self.assembly.append(f"    ldr x1, {offset}")
             else:
                 self._emit_fp_access(self.assembly, "ldr", "x1", -offset)
             self.assembly.append("    ldr x0, [x2, x1, lsl #3]")
@@ -883,7 +894,7 @@ class Arm64Codegen:
             self._free_reg(ptr_reg)
             self.assembly.append("    ldr x1, [sp], #16")
             self.assembly.append("    ldr x0, [sp], #16")
-            self.assembly.append("    str w1, [x0]")
+            self.assembly.append("    str x1, [x0]")
         elif isinstance(node, ArrayIndexAssign):
             val_reg = self._compile_expr_to_reg(node.value)
             idx_reg = self._compile_expr_to_reg(node.index)
@@ -897,10 +908,14 @@ class Arm64Codegen:
             self.assembly.append("    ldr x2, [sp], #16")
             self.assembly.append("    ldr x1, [sp], #16")
             self.assembly.append("    ldr x0, [sp], #16")
-            self.assembly.append("    cmp w1, #0")
+            self.assembly.append(f"    adrp x16, _oob_line@PAGE")
+            self.assembly.append(f"    add x16, x16, _oob_line@PAGEOFF")
+            self.assembly.append(f"    mov x17, #{node.line}")
+            self.assembly.append(f"    str x17, [x16]")
+            self.assembly.append("    cmp x1, #0")
             self.assembly.append("    b.lt _out_of_bounds")
             self.assembly.append("    ldr w3, [x2]")
-            self.assembly.append("    cmp w1, w3")
+            self.assembly.append("    cmp x1, x3")
             self.assembly.append("    b.ge _out_of_bounds")
             self.assembly.append("    ldr x3, [x2, #8]")
             self.assembly.append("    str x0, [x3, x1, lsl #3]")
@@ -919,11 +934,48 @@ class Arm64Codegen:
             self.assembly.append("    ldr x0, [sp], #16")
             self.assembly.append("    bl _fclose")
         elif isinstance(node, Try):
+            catch_label = self.next_label("catch")
+            after_label = self.next_label("after_try")
+            self.assembly.append(f"    adrp x16, _try_catch_sp@PAGE")
+            self.assembly.append(f"    add x16, x16, _try_catch_sp@PAGEOFF")
+            self.assembly.append("    mov x17, sp")
+            self.assembly.append("    str x17, [x16]")
+            self.assembly.append(f"    adrp x16, _catch_ip@PAGE")
+            self.assembly.append(f"    add x16, x16, _catch_ip@PAGEOFF")
+            self.assembly.append(f"    adrp x17, {catch_label}@PAGE")
+            self.assembly.append(f"    add x17, x17, {catch_label}@PAGEOFF")
+            self.assembly.append("    str x17, [x16]")
             for stmt in node.body:
                 self.compile_stmt(stmt)
+            self.assembly.append(f"    adrp x16, _try_catch_sp@PAGE")
+            self.assembly.append(f"    add x16, x16, _try_catch_sp@PAGEOFF")
+            self.assembly.append("    str xzr, [x16]")
+            self.assembly.append(f"    b {after_label}")
+            self.assembly.append(f"{catch_label}:")
+            self.assembly.append(f"    adrp x16, _exception_val@PAGE")
+            self.assembly.append(f"    add x16, x16, _exception_val@PAGEOFF")
+            self.assembly.append("    ldr x0, [x16]")
+            if node.catch_var:
+                offset = self.local_vars.get(node.catch_var)
+                if offset is not None:
+                    self._emit_fp_access(self.assembly, "str", "x0", -offset if isinstance(offset, int) else 0)
+            for stmt in node.catch_body:
+                self.compile_stmt(stmt)
+            self.assembly.append(f"{after_label}:")
         elif isinstance(node, Throw):
             self.compile_expr(node.value)
-            self.assembly.append("    add sp, sp, #16")
+            self.assembly.append("    ldr x0, [sp], #16")
+            self.assembly.append(f"    adrp x16, _exception_val@PAGE")
+            self.assembly.append(f"    add x16, x16, _exception_val@PAGEOFF")
+            self.assembly.append("    str x0, [x16]")
+            self.assembly.append(f"    adrp x17, _try_catch_sp@PAGE")
+            self.assembly.append(f"    add x17, x17, _try_catch_sp@PAGEOFF")
+            self.assembly.append("    ldr x17, [x17]")
+            self.assembly.append("    mov sp, x17")
+            self.assembly.append(f"    adrp x16, _catch_ip@PAGE")
+            self.assembly.append(f"    add x16, x16, _catch_ip@PAGEOFF")
+            self.assembly.append("    ldr x16, [x16]")
+            self.assembly.append("    br x16")
         elif isinstance(node, RawBlock):
             for line in node.body:
                 if isinstance(line, str): self.assembly.append(line)
@@ -940,20 +992,20 @@ class Arm64Codegen:
             if isinstance(node.value, float):
                 import struct
                 bits = struct.unpack('<I', struct.pack('<f', node.value))[0]
-                self.assembly.append(f"    movz w0, #{bits & 0xFFFF}")
-                self.assembly.append(f"    movk w0, #{(bits >> 16) & 0xFFFF}, lsl #16")
+                self.assembly.append(f"    movz x0, #{bits & 0xFFFF}")
+                self.assembly.append(f"    movk x0, #{(bits >> 16) & 0xFFFF}, lsl #16")
                 self.assembly.append("    str x0, [sp, #-16]!")
             else:
                 val = int(node.value)
                 if val < 0: val = (1 << 64) + val
-                w0 = val & 0xFFFF
-                w1 = (val >> 16) & 0xFFFF
-                w2 = (val >> 32) & 0xFFFF
-                w3 = (val >> 48) & 0xFFFF
-                self.assembly.append(f"    movz x0, #{w0}")
-                if w1: self.assembly.append(f"    movk x0, #{w1}, lsl 16")
-                if w2: self.assembly.append(f"    movk x0, #{w2}, lsl 32")
-                if w3: self.assembly.append(f"    movk x0, #{w3}, lsl 48")
+                x0 = val & 0xFFFF
+                x1 = (val >> 16) & 0xFFFF
+                x2 = (val >> 32) & 0xFFFF
+                x3 = (val >> 48) & 0xFFFF
+                self.assembly.append(f"    movz x0, #{x0}")
+                if x1: self.assembly.append(f"    movk x0, #{x1}, lsl 16")
+                if x2: self.assembly.append(f"    movk x0, #{x2}, lsl 32")
+                if x3: self.assembly.append(f"    movk x0, #{x3}, lsl 48")
                 self.assembly.append("    str x0, [sp, #-16]!")
         elif isinstance(node, String):
             label = self.add_string_literal(node.value)
@@ -1057,11 +1109,11 @@ class Arm64Codegen:
             self.compile_expr(node.ptr)
             if node.property == "value":
                 self.assembly.append("    ldr x0, [sp], #16")
-                self.assembly.append("    ldr w0, [x0]")
+                self.assembly.append("    ldr x0, [x0]")
                 self.assembly.append("    str x0, [sp, #-16]!")
             elif node.property == "value_byte":
                 self.assembly.append("    ldr x0, [sp], #16")
-                self.assembly.append("    ldrb w0, [x0]")
+                self.assembly.append("    ldrb x0, [x0]")
                 self.assembly.append("    str x0, [sp, #-16]!")
             elif node.property == "addr":
                 pass
@@ -1083,20 +1135,24 @@ class Arm64Codegen:
             self.assembly.append("    ldr x0, [sp], #16")
             self.assembly.append("    ldr x1, [sp], #16")
             if is_str:
-                self.assembly.append("    ldrb w0, [x0, x1]")
+                self.assembly.append("    ldrb x0, [x0, x1]")
                 self.assembly.append("    lsl x0, x0, #1")
                 self.assembly.append("    adrp x1, char_strings@PAGE")
                 self.assembly.append("    add x1, x1, char_strings@PAGEOFF")
                 self.assembly.append("    add x0, x1, x0")
                 self.assembly.append("    str x0, [sp, #-16]!")
             else:
-                self.assembly.append("    cmp w0, #0")
+                self.assembly.append(f"    adrp x16, _oob_line@PAGE")
+                self.assembly.append(f"    add x16, x16, _oob_line@PAGEOFF")
+                self.assembly.append(f"    mov x17, #{node.line}")
+                self.assembly.append(f"    str x17, [x16]")
+                self.assembly.append("    cmp x0, #0")
                 self.assembly.append("    b.lt _out_of_bounds")
                 self.assembly.append("    ldr w2, [x1]")
-                self.assembly.append("    cmp w0, w2")
+                self.assembly.append("    cmp x0, x2")
                 self.assembly.append("    b.ge _out_of_bounds")
                 self.assembly.append("    ldr x2, [x1, #8]")
-                self.assembly.append("    ldr x0, [x2, w0, uxtw #3]")
+                self.assembly.append("    ldr x0, [x2, x0, uxtw #3]")
                 self.assembly.append("    str x0, [sp, #-16]!")
         elif isinstance(node, Openf):
             self.assembly.append("    mov x0, #24")
@@ -1109,10 +1165,12 @@ class Arm64Codegen:
             self.assembly.append("    ldr x0, [sp], #16")
             self.assembly.append("    str x0, [sp, #-16]!")
             self.assembly.append("    str x1, [x0, #16]")
+            self.assembly.append("    mov x0, x1")
+            self.assembly.append("    mov x1, x2")
             self.assembly.append("    bl _fopen")
             self.assembly.append("    ldr x1, [sp], #16")
             self.assembly.append("    str x1, [sp, #-16]!")
-            self.assembly.append("    str w0, [x1]")
+            self.assembly.append("    str x0, [x1]")
             self.assembly.append("    str x1, [sp, #-16]!")
         elif isinstance(node, OpenFile):
             self.compile_expr(node.path)
@@ -1171,32 +1229,32 @@ class Arm64Codegen:
                 self.assembly.append("    ldr x0, [sp], #16")
                 # x1 = list_ptr, x0 = value
                 # Compare (count+1)*8 <= capacity_bytes to decide realloc
-                self.assembly.append("    ldr w2, [x1]")             # w2 = count
+                self.assembly.append("    ldr w2, [x1]")             # w2 = count (32-bit, zero-extended)
                 self.assembly.append("    add w3, w2, #1")           # w3 = count + 1
                 self.assembly.append("    lsl w3, w3, #3")           # w3 = (count+1)*8 = new byte size
-                self.assembly.append("    ldr w4, [x1, #4]")         # w4 = capacity_bytes
+                self.assembly.append("    ldr w4, [x1, #4]")         # w4 = capacity_bytes (32-bit)
                 self.assembly.append("    cmp w3, w4")
                 self.assembly.append(f"    b.lt {no_realloc}")
                 # Realloc path: realloc(data_ptr, capacity*2)
-                self.assembly.append("    lsl w4, w4, #1")           # w4 = capacity * 2 = new_capacity_bytes
+                self.assembly.append("    lsl x4, x4, #1")           # x4 = capacity * 2 (64-bit for realloc size)
                 self.assembly.append("    ldr x2, [x1, #8]")         # x2 = data_ptr
                 self.assembly.append("    str x0, [sp, #-16]!")      # save value
                 self.assembly.append("    str x1, [sp, #-16]!")      # save list_ptr
                 self.assembly.append("    mov x0, x2")               # x0 = data_ptr (arg1)
-                self.assembly.append("    mov x1, x4")               # x1 = new_size (arg2)
+                self.assembly.append("    mov x1, x4")               # x1 = new_size (arg2, 64-bit)
                 self.assembly.append("    bl _realloc")
                 self.assembly.append("    mov x2, x0")               # x2 = new data_ptr
                 self.assembly.append("    ldr x1, [sp], #16")        # restore list_ptr
                 self.assembly.append("    ldr x0, [sp], #16")        # restore value
                 self.assembly.append("    str x2, [x1, #8]")         # update data_ptr in header
-                self.assembly.append("    str w4, [x1, #4]")         # update capacity in header
+                self.assembly.append("    str w4, [x1, #4]")         # update capacity in header (32-bit)
                 # Common store path (post-increment count)
                 self.assembly.append(f"{no_realloc}:")
-                self.assembly.append("    ldr w3, [x1]")             # w3 = count
+                self.assembly.append("    ldr w3, [x1]")             # w3 = count (32-bit)
                 self.assembly.append("    ldr x2, [x1, #8]")         # x2 = data_ptr
-                self.assembly.append("    str x0, [x2, w3, uxtw #3]") # data[count] = value
-                self.assembly.append("    add w3, w3, #1")           # count++
-                self.assembly.append("    str w3, [x1]")             # store count
+                self.assembly.append("    str x0, [x2, x3, uxtw #3]") # data[count] = value
+                self.assembly.append("    add w3, w3, #1")           # w3 = count++ (32-bit)
+                self.assembly.append("    str w3, [x1]")             # store count (32-bit)
                 self.assembly.append("    str x1, [sp, #-16]!")      # push list_ptr (expression result)
             elif node.method_name == "pop":
                 self.compile_expr(node.instance)
@@ -1287,7 +1345,7 @@ class Arm64Codegen:
             self.assembly.append("    str x0, [sp, #-16]!")
         elif isinstance(node, StrConvert):
             self.compile_expr(node.target)
-            self.assembly.append("    mov w0, #32")
+            self.assembly.append("    mov x0, #32")
             self.assembly.append("    bl _malloc")
             self.assembly.append("    ldr x2, [sp], #16")
             self.assembly.append("    adrp x1, fmt_int_pure@PAGE")

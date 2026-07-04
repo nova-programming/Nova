@@ -351,12 +351,13 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
     except StaticTypeError as e:
         print(format_error(source, getattr(e, 'line', None), getattr(e, 'col', None), f"{e} (continuing build)"))
 
+    source_path = os.path.basename(file_path)
     if target_arch == "arm64":
         from compiler.backend.arm64.codegen import Arm64Codegen
-        codegen = Arm64Codegen(ast, module_names=module_names, debug_mode=debug_mode, target_os=target_os)
+        codegen = Arm64Codegen(ast, module_names=module_names, debug_mode=debug_mode, target_os=target_os, source_path=source_path)
     else:
         from compiler.backend.x86_64.codegen import X86_64Codegen
-        codegen = X86_64Codegen(ast, module_names=module_names, debug_mode=debug_mode, target_os=target_os)
+        codegen = X86_64Codegen(ast, module_names=module_names, debug_mode=debug_mode, target_os=target_os, source_path=source_path)
         
     asm_code = codegen.generate()
 
@@ -590,6 +591,32 @@ def _do_uninstall():
     print("  Close and reopen your terminal for PATH changes to take effect.")
 
 
+def run_native(file_path, target_arch="x86_64", target_os=None):
+    """Build to native executable and run it."""
+    if target_os is None:
+        target_os = "macos" if sys.platform == "darwin" else ("windows" if sys.platform == "win32" else "linux")
+
+    compile_native(file_path, target_arch=target_arch, target_os=target_os)
+
+    output_ext = ".exe" if target_os == "windows" else ""
+    exe_file = file_path.rsplit(".", 1)[0] + output_ext
+
+    if not os.path.exists(exe_file):
+        print(f"  Native build failed — falling back to VM execution.")
+        run_source(file_path)
+        return
+
+    program_args = []
+    try:
+        idx = sys.argv.index(file_path)
+        program_args = sys.argv[idx + 1:]
+    except ValueError:
+        pass
+    cmd = [exe_file] + program_args
+    print(f"  Executing: {' '.join(cmd)}")
+    subprocess.run(cmd)
+
+
 def print_usage():
     print("Nova Programming Language")
     print(f"Version: {NOVA_VERSION}")
@@ -598,7 +625,7 @@ def print_usage():
     print("  nova --version            Show version")
     print("  nova dev <file.nv>       Run in VM (fast, for development)")
     print("  nova build <file.nv>     Compile to native executable")
-    print("  nova run <file.nv>       Alias for 'dev' (backward compatible)")
+    print("  nova run <file.nv>       Build native + execute (maximum speed)")
     print("  nova repl                Interactive REPL shell")
     print("  nova update              Update Nova compiler")
     print("  nova --uninstall         Remove Nova from your system")
@@ -772,8 +799,11 @@ def main():
     import time
     start_time = time.time()
 
-    if command in ("dev", "run"):
+    if command in ("dev",):
         run_source(file_path)
+    elif command == "run":
+        target_os_arg = locals().get("target_os")
+        run_native(file_path, target_arch=target_arch, target_os=target_os_arg)
     elif command == "build":
         target_os_arg = locals().get("target_os")
         compile_native(file_path, debug_mode, target_arch=target_arch, target_os=target_os_arg)

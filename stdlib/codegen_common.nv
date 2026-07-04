@@ -6,7 +6,9 @@ def get_externs() -> list {
             "_dict_new", "_dict_get", "_dict_set", "_dict_has", "_dict_remove",
             "_dict_keys", "_dict_values", "_dict_items", "_dict_free",
             "_abs", "_min", "_max", "_file_exists", "_file_size", "_file_type", "_now", "_call",
-            "_str_sub", "_slice_list", "_char_code"]
+            "_str_sub", "_slice_list", "_char_code",
+            "_try_catch_sp", "_catch_ip", "_exception_val",
+            "_oob_file_ptr", "_oob_line"]
 }
 
 def get_data_strings() -> list {
@@ -24,12 +26,10 @@ def get_data_strings() -> list {
             "str_type_unknown: .asciz \"unknown\"",
             "debug_prefix: .asciz \"debug - [line \"",
             "debug_suffix: .asciz \"]: \"",
-            "L_out_of_bounds_msg: .asciz \"Index Out Of Bounds\\n\"",
-            "L_realloc_fail_msg: .asciz \"Realloc failed!\\n\"",
+            "L_oob_source: .asciz \"unknown\"",
             "str_fmode_a: .asciz \"a\"",
             "str_fmode_w: .asciz \"w\"",
             "str_fmode_r: .asciz \"r\"",
             "str_fmode_rw: .asciz \"r+\"",
-            "str_fmode_wp: .asciz \"w+\"",
-            "str_const_chacha_mem: .asciz \"expand 32-byte k\""]
+            "str_fmode_wp: .asciz \"w+\""]
 }

@@ -14,16 +14,9 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             }
         }
         if is_str_val == 1 {
-            found_str = 0
-            k = 0
-            while k < len(state.string_vars) {
-                if state.string_vars[k] == node.val_str {
-                    found_str = 1
-                }
-                k = k + 1
-            }
-            if found_str == 0 {
+            if state.string_var_map.has(node.val_str) == 0 {
                 state.string_vars.append(node.val_str)
+                state.string_var_map.set(node.val_str, 1)
             }
         }
         compile_expr(state, node.left)
@@ -81,7 +74,9 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             emit(state, "    push %d")
             emit_call(state, "_dict_set", 3)
         } else {
-            emit(state, "    cmp ecx, 0")
+            emit(state, "    lea %x, [rip + _oob_line]")
+            emit(state, "    mov qword ptr [%x], " + str(node.line))
+            emit(state, "    cmp rcx, 0")
             emit(state, "    jl _out_of_bounds")
             emit(state, "    cmp ecx, dword ptr [%d]")
             emit(state, "    jge _out_of_bounds")
@@ -263,7 +258,7 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         
         ptr_sz = ptr_size(state)
         emit(state, "    sub %s, " + str(ptr_sz))
-        emit(state, "    mov dword ptr [%s], 0")
+        emit(state, "    mov qword ptr [%s], 0")
         
         loop_label = next_label(state, "L_forin")
         end_label = next_label(state, "L_forin_end")
@@ -273,10 +268,10 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, loop_label + ":")
         emit(state, "    mov %d, [%s + " + str(ptr_sz) + "]")
         emit(state, "    mov eax, dword ptr [%d]")
-        emit(state, "    cmp dword ptr [%s], eax")
+        emit(state, "    cmp qword ptr [%s], rax")
         emit(state, "    jge " + end_label)
         
-        emit(state, "    mov eax, dword ptr [%s]")
+        emit(state, "    mov rax, qword ptr [%s]")
         emit(state, "    mov %x, [%d + 8]")
         if ptr_sz == 8 {
             emit(state, "    mov %a, [%x + %a*8]")
@@ -298,9 +293,9 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             i = i + 1
         }
         
-        emit(state, "    mov eax, dword ptr [%s]")
-        emit(state, "    inc eax")
-        emit(state, "    mov dword ptr [%s], eax")
+        emit(state, "    mov rax, qword ptr [%s]")
+        emit(state, "    inc rax")
+        emit(state, "    mov qword ptr [%s], rax")
         emit(state, "    jmp " + loop_label)
         emit(state, end_label + ":")
         clean_n(state, 2)
@@ -377,15 +372,52 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
     }
     
     if node.kind == "TRY" {
+        catch_label = next_label(state, "L_catch")
+        after_label = next_label(state, "L_after_try")
+        
+        emit(state, "    lea %a, [rip + _try_catch_sp]")
+        emit(state, "    mov [%a], %s")
+        emit(state, "    lea %a, [rip + _catch_ip]")
+        emit(state, "    lea %c, [rip + " + catch_label + "]")
+        emit(state, "    mov [%a], %c")
+        
         i = 0
         while i < len(node.body) {
             compile_stmt(state, node.body[i], debug_mode)
             i = i + 1
         }
+        
+        emit(state, "    lea %a, [rip + _try_catch_sp]")
+        emit(state, "    xor %c, %c")
+        emit(state, "    mov [%a], %c")
+        emit(state, "    jmp " + after_label)
+        emit(state, catch_label + ":")
+        emit(state, "    lea %a, [rip + _exception_val]")
+        emit(state, "    mov %a, [%a]")
+        
+        if node.val_str != "" {
+            var_offset = find_var_offset(state, node.val_str)
+            emit(state, "    mov [%b - " + str(abs(var_offset)) + "], %a")
+        }
+        
+        i = 0
+        while i < len(node.else_body) {
+            compile_stmt(state, node.else_body[i], debug_mode)
+            i = i + 1
+        }
+        
+        emit(state, after_label + ":")
     }
     if node.kind == "THROW" {
         compile_expr(state, node.left)
-        clean_n(state, 1)
+        emit(state, "    pop %j")
+        emit(state, "    lea %a, [rip + _exception_val]")
+        emit(state, "    mov [%a], %j")
+        emit(state, "    lea %c, [rip + _try_catch_sp]")
+        emit(state, "    mov %s, [%c]")
+        emit(state, "    lea %c, [rip + _catch_ip]")
+        emit(state, "    mov %c, [%c]")
+        emit(state, "    jmp %c")
     }
     if node.kind == "Call" or node.kind == "MethodCall" {
         compile_expr(state, node)

@@ -18,6 +18,7 @@ data CodegenState {
     label_count: int
     local_vars: list
     local_var_names: list
+    var_name_map: dict
     local_offset: int
     loop_start_labels: list
     loop_end_labels: list
@@ -27,8 +28,10 @@ data CodegenState {
     str_lit_vals: list
     str_lit_labels: list
     string_vars: list
+    string_var_map: dict
     global_field_names: list
     next_global_offset: int
+    prop_offset_map: dict
     local_var_regs: list
     used_regs: list
     target: int
@@ -53,6 +56,7 @@ def new_codegen(tgt: int, target_os: string) -> CodegenState {
     state.label_count = 0
     state.local_vars = []
     state.local_var_names = []
+    state.var_name_map = {}
     state.local_offset = 0
     state.loop_start_labels = []
     state.loop_end_labels = []
@@ -60,21 +64,23 @@ def new_codegen(tgt: int, target_os: string) -> CodegenState {
     state.struct_sizes = []
     state.struct_fields = []
     state.string_vars = []
+    state.string_var_map = {}
     state.str_lit_vals = []
     state.str_lit_labels = []
     state.global_field_names = []
     state.next_global_offset = 8
+    state.prop_offset_map = {}
     state.local_var_regs = []
     state.used_regs = []
     if tgt == 0 {
         state.bp = "ebp"
         state.sp = "esp"
-        state.ax = "eax"
-        state.bx = "ebx"
-        state.cx = "ecx"
-        state.dx = "edx"
-        state.si = "esi"
-        state.di = "edi"
+        state.ax = "rax"
+        state.bx = "rbx"
+        state.cx = "rcx"
+        state.dx = "rdx"
+        state.si = "rsi"
+        state.di = "rdi"
     } else {
         state.bp = "rbp"
         state.sp = "rsp"
@@ -177,7 +183,7 @@ def emit_call(state: CodegenState, func_name: string, arg_count: int) {
         if arg_count >= 5 { emit(state, "    pop r8") }
         if arg_count >= 6 { emit(state, "    pop r9") }
         
-        emit(state, "    xor eax, eax")
+        emit(state, "    xor rax, rax")
         emit(state, "    sub rsp, 32")
         emit(state, "    call " + func_name)
         emit(state, "    add rsp, 32")
@@ -227,27 +233,16 @@ def add_string_literal(state: CodegenState, raw_val: string) -> string {
 }
 
 def find_var_offset(state: CodegenState, name: string) -> int {
-    i = 0
-    while i < len(state.local_var_names) {
-        if state.local_var_names[i] == name {
-            return state.local_vars[i]
-        }
-        i = i + 1
-    }
+    if state.var_name_map.has(name) { return state.var_name_map.get(name) }
     return 0
 }
 
 def register_var(state: CodegenState, name: string) -> int {
-    i = 0
-    while i < len(state.local_var_names) {
-        if state.local_var_names[i] == name {
-            return state.local_vars[i]
-        }
-        i = i + 1
-    }
+    if state.var_name_map.has(name) { return state.var_name_map.get(name) }
     
     psize = ptr_size(state)
     state.local_offset = state.local_offset + psize
+    state.var_name_map.set(name, state.local_offset)
     state.local_var_names.append(name)
     state.local_vars.append(state.local_offset)
     state.local_var_regs.append("")
@@ -270,18 +265,24 @@ def get_prop_offset(state: CodegenState, struct_name: string, field_name: string
         return offset
     }
 
+    key = struct_name + "." + field_name
+    if state.prop_offset_map.has(key) { return state.prop_offset_map.get(key) }
     si = 0
     while si < len(state.struct_names) {
         if state.struct_names[si] == struct_name {
             fi = 0
             while fi < len(state.struct_fields[si]) {
                 if state.struct_fields[si][fi] == field_name {
-                    return struct_field_offset(state, fi)
+                    off = struct_field_offset(state, fi)
+                    state.prop_offset_map.set(key, off)
+                    return off
                 }
                 fi = fi + 1
             }
             state.struct_fields[si].append(field_name)
-            return struct_field_offset(state, fi)
+            off = struct_field_offset(state, fi)
+            state.prop_offset_map.set(key, off)
+            return off
         }
         si = si + 1
     }
@@ -299,13 +300,7 @@ def is_string_expr(state: CodegenState, node: AstNode) -> int {
     }
 
     if node.kind == "Variable" {
-        i = 0
-        while i < len(state.string_vars) {
-            if state.string_vars[i] == node.val_str {
-                return 1
-            }
-            i = i + 1
-        }
+        if state.string_var_map.has(node.val_str) { return 1 }
         if node.inferred_type != 0 and node.inferred_type.kind == "scalar" and node.inferred_type.name == "string" {
             return 1
         }
@@ -499,16 +494,20 @@ def scan_vars(state: CodegenState, node: AstNode) {
 def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     old_var_names = state.local_var_names
     old_vars = state.local_vars
+    old_var_map = state.var_name_map
     old_var_regs = state.local_var_regs
     old_offset = state.local_offset
     old_string_vars = state.string_vars
+    old_string_map = state.string_var_map
     old_used_regs = state.used_regs
 
     state.local_var_names = []
     state.local_vars = []
+    state.var_name_map = {}
     state.local_var_regs = []
     state.local_offset = 0
     state.string_vars = []
+    state.string_var_map = {}
     state.used_regs = []
 
     psize = ptr_size(state)
@@ -522,6 +521,7 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
         if p < len(node.param_types) {
             if node.param_types[p] == "string" {
                 state.string_vars.append(param_name)
+                state.string_var_map.set(param_name, 1)
             }
         }
         p = p + 1
@@ -601,9 +601,11 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
 
     state.local_var_names = old_var_names
     state.local_vars = old_vars
+    state.var_name_map = old_var_map
     state.local_var_regs = old_var_regs
     state.local_offset = old_offset
     state.string_vars = old_string_vars
+    state.string_var_map = old_string_map
     state.used_regs = old_used_regs
 }
 
@@ -686,6 +688,7 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
 
     state.local_var_names = []
     state.local_vars = []
+    state.var_name_map = {}
     state.local_var_regs = []
     state.local_offset = 0
     state.used_regs = []
@@ -706,6 +709,9 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     emit(state, "    mov [rax], rdi")
     emit(state, "    lea rax, [rip + __nova_argv]")
     emit(state, "    mov [rax], rsi")
+    emit(state, "    lea rax, [rip + L_oob_source]")
+    emit(state, "    lea rcx, [rip + _oob_file_ptr]")
+    emit(state, "    mov [rcx], rax")
     if is_x64(state) == 1 {
         emit(state, "    and " + sp + ", -16")
     }
@@ -740,7 +746,7 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     }
     emit(state, "    mov " + sp + ", " + bp)
     emit(state, "    pop " + bp)
-    emit(state, "    mov eax, 0")
+    emit(state, "    mov rax, 0")
     emit(state, "    ret")
 
     emit(state, "_concat_strings:")
@@ -751,12 +757,12 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     emit(state, "    mov [rsp + 8], rdi")
     emit(state, "    mov [rsp + 16], rsi")
     emit(state, "    call _strlen")
-    emit(state, "    mov ebx, eax")
+    emit(state, "    mov rbx, rax")
     emit(state, "    mov rdi, [rsp + 16]")
     emit(state, "    call _strlen")
-    emit(state, "    add ebx, eax")
-    emit(state, "    inc ebx")
-    emit(state, "    mov edi, ebx")
+    emit(state, "    add rbx, rax")
+    emit(state, "    inc rbx")
+    emit(state, "    mov rdi, rbx")
     emit(state, "    call _malloc")
     emit(state, "    mov [rsp], rax")
     emit(state, "    mov rsi, [rsp + 8]")
@@ -777,24 +783,24 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     emit(state, "    mov rbp, rsp")
     emit(state, "    push rbx")
     emit(state, "    sub rsp, 40")
-    emit(state, "    mov ebx, esi")
-    emit(state, "    mov ecx, edx")
-    emit(state, "    sub ecx, ebx")
-    emit(state, "    cmp ecx, 0")
+    emit(state, "    mov rbx, rsi")
+    emit(state, "    mov rcx, rdx")
+    emit(state, "    sub rcx, rbx")
+    emit(state, "    cmp rcx, 0")
     emit(state, "    jge L_slice_alloc_64")
-    emit(state, "    xor ecx, ecx")
+    emit(state, "    xor rcx, rcx")
     emit(state, "L_slice_alloc_64:")
     emit(state, "    mov [rsp + 32], rcx")
     emit(state, "    mov [rsp + 24], rdi")
-    emit(state, "    inc ecx")
-    emit(state, "    mov edi, ecx")
+    emit(state, "    inc rcx")
+    emit(state, "    mov rdi, rcx")
     emit(state, "    call _malloc")
     emit(state, "    mov rcx, [rsp + 32]")
     emit(state, "    mov rsi, [rsp + 24]")
     emit(state, "    mov rdi, rax")
     emit(state, "    add rsi, rbx")
     emit(state, "    mov [rsp + 16], rdi")
-    emit(state, "    cmp ecx, 0")
+    emit(state, "    cmp rcx, 0")
     emit(state, "    jle L_slice_done_64")
     emit(state, "    cld")
     emit(state, "    rep movsb")

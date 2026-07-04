@@ -143,24 +143,25 @@ def types_equal(t1: Type, t2: Type) -> int {
     return 0
 }
 
+type_annotation_map = {
+    "any": create_any_type(),
+    "dyn": create_dyn_type(),
+    "int": create_scalar_type("int"),
+    "float": create_scalar_type("float"),
+    "bool": create_scalar_type("bool"),
+    "string": create_scalar_type("string"),
+    "byte": create_scalar_type("byte"),
+    "void": create_scalar_type("void"),
+    "list": create_list_type(create_any_type()),
+    "dict": create_dict_type(),
+    "func": create_func_type([], create_any_type()),
+    "struct": create_struct_type("struct")
+}
+
 def resolve_type_annotation(annotation_str: string) -> Type {
     if len(annotation_str) == 0 { return create_any_type() }
     
-    if str_eq(annotation_str, "any") == 1 { return create_any_type() }
-    if str_eq(annotation_str, "dyn") == 1 { return create_dyn_type() }
-    
-    if str_eq(annotation_str, "int") == 1 { return create_scalar_type("int") }
-    if str_eq(annotation_str, "float") == 1 { return create_scalar_type("float") }
-    if str_eq(annotation_str, "bool") == 1 { return create_scalar_type("bool") }
-    if str_eq(annotation_str, "string") == 1 { return create_scalar_type("string") }
-    if str_eq(annotation_str, "byte") == 1 { return create_scalar_type("byte") }
-    if str_eq(annotation_str, "void") == 1 { return create_scalar_type("void") }
-    
-    # Handle bare aggregate type annotations
-    if str_eq(annotation_str, "list") == 1 { return create_list_type(create_any_type()) }
-    if str_eq(annotation_str, "dict") == 1 { return create_dict_type() }
-    if str_eq(annotation_str, "func") == 1 { return create_func_type([], create_any_type()) }
-    if str_eq(annotation_str, "struct") == 1 { return create_struct_type("struct") }
+    if type_annotation_map.has(annotation_str) { return type_annotation_map.get(annotation_str) }
     
     # Check for list[T]
     if str_starts_with(annotation_str, "list[") == 1 {

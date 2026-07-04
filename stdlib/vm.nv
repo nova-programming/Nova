@@ -112,6 +112,68 @@ def val_to_str_val(v: Value) -> Value {
     return make_str_val("<unknown>")
 }
 
+# --- Opcode dispatch table ---
+# Maps opcode string to integer for faster dispatch
+
+_OP_DISPATCH = {}
+_OP_DISPATCH["LOAD_CONST"] = 1
+_OP_DISPATCH["LOAD_STR"] = 2
+_OP_DISPATCH["LOAD_BOOL"] = 3
+_OP_DISPATCH["LOAD_NAME"] = 4
+_OP_DISPATCH["STORE_NAME"] = 5
+_OP_DISPATCH["ADD"] = 6
+_OP_DISPATCH["SUB"] = 7
+_OP_DISPATCH["MUL"] = 8
+_OP_DISPATCH["DIV"] = 9
+_OP_DISPATCH["MOD"] = 10
+_OP_DISPATCH["NEG"] = 11
+_OP_DISPATCH["CMP_EQ"] = 12
+_OP_DISPATCH["CMP_NEQ"] = 13
+_OP_DISPATCH["CMP_LT"] = 14
+_OP_DISPATCH["CMP_GT"] = 15
+_OP_DISPATCH["CMP_LE"] = 16
+_OP_DISPATCH["CMP_GE"] = 17
+_OP_DISPATCH["AND"] = 18
+_OP_DISPATCH["OR"] = 19
+_OP_DISPATCH["NOT"] = 20
+_OP_DISPATCH["BIT_AND"] = 21
+_OP_DISPATCH["BIT_OR"] = 22
+_OP_DISPATCH["BIT_XOR"] = 23
+_OP_DISPATCH["BIT_NOT"] = 24
+_OP_DISPATCH["SHL"] = 25
+_OP_DISPATCH["SAR"] = 26
+_OP_DISPATCH["NEW_LIST"] = 27
+_OP_DISPATCH["LEN"] = 28
+_OP_DISPATCH["LOAD_INDEX"] = 29
+_OP_DISPATCH["STORE_INDEX"] = 30
+_OP_DISPATCH["SLICE"] = 31
+_OP_DISPATCH["BUILD_DICT"] = 32
+_OP_DISPATCH["HAS"] = 33
+_OP_DISPATCH["JUMP"] = 34
+_OP_DISPATCH["JUMP_IF_FALSE"] = 35
+_OP_DISPATCH["CALL"] = 36
+_OP_DISPATCH["RETURN"] = 37
+_OP_DISPATCH["PRINT"] = 38
+_OP_DISPATCH["LOAD_PTR"] = 39
+_OP_DISPATCH["STORE_PTR"] = 40
+_OP_DISPATCH["PTR_OFFSET"] = 41
+_OP_DISPATCH["ALLOC"] = 42
+_OP_DISPATCH["FREE"] = 43
+_OP_DISPATCH["OPEN_FILE"] = 44
+_OP_DISPATCH["READ_FILE"] = 45
+_OP_DISPATCH["WRITE_FILE"] = 46
+_OP_DISPATCH["CLOSE_FILE"] = 47
+_OP_DISPATCH["SIZEOF"] = 48
+_OP_DISPATCH["STR_CONVERT"] = 49
+_OP_DISPATCH["NEW"] = 50
+_OP_DISPATCH["LOAD_ATTR"] = 51
+_OP_DISPATCH["STORE_ATTR"] = 52
+_OP_DISPATCH["CALL_METHOD"] = 53
+_OP_DISPATCH["LOAD_SELF"] = 54
+_OP_DISPATCH["PUSH_HANDLER"] = 55
+_OP_DISPATCH["POP_HANDLER"] = 56
+_OP_DISPATCH["THROW"] = 57
+
 # --- Interpreter ---
 
 # exec_func: recursively execute a function within a program
@@ -142,207 +204,195 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
 
     while ip < end_ip {
         instr = prog.code[ip]
-        op = instr.opcode
+        h = 0
+        if _OP_DISPATCH.has(instr.opcode) { h = _OP_DISPATCH[instr.opcode] }
 
-        # --- Constants ---
-        if op == "LOAD_CONST" { stack.append(make_int_val(prog.constants[instr.arg_int]) )}
-        elif op == "LOAD_STR" { stack.append(make_str_val(prog.strings[instr.arg_int]) )}
-        elif op == "LOAD_BOOL" { stack.append(make_bool_val(instr.arg_int) )}
-
-        # --- Variables ---
-        elif op == "LOAD_NAME" {
-            if local_env.has(instr.arg) { stack.append(local_env[instr.arg] )}
-            else { stack.append(make_null_val() )}
+        if h == 1 { stack.append(make_int_val(prog.constants[instr.arg_int])) }         # LOAD_CONST
+        elif h == 2 { stack.append(make_str_val(prog.strings[instr.arg_int])) }         # LOAD_STR
+        elif h == 3 { stack.append(make_bool_val(instr.arg_int)) }                      # LOAD_BOOL
+        elif h == 4 {                                                                   # LOAD_NAME
+            if local_env.has(instr.arg) { stack.append(local_env[instr.arg]) }
+            else { stack.append(make_null_val()) }
         }
-        elif op == "STORE_NAME" {
+        elif h == 5 {                                                                   # STORE_NAME
             local_env[instr.arg] = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
         }
-
-        # --- Arithmetic ---
-        elif op == "ADD" {
+        elif h == 6 {                                                                   # ADD
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
-            if a.kind == "int" and b.kind == "int" { stack.append(make_int_val(a.int_val + b.int_val) )}
-            elif a.kind == "float" and b.kind == "float" { stack.append(make_float_val(a.float_val + b.float_val) )}
-            elif a.kind == "int" and b.kind == "float" { stack.append(make_float_val(a.int_val + b.float_val) )}
-            elif a.kind == "float" and b.kind == "int" { stack.append(make_float_val(a.float_val + b.int_val) )}
-            elif a.kind == "string" and b.kind == "string" { stack.append(make_str_val(a.str_val + b.str_val) )}
+            if a.kind == "int" and b.kind == "int" { stack.append(make_int_val(a.int_val + b.int_val)) }
+            elif a.kind == "float" and b.kind == "float" { stack.append(make_float_val(a.float_val + b.float_val)) }
+            elif a.kind == "int" and b.kind == "float" { stack.append(make_float_val(a.int_val + b.float_val)) }
+            elif a.kind == "float" and b.kind == "int" { stack.append(make_float_val(a.float_val + b.int_val)) }
+            elif a.kind == "string" and b.kind == "string" { stack.append(make_str_val(a.str_val + b.str_val)) }
         }
-        elif op == "SUB" {
+        elif h == 7 {                                                                   # SUB
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
-            if a.kind == "int" and b.kind == "int" { stack.append(make_int_val(a.int_val - b.int_val) )}
-            elif a.kind == "float" and b.kind == "float" { stack.append(make_float_val(a.float_val - b.float_val) )}
-            elif a.kind == "int" and b.kind == "float" { stack.append(make_float_val(a.int_val - b.float_val) )}
-            elif a.kind == "float" and b.kind == "int" { stack.append(make_float_val(a.float_val - b.int_val) )}
+            if a.kind == "int" and b.kind == "int" { stack.append(make_int_val(a.int_val - b.int_val)) }
+            elif a.kind == "float" and b.kind == "float" { stack.append(make_float_val(a.float_val - b.float_val)) }
+            elif a.kind == "int" and b.kind == "float" { stack.append(make_float_val(a.int_val - b.float_val)) }
+            elif a.kind == "float" and b.kind == "int" { stack.append(make_float_val(a.float_val - b.int_val)) }
         }
-        elif op == "MUL" {
+        elif h == 8 {                                                                   # MUL
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
-            if a.kind == "int" and b.kind == "int" { stack.append(make_int_val(a.int_val * b.int_val) )}
-            elif a.kind == "float" and b.kind == "float" { stack.append(make_float_val(a.float_val * b.float_val) )}
-            elif a.kind == "int" and b.kind == "float" { stack.append(make_float_val(a.int_val * b.float_val) )}
-            elif a.kind == "float" and b.kind == "int" { stack.append(make_float_val(a.float_val * b.int_val) )}
+            if a.kind == "int" and b.kind == "int" { stack.append(make_int_val(a.int_val * b.int_val)) }
+            elif a.kind == "float" and b.kind == "float" { stack.append(make_float_val(a.float_val * b.float_val)) }
+            elif a.kind == "int" and b.kind == "float" { stack.append(make_float_val(a.int_val * b.float_val)) }
+            elif a.kind == "float" and b.kind == "int" { stack.append(make_float_val(a.float_val * b.int_val)) }
         }
-        elif op == "DIV" {
+        elif h == 9 {                                                                   # DIV
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
-            if a.kind == "float" and b.kind == "float" { stack.append(make_float_val(a.float_val / b.float_val) )}
-            elif a.kind == "int" and b.kind == "float" { stack.append(make_float_val(a.int_val / b.float_val) )}
-            elif a.kind == "float" and b.kind == "int" { stack.append(make_float_val(a.float_val / b.int_val) )}
-            elif a.kind == "int" and b.kind == "int" { stack.append(make_float_val(a.int_val / b.int_val) )}
+            if a.kind == "float" and b.kind == "float" { stack.append(make_float_val(a.float_val / b.float_val)) }
+            elif a.kind == "int" and b.kind == "float" { stack.append(make_float_val(a.int_val / b.float_val)) }
+            elif a.kind == "float" and b.kind == "int" { stack.append(make_float_val(a.float_val / b.int_val)) }
+            elif a.kind == "int" and b.kind == "int" { stack.append(make_float_val(a.int_val / b.int_val)) }
         }
-        elif op == "MOD" {
+        elif h == 10 {                                                                  # MOD
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
-            if a.kind == "int" and b.kind == "int" { stack.append(make_int_val(a.int_val % b.int_val) )}
+            if a.kind == "int" and b.kind == "int" { stack.append(make_int_val(a.int_val % b.int_val)) }
         }
-        elif op == "NEG" {
+        elif h == 11 {                                                                  # NEG
             a = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
-            if a.kind == "int" { stack.append(make_int_val(-a.int_val) )}
-            else { stack.append(make_float_val(-a.float_val) )}
+            if a.kind == "int" { stack.append(make_int_val(-a.int_val)) }
+            else { stack.append(make_float_val(-a.float_val)) }
         }
-
-        # --- Comparisons ---
-        elif op == "CMP_EQ" {
+        elif h == 12 {                                                                  # CMP_EQ
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
-            if a.kind != b.kind { stack.append(make_bool_val(0) )}
-            elif a.kind == "int" { stack.append(make_bool_val(a.int_val == b.int_val) )}
-            elif a.kind == "float" { stack.append(make_bool_val(a.float_val == b.float_val) )}
-            elif a.kind == "string" { stack.append(make_bool_val(a.str_val == b.str_val) )}
-            elif a.kind == "bool" { stack.append(make_bool_val(a.bool_val == b.bool_val) )}
-            else { stack.append(make_bool_val(0) )}
+            if a.kind != b.kind { stack.append(make_bool_val(0)) }
+            elif a.kind == "int" { stack.append(make_bool_val(a.int_val == b.int_val)) }
+            elif a.kind == "float" { stack.append(make_bool_val(a.float_val == b.float_val)) }
+            elif a.kind == "string" { stack.append(make_bool_val(a.str_val == b.str_val)) }
+            elif a.kind == "bool" { stack.append(make_bool_val(a.bool_val == b.bool_val)) }
+            else { stack.append(make_bool_val(0)) }
         }
-        elif op == "CMP_NEQ" {
+        elif h == 13 {                                                                  # CMP_NEQ
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
-            if a.kind != b.kind { stack.append(make_bool_val(1) )}
-            elif a.kind == "int" { stack.append(make_bool_val(a.int_val != b.int_val) )}
-            elif a.kind == "float" { stack.append(make_bool_val(a.float_val != b.float_val) )}
-            elif a.kind == "string" { stack.append(make_bool_val(a.str_val != b.str_val) )}
-            elif a.kind == "bool" { stack.append(make_bool_val(a.bool_val != b.bool_val) )}
-            else { stack.append(make_bool_val(0) )}
+            if a.kind != b.kind { stack.append(make_bool_val(1)) }
+            elif a.kind == "int" { stack.append(make_bool_val(a.int_val != b.int_val)) }
+            elif a.kind == "float" { stack.append(make_bool_val(a.float_val != b.float_val)) }
+            elif a.kind == "string" { stack.append(make_bool_val(a.str_val != b.str_val)) }
+            elif a.kind == "bool" { stack.append(make_bool_val(a.bool_val != b.bool_val)) }
+            else { stack.append(make_bool_val(0)) }
         }
-        elif op == "CMP_LT" {
+        elif h == 14 {                                                                  # CMP_LT
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
-            if a.kind == "int" and b.kind == "int" { stack.append(make_bool_val(a.int_val < b.int_val) )}
-            elif a.kind == "float" and b.kind == "float" { stack.append(make_bool_val(a.float_val < b.float_val) )}
-            elif a.kind == "int" and b.kind == "float" { stack.append(make_bool_val(a.int_val < b.float_val) )}
-            elif a.kind == "float" and b.kind == "int" { stack.append(make_bool_val(a.float_val < b.int_val) )}
-            else { stack.append(make_bool_val(0) )}
+            if a.kind == "int" and b.kind == "int" { stack.append(make_bool_val(a.int_val < b.int_val)) }
+            elif a.kind == "float" and b.kind == "float" { stack.append(make_bool_val(a.float_val < b.float_val)) }
+            elif a.kind == "int" and b.kind == "float" { stack.append(make_bool_val(a.int_val < b.float_val)) }
+            elif a.kind == "float" and b.kind == "int" { stack.append(make_bool_val(a.float_val < b.int_val)) }
+            else { stack.append(make_bool_val(0)) }
         }
-        elif op == "CMP_GT" {
+        elif h == 15 {                                                                  # CMP_GT
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
-            if a.kind == "int" and b.kind == "int" { stack.append(make_bool_val(a.int_val > b.int_val) )}
-            elif a.kind == "float" and b.kind == "float" { stack.append(make_bool_val(a.float_val > b.float_val) )}
-            elif a.kind == "int" and b.kind == "float" { stack.append(make_bool_val(a.int_val > b.float_val) )}
-            elif a.kind == "float" and b.kind == "int" { stack.append(make_bool_val(a.float_val > b.int_val) )}
-            else { stack.append(make_bool_val(0) )}
+            if a.kind == "int" and b.kind == "int" { stack.append(make_bool_val(a.int_val > b.int_val)) }
+            elif a.kind == "float" and b.kind == "float" { stack.append(make_bool_val(a.float_val > b.float_val)) }
+            elif a.kind == "int" and b.kind == "float" { stack.append(make_bool_val(a.int_val > b.float_val)) }
+            elif a.kind == "float" and b.kind == "int" { stack.append(make_bool_val(a.float_val > b.int_val)) }
+            else { stack.append(make_bool_val(0)) }
         }
-        elif op == "CMP_LE" {
+        elif h == 16 {                                                                  # CMP_LE
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
-            if a.kind == "int" and b.kind == "int" { stack.append(make_bool_val(a.int_val <= b.int_val) )}
-            elif a.kind == "float" and b.kind == "float" { stack.append(make_bool_val(a.float_val <= b.float_val) )}
-            elif a.kind == "int" and b.kind == "float" { stack.append(make_bool_val(a.int_val <= b.float_val) )}
-            elif a.kind == "float" and b.kind == "int" { stack.append(make_bool_val(a.float_val <= b.int_val) )}
-            else { stack.append(make_bool_val(0) )}
+            if a.kind == "int" and b.kind == "int" { stack.append(make_bool_val(a.int_val <= b.int_val)) }
+            elif a.kind == "float" and b.kind == "float" { stack.append(make_bool_val(a.float_val <= b.float_val)) }
+            elif a.kind == "int" and b.kind == "float" { stack.append(make_bool_val(a.int_val <= b.float_val)) }
+            elif a.kind == "float" and b.kind == "int" { stack.append(make_bool_val(a.float_val <= b.int_val)) }
+            else { stack.append(make_bool_val(0)) }
         }
-        elif op == "CMP_GE" {
+        elif h == 17 {                                                                  # CMP_GE
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
-            if a.kind == "int" and b.kind == "int" { stack.append(make_bool_val(a.int_val >= b.int_val) )}
-            elif a.kind == "float" and b.kind == "float" { stack.append(make_bool_val(a.float_val >= b.float_val) )}
-            elif a.kind == "int" and b.kind == "float" { stack.append(make_bool_val(a.int_val >= b.float_val) )}
-            elif a.kind == "float" and b.kind == "int" { stack.append(make_bool_val(a.float_val >= b.int_val) )}
-            else { stack.append(make_bool_val(0) )}
+            if a.kind == "int" and b.kind == "int" { stack.append(make_bool_val(a.int_val >= b.int_val)) }
+            elif a.kind == "float" and b.kind == "float" { stack.append(make_bool_val(a.float_val >= b.float_val)) }
+            elif a.kind == "int" and b.kind == "float" { stack.append(make_bool_val(a.int_val >= b.float_val)) }
+            elif a.kind == "float" and b.kind == "int" { stack.append(make_bool_val(a.float_val >= b.int_val)) }
+            else { stack.append(make_bool_val(0)) }
         }
-
-        # --- Logic ---
-        elif op == "AND" {
+        elif h == 18 {                                                                  # AND
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
-            if value_is_truthy(a) != 0 and value_is_truthy(b) != 0 { stack.append(make_bool_val(1) )}
-            else { stack.append(make_bool_val(0) )}
+            if value_is_truthy(a) != 0 and value_is_truthy(b) != 0 { stack.append(make_bool_val(1)) }
+            else { stack.append(make_bool_val(0)) }
         }
-        elif op == "OR" {
+        elif h == 19 {                                                                  # OR
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
-            if value_is_truthy(a) != 0 or value_is_truthy(b) != 0 { stack.append(make_bool_val(1) )}
-            else { stack.append(make_bool_val(0) )}
+            if value_is_truthy(a) != 0 or value_is_truthy(b) != 0 { stack.append(make_bool_val(1)) }
+            else { stack.append(make_bool_val(0)) }
         }
-        elif op == "NOT" {
+        elif h == 20 {                                                                  # NOT
             a = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
-            if value_is_truthy(a) != 0 { stack.append(make_bool_val(0) )}
-            else { stack.append(make_bool_val(1) )}
+            if value_is_truthy(a) != 0 { stack.append(make_bool_val(0)) }
+            else { stack.append(make_bool_val(1)) }
         }
-
-        # --- Bitwise ---
-        elif op == "BIT_AND" {
+        elif h == 21 {                                                                  # BIT_AND
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
             stack.append(make_int_val(a.int_val & b.int_val))
         }
-        elif op == "BIT_OR" {
+        elif h == 22 {                                                                  # BIT_OR
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
             stack.append(make_int_val(a.int_val | b.int_val))
         }
-        elif op == "BIT_XOR" {
+        elif h == 23 {                                                                  # BIT_XOR
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
             stack.append(make_int_val(a.int_val ^ b.int_val))
         }
-        elif op == "BIT_NOT" {
+        elif h == 24 {                                                                  # BIT_NOT
             a = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
             stack.append(make_int_val(~a.int_val))
         }
-        elif op == "SHL" {
+        elif h == 25 {                                                                  # SHL
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
             stack.append(make_int_val(a.int_val << b.int_val))
         }
-        elif op == "SAR" {
+        elif h == 26 {                                                                  # SAR
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
             stack.append(make_int_val(a.int_val >> b.int_val))
         }
-
-        # --- List operations ---
-        elif op == "NEW_LIST" { stack.append(make_list_val([]) )}
-        elif op == "LEN" {
+        elif h == 27 { stack.append(make_list_val([])) }                                # NEW_LIST
+        elif h == 28 {                                                                  # LEN
             a = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
-            if a.kind == "list" { stack.append(make_int_val(len(a.list_val)) )}
-            elif a.kind == "string" { stack.append(make_int_val(len(a.str_val)) )}
-            elif a.kind == "dict" { stack.append(make_int_val(len(a.dict_val)) )}
+            if a.kind == "list" { stack.append(make_int_val(len(a.list_val))) }
+            elif a.kind == "string" { stack.append(make_int_val(len(a.str_val))) }
+            elif a.kind == "dict" { stack.append(make_int_val(len(a.dict_val))) }
         }
-        elif op == "LOAD_INDEX" {
+        elif h == 29 {                                                                  # LOAD_INDEX
             idx_val = stack[len(stack) - 1]
             base_val = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
@@ -354,7 +404,7 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
                 stack.append(make_str_val(str_sub(base_val.str_val, idx, idx + 1)))
             }
         }
-        elif op == "STORE_INDEX" {
+        elif h == 30 {                                                                  # STORE_INDEX
             val = stack[len(stack) - 1]
             idx_val = stack[len(stack) - 2]
             base_val = stack[len(stack) - 3]
@@ -364,7 +414,7 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
                 base_val.list_val[idx] = val
             }
         }
-        elif op == "SLICE" {
+        elif h == 31 {                                                                  # SLICE
             end_val = stack[len(stack) - 1]
             start_val = stack[len(stack) - 2]
             base_val = stack[len(stack) - 3]
@@ -375,20 +425,18 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
             if base_val.kind == "list" {
                 if end > len(base_val.list_val) { end = len(base_val.list_val) }
                 if start < 0 { start = 0 }
-                if start < end { stack.append(make_list_val(base_val.list_val[start:end]) )}
-                else { stack.append(make_list_val([]) )}
+                if start < end { stack.append(make_list_val(base_val.list_val[start:end])) }
+                else { stack.append(make_list_val([])) }
             }
             elif base_val.kind == "string" {
                 if end > len(base_val.str_val) { end = len(base_val.str_val) }
                 if start < 0 { start = 0 }
-                if start < end { stack.append(make_str_val(str_sub(base_val.str_val, start, end)) )}
-                else { stack.append(make_str_val("") )}
+                if start < end { stack.append(make_str_val(str_sub(base_val.str_val, start, end))) }
+                else { stack.append(make_str_val("")) }
             }
         }
-
-        # --- Dict operations ---
-        elif op == "BUILD_DICT" { stack.append(make_dict_val({}) )}
-        elif op == "HAS" {
+        elif h == 32 { stack.append(make_dict_val({})) }                                # BUILD_DICT
+        elif h == 33 {                                                                  # HAS
             key_val = stack[len(stack) - 1]
             dict_val = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
@@ -396,15 +444,13 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
                 stack.append(make_bool_val(dict_val.dict_val.has(key_val.str_val)))
             }
         }
-
-        # --- Control flow ---
-        elif op == "JUMP" { ip = instr.arg_int }
-        elif op == "JUMP_IF_FALSE" {
+        elif h == 34 { ip = instr.arg_int }                                             # JUMP
+        elif h == 35 {                                                                  # JUMP_IF_FALSE
             cond = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
             if value_is_truthy(cond) == 0 { ip = instr.arg_int }
         }
-        elif op == "CALL" {
+        elif h == 36 {                                                                  # CALL
             num_args = instr.arg_int
             callee_args = []
             k = 0
@@ -413,7 +459,6 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
                 stack = stack[0:len(stack) - 1]
                 k = k + 1
             }
-            # Reverse: args pushed in reverse order
             rev_args = []
             ri = len(callee_args) - 1
             while ri >= 0 {
@@ -424,10 +469,8 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
             result = exec_func(prog, instr.arg, callee_args, depth + 1)
             stack.append(result)
         }
-        elif op == "RETURN" { return stack[len(stack) - 1] }
-
-        # --- Print ---
-        elif op == "PRINT" {
+        elif h == 37 { return stack[len(stack) - 1] }                                   # RETURN
+        elif h == 38 {                                                                  # PRINT
             val = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
             if val.kind == "int" { print(val.int_val) }
@@ -454,53 +497,48 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
             }
             elif val.kind == "dict" { print("<dict>") }
         }
-
-        elif op == "LOAD_PTR" {}
-        elif op == "STORE_PTR" {}
-        elif op == "PTR_OFFSET" {}
-        elif op == "ALLOC" { stack.append(make_int_val(0) )}
-        elif op == "FREE" { stack = stack[0:len(stack) - 1] }
-        elif op == "OPEN_FILE" {
+        elif h == 39 {}                                                                 # LOAD_PTR
+        elif h == 40 {}                                                                 # STORE_PTR
+        elif h == 41 {}                                                                 # PTR_OFFSET
+        elif h == 42 { stack.append(make_int_val(0)) }                                  # ALLOC
+        elif h == 43 { stack = stack[0:len(stack) - 1] }                                # FREE
+        elif h == 44 {                                                                  # OPEN_FILE
             mode_val = stack[len(stack) - 1]
             path_val = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
             stack.append(make_int_val(0))
         }
-        elif op == "READ_FILE" {
+        elif h == 45 {                                                                  # READ_FILE
             fd_val = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
             stack.append(make_str_val(""))
         }
-        elif op == "WRITE_FILE" {
+        elif h == 46 {                                                                  # WRITE_FILE
             content_val = stack[len(stack) - 1]
             fd_val = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
         }
-        elif op == "CLOSE_FILE" {
+        elif h == 47 {                                                                  # CLOSE_FILE
             fd_val = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
         }
-        elif op == "SIZEOF" {
+        elif h == 48 {                                                                  # SIZEOF
             target_val = stack[len(stack) - 1]
             stack.append(make_int_val(0))
         }
-        elif op == "STR_CONVERT" {
+        elif h == 49 {                                                                  # STR_CONVERT
             val = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
             stack.append(val_to_str_val(val))
         }
-
-        # --- OOP ---
-        elif op == "NEW" {}
-        elif op == "LOAD_ATTR" {}
-        elif op == "STORE_ATTR" {}
-        elif op == "CALL_METHOD" {}
-        elif op == "LOAD_SELF" {}
-
-        # --- Exception handling ---
-        elif op == "PUSH_HANDLER" {}
-        elif op == "POP_HANDLER" {}
-        elif op == "THROW" {
+        elif h == 50 {}                                                                 # NEW
+        elif h == 51 {}                                                                 # LOAD_ATTR
+        elif h == 52 {}                                                                 # STORE_ATTR
+        elif h == 53 {}                                                                 # CALL_METHOD
+        elif h == 54 {}                                                                 # LOAD_SELF
+        elif h == 55 {}                                                                 # PUSH_HANDLER
+        elif h == 56 {}                                                                 # POP_HANDLER
+        elif h == 57 {                                                                  # THROW
             val = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
         }

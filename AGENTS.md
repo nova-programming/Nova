@@ -521,3 +521,30 @@ galaxy publish             # Publish to registry
 - **Verification**: All 246 tests pass (1 skipped). Generated assembly verified — all `ldr xN, [sp, #K]` replaced with `ldr xN, [fp, #K']`.
 - **CI status**: macOS ARM64 (`nova-stage1 build selfhost.nv`) crashes with `Bus error: 10` at exit 138 **before these changes, still fails after**. This is a pre-existing bug (99/100 recent CI runs failed, no success found within last 100). Ubuntu + Windows CI pass.
 - **Debug markers added/removed** (June 30 - July 2): Added `system.file_write(2, "CF:...")` markers to `stdlib/compiler.nv` at each statement boundary in `compile_file`. Markers showed `CF:load_cache` fires but `CF:before_file_size` does not — crash occurs between two structurally identical `system.file_write` calls. Generated assembly confirmed both calls are identical (same register setup, same function call chain). String data section verified (all `.asciz` entries correct). Root cause of macOS ARM64 Bus error remains unidentified — suspected: Apple Clang `@PAGE`/`@PAGEOFF` relocation issue, Mach-O symbol resolution, or pre-existing runtime.c assembly incompatibility with Apple Silicon's linker. Markers removed in commit `6a4adc4`.
+
+### Phase 17: Error Message Improvements + Dict-based Performance Optimization (This Session — July 4, 2026)
+- **`_oob_file_ptr` / `_oob_line` globals** (`runtime.c:215-231`): `_out_of_bounds()` now prints `"error: Index Out Of Bounds at <file> line <line>\n"` using multiple `_printf` calls (wrapper takes only one arg). Falls back to plain message when `_oob_file_ptr` is null.
+- **All 4 backends updated**: Before each bounds check jump, `_oob_line` set from AST node's `.line` attribute. `_oob_file_ptr` set once at entry from `source_path_str` (bootstrap) / `L_oob_source` (self-hosted).
+- **Assembly `_out_of_bounds:` removed**: C function from `runtime.c` handles the detailed message. Eliminates linker conflicts and code duplication across 4 backends.
+- **ARM64 `str sp, [xN]` gotcha fixed**: `str sp, [xN]` stores `xzr` (zero), not `sp`. All ARM64 backends now use `mov xN, sp; str xN, [addr]` and `mov sp, xN` for restore.
+- **Test updates**: Both `test_out_of_bounds_helper` tests (x86_64 + ARM64) updated to check for externs + data labels instead of assembly `_out_of_bounds:` label.
+- **Dead strings removed from `codegen_common.nv`**: `L_realloc_fail_msg` and `str_const_chacha_mem` — neither was referenced by any code.
+- **Dict-based `find_var_offset`/`register_var`** (x86_64 + ARM64 `codegen.nv`): Added `var_name_map: dict` to `CodegenState`. Replaces O(n) linear scan over `local_var_names` with O(1) dict lookup. Updates save/restore/clear in `compile_function` and `generate_assembly`.
+- **Dict-based `tc_find_func`/`tc_find_struct`** (`type_checker.nv`): Added `func_name_map: dict` and `struct_name_map: dict` to `TypeChecker`. Replaces O(n) `str_eq` linear scan with O(1) dict lookup. Populated in `tc_add_func` and `tc_add_struct`.
+- **Full suite**: 229 passed, 1 skipped, 13 subtests — all pass. Test runtime dropped from ~3.7s to ~2.0s.
+
+### Phase 18: 64-bit Int, Dict/VM Opcode Dispatch, Char-by-Char Lexer, Native `nova run`, List Header Fix (This Session — July 4, 2026)
+
+- **64-bit integer upgrade across all 8 codegen files**: x86_64: eax→rax, ebx→rbx, ecx→rcx, edx→rdx, esi→rsi, edi→rdi, cdq→cqo, dword→qword. ARM64: w0-w30→x0-x30. `runtime.c` `_printf %d` handler: `int val` → `long long val`. 32-bit `int` overflowed `sum_to(100000)` (5B > 2³¹).
+- **List header count/capacity reverted to 32-bit**: The automated 64-bit upgrade incorrectly changed list `count` (offset 0) and `capacity` (offset 4) from 32-bit to 64-bit operations, causing overlap and corruption of the 64-bit `data_ptr` (offset 8). Reverted in all 6 codegen files: ListLiteral, Len, ForIn, ArrayIndexAssign, Append, Pop. All 266 tests pass.
+- **List header is the ONLY structure affected**: Dict and other structures have mixed 32/64 fields but are accessed only through C runtime functions, not assembly. No other corruption exists.
+- **Dict-based optimization extended to all stdlib backends**: `var_name_map`, `string_var_map`, `prop_offset_map` dicts in `CodegenState` (codegen.nv). `kind_handlers` dict for `tc_visit_real` (type_checker.nv). `type_annotation_map` dict (types.nv). Dict-based method dispatch in `codegen_expr.nv` (x86_64 + ARM64) replaces 14 `str_eq` comparisons. Dict-based statement dispatch in `codegen_stmt.nv`.
+- **Bootstrap VM opcode dispatch** (`machine.py`): 60+ elif chain replaced with `_OPCODE_DISPATCH` dict + module-level handler functions.
+- **Self-hosted VM dispatch** (`stdlib/vm.nv`): 57 `elif op == "..."` chain replaced with `_OP_DISPATCH` dict + integer `h` handler chain.
+- **`nova run` changed** from VM alias to auto-build native + execute (`bootstrap/main.py`). `nova dev` stays VM for development.
+- **Char-by-char lexer** (`bootstrap/lexer/tokenizer.py`): Rewrote from regex-based to character-by-character. 420K input: 950ms → 100ms (9.5× faster). Handles string interpolation recursively via `tokenize()` calls.
+- **Benchmarks written**: `tests/benchmark_overall.py`/`.nv` (Nova VM vs CPython vs C), `tests/benchmark_type_checker.py` (compiler pipeline), `tests/type_checker_tests.nv`/`test_type_checker_nv.py` (19 type-checker optimization tests).
+- **ARM64 self-hosted openf malloc(12) bug fixed** (`stdlib/backend/arm64/codegen_expr.nv:716,733`): `malloc(12)` → `malloc(24)`, path stored at `+16` instead of `+8`. Struct needs 24 bytes for 64-bit pointers (handle 8B + padding 8B + path 8B).
+- **ARM64 bootstrap openf _fopen arg order bug fixed** (`bootstrap/compiler/backend/arm64/codegen.py:1168`): Called `_fopen(struct_ptr, path)` instead of `_fopen(path, mode)`. Added `mov x0, x1; mov x1, x2` before `bl _fopen` to pass correct args. Latent bug (ARM64 native tests not run on this machine).
+- **Overall benchmark**: Nova Native (build+run) beats CPython by 2.2× on heavy compute (sum_to=10M, primes=300K, fib=35). Nova VM ~109× slower than CPython.
+- **All 266 tests pass** (1 skipped). Test runtime: ~78s.

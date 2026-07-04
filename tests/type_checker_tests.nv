@@ -1,0 +1,126 @@
+# Type Checker AST Kind Dispatch Tests
+# Each test program exercises one or more AST node kinds through the
+# compiler pipeline. Correct output means type inference worked.
+# --- NumberLiteral ---
+print("=== NUMBER ===")
+print(42)
+print(3.14)
+
+# --- StringLiteral ---
+print("=== STRING ===")
+print("hello")
+
+# --- BooleanLiteral ---
+print("=== BOOLEAN ===")
+print(true)
+print(false)
+
+# --- Variable ---
+print("=== VARIABLE ===")
+x = 10
+print(x)
+
+# --- BinOp ---
+print("=== BINOP ===")
+print(1 + 2)
+print(10 - 3)
+print(4 * 5)
+print(10 / 3)
+print(10 % 3)
+
+# --- Compare ---
+print("=== COMPARE ===")
+print(2 == 2)
+print(2 != 3)
+print(3 < 5)
+print(10 > 5)
+
+# --- Assignment ---
+print("=== ASSIGNMENT ===")
+a = 5
+b = 10
+print(a + b)
+x2 = 1
+x2 = x2 + 2
+print(x2)
+
+# --- Function + Return ---
+print("=== FUNCTION ===")
+def double(n) { return n * 2 }
+print(double(21))
+
+# --- Call ---
+print("=== CALL ===")
+print(abs(-5))
+def add(a, b) { return a + b }
+print(add(10, 32))
+
+# --- IfElse ---
+print("=== IFELSE ===")
+if 1 == 1 { print("yes") } else { print("no") }
+if 1 == 0 { print("yes") } else { print("no") }
+
+# --- While ---
+print("=== WHILE ===")
+i = 0
+while i < 3 {
+    print(i)
+    i = i + 1
+}
+
+# --- MethodCall (dict) ---
+print("=== METHODCALL ===")
+d = {"a": 1}
+print(d.get("a"))
+print(d.has("a"))
+d2 = {}
+d2.set("k", 42)
+print(d2.get("k"))
+
+# --- ArrayIndex ---
+print("=== ARRAYINDEX ===")
+l = [10, 20, 30]
+print(l[0])
+print(l[1])
+print(l[2])
+
+# --- ArrayIndexAssign ---
+print("=== ARRAYINDEXASSIGN ===")
+l2 = [1, 2, 3]
+l2[1] = 99
+print(l2[0])
+print(l2[1])
+print(l2[2])
+
+# --- DictLiteral ---
+print("=== DICT ===")
+d3 = {"x": 5, "y": 10}
+print(d3.get("x"))
+print(d3.get("y"))
+
+# --- ListLiteral ---
+print("=== LIST ===")
+l3 = [1, 2, 3]
+print(len(l3))
+
+# --- ForLoop ---
+print("=== FORLOOP ===")
+for i = 0 to 4 step 1 { print(i) }
+
+# --- Len ---
+print("=== LEN ===")
+print(len("hello"))
+print(len([10, 20, 30]))
+
+# --- TRY + THROW ---
+print("=== TRY ===")
+try {
+    print(1)
+} catch e {
+    print(2)
+}
+try {
+    throw 99
+} catch e {
+    print(e)
+}
