@@ -296,28 +296,26 @@ def strip_name(raw_name: string) -> string {
     return actual_name
 }
 
-_KERNEL32_MAP = {}
-_KERNEL32_MAP["GetProcessHeap"] = 1
-_KERNEL32_MAP["HeapAlloc"] = 1
-_KERNEL32_MAP["HeapFree"] = 1
-_KERNEL32_MAP["HeapReAlloc"] = 1
-_KERNEL32_MAP["GetStdHandle"] = 1
-_KERNEL32_MAP["WriteFile"] = 1
-_KERNEL32_MAP["ReadFile"] = 1
-_KERNEL32_MAP["CreateFileA"] = 1
-_KERNEL32_MAP["CloseHandle"] = 1
-_KERNEL32_MAP["GetFileSize"] = 1
-_KERNEL32_MAP["SetFilePointer"] = 1
-_KERNEL32_MAP["FlushFileBuffers"] = 1
-_KERNEL32_MAP["ExitProcess"] = 1
-_KERNEL32_MAP["WinExec"] = 1
-_KERNEL32_MAP["GetCommandLineA"] = 1
-_KERNEL32_MAP["GetTickCount"] = 1
-_KERNEL32_MAP["VirtualAlloc"] = 1
-_KERNEL32_MAP["VirtualFree"] = 1
-
 def is_kernel32_func(name: string) -> int {
-    return _KERNEL32_MAP.get(name, 0)
+    if name == "GetProcessHeap" { return 1 }
+    if name == "HeapAlloc" { return 1 }
+    if name == "HeapFree" { return 1 }
+    if name == "HeapReAlloc" { return 1 }
+    if name == "GetStdHandle" { return 1 }
+    if name == "WriteFile" { return 1 }
+    if name == "ReadFile" { return 1 }
+    if name == "CreateFileA" { return 1 }
+    if name == "CloseHandle" { return 1 }
+    if name == "GetFileSize" { return 1 }
+    if name == "SetFilePointer" { return 1 }
+    if name == "FlushFileBuffers" { return 1 }
+    if name == "ExitProcess" { return 1 }
+    if name == "WinExec" { return 1 }
+    if name == "GetCommandLineA" { return 1 }
+    if name == "GetTickCount" { return 1 }
+    if name == "VirtualAlloc" { return 1 }
+    if name == "VirtualFree" { return 1 }
+    return 0
 }
 
 def link(sections: list) -> list {

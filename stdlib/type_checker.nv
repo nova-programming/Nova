@@ -25,6 +25,7 @@ data EnvVar {
 
 data EnvFrame {
     vars: list
+    name_map: dict
 }
 
 def tc_init(tc: TypeChecker) {
@@ -162,6 +163,7 @@ def tc_find_struct(tc: TypeChecker, name: string) -> Type {
 def tc_push_env(tc: TypeChecker) {
     frame = EnvFrame()
     frame.vars = []
+    frame.name_map = {}
     tc.env_stack.append(frame)
 }
 
@@ -181,31 +183,26 @@ def tc_set_var(tc: TypeChecker, name: string, typ: Type) {
     if len(tc.env_stack) == 0 { return 0 }
     frame = tc.env_stack[len(tc.env_stack) - 1]
     
-    i = 0
-    while i < len(frame.vars) {
-        v = frame.vars[i]
-        if str_eq(v.name, name) == 1 {
-            v.typ = typ
-            return 0
-        }
-        i = i + 1
+    if frame.name_map.has(name) {
+        v = frame.name_map[name]
+        v.typ = typ
+        return 0
     }
     
     v = EnvVar()
     v.name = name
     v.typ = typ
     frame.vars.append(v)
+    frame.name_map[name] = v
 }
 
 def tc_get_var(tc: TypeChecker, name: string) -> Type {
     i = len(tc.env_stack) - 1
     while i >= 0 {
         frame = tc.env_stack[i]
-        j = 0
-        while j < len(frame.vars) {
-            v = frame.vars[j]
-            if str_eq(v.name, name) == 1 { return v.typ }
-            j = j + 1
+        if frame.name_map.has(name) {
+            v = frame.name_map[name]
+            return v.typ
         }
         i = i - 1
     }

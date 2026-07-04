@@ -737,6 +737,18 @@ def parse_logic(state: ParserState) -> AstNode {
         if tok.kind == "AND" or tok.kind == "OR" {
             eat_tok(state, tok.kind)
             right = parse_compare(state)
+            
+            if left.kind == "Compare" and right.kind != "Compare" {
+                new_right = AstNode()
+                new_right.kind = "Compare"
+                new_right.val_str = left.val_str
+                new_right.line = right.line
+                new_right.col = right.col
+                new_right.left = left.left
+                new_right.right = right
+                right = new_right
+            }
+            
             node = AstNode()
             node.kind = "BinOp"
             node.val_str = tok.val

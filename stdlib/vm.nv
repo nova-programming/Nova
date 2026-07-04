@@ -112,113 +112,21 @@ def val_to_str_val(v: Value) -> Value {
     return make_str_val("<unknown>")
 }
 
-# --- Opcode dispatch table ---
-# Maps opcode string to integer for faster dispatch
-
-_OP_DISPATCH = {}
-_OP_DISPATCH["LOAD_CONST"] = 1
-_OP_DISPATCH["LOAD_STR"] = 2
-_OP_DISPATCH["LOAD_BOOL"] = 3
-_OP_DISPATCH["LOAD_NAME"] = 4
-_OP_DISPATCH["STORE_NAME"] = 5
-_OP_DISPATCH["ADD"] = 6
-_OP_DISPATCH["SUB"] = 7
-_OP_DISPATCH["MUL"] = 8
-_OP_DISPATCH["DIV"] = 9
-_OP_DISPATCH["MOD"] = 10
-_OP_DISPATCH["NEG"] = 11
-_OP_DISPATCH["CMP_EQ"] = 12
-_OP_DISPATCH["CMP_NEQ"] = 13
-_OP_DISPATCH["CMP_LT"] = 14
-_OP_DISPATCH["CMP_GT"] = 15
-_OP_DISPATCH["CMP_LE"] = 16
-_OP_DISPATCH["CMP_GE"] = 17
-_OP_DISPATCH["AND"] = 18
-_OP_DISPATCH["OR"] = 19
-_OP_DISPATCH["NOT"] = 20
-_OP_DISPATCH["BIT_AND"] = 21
-_OP_DISPATCH["BIT_OR"] = 22
-_OP_DISPATCH["BIT_XOR"] = 23
-_OP_DISPATCH["BIT_NOT"] = 24
-_OP_DISPATCH["SHL"] = 25
-_OP_DISPATCH["SAR"] = 26
-_OP_DISPATCH["NEW_LIST"] = 27
-_OP_DISPATCH["LEN"] = 28
-_OP_DISPATCH["LOAD_INDEX"] = 29
-_OP_DISPATCH["STORE_INDEX"] = 30
-_OP_DISPATCH["SLICE"] = 31
-_OP_DISPATCH["BUILD_DICT"] = 32
-_OP_DISPATCH["HAS"] = 33
-_OP_DISPATCH["JUMP"] = 34
-_OP_DISPATCH["JUMP_IF_FALSE"] = 35
-_OP_DISPATCH["CALL"] = 36
-_OP_DISPATCH["RETURN"] = 37
-_OP_DISPATCH["PRINT"] = 38
-_OP_DISPATCH["LOAD_PTR"] = 39
-_OP_DISPATCH["STORE_PTR"] = 40
-_OP_DISPATCH["PTR_OFFSET"] = 41
-_OP_DISPATCH["ALLOC"] = 42
-_OP_DISPATCH["FREE"] = 43
-_OP_DISPATCH["OPEN_FILE"] = 44
-_OP_DISPATCH["READ_FILE"] = 45
-_OP_DISPATCH["WRITE_FILE"] = 46
-_OP_DISPATCH["CLOSE_FILE"] = 47
-_OP_DISPATCH["SIZEOF"] = 48
-_OP_DISPATCH["STR_CONVERT"] = 49
-_OP_DISPATCH["NEW"] = 50
-_OP_DISPATCH["LOAD_ATTR"] = 51
-_OP_DISPATCH["STORE_ATTR"] = 52
-_OP_DISPATCH["CALL_METHOD"] = 53
-_OP_DISPATCH["LOAD_SELF"] = 54
-_OP_DISPATCH["PUSH_HANDLER"] = 55
-_OP_DISPATCH["POP_HANDLER"] = 56
-_OP_DISPATCH["THROW"] = 57
-
-# --- Interpreter ---
-
-# exec_func: recursively execute a function within a program
-# Returns the result Value
-def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value {
-    func = 0
-    i = 0
-    while i < len(prog.functions) {
-        if prog.functions[i].name == func_name { func = prog.functions[i] }
-        i = i + 1
-    }
-    if func == 0 {
-        errors.warn("VM", "", 0, "function not found: " + func_name, "", 0)
-        return make_null_val()
-    }
-
-    local_env = {}
-    j = 0
-    while j < len(func.params) {
-        if j < len(args) { local_env[func.params[j]] = args[j] }
-        else { local_env[func.params[j]] = make_null_val() }
-        j = j + 1
-    }
-
-    stack = []
-    ip = func.ip
-    end_ip = func.ip + func.num_instrs
-
     while ip < end_ip {
         instr = prog.code[ip]
-        h = 0
-        if _OP_DISPATCH.has(instr.opcode) { h = _OP_DISPATCH[instr.opcode] }
 
-        if h == 1 { stack.append(make_int_val(prog.constants[instr.arg_int])) }         # LOAD_CONST
-        elif h == 2 { stack.append(make_str_val(prog.strings[instr.arg_int])) }         # LOAD_STR
-        elif h == 3 { stack.append(make_bool_val(instr.arg_int)) }                      # LOAD_BOOL
-        elif h == 4 {                                                                   # LOAD_NAME
+        if instr.opcode == "LOAD_CONST" { stack.append(make_int_val(prog.constants[instr.arg_int])) }         # LOAD_CONST
+        elif instr.opcode == "LOAD_STR" { stack.append(make_str_val(prog.strings[instr.arg_int])) }         # LOAD_STR
+        elif instr.opcode == "LOAD_BOOL" { stack.append(make_bool_val(instr.arg_int)) }                      # LOAD_BOOL
+        elif instr.opcode == "LOAD_NAME" {                                                                   # LOAD_NAME
             if local_env.has(instr.arg) { stack.append(local_env[instr.arg]) }
             else { stack.append(make_null_val()) }
         }
-        elif h == 5 {                                                                   # STORE_NAME
+        elif instr.opcode == "STORE_NAME" {                                                                   # STORE_NAME
             local_env[instr.arg] = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
         }
-        elif h == 6 {                                                                   # ADD
+        elif instr.opcode == "ADD" {                                                                   # ADD
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
@@ -228,7 +136,7 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
             elif a.kind == "float" and b.kind == "int" { stack.append(make_float_val(a.float_val + b.int_val)) }
             elif a.kind == "string" and b.kind == "string" { stack.append(make_str_val(a.str_val + b.str_val)) }
         }
-        elif h == 7 {                                                                   # SUB
+        elif instr.opcode == "SUB" {                                                                   # SUB
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
@@ -237,7 +145,7 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
             elif a.kind == "int" and b.kind == "float" { stack.append(make_float_val(a.int_val - b.float_val)) }
             elif a.kind == "float" and b.kind == "int" { stack.append(make_float_val(a.float_val - b.int_val)) }
         }
-        elif h == 8 {                                                                   # MUL
+        elif instr.opcode == "MUL" {                                                                   # MUL
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
@@ -246,7 +154,7 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
             elif a.kind == "int" and b.kind == "float" { stack.append(make_float_val(a.int_val * b.float_val)) }
             elif a.kind == "float" and b.kind == "int" { stack.append(make_float_val(a.float_val * b.int_val)) }
         }
-        elif h == 9 {                                                                   # DIV
+        elif instr.opcode == "DIV" {                                                                   # DIV
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
@@ -255,19 +163,19 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
             elif a.kind == "float" and b.kind == "int" { stack.append(make_float_val(a.float_val / b.int_val)) }
             elif a.kind == "int" and b.kind == "int" { stack.append(make_float_val(a.int_val / b.int_val)) }
         }
-        elif h == 10 {                                                                  # MOD
+        elif instr.opcode == "MOD" {                                                                  # MOD
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
             if a.kind == "int" and b.kind == "int" { stack.append(make_int_val(a.int_val % b.int_val)) }
         }
-        elif h == 11 {                                                                  # NEG
+        elif instr.opcode == "NEG" {                                                                  # NEG
             a = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
             if a.kind == "int" { stack.append(make_int_val(-a.int_val)) }
             else { stack.append(make_float_val(-a.float_val)) }
         }
-        elif h == 12 {                                                                  # CMP_EQ
+        elif instr.opcode == "CMP_EQ" {                                                                  # CMP_EQ
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
@@ -278,7 +186,7 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
             elif a.kind == "bool" { stack.append(make_bool_val(a.bool_val == b.bool_val)) }
             else { stack.append(make_bool_val(0)) }
         }
-        elif h == 13 {                                                                  # CMP_NEQ
+        elif instr.opcode == "CMP_NEQ" {                                                                  # CMP_NEQ
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
@@ -289,7 +197,7 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
             elif a.kind == "bool" { stack.append(make_bool_val(a.bool_val != b.bool_val)) }
             else { stack.append(make_bool_val(0)) }
         }
-        elif h == 14 {                                                                  # CMP_LT
+        elif instr.opcode == "CMP_LT" {                                                                  # CMP_LT
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
@@ -299,7 +207,7 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
             elif a.kind == "float" and b.kind == "int" { stack.append(make_bool_val(a.float_val < b.int_val)) }
             else { stack.append(make_bool_val(0)) }
         }
-        elif h == 15 {                                                                  # CMP_GT
+        elif instr.opcode == "CMP_GT" {                                                                  # CMP_GT
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
@@ -309,7 +217,7 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
             elif a.kind == "float" and b.kind == "int" { stack.append(make_bool_val(a.float_val > b.int_val)) }
             else { stack.append(make_bool_val(0)) }
         }
-        elif h == 16 {                                                                  # CMP_LE
+        elif instr.opcode == "CMP_LE" {                                                                  # CMP_LE
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
@@ -319,7 +227,7 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
             elif a.kind == "float" and b.kind == "int" { stack.append(make_bool_val(a.float_val <= b.int_val)) }
             else { stack.append(make_bool_val(0)) }
         }
-        elif h == 17 {                                                                  # CMP_GE
+        elif instr.opcode == "CMP_GE" {                                                                  # CMP_GE
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
@@ -329,70 +237,70 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
             elif a.kind == "float" and b.kind == "int" { stack.append(make_bool_val(a.float_val >= b.int_val)) }
             else { stack.append(make_bool_val(0)) }
         }
-        elif h == 18 {                                                                  # AND
+        elif instr.opcode == "AND" {                                                                  # AND
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
             if value_is_truthy(a) != 0 and value_is_truthy(b) != 0 { stack.append(make_bool_val(1)) }
             else { stack.append(make_bool_val(0)) }
         }
-        elif h == 19 {                                                                  # OR
+        elif instr.opcode == "OR" {                                                                  # OR
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
             if value_is_truthy(a) != 0 or value_is_truthy(b) != 0 { stack.append(make_bool_val(1)) }
             else { stack.append(make_bool_val(0)) }
         }
-        elif h == 20 {                                                                  # NOT
+        elif instr.opcode == "NOT" {                                                                  # NOT
             a = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
             if value_is_truthy(a) != 0 { stack.append(make_bool_val(0)) }
             else { stack.append(make_bool_val(1)) }
         }
-        elif h == 21 {                                                                  # BIT_AND
+        elif instr.opcode == "BIT_AND" {                                                                  # BIT_AND
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
             stack.append(make_int_val(a.int_val & b.int_val))
         }
-        elif h == 22 {                                                                  # BIT_OR
+        elif instr.opcode == "BIT_OR" {                                                                  # BIT_OR
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
             stack.append(make_int_val(a.int_val | b.int_val))
         }
-        elif h == 23 {                                                                  # BIT_XOR
+        elif instr.opcode == "BIT_XOR" {                                                                  # BIT_XOR
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
             stack.append(make_int_val(a.int_val ^ b.int_val))
         }
-        elif h == 24 {                                                                  # BIT_NOT
+        elif instr.opcode == "BIT_NOT" {                                                                  # BIT_NOT
             a = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
             stack.append(make_int_val(~a.int_val))
         }
-        elif h == 25 {                                                                  # SHL
+        elif instr.opcode == "SHL" {                                                                  # SHL
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
             stack.append(make_int_val(a.int_val << b.int_val))
         }
-        elif h == 26 {                                                                  # SAR
+        elif instr.opcode == "SAR" {                                                                  # SAR
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
             stack.append(make_int_val(a.int_val >> b.int_val))
         }
-        elif h == 27 { stack.append(make_list_val([])) }                                # NEW_LIST
-        elif h == 28 {                                                                  # LEN
+        elif instr.opcode == "NEW_LIST" { stack.append(make_list_val([])) }                                # NEW_LIST
+        elif instr.opcode == "LEN" {                                                                  # LEN
             a = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
             if a.kind == "list" { stack.append(make_int_val(len(a.list_val))) }
             elif a.kind == "string" { stack.append(make_int_val(len(a.str_val))) }
             elif a.kind == "dict" { stack.append(make_int_val(len(a.dict_val))) }
         }
-        elif h == 29 {                                                                  # LOAD_INDEX
+        elif instr.opcode == "LOAD_INDEX" {                                                                  # LOAD_INDEX
             idx_val = stack[len(stack) - 1]
             base_val = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
@@ -404,7 +312,7 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
                 stack.append(make_str_val(str_sub(base_val.str_val, idx, idx + 1)))
             }
         }
-        elif h == 30 {                                                                  # STORE_INDEX
+        elif instr.opcode == "STORE_INDEX" {                                                                  # STORE_INDEX
             val = stack[len(stack) - 1]
             idx_val = stack[len(stack) - 2]
             base_val = stack[len(stack) - 3]
@@ -414,7 +322,7 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
                 base_val.list_val[idx] = val
             }
         }
-        elif h == 31 {                                                                  # SLICE
+        elif instr.opcode == "SLICE" {                                                                  # SLICE
             end_val = stack[len(stack) - 1]
             start_val = stack[len(stack) - 2]
             base_val = stack[len(stack) - 3]
@@ -435,8 +343,8 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
                 else { stack.append(make_str_val("")) }
             }
         }
-        elif h == 32 { stack.append(make_dict_val({})) }                                # BUILD_DICT
-        elif h == 33 {                                                                  # HAS
+        elif instr.opcode == "BUILD_DICT" { stack.append(make_dict_val({})) }                                # BUILD_DICT
+        elif instr.opcode == "HAS" {                                                                  # HAS
             key_val = stack[len(stack) - 1]
             dict_val = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
@@ -444,13 +352,13 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
                 stack.append(make_bool_val(dict_val.dict_val.has(key_val.str_val)))
             }
         }
-        elif h == 34 { ip = instr.arg_int }                                             # JUMP
-        elif h == 35 {                                                                  # JUMP_IF_FALSE
+        elif instr.opcode == "JUMP" { ip = instr.arg_int }                                             # JUMP
+        elif instr.opcode == "JUMP_IF_FALSE" {                                                                  # JUMP_IF_FALSE
             cond = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
             if value_is_truthy(cond) == 0 { ip = instr.arg_int }
         }
-        elif h == 36 {                                                                  # CALL
+        elif instr.opcode == "CALL" {                                                                  # CALL
             num_args = instr.arg_int
             callee_args = []
             k = 0
@@ -469,8 +377,8 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
             result = exec_func(prog, instr.arg, callee_args, depth + 1)
             stack.append(result)
         }
-        elif h == 37 { return stack[len(stack) - 1] }                                   # RETURN
-        elif h == 38 {                                                                  # PRINT
+        elif instr.opcode == "RETURN" { return stack[len(stack) - 1] }                                   # RETURN
+        elif instr.opcode == "PRINT" {                                                                  # PRINT
             val = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
             if val.kind == "int" { print(val.int_val) }
@@ -497,48 +405,48 @@ def exec_func(prog: Program, func_name: string, args: list, depth: int) -> Value
             }
             elif val.kind == "dict" { print("<dict>") }
         }
-        elif h == 39 {}                                                                 # LOAD_PTR
-        elif h == 40 {}                                                                 # STORE_PTR
-        elif h == 41 {}                                                                 # PTR_OFFSET
-        elif h == 42 { stack.append(make_int_val(0)) }                                  # ALLOC
-        elif h == 43 { stack = stack[0:len(stack) - 1] }                                # FREE
-        elif h == 44 {                                                                  # OPEN_FILE
+        elif instr.opcode == "LOAD_PTR" {}                                                                 # LOAD_PTR
+        elif instr.opcode == "STORE_PTR" {}                                                                 # STORE_PTR
+        elif instr.opcode == "PTR_OFFSET" {}                                                                 # PTR_OFFSET
+        elif instr.opcode == "ALLOC" { stack.append(make_int_val(0)) }                                  # ALLOC
+        elif instr.opcode == "FREE" { stack = stack[0:len(stack) - 1] }                                # FREE
+        elif instr.opcode == "OPEN_FILE" {                                                                  # OPEN_FILE
             mode_val = stack[len(stack) - 1]
             path_val = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
             stack.append(make_int_val(0))
         }
-        elif h == 45 {                                                                  # READ_FILE
+        elif instr.opcode == "READ_FILE" {                                                                  # READ_FILE
             fd_val = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
             stack.append(make_str_val(""))
         }
-        elif h == 46 {                                                                  # WRITE_FILE
+        elif instr.opcode == "WRITE_FILE" {                                                                  # WRITE_FILE
             content_val = stack[len(stack) - 1]
             fd_val = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
         }
-        elif h == 47 {                                                                  # CLOSE_FILE
+        elif instr.opcode == "CLOSE_FILE" {                                                                  # CLOSE_FILE
             fd_val = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
         }
-        elif h == 48 {                                                                  # SIZEOF
+        elif instr.opcode == "SIZEOF" {                                                                  # SIZEOF
             target_val = stack[len(stack) - 1]
             stack.append(make_int_val(0))
         }
-        elif h == 49 {                                                                  # STR_CONVERT
+        elif instr.opcode == "STR_CONVERT" {                                                                  # STR_CONVERT
             val = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
             stack.append(val_to_str_val(val))
         }
-        elif h == 50 {}                                                                 # NEW
-        elif h == 51 {}                                                                 # LOAD_ATTR
-        elif h == 52 {}                                                                 # STORE_ATTR
-        elif h == 53 {}                                                                 # CALL_METHOD
-        elif h == 54 {}                                                                 # LOAD_SELF
-        elif h == 55 {}                                                                 # PUSH_HANDLER
-        elif h == 56 {}                                                                 # POP_HANDLER
-        elif h == 57 {                                                                  # THROW
+        elif instr.opcode == "NEW" {}                                                                 # NEW
+        elif instr.opcode == "LOAD_ATTR" {}                                                                 # LOAD_ATTR
+        elif instr.opcode == "STORE_ATTR" {}                                                                 # STORE_ATTR
+        elif instr.opcode == "CALL_METHOD" {}                                                                 # CALL_METHOD
+        elif instr.opcode == "LOAD_SELF" {}                                                                 # LOAD_SELF
+        elif instr.opcode == "PUSH_HANDLER" {}                                                                 # PUSH_HANDLER
+        elif instr.opcode == "POP_HANDLER" {}                                                                 # POP_HANDLER
+        elif instr.opcode == "THROW" {                                                                  # THROW
             val = stack[len(stack) - 1]
             stack = stack[0:len(stack) - 1]
         }
