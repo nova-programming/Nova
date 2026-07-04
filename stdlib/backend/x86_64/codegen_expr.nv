@@ -1,3 +1,42 @@
+_BINOP_MAP = {}
+_BINOP_MAP["and"] = 1
+_BINOP_MAP["or"] = 2
+_BINOP_MAP["=="] = 3
+_BINOP_MAP["!="] = 4
+_BINOP_MAP["<"] = 5
+_BINOP_MAP["<="] = 6
+_BINOP_MAP[">"] = 7
+_BINOP_MAP[">="] = 8
+_BINOP_MAP["has"] = 9
+_BINOP_MAP["+"] = 10
+_BINOP_MAP["-"] = 11
+_BINOP_MAP["*"] = 12
+_BINOP_MAP["/"] = 13
+_BINOP_MAP["%"] = 14
+_BINOP_MAP["&"] = 15
+_BINOP_MAP[">>"] = 16
+_BINOP_MAP["<<"] = 17
+_BINOP_MAP["|"] = 18
+_BINOP_MAP["^"] = 19
+BIN_AND = 1
+BIN_OR = 2
+BIN_EQ = 3
+BIN_NE = 4
+BIN_LT = 5
+BIN_LE = 6
+BIN_GT = 7
+BIN_GE = 8
+BIN_HAS = 9
+BIN_ADD = 10
+BIN_SUB = 11
+BIN_MUL = 12
+BIN_DIV = 13
+BIN_MOD = 14
+BIN_BAND = 15
+BIN_BSR = 16
+BIN_BSL = 17
+BIN_BOR = 18
+BIN_XOR = 19
 # ============================================================
 # Code Generator: Expression Compi
 def float_str_to_hex(s: string) -> int {
@@ -334,7 +373,8 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    push %a")
     }
     if node.kind == "BinOp" {
-        if node.val_str == "and" {
+        op = _BINOP_MAP.get(node.val_str, 0)
+        if op == BIN_AND {
             end_lbl = next_label(state, "L_and_end")
             compile_expr(state, node.left)
             emit(state, "    pop %a")
@@ -344,233 +384,221 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    pop %a")
             emit(state, end_lbl + ":")
             emit(state, "    push %a")
+        } elif op == BIN_OR {
+            end_lbl = next_label(state, "L_or_end")
+            compile_expr(state, node.left)
+            emit(state, "    pop %a")
+            emit(state, "    cmp rax, 0")
+            emit(state, "    jne " + end_lbl)
+            compile_expr(state, node.right)
+            emit(state, "    pop %a")
+            emit(state, end_lbl + ":")
+            emit(state, "    push %a")
         } else {
-            if node.val_str == "or" {
-                end_lbl = next_label(state, "L_or_end")
+            left_leaf = is_leaf_expr(state, node.left)
+            right_leaf = is_leaf_expr(state, node.right)
+            
+            is_float_op = 0
+            if is_float_expr(state, node.left) == 1 { is_float_op = 1 }
+            if is_float_expr(state, node.right) == 1 { is_float_op = 1 }
+            
+            if is_float_op == 1 {
                 compile_expr(state, node.left)
-                emit(state, "    pop %a")
-                emit(state, "    cmp rax, 0")
-                emit(state, "    jne " + end_lbl)
                 compile_expr(state, node.right)
-                emit(state, "    pop %a")
-                emit(state, end_lbl + ":")
-                emit(state, "    push %a")
+                is_cmp2 = 0
+                if op >= BIN_EQ and op <= BIN_GE { is_cmp2 = 1 }
+                
+                if is_cmp2 == 1 {
+                    emit(state, "    fld qword ptr [esp]")
+                    emit(state, "    fld qword ptr [esp + 4]")
+                    clean_n(state, 2)
+                    emit(state, "    fucomip st(0), st(1)")
+                    emit(state, "    fstp st(0)")
+                    emit(state, "    pushf")
+                    emit(state, "    pop %a")
+                    
+                    label_true2 = next_label(state, "L_fcmp_true")
+                    label_end2 = next_label(state, "L_fcmp_end")
+                    
+                    if op == BIN_EQ {
+                        emit(state, "    and rax, 64")
+                        emit(state, "    cmp rax, 0")
+                        emit(state, "    jne " + label_true2)
+                    }
+                    if op == BIN_NE {
+                        emit(state, "    and rax, 64")
+                        emit(state, "    cmp rax, 0")
+                        emit(state, "    je " + label_true2)
+                    }
+                    if op == BIN_LT {
+                        emit(state, "    and rax, 1")
+                        emit(state, "    cmp rax, 1")
+                        emit(state, "    je " + label_true2)
+                    }
+                    if op == BIN_GT {
+                        emit(state, "    and rax, 65")
+                        emit(state, "    cmp rax, 0")
+                        emit(state, "    je " + label_true2)
+                    }
+                    if op == BIN_LE {
+                        emit(state, "    and rax, 65")
+                        emit(state, "    cmp rax, 0")
+                        emit(state, "    jne " + label_true2)
+                    }
+                    if op == BIN_GE {
+                        emit(state, "    and rax, 1")
+                        emit(state, "    cmp rax, 0")
+                        emit(state, "    je " + label_true2)
+                    }
+                    
+                    emit(state, "    push 0")
+                    emit(state, "    jmp " + label_end2)
+                    emit(state, label_true2 + ":")
+                    emit(state, "    push 1")
+                    emit(state, label_end2 + ":")
+                } else {
+                    emit(state, "    fld qword ptr [esp + 4]")
+                    emit(state, "    fld qword ptr [esp]")
+                    if op == BIN_ADD { emit(state, "    faddp st(1), st(0)") }
+                    elif op == BIN_SUB { emit(state, "    fsubp st(1), st(0)") }
+                    elif op == BIN_MUL { emit(state, "    fmulp st(1), st(0)") }
+                    elif op == BIN_DIV { emit(state, "    fdivp st(1), st(0)") }
+                    clean_n(state, 2)
+                    emit(state, "    sub esp, 4")
+                    emit(state, "    fstp qword ptr [esp]")
+                }
             } else {
-                left_leaf = is_leaf_expr(state, node.left)
-                right_leaf = is_leaf_expr(state, node.right)
+                all_leaf = left_leaf + right_leaf
+                is_str_concat = 0
+                if op == BIN_ADD {
+                    if is_string_expr(state, node.left) == 1 { is_str_concat = 1 }
+                    if is_string_expr(state, node.right) == 1 { is_str_concat = 1 }
+                }
                 
-                is_float_op = 0
-                if is_float_expr(state, node.left) == 1 { is_float_op = 1 }
-                if is_float_expr(state, node.right) == 1 { is_float_op = 1 }
-                
-                if is_float_op == 1 {
+                if all_leaf == 2 and is_str_concat == 0 {
+                    compile_leaf_to_reg(state, node.right, "%x")
+                    compile_leaf_to_reg(state, node.left, "%a")
+                } else {
                     compile_expr(state, node.left)
                     compile_expr(state, node.right)
-                    is_cmp2 = 0
-                    if node.val_str == "==" { is_cmp2 = 1 }
-                    if node.val_str == "!=" { is_cmp2 = 1 }
-                    if node.val_str == "<" { is_cmp2 = 1 }
-                    if node.val_str == "<=" { is_cmp2 = 1 }
-                    if node.val_str == ">" { is_cmp2 = 1 }
-                    if node.val_str == ">=" { is_cmp2 = 1 }
-                    
-                    if is_cmp2 == 1 {
-                        emit(state, "    fld qword ptr [esp]")
-                        emit(state, "    fld qword ptr [esp + 4]")
-                        clean_n(state, 2)
-                        emit(state, "    fucomip st(0), st(1)")
-                        emit(state, "    fstp st(0)")
-                        emit(state, "    pushf")
-                        emit(state, "    pop %a")
-                        
-                        label_true2 = next_label(state, "L_fcmp_true")
-                        label_end2 = next_label(state, "L_fcmp_end")
-                        
-                        if node.val_str == "==" {
-                            emit(state, "    and rax, 64")
-                            emit(state, "    cmp rax, 0")
-                            emit(state, "    jne " + label_true2)
-                        }
-                        if node.val_str == "!=" {
-                            emit(state, "    and rax, 64")
-                            emit(state, "    cmp rax, 0")
-                            emit(state, "    je " + label_true2)
-                        }
-                        if node.val_str == "<" {
-                            emit(state, "    and rax, 1")
-                            emit(state, "    cmp rax, 1")
-                            emit(state, "    je " + label_true2)
-                        }
-                        if node.val_str == ">" {
-                            emit(state, "    and rax, 65")
-                            emit(state, "    cmp rax, 0")
-                            emit(state, "    je " + label_true2)
-                        }
-                        if node.val_str == "<=" {
-                            emit(state, "    and rax, 65")
-                            emit(state, "    cmp rax, 0")
-                            emit(state, "    jne " + label_true2)
-                        }
-                        if node.val_str == ">=" {
-                            emit(state, "    and rax, 1")
-                            emit(state, "    cmp rax, 0")
-                            emit(state, "    je " + label_true2)
-                        }
-                        
-                        emit(state, "    push 0")
-                        emit(state, "    jmp " + label_end2)
-                        emit(state, label_true2 + ":")
-                        emit(state, "    push 1")
-                        emit(state, label_end2 + ":")
-                    } else {
-                        emit(state, "    fld qword ptr [esp + 4]")
-                        emit(state, "    fld qword ptr [esp]")
-                        if node.val_str == "+" { emit(state, "    faddp st(1), st(0)") }
-                        if node.val_str == "-" { emit(state, "    fsubp st(1), st(0)") }
-                        if node.val_str == "*" { emit(state, "    fmulp st(1), st(0)") }
-                        if node.val_str == "/" { emit(state, "    fdivp st(1), st(0)") }
-                        clean_n(state, 2)
-                        emit(state, "    sub esp, 4")
-                        emit(state, "    fstp qword ptr [esp]")
-                    }
-                } else {
-                    all_leaf = left_leaf + right_leaf
-                    is_str_concat = 0
-                    if node.val_str == "+" {
-                        if is_string_expr(state, node.left) == 1 { is_str_concat = 1 }
-                        if is_string_expr(state, node.right) == 1 { is_str_concat = 1 }
-                    }
-                    
-                    if all_leaf == 2 and is_str_concat == 0 {
-                        compile_leaf_to_reg(state, node.right, "%x")
-                        compile_leaf_to_reg(state, node.left, "%a")
-                    } else {
-                        compile_expr(state, node.left)
-                        compile_expr(state, node.right)
-                        emit(state, "    pop %x")
-                        emit(state, "    pop %a")
-                    }
-                    
-                    is_cmp = 0
-                    if node.val_str == "==" { is_cmp = 1 }
-                    if node.val_str == "!=" { is_cmp = 1 }
-                    if node.val_str == "<" { is_cmp = 1 }
-                    if node.val_str == "<=" { is_cmp = 1 }
-                    if node.val_str == ">" { is_cmp = 1 }
-                    if node.val_str == ">=" { is_cmp = 1 }
-                    if node.val_str == "has" { is_cmp = 1 }
+                    emit(state, "    pop %x")
+                    emit(state, "    pop %a")
+                }
                 
-                if is_cmp == 1 {
-                    is_str_cmp = 0
-                    left_str = is_string_expr(state, node.left)
-                    right_str = is_string_expr(state, node.right)
-                    if left_str == 1 or right_str == 1 { is_str_cmp = 1 }
-                    if left_str == 1 and node.right.kind == "Number" and node.right.val_int == 0 { is_str_cmp = 0 }
-                    if right_str == 1 and node.left.kind == "Number" and node.left.val_int == 0 { is_str_cmp = 0 }
-                    
-                    label_true = next_label(state, "L_cmp_true")
-                    label_end = next_label(state, "L_cmp_end")
+                is_cmp = 0
+                if op >= BIN_EQ and op <= BIN_GE { is_cmp = 1 }
+                if op == BIN_HAS { is_cmp = 1 }
+            
+            if is_cmp == 1 {
+                is_str_cmp = 0
+                left_str = is_string_expr(state, node.left)
+                right_str = is_string_expr(state, node.right)
+                if left_str == 1 or right_str == 1 { is_str_cmp = 1 }
+                if left_str == 1 and node.right.kind == "Number" and node.right.val_int == 0 { is_str_cmp = 0 }
+                if right_str == 1 and node.left.kind == "Number" and node.left.val_int == 0 { is_str_cmp = 0 }
+                
+                label_true = next_label(state, "L_cmp_true")
+                label_end = next_label(state, "L_cmp_end")
 
-                    if node.val_str == "has" {
-                        is_dict = 0
-                        if node.left.inferred_type != 0 and node.left.inferred_type.kind == "dict" {
-                            is_dict = 1
-                        }
+                if op == BIN_HAS {
+                    is_dict = 0
+                    if node.left.inferred_type != 0 and node.left.inferred_type.kind == "dict" {
+                        is_dict = 1
+                    }
+                    emit(state, "    push %x")
+                    emit(state, "    push %a")
+                    if is_dict == 1 {
+                        emit_call(state, "_dict_has", 2)
+                    } else {
+                        emit_call(state, "_strstr", 2)
+                    }
+                    emit(state, "    cmp rax, 0")
+                    emit(state, "    jne " + label_true)
+                } else {
+                    if is_str_cmp == 1 {
                         emit(state, "    push %x")
                         emit(state, "    push %a")
-                        if is_dict == 1 {
-                            emit_call(state, "_dict_has", 2)
-                        } else {
-                            emit_call(state, "_strstr", 2)
-                        }
+                        emit_call(state, "_strcmp", 2)
                         emit(state, "    cmp rax, 0")
-                        emit(state, "    jne " + label_true)
                     } else {
-                        if is_str_cmp == 1 {
-                            emit(state, "    push %x")
-                            emit(state, "    push %a")
-                            emit_call(state, "_strcmp", 2)
-                            emit(state, "    cmp rax, 0")
-                        } else {
-                            emit(state, "    cmp rax, rbx")
-                        }
-
-                        if node.val_str == "==" {
-                            emit(state, "    je " + label_true)
-                        }
-                        if node.val_str == "!=" {
-                            emit(state, "    jne " + label_true)
-                        }
-                        if node.val_str == "<" {
-                            emit(state, "    jl " + label_true)
-                        }
-                        if node.val_str == "<=" {
-                            emit(state, "    jle " + label_true)
-                        }
-                        if node.val_str == ">" {
-                            emit(state, "    jg " + label_true)
-                        }
-                        if node.val_str == ">=" {
-                            emit(state, "    jge " + label_true)
-                        }
+                        emit(state, "    cmp rax, rbx")
                     }
 
-                    emit(state, "    push 0")
-                    emit(state, "    jmp " + label_end)
-                    emit(state, label_true + ":")
-                    emit(state, "    push 1")
-                    emit(state, label_end + ":")
-                } else {
-                    if node.val_str == "+" {
-                        if is_string_expr(state, node.left) == 1 {
+                    if op == BIN_EQ {
+                        emit(state, "    je " + label_true)
+                    }
+                    if op == BIN_NE {
+                        emit(state, "    jne " + label_true)
+                    }
+                    if op == BIN_LT {
+                        emit(state, "    jl " + label_true)
+                    }
+                    if op == BIN_LE {
+                        emit(state, "    jle " + label_true)
+                    }
+                    if op == BIN_GT {
+                        emit(state, "    jg " + label_true)
+                    }
+                    if op == BIN_GE {
+                        emit(state, "    jge " + label_true)
+                    }
+                }
+
+                emit(state, "    push 0")
+                emit(state, "    jmp " + label_end)
+                emit(state, label_true + ":")
+                emit(state, "    push 1")
+                emit(state, label_end + ":")
+            } else {
+                if op == BIN_ADD {
+                    if is_string_expr(state, node.left) == 1 {
+                        emit(state, "    push %x")
+                        emit(state, "    push %a")
+                        emit_call(state, "_concat_strings", 2)
+                    } else {
+                        if is_string_expr(state, node.right) == 1 {
                             emit(state, "    push %x")
                             emit(state, "    push %a")
                             emit_call(state, "_concat_strings", 2)
                         } else {
-                            if is_string_expr(state, node.right) == 1 {
-                                emit(state, "    push %x")
-                                emit(state, "    push %a")
-                                emit_call(state, "_concat_strings", 2)
-                            } else {
-                                emit(state, "    add rax, rbx")
-                            }
+                            emit(state, "    add rax, rbx")
                         }
                     }
-                    if node.val_str == "-" {
-                        emit(state, "    sub rax, rbx")
-                    }
-                    if node.val_str == "*" {
-                        emit(state, "    imul rax, rbx")
-                    }
-                    if node.val_str == "/" {
-                        emit(state, "    cqo")
-                        emit(state, "    idiv rbx")
-                    }
-                    if node.val_str == "%" {
-                        emit(state, "    cqo")
-                        emit(state, "    idiv rbx")
-                        emit(state, "    mov rax, rdx")
-                    }
-                    if node.val_str == "&" {
-                        emit(state, "    and rax, rbx")
-                    }
-                    if node.val_str == ">>" {
-                        emit(state, "    mov rcx, rbx")
-                        emit(state, "    sar rax, cl")
-                    }
-                    if node.val_str == "<<" {
-                        emit(state, "    mov rcx, rbx")
-                        emit(state, "    shl rax, cl")
-                    }
-                    if node.val_str == "|" {
-                        emit(state, "    or rax, rbx")
-                    }
-                    if node.val_str == "^" {
-                        emit(state, "    xor rax, rbx")
-                    }
-                    emit(state, "    push %a")
                 }
+                if op == BIN_SUB {
+                    emit(state, "    sub rax, rbx")
                 }
+                if op == BIN_MUL {
+                    emit(state, "    imul rax, rbx")
+                }
+                if op == BIN_DIV {
+                    emit(state, "    cqo")
+                    emit(state, "    idiv rbx")
+                }
+                if op == BIN_MOD {
+                    emit(state, "    cqo")
+                    emit(state, "    idiv rbx")
+                    emit(state, "    mov rax, rdx")
+                }
+                if op == BIN_BAND {
+                    emit(state, "    and rax, rbx")
+                }
+                if op == BIN_BSR {
+                    emit(state, "    mov rcx, rbx")
+                    emit(state, "    sar rax, cl")
+                }
+                if op == BIN_BSL {
+                    emit(state, "    mov rcx, rbx")
+                    emit(state, "    shl rax, cl")
+                }
+                if op == BIN_BOR {
+                    emit(state, "    or rax, rbx")
+                }
+                if op == BIN_XOR {
+                    emit(state, "    xor rax, rbx")
+                }
+                emit(state, "    push %a")
+            }
             }
         }
     }

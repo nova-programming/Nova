@@ -216,19 +216,19 @@ def write_u32(buf: list, off: int, val: int) {
 }
 
 def apply_relocs(code: list, fixups: list, labels: list, text_rva: int, data_rva: int, image_base: int) {
+    label_map = {}
+    j = 0
+    while j < len(labels) {
+        if labels[j].defined == 1 {
+            label_map[labels[j].name] = j
+        }
+        j = j + 1
+    }
+    
     i = 0
     while i < len(fixups) {
         fixup = fixups[i]
-        lbl_idx = -1
-
-        j = 0
-        while j < len(labels) {
-            if str_eq(labels[j].name, fixup.target) == 1 and labels[j].defined == 1 {
-                lbl_idx = j
-                break
-            }
-            j = j + 1
-        }
+        lbl_idx = label_map.get(fixup.target, -1)
 
         if lbl_idx >= 0 {
             target_lbl = labels[lbl_idx]
@@ -296,26 +296,28 @@ def strip_name(raw_name: string) -> string {
     return actual_name
 }
 
+_KERNEL32_MAP = {}
+_KERNEL32_MAP["GetProcessHeap"] = 1
+_KERNEL32_MAP["HeapAlloc"] = 1
+_KERNEL32_MAP["HeapFree"] = 1
+_KERNEL32_MAP["HeapReAlloc"] = 1
+_KERNEL32_MAP["GetStdHandle"] = 1
+_KERNEL32_MAP["WriteFile"] = 1
+_KERNEL32_MAP["ReadFile"] = 1
+_KERNEL32_MAP["CreateFileA"] = 1
+_KERNEL32_MAP["CloseHandle"] = 1
+_KERNEL32_MAP["GetFileSize"] = 1
+_KERNEL32_MAP["SetFilePointer"] = 1
+_KERNEL32_MAP["FlushFileBuffers"] = 1
+_KERNEL32_MAP["ExitProcess"] = 1
+_KERNEL32_MAP["WinExec"] = 1
+_KERNEL32_MAP["GetCommandLineA"] = 1
+_KERNEL32_MAP["GetTickCount"] = 1
+_KERNEL32_MAP["VirtualAlloc"] = 1
+_KERNEL32_MAP["VirtualFree"] = 1
+
 def is_kernel32_func(name: string) -> int {
-    if name == "GetProcessHeap" { return 1 }
-    if name == "HeapAlloc" { return 1 }
-    if name == "HeapFree" { return 1 }
-    if name == "HeapReAlloc" { return 1 }
-    if name == "GetStdHandle" { return 1 }
-    if name == "WriteFile" { return 1 }
-    if name == "ReadFile" { return 1 }
-    if name == "CreateFileA" { return 1 }
-    if name == "CloseHandle" { return 1 }
-    if name == "GetFileSize" { return 1 }
-    if name == "SetFilePointer" { return 1 }
-    if name == "FlushFileBuffers" { return 1 }
-    if name == "ExitProcess" { return 1 }
-    if name == "WinExec" { return 1 }
-    if name == "GetCommandLineA" { return 1 }
-    if name == "GetTickCount" { return 1 }
-    if name == "VirtualAlloc" { return 1 }
-    if name == "VirtualFree" { return 1 }
-    return 0
+    return _KERNEL32_MAP.get(name, 0)
 }
 
 def link(sections: list) -> list {
@@ -342,21 +344,14 @@ def link(sections: list) -> list {
     msvcrt_imports = []
     all_import_names = []
     all_import_dll_idx = []
+    import_name_map = {}
 
     i = 0
     while i < len(labels) {
         if labels[i].defined == 0 {
             actual_name = strip_name(labels[i].name)
-            already = 0
-            j = 0
-            while j < len(all_import_names) {
-                if str_eq(all_import_names[j], actual_name) == 1 {
-                    already = 1
-                    break
-                }
-                j = j + 1
-            }
-            if already == 0 {
+            if import_name_map.get(actual_name, 0) == 0 {
+                import_name_map[actual_name] = 1
                 all_import_names.append(actual_name)
                 if is_kernel32_func(actual_name) == 1 {
                     all_import_dll_idx.append(0)
@@ -372,6 +367,20 @@ def link(sections: list) -> list {
 
     num_k32 = len(kernel32_imports)
     num_msvcrt = len(msvcrt_imports)
+    
+    # Build import name → index dicts for O(1) thunk generation
+    k32_idx_map = {}
+    j = 0
+    while j < num_k32 {
+        k32_idx_map[kernel32_imports[j]] = j
+        j = j + 1
+    }
+    msvcrt_idx_map = {}
+    j = 0
+    while j < num_msvcrt {
+        msvcrt_idx_map[msvcrt_imports[j]] = j
+        j = j + 1
+    }
     num_dlls = 0
     if num_k32 > 0 { num_dlls = num_dlls + 1 }
     if num_msvcrt > 0 { num_dlls = num_dlls + 1 }
@@ -450,26 +459,10 @@ def link(sections: list) -> list {
 
             entry_abs_rva = 0
             if is_kernel32_func(actual_name) == 1 {
-                idx = 0
-                j = 0
-                while j < num_k32 {
-                    if str_eq(kernel32_imports[j], actual_name) == 1 {
-                        idx = j
-                        break
-                    }
-                    j = j + 1
-                }
+                idx = k32_idx_map[actual_name]
                 entry_abs_rva = iat_k32_base + idx * 8
             } else {
-                idx = 0
-                j = 0
-                while j < num_msvcrt {
-                    if str_eq(msvcrt_imports[j], actual_name) == 1 {
-                        idx = j
-                        break
-                    }
-                    j = j + 1
-                }
+                idx = msvcrt_idx_map[actual_name]
                 entry_abs_rva = iat_msvcrt_base + idx * 8
             }
 
@@ -616,7 +609,7 @@ def link(sections: list) -> list {
     main_rva = text_rva
     i = 0
     while i < len(labels) {
-        if str_eq(labels[i].name, "_main") == 1 or str_eq(labels[i].name, "main") == 1 {
+        if labels[i].name == "_main" or labels[i].name == "main" {
             main_rva = text_rva + labels[i].offset
         }
         i = i + 1

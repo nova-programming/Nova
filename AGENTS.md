@@ -548,3 +548,15 @@ galaxy publish             # Publish to registry
 - **ARM64 bootstrap openf _fopen arg order bug fixed** (`bootstrap/compiler/backend/arm64/codegen.py:1168`): Called `_fopen(struct_ptr, path)` instead of `_fopen(path, mode)`. Added `mov x0, x1; mov x1, x2` before `bl _fopen` to pass correct args. Latent bug (ARM64 native tests not run on this machine).
 - **Overall benchmark**: Nova Native (build+run) beats CPython by 2.2× on heavy compute (sum_to=10M, primes=300K, fib=35). Nova VM ~109× slower than CPython.
 - **All 266 tests pass** (1 skipped). Test runtime: ~78s.
+
+### Phase 19: Self-Hosted Compiler Performance Optimization (This Session — July 4, 2026)
+- **BinOp handler dict dispatch** (x86_64 + ARM64 `codegen_expr.nv`): Replaced ~47 `node.val_str == "..."` string comparisons per BinOp with single `_BINOP_MAP.get(node.val_str, 0)` dict lookup + integer `op == BIN_*` dispatch. Covers `and`, `or`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `has`, `+`, `-`, `*`, `/`, `%`, `&`, `>>`, `<<`, `|`, `^`.
+- **Float comparison detection**: 6 `if node.val_str == "..."` → `if op >= BIN_EQ and op <= BIN_GE` (single range check).
+- **Float arithmetic**: 4 `if node.val_str == "..."` → `if op == BIN_ADD / BIN_SUB / BIN_MUL / BIN_DIV` chain with `elif`.
+- **Int comparison detection**: 7 `if node.val_str == "..."` → `if op >= BIN_EQ and op <= BIN_GE or op == BIN_HAS`.
+- **Linker `is_kernel32_func` dict lookup** (x86_64 + ARM64 `linker.nv`): 18 `if name == "..."` → `_KERNEL32_MAP.get(name, 0)` dict lookup.
+- **Linker `apply_relocs` label dict** (both arches): Builds `label_map = {}` once at entry, replaces O(N_fixups × N_labels) str_eq inner loop with O(1) `label_map.get(fixup.target, -1)` per fixup.
+- **Linker import dedup dict** (both arches): O(N²) inner scan replaced with `import_name_map.get(actual_name, 0)` O(1) dedup.
+- **Linker thunk generation dict** (both arches): Builds `k32_idx_map` and `msvcrt_idx_map` after import collection, replacing O(N_labels × N_imports) inner loops with O(1) dict lookup per label.
+- **Linker `_main` string comparison**: `str_eq` → `==` operator (same semantics, less overhead).
+- **Test runtime**: 78s → 47s (40% faster). All 266 tests pass.
