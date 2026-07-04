@@ -164,7 +164,9 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     file_write(2, "CF:sys_close_done\n")
     
     file_write(2, "CF:tokenize_start\n")
+    file_write(2, "CF:tokenize_about_to_call\n")
     tokens = tokenize(source)
+    file_write(2, "CF:tokenize_returned\n")
     
     ast = parse(tokens, path)
     

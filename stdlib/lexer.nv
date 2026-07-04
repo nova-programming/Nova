@@ -85,12 +85,17 @@ def match_keyword(word: string) -> string {
 }
 
 def tokenize(src: string) -> list {
+    file_write(2, "TZ:enter\n")
     tokens = []
+    file_write(2, "TZ:tokens_done\n")
     i = 0
+    file_write(2, "TZ:i_zero\n")
     length = len(src)
+    file_write(2, "TZ:len_done\n")
     line_num = 1
     line_start = 0
 
+    file_write(2, "TZ:loop_start\n")
     while i < length {
         ch = src[i]
         col = i - line_start
