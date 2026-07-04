@@ -168,7 +168,9 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     tokens = tokenize(source)
     file_write(2, "CF:tokenize_returned\n")
     
+    file_write(2, "CF:parse_start\n")
     ast = parse(tokens, path)
+    file_write(2, "CF:parse_returned\n")
     
     visited = []
     ast = resolve_imports(ast, visited, target_arch, target_os)

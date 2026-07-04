@@ -97,6 +97,7 @@ def tokenize(src: string) -> list {
 
     file_write(2, "TZ:loop_start\n")
     while i < length {
+        file_write(2, "TZ:loop_body\n")
         ch = src[i]
         col = i - line_start
 
