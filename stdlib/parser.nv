@@ -1429,10 +1429,15 @@ def desugar_enums(program: list) -> list {
 def parse(tokens: list, filename: string) -> list {
     file_write(2, "PARSE:enter\n")
     state = ParserState()
+    file_write(2, "PARSE:state_created\n")
     state.tokens = tokens
+    file_write(2, "PARSE:tokens_set\n")
     state.pos = 0
+    file_write(2, "PARSE:pos_set\n")
     state.filename = filename
+    file_write(2, "PARSE:filename_set\n")
     state.comp_counter = 0
+    file_write(2, "PARSE:comp_counter_set\n")
     program = []
     
     loop = 1
