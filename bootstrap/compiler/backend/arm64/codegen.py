@@ -711,7 +711,7 @@ class Arm64Codegen:
                 offset = self.get_struct_prop_offset(struct_name, node.field_name)
             else:
                 offset = self.get_prop_offset(node.field_name)
-            self.assembly.append(f"    str x1, [x0, #{offset}]")
+            self.assembly.append(f"    str x0, [x1, #{offset}]")
         elif isinstance(node, Print):
             if self._is_file_expr(node.value):
                 self.compile_expr(node.value)
