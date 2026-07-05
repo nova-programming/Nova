@@ -200,18 +200,28 @@ def tokenize(src: string) -> list {
         }
 
         if is_alpha(ch) == 1 {
+            file_write(2, "TZ:alpha_start\n")
             start = i
+            file_write(2, "TZ:alpha_loop\n")
             while i < length and (is_alpha(src[i]) == 1 or is_digit(src[i]) == 1) {
                 i = i + 1
             }
+            file_write(2, "TZ:alpha_loop_done\n")
             ident_str = str_sub(src, start, i)
+            file_write(2, "TZ:alpha_str_sub_done\n")
             kind = match_keyword(ident_str)
+            file_write(2, "TZ:alpha_match_kw_done\n")
             tok = Token()
+            file_write(2, "TZ:alpha_tok_alloc_done\n")
             tok.kind = kind
+            file_write(2, "TZ:alpha_kind_set\n")
             tok.val = ident_str
+            file_write(2, "TZ:alpha_val_set\n")
             tok.line = line_num
             tok.col = col
+            file_write(2, "TZ:alpha_fields_set\n")
             tokens.append(tok)
+            file_write(2, "TZ:alpha_append_done\n")
             continue
         }
 

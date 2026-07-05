@@ -1439,10 +1439,14 @@ def parse(tokens: list, filename: string) -> list {
     state.comp_counter = 0
     file_write(2, "PARSE:comp_counter_set\n")
     program = []
+    file_write(2, "PARSE:program_created\n")
     
     loop = 1
+    file_write(2, "PARSE:loop_set\n")
     while loop == 1 {
+        file_write(2, "PARSE:loop_top\n")
         tok = current_tok(state)
+        file_write(2, "PARSE:current_tok_done\n")
         if current_tok(state).kind == "EOF" {
             break
         }
