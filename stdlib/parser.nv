@@ -1447,9 +1447,12 @@ def parse(tokens: list, filename: string) -> list {
         file_write(2, "PARSE:loop_top\n")
         tok = current_tok(state)
         file_write(2, "PARSE:current_tok_done\n")
+        file_write(2, "PARSE:about_to_check_eof\n")
         if current_tok(state).kind == "EOF" {
+            file_write(2, "PARSE:eof_break\n")
             break
         }
+        file_write(2, "PARSE:after_eof_check\n")
         stmt = parse_statement(state)
         if stmt.kind != "NONE" {
             program.append(stmt)
