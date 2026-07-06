@@ -1,2 +1,0 @@
-printd(_strcmp("a", "p"))
-printd(_strcmp("p", "z"))

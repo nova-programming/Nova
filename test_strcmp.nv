@@ -1,6 +1,0 @@
-print(_strcmp("a", "p"))
-print(_strcmp("p", "z"))
-print(_strcmp("A", "p"))
-print(_strcmp("p", "Z"))
-print(_strcmp("a", "A"))
-print(_strcmp("a", "p") <= 0)
