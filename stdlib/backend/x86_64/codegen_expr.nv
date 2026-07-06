@@ -490,18 +490,19 @@ def compile_expr(state: CodegenState, node: AstNode) {
                     emit(state, "    push %a")
                     if is_dict == 1 {
                         emit_call(state, "_dict_has", 2)
+                        emit(state, "    cmp eax, 0")
                     } else {
                         emit_call(state, "_strstr", 2)
+                        emit(state, "    cmp rax, 0")
                     }
-                    emit(state, "    cmp rax, 0")
                     emit(state, "    jne " + label_true)
                 } else {
-                    if is_str_cmp == 1 {
-                        emit(state, "    push %x")
-                        emit(state, "    push %a")
-                        emit_call(state, "_strcmp", 2)
-                        emit(state, "    cmp rax, 0")
-                    } else {
+                if is_str_cmp == 1 {
+                    emit(state, "    push %x")
+                    emit(state, "    push %a")
+                    emit_call(state, "_strcmp", 2)
+                    emit(state, "    cmp eax, 0")
+                } else {
                         emit(state, "    cmp rax, rbx")
                     }
 
@@ -678,7 +679,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
                     emit(state, "    push %x")
                     emit(state, "    push %a")
                     emit_call(state, "_strcmp", 2)
-                    emit(state, "    cmp rax, 0")
+                    emit(state, "    cmp eax, 0")
                 } else {
                     emit(state, "    cmp rax, rbx")
                 }
@@ -1240,7 +1241,6 @@ def compile_expr(state: CodegenState, node: AstNode) {
                 elif inferred == "dict" { type_str = "dict" }
             }
             push_data_label(state, "str_type_" + type_str)
-            emit(state, "    push %a")
             return
         }
         

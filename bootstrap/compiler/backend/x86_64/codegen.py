@@ -1036,7 +1036,7 @@ class X86_64Codegen:
                 self.assembly.append("    sub rsp, 32")
                 self.assembly.append("    call _strcmp")
                 self.assembly.append("    add rsp, 32")
-                self.assembly.append("    cmp rax, 0")
+                self.assembly.append("    cmp eax, 0")
                 setcc_map = {"==": "sete", "!=": "setne", "<": "setl", ">": "setg", "<=": "setle", ">=": "setge"}
                 cmp_op = setcc_map.get(node.op, "sete")
                 self.assembly.append(f"    {cmp_op} al")

@@ -636,7 +636,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
                     emit(state, "    str %x, [sp, #-16]!")
                     emit(state, "    str %a, [sp, #-16]!")
                     emit_call(state, "_strcmp", 2)
-                    emit(state, "    cmp x0, #0")
+                    emit(state, "    cmp w0, #0")
                 } else {
                     emit(state, "    cmp x0, x1")
                 }
@@ -908,9 +908,8 @@ def compile_expr(state: CodegenState, node: AstNode) {
         } else {
             push_data_label(state, "fmt_int_pure")
         }
-        emit(state, "    str %a, [sp, #-16]!")
         
-        emit(state, "    ldr %c, [sp, #16]")
+        emit(state, "    ldr %c, [sp, #32]")
         emit(state, "    str %c, [sp, #-16]!")
         
         emit_call(state, "_sprintf", 3)
@@ -1146,7 +1145,6 @@ def compile_expr(state: CodegenState, node: AstNode) {
                 elif inferred == "dict" { type_str = "dict" }
             }
             push_data_label(state, "str_type_" + type_str)
-            emit(state, "    str %a, [sp, #-16]!")
             return
         }
         

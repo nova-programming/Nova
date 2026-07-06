@@ -1,0 +1,20 @@
+CF:begin
+CF:cache_path
+CF:load_cache
+CF:file_size
+CF:cache_key
+CF:before_open
+CF:after_open
+CF:after_read
+CF:after_close
+CF:after_tokenize
+CF:after_parse
+CF:after_imports
+CF:after_tc
+CF:after_codegen
+'rm' is not recognized as an internal or external command,
+operable program or batch file.
+'.' is not recognized as an internal or external command,
+operable program or batch file.
+'.' is not recognized as an internal or external command,
+operable program or batch file.

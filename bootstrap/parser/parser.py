@@ -171,7 +171,7 @@ class Parser:
             op = self.eat(self.current()[0])[1]
             right = self.parse_compare()
             # Desugar: a == b or c -> (a == b) or (a == c)
-            if isinstance(left, Compare) and not isinstance(right, Compare):
+            if isinstance(left, Compare) and not isinstance(right, Compare) and not isinstance(right, BinOp):
                 right_line = getattr(right, 'line', 0)
                 right = Compare(left.left, left.op, right, line=right_line)
             left = BinOp(left, op, right, line=line)

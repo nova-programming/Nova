@@ -265,6 +265,11 @@ galaxy publish             # Publish to registry
 - **Reverted all debug prints** from `stdlib/vm.nv` (temporary debug lines in `exec_func` for LOAD_NAME, LOAD_CONST, ADD, CALL, RETURN).
 - **Full suite**: 229 passed, 1 skipped, 13 subtests passed
 
+### Parser Desugaring Bug Fix (This Session — July 7, 2026)
+- **Root cause**: `parse_logic()` in both bootstrap (`parser.py:174`) and self-hosted (`parser.nv:741`) desugared `Compare + and/or + non-Compare` by wrapping the right side in a new `Compare(left.left, left.op, right)`. For `i < length and (is_alpha(...) or is_digit(...))`, left=`Compare(i,"<",length)`, right=`BinOp(OR)` (not a Compare), so right was incorrectly desugared to `Compare(i, "<", BinOp(OR))` → `i < (is_alpha or is_digit)`. Since `i=1` and `OR_result=1`, `1<1` = FALSE → inner while loop exited immediately without incrementing `i` → self-hosted lexer stuck at `i=1` forever.
+- **Fix**: Added `and not isinstance(right, BinOp)` / `and right.kind != "BinOp"` to the desugaring condition in both parsers. The desugaring `a == b or c → (a == b) or (a == c)` is only valid when `c` is a simple value (Variable/Number/String), not a BinOp expression.
+- **Tests**: All 274 pass, 1 skipped.
+
 ### Performance & Consolidation (This Session — June 20, 2026)
 - **Root cause**: `nova.exe` crashed with `STATUS_ACCESS_VIOLATION` on startup because `_printf`/`_sys_get_args` from a stale `runtime.o` had debug markers and incomplete quote handling
 - **Quote handling**: `_sys_get_args` in `runtime.c` now tracks `in_quote` state — paths with spaces (e.g. `D:\...\Random Topic Practice\...`) are parsed as single args instead of being split into 4 tokens

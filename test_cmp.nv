@@ -1,0 +1,11 @@
+s = "p"
+if "a" <= s {
+    print("a <= p is TRUE")
+} else {
+    print("a <= p is FALSE")
+}
+if s <= "z" {
+    print("p <= z is TRUE")
+} else {
+    print("p <= z is FALSE")
+}

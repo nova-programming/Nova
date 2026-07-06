@@ -241,7 +241,17 @@ SYSCALL char *_sys_read_c(long long s) {
     buf[len] = '\0';
     return buf;
 }
-SYSCALL void _sys_write_c(long long s, const char *str) { STR_PFX(fputs)(str, s); }
+SYSCALL void _sys_write_c(long long s, const char *str) {
+    /* Map Nova fd 0/1/2 to actual Win32 handles.  Nova uses raw HANDLEs as
+     * file descriptors (from CreateFileA), but standard streams 0/1/2 must
+     * be mapped via GetStdHandle since (HANDLE)1/2 are invalid handles. */
+    HANDLE h;
+    if (s == 0) h = GetStdHandle(STD_INPUT_HANDLE);
+    else if (s == 1) h = GetStdHandle(STD_OUTPUT_HANDLE);
+    else if (s == 2) h = GetStdHandle(STD_ERROR_HANDLE);
+    else h = (HANDLE)(intptr_t)s;
+    STR_PFX(fputs)(str, (long long)(intptr_t)h);
+}
 SYSCALL int _sys_write_raw_c(int s, void *arr) {
     int *iarr = (int*)arr;
     int len = iarr[0];
@@ -346,7 +356,9 @@ SYSCALL void *_malloc(size_t s) { return malloc(s); }
 SYSCALL void _free(void *p) { free(p); }
 SYSCALL void *_realloc(void *p, size_t s) { return realloc(p, s); }
 SYSCALL size_t _strlen(const char *s) { return strlen(s); }
-SYSCALL int _strcmp(const char *a, const char *b) { return strcmp(a, b); }
+SYSCALL int _strcmp(const char *a, const char *b) {
+    return lstrcmpA(a, b);
+}
 SYSCALL char *_strcpy(char *d, const char *s) { return strcpy(d, s); }
 SYSCALL char *_strcat(char *d, const char *s) { return strcat(d, s); }
 SYSCALL void *_memset(void *p, int c, size_t n) { return memset(p, c, n); }

@@ -357,8 +357,7 @@ class Arm64Codegen:
             self.assembly.append("    bl _strcmp")
             self.assembly.append("    add sp, sp, #32")
             reg = self._alloc_reg()
-            self.assembly.append(f"    mov {reg}, x0")
-            self.assembly.append(f"    cmp {reg}, #0")
+            self.assembly.append(f"    cmp w0, #0")
             setcc_map = {"==": "eq", "!=": "ne", "<": "lt", ">": "gt", "<=": "le", ">=": "ge"}
             cond = setcc_map.get(node.op, "eq")
             self.assembly.append(f"    cset {reg}, {cond}")
