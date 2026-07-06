@@ -1428,7 +1428,9 @@ def desugar_enums(program: list) -> list {
 
 def parse(tokens: list, filename: string) -> list {
     state = ParserState()
+    system.file_write(2, "PARSE:state_created\n")
     state.tokens = tokens
+    system.file_write(2, "PARSE:tokens_set\n")
     state.pos = 0
     state.filename = filename
     state.comp_counter = 0
@@ -1440,13 +1442,18 @@ def parse(tokens: list, filename: string) -> list {
         if tok.kind == "EOF" {
             break
         }
+        system.file_write(2, "PARSE:stmt_loop\n")
         stmt = parse_statement(state)
+        system.file_write(2, "PARSE:stmt_done\n")
         if stmt.kind != "NONE" {
             program.append(stmt)
         }
     }
     
-    return desugar_enums(program)
+    system.file_write(2, "PARSE:desugar_enums\n")
+    result = desugar_enums(program)
+    system.file_write(2, "PARSE:return\n")
+    return result
 }
 
 # --- Utility: atoi ---
