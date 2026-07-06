@@ -37,3 +37,14 @@ gcc/
 *_log2.txt
 *_log3.txt
 full_*.txt
+
+# Test files
+hello.nv
+simple.nv
+simple_test.nv
+test_*.c
+test_*.nv
+test_*.txt
+ver_*.txt
+ci-tmp/
+
