@@ -356,9 +356,7 @@ SYSCALL void *_malloc(size_t s) { return malloc(s); }
 SYSCALL void _free(void *p) { free(p); }
 SYSCALL void *_realloc(void *p, size_t s) { return realloc(p, s); }
 SYSCALL size_t _strlen(const char *s) { return strlen(s); }
-SYSCALL int _strcmp(const char *a, const char *b) {
-    return lstrcmpA(a, b);
-}
+SYSCALL int _strcmp(const char *a, const char *b) { return strcmp(a, b); }
 SYSCALL char *_strcpy(char *d, const char *s) { return strcpy(d, s); }
 SYSCALL char *_strcat(char *d, const char *s) { return strcat(d, s); }
 SYSCALL void *_memset(void *p, int c, size_t n) { return memset(p, c, n); }

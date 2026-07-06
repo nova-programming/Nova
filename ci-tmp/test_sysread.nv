@@ -1,0 +1,3 @@
+fd = sys_open("ci-tmp/test_clean.nv", "r")
+content = sys_read(fd)
+print(content)

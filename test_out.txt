@@ -1,0 +1,9 @@
+Compiling test_hang.nv -> test_hang.exe
+[cached] test_hang.nv is up to date
+
+ERROR [test_hang.nv:1:0] (Syntax): unexpected token: EOF
+  -> this token does not belong here — check for misplaced operators, missing expressions, or extra punctuation
+Compiling runtime.c: ./gcc/bin/gcc.exe -O3 -c ./runtime.c -o ./runtime.o -mno-red-zone
+Using GCC to assemble and link...
+Compiled: test_hang.nv -> test_hang.exe
+Generated executable: test_hang.exe

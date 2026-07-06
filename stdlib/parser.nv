@@ -1437,7 +1437,7 @@ def parse(tokens: list, filename: string) -> list {
     loop = 1
     while loop == 1 {
         tok = current_tok(state)
-        if state.pos >= len(state.tokens) {
+        if tok.kind == "EOF" {
             break
         }
         stmt = parse_statement(state)
