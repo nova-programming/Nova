@@ -696,8 +696,8 @@ class Arm64Codegen:
                 self.string_vars.add(node.name)
         elif isinstance(node, DataFieldAssign):
             val_reg = self._compile_expr_to_reg(node.value)
-            inst_reg = self._compile_expr_to_reg(node.instance)
             self.assembly.append(f"    str {val_reg}, [sp, #-16]!")
+            inst_reg = self._compile_expr_to_reg(node.instance)
             self.assembly.append(f"    str {inst_reg}, [sp, #-16]!")
             self._free_reg(val_reg)
             self._free_reg(inst_reg)

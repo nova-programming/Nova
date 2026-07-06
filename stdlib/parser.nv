@@ -1428,6 +1428,7 @@ def desugar_enums(program: list) -> list {
 
 def parse(tokens: list, filename: string) -> list {
     state = ParserState()
+    system.file_write(2, "P\n")
     state.tokens = tokens
     state.pos = 0
     state.filename = filename
