@@ -565,3 +565,17 @@ galaxy publish             # Publish to registry
 - **Linker thunk generation dict** (both arches): Builds `k32_idx_map` and `msvcrt_idx_map` after import collection, replacing O(N_labels × N_imports) inner loops with O(1) dict lookup per label.
 - **Linker `_main` string comparison**: `str_eq` → `==` operator (same semantics, less overhead).
 - **Test runtime**: 78s → 47s (40% faster). All 266 tests pass.
+
+### macOS ARM64 Self-Hosted Bootstrap — Handoff to Subordinate (This Session — July 8, 2026)
+- **Task**: Fix `./nova-stage1 build test.nv` crash on macOS ARM64 (SIGSEGV after `CF:after_tc`, during codegen)
+- **Investigation done**:
+  - `_parse` and `_current_tok` disassembly dumped and verified correct
+  - `--version` works (exit 0), crash is only in `build` subcommand
+  - `CF:after_tc` fires but `CF:after_codegen` does NOT — crash is inside `generate_assembly()`
+  - Crash is heap-layout sensitive (varies between CI runs — sometimes `--version` crashes too)
+- **Infrastructure for subordinate**:
+  - `docs/internals/macos_arm64_bootstrap.md` — full investigation summary with hypotheses, reproduction steps, next steps
+  - `stdlib/compiler.nv` — added `CF:arch=`, `CF:is_x64=`, `CF:call_arm64_codegen`, `CF:arm64_codegen_done` markers
+  - `stdlib/backend/arm64/codegen.nv` — added `CG:` markers at each major phase (start, externs, data, struct_scan, classify, per-function compile, scan_vars, per-statement compile, return)
+  - `.github/workflows/ci.yml` — added `_current_tok` and `_str_sub` otool dumps for macOS
+- **To continue**: Push to `main`, check CI logs for `CG:*` markers, identify which statement/function crashes
