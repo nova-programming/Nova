@@ -167,13 +167,19 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     tc_init(tc)
     tc_check(tc, ast)
     system.file_write(2, "CF:after_tc\n")
+    system.file_write(2, "CF:arch=$target_arch\n")
 
     is_x64 = 0
     if target_arch == "x86_64" { is_x64 = 1 }
+    system.file_write(2, "CF:is_x64=$is_x64\n")
     if target_arch == "arm64" {
+        system.file_write(2, "CF:call_arm64_codegen\n")
         asm = generate_assembly(ast, debug_mode, is_x64, target_os)
+        system.file_write(2, "CF:arm64_codegen_done\n")
     } else {
+        system.file_write(2, "CF:call_x86_codegen\n")
         asm = generate_assembly(ast, debug_mode, is_x64, target_os)
+        system.file_write(2, "CF:x86_codegen_done\n")
     }
     system.file_write(2, "CF:after_codegen\n")
     sys_flush()
