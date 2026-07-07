@@ -97,6 +97,8 @@ jobs:
             nm ./nova-stage1 2>&1 | head -30
             echo "=== otool -tv _main (first 30 lines) ==="
             otool -tV ./nova-stage1 2>&1 | head -30
+            echo "=== otool -tV _parse (first 80 lines) ==="
+            otool -tV ./nova-stage1 2>&1 | grep -A 80 "_parse:" || echo "(no _parse section)"
           fi
           ./nova-stage1 --version; echo "version exit=$?"
           ./nova-stage1 2>&1; echo "plain exit=$?"
