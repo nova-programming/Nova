@@ -292,6 +292,8 @@ int main(void) {
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <signal.h>
+#include <execinfo.h>
 
 /* Custom printf: processes fmt manually and writes to fd 1 via write().
  * Avoids va_list/AAPCS64 register save area issues on ARM64 that can occur
@@ -375,6 +377,20 @@ SYSCALL long _ftell(int s) { return ftell((FILE*)(intptr_t)s); }
 SYSCALL int _fflush(int s) { return fflush((FILE*)(intptr_t)s); }
 SYSCALL void _exit(int c) { exit(c); }
 #endif /* defined(LINUX_WRAP) */
+
+/* SIGSEGV/SIGBUS handler for debug — prints backtrace */
+static void _sigsegv(int sig) {
+    void *buf[64];
+    int n = backtrace(buf, 64);
+    write(2, sig == 11 ? "SIGNAL:SIGSEGV\n" : "SIGNAL:SIGBUS\n", 16);
+    backtrace_symbols_fd(buf, n, 2);
+    _exit(139);
+}
+__attribute__((constructor))
+static void _init_sig(void) {
+    signal(SIGSEGV, _sigsegv);
+    signal(SIGBUS, _sigsegv);
+}
 
 /* Out-of-bounds globals and handler (also in Windows section above) */
 long long _oob_file_ptr;
