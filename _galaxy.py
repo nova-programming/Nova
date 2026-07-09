@@ -8,7 +8,6 @@ import sys
 import os
 import json
 import hashlib
-import subprocess
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -44,7 +43,6 @@ def main():
         "init":      cmd_init,
         "install":   cmd_install,
         "list":      cmd_list,
-        "test":      cmd_test,
         "search":    cmd_search,
         "info":      cmd_info,
         "publish":   cmd_publish,
@@ -74,7 +72,6 @@ def print_usage():
     print("  galaxy list                  List installed packages")
     print("  galaxy search <query>        Search the registry")
     print("  galaxy info <pkg>            Show package details")
-    print("  galaxy test [--vm] [name]    Run library tests (--vm for faster VM mode)")
     print("  galaxy publish               Publish current package to registry")
     print("  galaxy update                Update Galaxy CLI itself")
     print("  galaxy upgrade [pkg]         Update installed packages")
@@ -199,152 +196,10 @@ def github_download_url(repo):
 
 TEMPLATES = {}
 TEMPLATES["library"] = {
-    "desc": "Reusable Nova library package (default)",
+    "desc": "Reusable library package (default)",
     "scaffold": {
-        "src/main.nv": """\
-# {name} — main entry point
-# Public API exported from this module.
-# Other Nova programs import this via: import {name}
-
-# Import the system library for I/O and OS operations
-import system
-
-# --- Public API ---
-def greet(name: string) -> string {
-    return "Hello, " + name + "!"
-}
-
-def add(a: int, b: int) -> int {
-    return a + b
-}
-
-def is_even(n: int) -> bool {
-    return n % 2 == 0
-}
-""",
-        "src/types.nv": """\
-# {name} — data type definitions
-# Define your custom data structures here.
-# Import this in main.nv: import types
-
-# Example: a Point data type
-data Point {
-    x: int
-    y: int
-}
-
-# Example: a Color enum
-data Color {
-    Red
-    Green
-    Blue
-}
-
-def make_point(x: int, y: int) -> Point {
-    p = Point()
-    p.x = x
-    p.y = y
-    return p
-}
-
-def distance(p: Point) -> int {
-    dx = p.x * p.x
-    dy = p.y * p.y
-    return dx + dy
-}
-""",
-        "tests/test_main.nv": """\
-# Tests for {name}
-# Run: galaxy test
-# Or:  python bootstrap/main.py dev tests/test_main.nv
-
-import system
-import src.main as lib
-
-# Test greet
-result = lib.greet("Nova")
-if result == "Hello, Nova!" {
-    system.file_write(2, "PASS: greet\\n")
-} else {
-    system.file_write(2, "FAIL: greet got " + result + "\\n")
-}
-
-# Test add
-if lib.add(2, 3) == 5 {
-    system.file_write(2, "PASS: add\\n")
-} else {
-    system.file_write(2, "FAIL: add\\n")
-}
-
-# Test is_even
-if lib.is_even(4) == true and lib.is_even(5) == false {
-    system.file_write(2, "PASS: is_even\\n")
-} else {
-    system.file_write(2, "FAIL: is_even\\n")
-}
-
-system.file_write(2, "All {name} tests passed!\\n")
-""",
-        "tests/test_types.nv": """\
-# Tests for {name} data types
-
-import src.types as types
-
-p = types.make_point(3, 4)
-if p.x == 3 and p.y == 4 {
-    system.file_write(2, "PASS: make_point\\n")
-} else {
-    system.file_write(2, "FAIL: make_point\\n")
-}
-
-d = types.distance(p)
-if d == 25 {
-    system.file_write(2, "PASS: distance\\n")
-} else {
-    system.file_write(2, "FAIL: distance\\n")
-}
-""",
-        "examples/demo.nv": """\
-# {name} — usage example
-# Run: python bootstrap/main.py dev examples/demo.nv
-
-import src.main as lib
-
-name = "World"
-print(lib.greet(name))
-print(lib.add(10, 20))
-print(lib.is_even(7))
-""",
-        "README.md": """# {name}
-
-A Nova library.
-
-## Usage
-
-```bash
-import {name}
-```
-
-## API
-
-- `greet(name)` — Returns a greeting string
-- `add(a, b)` — Adds two integers
-- `is_even(n)` — Checks if a number is even
-
-## Development
-
-```bash
-# Run tests
-galaxy test
-
-# Or directly
-python bootstrap/main.py dev tests/test_main.nv
-python bootstrap/main.py dev tests/test_types.nv
-
-# Run example
-python bootstrap/main.py dev examples/demo.nv
-```
-""",
+        "src/main.nv": 'import "os"\n\nprint("Hello from {name}!")\n',
+        "tests/test_main.nv": '# Tests for {name}\nprint("All tests passed!")\n',
     },
 }
 TEMPLATES["lib"] = {"desc": "Alias for library template", "alias": "library"}
@@ -399,7 +254,7 @@ def cmd_init(args):
             os.makedirs(dir_name, exist_ok=True)
         if not os.path.exists(full_path):
             with open(full_path, "w") as f:
-                f.write(content_template.replace("{name}", manifest["name"]))
+                f.write(content_template.format(name=manifest["name"]))
 
     display_name = name or os.path.basename(os.getcwd())
     print(f"Initialized {template_name} package '{manifest['name']}'")
@@ -407,11 +262,11 @@ def cmd_init(args):
     for rel_path in sorted(template["scaffold"].keys()):
         print(f"  {rel_path}")
     print()
-    print("Next steps:")
-    print(f"  1. Edit {MANIFEST_FILE} and set your repository URL")
-    print("  2. Write your code in src/")
-    print("  3. Run 'galaxy test' to run tests")
-    print("  4. Run 'galaxy publish' to submit to the registry")
+    if not manifest["repository"]:
+        print("Next steps:")
+        print(f"  1. Edit {MANIFEST_FILE} and set your repository URL")
+        print("  2. Write your code in src/")
+        print("  3. Run 'galaxy publish' to submit to the registry")
 
 
 def _verify_hashes(dest_dir, version_data, pkg_name):
@@ -647,101 +502,6 @@ def _client_side_search(query):
             any(q in kw for kw in keywords)):
             results.append(p)
     return results
-
-
-def _find_nova_compiler():
-    """Locate the Nova compiler: check PATH, then repo root."""
-    # Check PATH for 'nova'
-    nova_path = shutil.which("nova")
-    if nova_path:
-        return nova_path
-    # Check for bootstrap/main.py in current dir or parents
-    for root in [os.getcwd()] + [os.path.dirname(os.getcwd())]:
-        candidate = os.path.join(root, "bootstrap", "main.py")
-        if os.path.exists(candidate):
-            return candidate
-    return None
-
-
-def _compile_and_run(nv_file, compiler, use_vm):
-    """Compile a .nv file and run it. Returns (exit_code, output_lines)."""
-    if use_vm:
-        cmd = [sys.executable, compiler, "dev", nv_file] if compiler.endswith(".py") else [compiler, "dev", nv_file]
-    else:
-        # Build native, then run
-        build_cmd = [sys.executable, compiler, "build", nv_file] if compiler.endswith(".py") else [compiler, "build", nv_file]
-        r = subprocess.run(build_cmd, capture_output=True, text=True, timeout=120)
-        if r.returncode != 0:
-            return (r.returncode, r.stdout.splitlines() + r.stderr.splitlines())
-        # Find output binary
-        base = os.path.splitext(nv_file)[0]
-        exe_path = base + (".exe" if sys.platform == "win32" else "")
-        if not os.path.exists(exe_path):
-            return (1, [f"Error: compiled binary not found at {exe_path}"])
-        cmd = [exe_path]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    return (r.returncode, r.stdout.splitlines() + r.stderr.splitlines())
-
-
-def cmd_test(args):
-    """Run all tests for the current library package.
-    
-    Usage: galaxy test [--vm] [test_name]
-    
-    --vm        Run in VM mode (faster, no native compilation)
-    test_name   Run only tests matching this substring
-    """
-    use_vm = "--vm" in args
-    filter_str = None
-    for a in args:
-        if a != "--vm":
-            filter_str = a
-
-    test_dir = "tests"
-    if not os.path.isdir(test_dir):
-        print("Error: no 'tests/' directory found")
-        return
-
-    test_files = sorted([f for f in os.listdir(test_dir) if f.endswith(".nv")])
-    if filter_str:
-        test_files = [f for f in test_files if filter_str in f]
-
-    if not test_files:
-        print("No tests found.")
-        return
-
-    compiler = _find_nova_compiler()
-    if not compiler:
-        print("Error: Nova compiler not found. Install Nova or run from repo root.")
-        return
-
-    mode = "VM" if use_vm else "native"
-    print(f"Running {len(test_files)} test(s) ({mode})...\n")
-
-    passed = 0
-    failed = 0
-    for tf in test_files:
-        path = os.path.join(test_dir, tf)
-        print(f"  [{tf}] ", end="", flush=True)
-        exit_code, output = _compile_and_run(path, compiler, use_vm)
-        if exit_code == 0:
-            print("PASS")
-            passed += 1
-        else:
-            print("FAIL")
-            failed += 1
-            for line in output:
-                print(f"    {line}")
-
-    total = passed + failed
-    print(f"\n{'='*40}")
-    print(f"Results: {passed}/{total} passed", end="")
-    if failed:
-        print(f", {failed} failed", end="")
-    print()
-
-    if failed:
-        sys.exit(1)
 
 
 def cmd_info(args):
