@@ -209,6 +209,52 @@ def tokenize(src: string) -> list {
 
         if ch == "\"" {
             start = i
+            
+            # ------------------------------------------------------------
+            #  TRIPLE QUOTE CHECK ( Multi-line Code)
+            # ------------------------------------------------------------
+            
+            if i + 2 < length and src[i + 1] == "\"" and src[i + 2] == "\"" {
+                i = i + 3 # Pehle teeno " ko skip karke string ke andar chalo
+                
+                while i < length {
+                    # Agar aage chal kar hume fir se `"""` mil jaye, toh string khatam!
+                    if i + 2 < length and src[i] == "\"" and src[i + 1] == "\"" and src[i + 2] == "\"" {
+                        break
+                    }
+                    
+                    # Agar beech me 'Enter' (newline) aaye, toh compiler ka line number badhao
+                    if src[i] == "\n" {
+                        line_num = line_num + 1
+                        line_start = i + 1
+                    }
+                    
+                    # Agar koi character escape kiya ho (jaise \"), toh use skip karo
+                    if src[i] == "\\" and i + 1 < length {
+                        i = i + 1
+                    }
+                    i = i + 1
+                }
+                
+                if i + 2 < length {
+                    i = i + 3 # Akhiri teeno `"""` ko skip karke string se bahar nikal jao
+                }
+                
+                # Puri multi-line string ka token banao aur list me daal do
+                str_val = str_sub(src, start, i)
+                tok = Token()
+                tok.kind = "STRING"
+                tok.val = str_val
+                tok.line = line_num
+                tok.col = col
+                tokens.append(tok)
+                continue # Kaam khatam! Agla character check karne ke liye loop par lout jao
+            }
+            
+            # ------------------------------------------------------------
+            #  ORIGINAL CODE (Single-Line Code)
+            # ------------------------------------------------------------
+            
             i = i + 1
             while i < length and src[i] != "\"" {
                 if src[i] == "\\" and i + 1 < length {
@@ -359,7 +405,6 @@ def tokenize(src: string) -> list {
             }
             continue
         }
-
         tok = Token()
         tok.col = col
         matched = 1

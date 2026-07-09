@@ -104,19 +104,38 @@ def tokenize(code):
 
         # String literal
         if c == '"':
-            j = i + 1
-            while j < n:
-                if code[j] == '\\' and j + 1 < n:
-                    j += 2
-                elif code[j] == '"':
-                    j += 1
-                    break
-                else:
-                    j += 1
-            value = code[i:j]
-            inner = value[1:-1]
-            inner = process_escapes(inner)
+            
+            if i + 2 < n and code[i+1] == '"' and code[i+2] == '"':
+                j = i + 3
+                while j < n:
+                    if j + 2 < n and code[j] == '"' and code[j+1] == '"' and code[j+2] == '"':
+                        j += 3
+                        break
+                    elif code[j] == '\\' and j + 1 < n:
+                        j += 2
+                    else:
+                        j += 1
+                value = code[i:j]
+                inner = value[3:-3] 
+                
+                
+                
+            else:
+                
+                j = i + 1
+                while j < n:
+                    if code[j] == '\\' and j + 1 < n:
+                        j += 2
+                    elif code[j] == '"':
+                        j += 1
+                        break
+                    else:
+                        j += 1
+                value = code[i:j]
+                inner = value[1:-1]
+                inner = process_escapes(inner)
 
+            
             if "{" in inner and "}" in inner:
                 new_tokens = []
                 k = 0
@@ -152,6 +171,9 @@ def tokenize(code):
                 tokens.extend(new_tokens)
             else:
                 tokens.append(("STRING", '"' + inner + '"', line_num, i - line_start))
+            
+            
+            line_num += value.count('\n')
             i = j
             continue
 
