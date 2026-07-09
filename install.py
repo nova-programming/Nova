@@ -22,6 +22,7 @@ import json
 import urllib.request
 import urllib.error
 import zipfile
+import tarfile
 import io
 import time
 
@@ -235,7 +236,6 @@ def _extract_archive(data: bytes) -> int:
     except zipfile.BadZipFile:
         pass
     # Fallback to tar
-    import tarfile
     return _extract_tar(data)
 
 
@@ -312,9 +312,19 @@ def _extract_zip(zip_data: bytes) -> int:
 
 def _install_gcc_if_missing():
     """Download and bundle a portable MinGW-w64 if GCC is not found on PATH."""
-    if shutil.which("gcc"):
-        info("GCC found on PATH — skipping bundle.")
-        return
+    import subprocess
+    gcc_path = shutil.which("gcc")
+    if gcc_path:
+        try:
+            machine = subprocess.check_output([gcc_path, "-dumpmachine"]).decode().strip()
+            if "x86_64" in machine:
+                info("64-bit GCC found on PATH — skipping bundle.")
+                return
+            else:
+                info(f"GCC found on PATH is 32-bit ({machine}) — Nova requires 64-bit. Will bundle MinGW-w64.")
+        except Exception as e:
+            info(f"Could not verify GCC architecture: {e}. Will bundle MinGW-w64 to be safe.")
+
     gcc_bin = os.path.join(GCC_DIR, "bin", "gcc.exe")
     if os.path.exists(gcc_bin):
         info("Bundled GCC found — skipping download.")

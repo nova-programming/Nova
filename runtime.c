@@ -160,6 +160,8 @@ SYSCALL char *STR_PFX(strstr)(const char *h, const char *n) {
 }
 
 /* Custom sprintf that handles %d and basic floats, respecting SysV ABI registers */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wbuiltin-declaration-mismatch"
 SYSCALL int STR_PFX(sprintf)(char *b, const char *fmt, long long arg_d) {
     char *out = b;
     while (*fmt) {
@@ -211,6 +213,8 @@ SYSCALL int STR_PFX(sprintf)(char *b, const char *fmt, long long arg_d) {
     *out = 0;
     return out - b;
 }
+#pragma GCC diagnostic pop
+
 /* Out-of-bounds globals (set by codegen before each bounds check) */
 long long _oob_file_ptr;
 long long _oob_line;
@@ -219,7 +223,7 @@ long long _oob_line;
 SYSCALL void STR_PFX(out_of_bounds)(void) {
     if (_oob_file_ptr) {
         STR_PFX(printf)("error: Index Out Of Bounds at ", 0);
-        STR_PFX(printf)("%s", (void*)_oob_file_ptr);
+        STR_PFX(printf)("%s", (void*)(intptr_t)_oob_file_ptr);
         STR_PFX(printf)(" line %d\n", (void*)(intptr_t)_oob_line);
     } else {
         STR_PFX(printf)("error: Index Out Of Bounds\n", 0);
