@@ -786,13 +786,17 @@ SYSCALL int _sys_get_tick_count_c(void) {
 /* ===== Unix syscall helpers (_c suffix for Nova codegen naming compatibility) ===== */
 SYSCALL long long _sys_open_c(const char *path, const char *mode) {
     int flags;
+    int fd;
     if (*mode == 'w' || *mode == 'a') {
         flags = O_WRONLY | O_CREAT;
         if (*mode == 'a') flags |= O_APPEND;
         else flags |= O_TRUNC;
-        return open(path, flags, 0666);
+        fd = open(path, flags, 0666);
+    } else {
+        fd = open(path, O_RDONLY);
     }
-    return open(path, O_RDONLY);
+    if (fd < 0) return 0;
+    return fd;
 }
 
 SYSCALL void _sys_close_c(long long fd) {
