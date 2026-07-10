@@ -528,6 +528,17 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return create_any_type()
     }
 
+    if h == 27 {
+    tc_visit(tc, node.cond)
+
+    true_t = tc_visit(tc, node.left)
+    false_t = tc_visit(tc, node.right)
+
+    tc_unify(tc, true_t, false_t, node)
+
+    return true_t   
+    }
+
     # Default fallback
     return create_any_type()
 }

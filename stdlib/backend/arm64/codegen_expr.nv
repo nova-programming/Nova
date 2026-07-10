@@ -652,6 +652,24 @@ def compile_expr(state: CodegenState, node: AstNode) {
         }
         }
     }
+    if node.kind == "Ternary" {
+    false_lbl = next_label(state, "L_ternary_false")
+    end_lbl = next_label(state, "L_ternary_end")
+
+    compile_expr(state, node.cond)
+    emit(state, "    ldr %a, [sp], #16")
+    emit(state, "    cmp x0, #0")
+    emit(state, "    b.eq " + false_lbl)
+
+    compile_expr(state, node.left)
+    emit(state, "    b " + end_lbl)
+
+    emit(state, false_lbl + ":")
+    compile_expr(state, node.right)
+
+    emit(state, end_lbl + ":")
+    return
+    }
     if node.kind == "UnaryOp" {
         compile_expr(state, node.left)
         emit(state, "    ldr %a, [sp], #16")

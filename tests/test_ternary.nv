@@ -1,0 +1,7 @@
+def main() {
+    x = 10
+
+    result = x > 5 ? 100 : 200
+
+    print(result)
+}

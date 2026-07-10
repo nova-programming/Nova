@@ -697,6 +697,26 @@ def compile_expr(state: CodegenState, node: AstNode) {
         }
         }
     }
+    
+        if node.kind == "Ternary" {
+        false_lbl = next_label(state, "L_ternary_false")
+        end_lbl = next_label(state, "L_ternary_end")
+
+        compile_expr(state, node.cond)
+        emit(state, "    pop %a")
+        emit(state, "    cmp rax, 0")
+        emit(state, "    je " + false_lbl)
+
+        compile_expr(state, node.left)
+        emit(state, "    jmp " + end_lbl)
+
+        emit(state, false_lbl + ":")
+        compile_expr(state, node.right)
+
+        emit(state, end_lbl + ":")
+        return
+    }
+
     if node.kind == "UnaryOp" {
         compile_expr(state, node.left)
         emit(state, "    pop %a")

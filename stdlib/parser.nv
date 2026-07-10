@@ -763,9 +763,36 @@ def parse_logic(state: ParserState) -> AstNode {
     }
     return left
 }
+def parse_ternary(state: ParserState) -> AstNode {
+    cond = parse_logic(state)
+
+    tok = current_tok(state)
+
+    if tok.kind != "QUESTION" {
+        return cond
+    }
+
+    eat_tok(state, "QUESTION")
+
+    true_expr = parse_expr(state)
+
+    eat_tok(state, "COLON")
+
+    false_expr = parse_expr(state)
+
+    node = AstNode()
+    node.kind = "Ternary"
+    node.line = tok.line
+    node.col = tok.col
+    node.cond = cond
+    node.left = true_expr
+    node.right = false_expr
+
+    return node
+}
 
 def parse_expr(state: ParserState) -> AstNode {
-    return parse_logic(state)
+    return parse_ternary(state)
 }
 
 def parse_type_annotation(state: ParserState) -> string {
