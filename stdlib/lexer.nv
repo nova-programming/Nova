@@ -505,6 +505,7 @@ def tokenize(src: string) -> list {
                 case "]" { tok.kind = "RBRACK" }
                 case "," { tok.kind = "COMMA" }
                 case ":" { tok.kind = "COLON" }
+                case "?" { tok.kind = "QUESTION" }
                 case "." { tok.kind = "DOT" }
                 case ";" { tok.kind = "SEMICOLON" }
             }

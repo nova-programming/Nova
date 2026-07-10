@@ -162,7 +162,7 @@ class Parser:
 
     def parse_expr(self):
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
-        return self.parse_logic()
+        return self.parse_ternary()
 
     def parse_logic(self):
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
@@ -176,6 +176,22 @@ class Parser:
                 right = Compare(left.left, left.op, right, line=right_line)
             left = BinOp(left, op, right, line=line)
         return left
+    def parse_ternary(self):
+        cond = self.parse_logic()
+
+        if not self.current() or self.current()[0] != "QUESTION":
+                  return cond
+
+        self.eat("QUESTION")
+
+        true_expr = self.parse_expr()
+
+        self.eat("COLON")
+
+        false_expr = self.parse_expr()
+
+        return Ternary(cond, true_expr, false_expr)
+
 
     def parse_compare(self):
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0

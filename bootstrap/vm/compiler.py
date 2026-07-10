@@ -354,6 +354,16 @@ class Compiler:
             }
             self.emit(ops[node.op])
         elif isinstance(node, SizeOf):
+             self.emit(ops[node.op])
+        elif isinstance(node, Ternary):
+            self.compile_expr(node.condition)
+            jump_false = self.emit(OpCode.JUMP_IF_FALSE)
+            self.compile_expr(node.true_expr)
+            jump_end = self.emit(OpCode.JUMP)
+            self.patch_jump(jump_false, len(self.code))
+            self.compile_expr(node.false_expr)
+            self.patch_jump(jump_end, len(self.code))
+        elif isinstance(node, SizeOf):
             self.compile_expr(node.target)
             self.emit(OpCode.SIZEOF)
         elif isinstance(node, Len):

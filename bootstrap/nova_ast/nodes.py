@@ -54,6 +54,16 @@ class Compare:
         self.right = right
     def __repr__(self):
         return f"Compare({self.left}, '{self.op}', {self.right})"
+    
+class Ternary:
+    def __init__(self, condition, true_expr, false_expr, line=0):
+        self.line = line
+        self.condition = condition
+        self.true_expr = true_expr
+        self.false_expr = false_expr
+
+    def __repr__(self):
+        return f"Ternary({self.condition}, {self.true_expr}, {self.false_expr})"
 
 class Assignment:
     def __init__(self, name, value, type_name=None, is_const=False, line=0):

@@ -6,6 +6,7 @@ SINGLE_CHAR = {
     '(': "LPAREN", ')': "RPAREN", '{': "LBRACE", '}': "RBRACE",
     '[': "LBRACK", ']': "RBRACK", ',': "COMMA", '.': "DOT",
     ':': "COLON", ';': "SEMICOLON", '<': "LT", '>': "GT",
+    '?': "QUESTION",
 }
 
 TWO_CHAR = {
