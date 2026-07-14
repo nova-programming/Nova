@@ -231,7 +231,7 @@ def tc_visit(tc: TypeChecker, node: AstNode) -> Type {
 
 def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     if node == 0 { return create_any_type() }
-    kind_handlers = {"Number": 1, "String": 2, "Boolean": 3, "Variable": 4, "BinOp": 5, "Compare": 6, "Assignment": 7, "Function": 8, "Return": 9, "Print": 10, "PrintD": 11, "TRY": 12, "THROW": 13, "Call": 14, "IfElse": 15, "While": 16, "MethodCall": 17, "DataFieldAccess": 18, "DataFieldAssign": 19, "ArrayIndex": 20, "ArrayIndexAssign": 21, "DictLiteral": 22, "ListLiteral": 23, "RawBlock": 24, "ForLoop": 25, "ForIn": 26}
+    kind_handlers = {"Number": 1, "String": 2, "Boolean": 3, "Variable": 4, "BinOp": 5, "Compare": 6, "Assignment": 7, "Function": 8, "Return": 9, "Print": 10, "PrintD": 11, "TRY": 12, "THROW": 13, "Call": 14, "IfElse": 15, "While": 16, "MethodCall": 17, "DataFieldAccess": 18, "DataFieldAssign": 19, "ArrayIndex": 20, "ArrayIndexAssign": 21, "DictLiteral": 22, "ListLiteral": 23, "Spread": 24, "RawBlock": 25, "ForLoop": 26, "ForIn": 27}
     h = kind_handlers.get(node.kind)
     if h == 1 {
         if node.is_float == 1 { return create_scalar_type("float") }
@@ -467,6 +467,10 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         }
         node.inferred_type = create_dict_type()
         return node.inferred_type
+    }
+
+    if node.kind == "Spread" {
+        return tc_visit(tc, node.left)
     }
 
     if h == 23 {
