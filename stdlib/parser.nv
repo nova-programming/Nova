@@ -242,6 +242,10 @@ def parse_primary(state: ParserState) -> AstNode {
             node.is_float = 0
             node.val_int = atoi(tok.val)
         }
+    } elif tok.kind == "SPREAD" {
+        eat_tok(state, "SPREAD")
+        node.kind = "Spread"
+        node.left = parse_primary(state)
     } elif tok.kind == "STRING" {
         eat_tok(state, "STRING")
         node.kind = "String"
