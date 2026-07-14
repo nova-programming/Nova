@@ -439,6 +439,12 @@ def tokenize(src: string) -> list {
                     i = i + 2
                     matched = 2 
                 }
+                case ".." {
+                    tok.kind = "SPREAD"
+                    tok.val = two_char
+                     i = i + 2
+                     matched = 2
+                    qq}
             }
         }
 
