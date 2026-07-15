@@ -813,55 +813,156 @@ def compile_expr(state: CodegenState, node: AstNode) {
         return
     }
     if node.kind == "ListLiteral" {
-        n = len(node.args)
-        ptr_sz = ptr_size(state)
-        req_cap = 16
-        if n > 0 {
-            req_cap = n * ptr_sz
-        }
-        emit(state, "    push 16")
-        emit_call(state, "_malloc", 1)
-        emit(state, "    push %a")
-        emit(state, "    push " + str(req_cap))
-        emit_call(state, "_malloc", 1)
-        emit(state, "    pop %x")
-        emit(state, "    push %x")
-        emit(state, "    mov dword ptr [%x], " + str(n))
-        emit(state, "    mov dword ptr [%x+4], " + str(req_cap))
-        emit(state, "    mov [%x+8], %a")
-        idx_list = 0
-        while idx_list < len(node.args) {
-            emit(state, "    push %x")
-            compile_expr(state, node.args[idx_list])
-            emit(state, "    pop %a")
-            emit(state, "    pop %x")
-            emit(state, "    mov %d, [%x+8]")
-            data_off = idx_list * ptr_sz
-            if ptr_sz == 8 {
-                emit(state, "    mov [%d + " + str(data_off) + "], %a")
-            } else {
-                emit(state, "    mov [%d + " + str(data_off) + "], rax")
+        has_spread = 0
+        i = 0
+        while i < len(node.args) {
+            if node.args[i].kind == "Spread" {
+                has_spread = 1
             }
-            idx_list = idx_list + 1
+            i = i + 1
+        }
+        ptr_sz = ptr_size(state)
+
+        if has_spread == 1 {
+            
+            emit(state, "    push 16")
+            emit_call(state, "_malloc", 1)
+            emit(state, "    push %a") 
+
+            
+            emit(state, "    push 32")
+            emit_call(state, "_malloc", 1)
+            emit(state, "    pop %x")   
+
+            emit(state, "    pop %d")   
+            emit(state, "    mov dword ptr [%d], 0")     // starting len = 0
+            emit(state, "    mov dword ptr [%d+4], 32")  // capacity = 32
+            emit(state, "    mov [%d+8], %x")            // array elements storage point
+
+            emit(state, "    push %d") 
+
+            i = 0
+            while i < len(node.args) {
+                if node.args[i].kind == "Spread" {
+                    
+                    compile_expr(state, node.args[i].left)
+                    
+                    emit(state, "    mov %x, [rsp]") 
+                    emit(state, "    push %x")
+                    emit(state, "    push %a")
+                    emit_call(state, "_list_extend_runtime", 2)
+                } else {
+                    
+                    compile_expr(state, node.args[i])
+                    emit(state, "    push %a") 
+                    
+                    emit(state, "    mov %x, [rsp+8]") 
+                    emit(state, "    push %x")
+                    emit_call(state, "_list_append_runtime", 2)
+                }
+                i = i + 1
+            }
+            emit(state, "    pop %a") 
+        } else {
+            
+            n = len(node.args)
+            req_cap = 16
+            if n > 0 {
+                req_cap = n * ptr_sz
+            }
+
+            emit(state, "    push 16")
+            emit_call(state, "_malloc", 1)
+            emit(state, "    push %a")
+            emit(state, "    push " + str(req_cap))
+            emit_call(state, "_malloc", 1)
+            emit(state, "    pop %x")
+            emit(state, "    pop %d")
+            emit(state, "    push %d")
+            emit(state, "    mov dword ptr [%d], " + str(n))
+            emit(state, "    mov dword ptr [%d+4], " + str(req_cap))
+            emit(state, "    mov [%d+8], %x")
+            idx_list = 0
+            while idx_list < len(node.args) {
+                emit(state, "    push %d")
+                compile_expr(state, node.args[idx_list])
+                emit(state, "    pop %a")
+                emit(state, "    pop %d")
+                emit(state, "    mov %x, [%d+8]")
+                data_off = idx_list * ptr_sz
+                if ptr_sz == 8 {
+                    emit(state, "    mov [%x + " + str(data_off) + "], %a")
+                } else {
+                    emit(state, "    mov [%x + " + str(data_off) + "], rax")
+                }
+                idx_list = idx_list + 1
+            }
+            emit(state, "    pop %a")
         }
     }
     if node.kind == "DictLiteral" {
-        emit_call(state, "_dict_new", 0)        emit(state, "    push %a")
+        has_spread = 0
         i = 0
         while i < len(node.args) {
-            value = node.args[i + 1]
-            key = node.args[i]
-            compile_expr(state, value)
-            compile_expr(state, key)
-            emit(state, "    pop %a")
-            emit(state, "    pop %x")
-            emit(state, "    pop %c")
-            emit(state, "    push %c")
+            if node.args[i].kind == "Spread" {
+                has_spread = 1
+                i = i + 1
+            } else {
+                i = i + 2
+            }
+        }
+
+        if has_spread == 1 {
+            emit_call(state, "_dict_new", 0)
+            emit(state, "    push %a") 
+
+            i = 0
+            while i < len(node.args) {
+                if node.args[i].kind == "Spread" {
+                    compile_expr(state, node.args[i].left)
+                    emit(state, "    mov %x, [rsp]") 
+                    emit(state, "    push %x")
+                    emit(state, "    push %a")
+                    emit_call(state, "_dict_merge_runtime", 2)
+                    i = i + 1
+                } else {
+                    key = node.args[i]
+                    value = node.args[i + 1]
+                    compile_expr(state, value)
+                    compile_expr(state, key)
+                    emit(state, "    pop %a") 
+                    emit(state, "    pop %x") 
+                    emit(state, "    pop %c") 
+                    
+                    emit(state, "    push %c")
+                    emit(state, "    push %a")
+                    emit(state, "    push %x")
+                    emit(state, "    push %c")
+                    emit_call(state, "_dict_set", 3)
+                    i = i + 2
+                }
+            }
+            emit(state, "    pop %a") 
+        } else {
+            emit_call(state, "_dict_new", 0)
             emit(state, "    push %a")
-            emit(state, "    push %x")
-            emit(state, "    push %c")
-            emit_call(state, "_dict_set", 3)
-            i = i + 2
+            i = 0
+            while i < len(node.args) {
+                value = node.args[i + 1]
+                key = node.args[i]
+                compile_expr(state, value)
+                compile_expr(state, key)
+                emit(state, "    pop %a")
+                emit(state, "    pop %x")
+                emit(state, "    pop %c")
+                emit(state, "    push %c")
+                emit(state, "    push %a")
+                emit(state, "    push %x")
+                emit(state, "    push %c")
+                emit_call(state, "_dict_set", 3)
+                i = i + 2
+            }
+            emit(state, "    pop %a") 
         }
     }
     if node.kind == "ArrayIndex" {

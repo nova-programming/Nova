@@ -462,15 +462,19 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     if h == 22 {
         i = 0
         while i < len(node.args) {
-            tc_visit(tc, node.args[i])
+            let current_arg = node.args[i]
+            let t = tc_visit(tc, current_arg)
+            
+            
+            if current_arg.kind == "Spread" || current_arg.kind == "DictSpread" {
+                if t.kind != "dict" {
+                    error("Spread operator '..' can only be used on expressions that evaluate to a Dict inside dictionaries")
+                }
+            }
             i = i + 1
         }
         node.inferred_type = create_dict_type()
         return node.inferred_type
-    }
-
-    if node.kind == "Spread" {
-        return tc_visit(tc, node.left)
     }
 
     if h == 23 {
@@ -478,7 +482,19 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         is_het = 0
         i = 0
         while i < len(node.args) {
-            t = tc_visit(tc, node.args[i])
+            let current_arg = node.args[i]
+            t = tc_visit(tc, current_arg)
+            
+            
+            if current_arg.kind == "Spread" {
+                if t.kind != "list" {
+                    error("Spread operator '..' can only be used on expressions that evaluate to a List")
+                }
+            
+                t = t.element_type 
+            }
+            
+            
             if is_het == 0 {
                 if elem_t.kind == "any" {
                     elem_t = t

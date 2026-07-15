@@ -355,7 +355,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
         elif node.val_str == "&" { op = 15 }
         elif node.val_str == ">>" { op = 16 }
         elif node.val_str == "<<" { op = 17 }
-        elif node.val_str == "|" { op = 18 }
+        elif node.val_str.ascii_at(0) == 124 { op = 18 }
         elif node.val_str == "^" { op = 19 }
         if op == 1 {
             end_lbl = next_label(state, "L_and_end")
@@ -751,68 +751,158 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    str %x, [sp, #-16]!")
     }
     if node.kind == "ListLiteral" {
-        cap = len(node.args)
-        ptr_sz = ptr_size(state)
-        req_cap = 16
-        if cap > 0 {
-            req_cap = cap * ptr_sz
-        }
-        
-        emit(state, "    mov %a, 16")
-        emit(state, "    str %a, [sp, #-16]!")
-        emit_call(state, "_malloc", 1)
-        emit(state, "    mov %x, %a")
-        
-        emit(state, "    mov %a, " + str(req_cap))
-        emit(state, "    str %a, [sp, #-16]!")
-        emit_call(state, "_malloc", 1)
-        
-        emit(state, "    mov w1, " + str(cap))
-        emit(state, "    str w1, [%x]")
-        emit(state, "    mov w1, " + str(req_cap))
-        emit(state, "    str w1, [%x, #4]")
-        emit(state, "    str %a, [%x, #8]")
-        emit(state, "    str %x, [sp, #-16]!")
-        
-        idx_list = 0
-        while idx_list < len(node.args) {
-            emit(state, "    ldr %x, [sp], #16")
-            emit(state, "    ldr %d, [%x, #8]")
-            emit(state, "    str %x, [sp, #-16]!")
-            emit(state, "    str %d, [sp, #-16]!")
-            
-            compile_expr(state, node.args[idx_list])
-            
-            emit(state, "    ldr %c, [sp], #16")
-            emit(state, "    ldr %d, [sp], #16")
-            emit(state, "    ldr %x, [sp], #16")
-            
-            data_off = idx_list * ptr_sz
-            if ptr_sz == 8 {
-                emit(state, "    str %c, [%d, #" + str(data_off) + "]")
+        has_spread = 0
+        i = 0
+        while i < len(node.args) {
+            if node.args[i].kind == "Spread" {
+                has_spread = 1
             }
+            i = i + 1
+        }
+        ptr_sz = ptr_size(state)
+
+        if has_spread == 1 {
+            
+            emit(state, "    mov %a, 16")
+            emit(state, "    str %a, [sp, #-16]!")
+            emit_call(state, "_malloc", 1)
+            emit(state, "    mov %x, %a") // %x = descriptor pointer
+
+            
+            emit(state, "    mov %a, 32")
+            emit(state, "    str %a, [sp, #-16]!")
+            emit_call(state, "_malloc", 1) // %a = storage elements array buffer ptr
+
+        
+            emit(state, "    mov w1, 0")
+            emit(state, "    str w1, [%x]")         
+            emit(state, "    mov w1, 32")
+            emit(state, "    str w1, [%x, #4]")      
+            emit(state, "    str %a, [%x, #8]")      
+
+            
             emit(state, "    str %x, [sp, #-16]!")
-            idx_list = idx_list + 1
+
+            i = 0
+            while i < len(node.args) {
+                if node.args[i].kind == "Spread" {
+                    compile_expr(state, node.args[i].left) // Source list -> %a
+                    emit(state, "    ldr %x, [sp]")        // Destination list -> %x
+                    emit(state, "    str %x, [sp, #-16]!")
+                    emit(state, "    str %a, [sp, #-16]!")
+                    emit_call(state, "_list_extend_runtime", 2)
+                } else {
+                    compile_expr(state, node.args[i])      // Element -> %a
+                    emit(state, "    str %a, [sp, #-16]!")
+                    emit(state, "    ldr %x, [sp, #16]")    // Target list ptr fetch
+                    emit(state, "    str %x, [sp, #-16]!")
+                    emit_call(state, "_list_append_runtime", 2)
+                }
+                i = i + 1
+            }
+            
+            emit(state, "    ldr %a, [sp], #16")
+        } else {
+            
+            cap = len(node.args)
+            req_cap = 16
+            if cap > 0 {
+                req_cap = cap * ptr_sz
+            }
+            emit(state, "    mov %a, 16")
+            emit(state, "    str %a, [sp, #-16]!")
+            emit_call(state, "_malloc", 1)
+            emit(state, "    mov %x, %a")
+            emit(state, "    mov %a, " + str(req_cap))
+            emit(state, "    str %a, [sp, #-16]!")
+            emit_call(state, "_malloc", 1)
+            emit(state, "    mov w1, " + str(cap))
+            emit(state, "    str w1, [%x]")
+            emit(state, "    mov w1, " + str(req_cap))
+            emit(state, "    str w1, [%x, #4]")
+            emit(state, "    str %a, [%x, #8]")
+            emit(state, "    str %x, [sp, #-16]!")
+            idx_list = 0
+            while idx_list < len(node.args) {
+                emit(state, "    ldr %x, [sp], #16")
+                emit(state, "    ldr %d, [%x, #8]")
+                emit(state, "    str %x, [sp, #-16]!")
+                emit(state, "    str %d, [sp, #-16]!")
+                compile_expr(state, node.args[idx_list])
+                emit(state, "    ldr %c, [sp], #16")
+                emit(state, "    ldr %d, [sp], #16")
+                emit(state, "    ldr %x, [sp], #16")
+                data_off = idx_list * ptr_sz
+                if ptr_sz == 8 {
+                    emit(state, "    str %c, [%d, #" + str(data_off) + "]")
+                }
+                emit(state, "    str %x, [sp, #-16]!")
+                idx_list = idx_list + 1
+            }
+            emit(state, "    ldr %a, [sp], #16")
         }
     }
     if node.kind == "DictLiteral" {
-        emit_call(state, "_dict_new", 0)
-        emit(state, "    str %a, [sp, #-16]!")
+        has_spread = 0
         i = 0
         while i < len(node.args) {
-            value = node.args[i + 1]
-            key = node.args[i]
-            compile_expr(state, value)
-            emit(state, "    ldr %x, [sp], #16")
-            compile_expr(state, key)
-            emit(state, "    ldr %a, [sp], #16")
-            emit(state, "    ldr %c, [sp], #16")
-            emit(state, "    str %c, [sp, #-16]!")
-            emit(state, "    str %x, [sp, #-16]!")
-            emit(state, "    str %a, [sp, #-16]!")
-            emit(state, "    str %c, [sp, #-16]!")
-            emit_call(state, "_dict_set", 3)
-            i = i + 2
+            if node.args[i].kind == "Spread" {
+                has_spread = 1
+                i = i + 1
+            } else {
+                i = i + 2
+            }
+        }
+
+        if has_spread == 1 {
+            emit_call(state, "_dict_new")
+            emit(state, "    str X0, [SP, #-16]!") 
+
+            i = 0
+            while i < len(node.args) {
+                if node.args[i].kind == "Spread" {
+                    compile_expr(state, node.args[i].left) 
+                    emit(state, "    ldr X1, [SP]")        
+                    emit_call(state, "_dict_merge_runtime")
+                    i = i + 1
+                } else {
+                    key = node.args[i]
+                    value = node.args[i + 1]
+                    
+                    compile_expr(state, value)
+                    emit(state, "    str X0, [SP, #-16]!") 
+                    
+                    compile_expr(state, key)              
+                    
+                    emit(state, "    mov X1, X0")           
+                    emit(state, "    ldr X2, [SP]")         
+                    emit(state, "    ldr X0, [SP, #16]") 
+                    
+                    emit_call(state, "_dict_set")
+                    emit(state, "    add SP, SP, #16")      
+                    i = i + 2
+                }
+            }
+            emit(state, "    ldr X0, [SP], #16") 
+        } else {
+            
+            emit_call(state, "_dict_new")
+            emit(state, "    str X0, [SP, #-16]!")
+            i = 0
+            while i < len(node.args) {
+                value = node.args[i + 1]
+                key = node.args[i]
+                compile_expr(state, value)
+                emit(state, "    str X0, [SP, #-16]!")
+                compile_expr(state, key)
+                emit(state, "    mov X1, X0")
+                emit(state, "    ldr X2, [SP]")
+                emit(state, "    ldr X0, [SP, #16]")
+                emit_call(state, "_dict_set")
+                emit(state, "    add SP, SP, #16")
+                i = i + 2
+            }
+            emit(state, "    ldr X0, [SP], #16")
         }
     }
     if node.kind == "ArrayIndex" {

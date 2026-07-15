@@ -461,3 +461,29 @@ def val_to_str_val(v: Value) -> Value {
 def exec_program(prog: Program) {
     _ = exec_func(prog, "main", [], 0)
 }
+
+
+def _list_extend_runtime(dest_list: any, src_list: any) {
+    if src_list == 0 { return }
+    
+    let src_len = len(src_list)
+    let i = 0
+    while i < src_len {
+        dest_list.append(src_list[i])
+        i = i + 1
+    }
+}
+
+def _dict_merge_runtime(dest_dict: any, src_dict: any) {
+    if src_dict == 0 { return }
+    
+    let src_keys = src_dict.keys()
+    let i = 0
+    while i < len(src_keys) {
+        let k = src_keys[i]
+        let v = src_dict[k]
+        
+        dest_dict[k] = v
+        i = i + 1
+    }
+}
