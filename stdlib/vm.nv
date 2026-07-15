@@ -267,7 +267,7 @@ def val_to_str_val(v: Value) -> Value {
             b = stack[len(stack) - 1]
             a = stack[len(stack) - 2]
             stack = stack[0:len(stack) - 2]
-            stack.append(make_int_val(a.int_val | b.int_val))
+            stack.append(make_int_val(a.int_val + b.int_val))
         }
         elif instr.opcode == "BIT_XOR" {                                                                  # BIT_XOR
             b = stack[len(stack) - 1]
@@ -466,8 +466,8 @@ def exec_program(prog: Program) {
 def _list_extend_runtime(dest_list: any, src_list: any) {
     if src_list == 0 { return }
     
-    let src_len = len(src_list)
-    let i = 0
+    src_len = len(src_list)
+    i = 0
     while i < src_len {
         dest_list.append(src_list[i])
         i = i + 1
@@ -477,11 +477,11 @@ def _list_extend_runtime(dest_list: any, src_list: any) {
 def _dict_merge_runtime(dest_dict: any, src_dict: any) {
     if src_dict == 0 { return }
     
-    let src_keys = src_dict.keys()
-    let i = 0
+    src_keys = src_dict.keys()
+    i = 0
     while i < len(src_keys) {
-        let k = src_keys[i]
-        let v = src_dict[k]
+        k = src_keys[i]
+        v = src_dict[k]
         
         dest_dict[k] = v
         i = i + 1

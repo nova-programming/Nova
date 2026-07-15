@@ -72,7 +72,7 @@ def ord(ch: string) -> int {
     if ch == "s" { return 115 } if ch == "t" { return 116 } if ch == "u" { return 117 }
     if ch == "v" { return 118 } if ch == "w" { return 119 } if ch == "x" { return 120 }
     if ch == "y" { return 121 } if ch == "z" { return 122 }
-    if ch == "{" { return 123 } if ch == "|" { return 124 } if ch == "}" { return 125 }
+    if ch == "{" { return 123 } if ch.ascii_at(0) == 124 { return 124 } if ch == "}" { return 125 }
     if ch == "~" { return 126 }
     return 0
 }

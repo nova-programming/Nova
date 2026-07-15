@@ -444,7 +444,7 @@ def tokenize(src: string) -> list {
                     tok.val = two_char
                      i = i + 2
                      matched = 2
-                    qq}
+                    }
             }
         }
 

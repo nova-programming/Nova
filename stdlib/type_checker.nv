@@ -462,11 +462,11 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     if h == 22 {
         i = 0
         while i < len(node.args) {
-            let current_arg = node.args[i]
-            let t = tc_visit(tc, current_arg)
+            current_arg = node.args[i]
+            t = tc_visit(tc, current_arg)
             
             
-            if current_arg.kind == "Spread" || current_arg.kind == "DictSpread" {
+            if current_arg.kind == "Spread" or  current_arg.kind == "DictSpread" {
                 if t.kind != "dict" {
                     error("Spread operator '..' can only be used on expressions that evaluate to a Dict inside dictionaries")
                 }
@@ -482,7 +482,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         is_het = 0
         i = 0
         while i < len(node.args) {
-            let current_arg = node.args[i]
+            current_arg = node.args[i]
             t = tc_visit(tc, current_arg)
             
             

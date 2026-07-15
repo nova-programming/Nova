@@ -659,7 +659,7 @@ def parse_mul(state: ParserState) -> AstNode {
                 if tok.val == "<<" { left.val_int = left.val_int << right.val_int }
                 if tok.val == ">>" { left.val_int = left.val_int >> right.val_int }
                 if tok.val == "&" { left.val_int = left.val_int & right.val_int }
-                if tok.val == "|" { left.val_int = left.val_int | right.val_int }
+                if tok.val.ascii_at(0) == 124 { left.val_int = left.val_int + right.val_int }
                 if tok.val == "^" { left.val_int = left.val_int ^ right.val_int }
             } else {
                 node = AstNode()

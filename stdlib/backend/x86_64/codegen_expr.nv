@@ -353,7 +353,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
         elif node.val_str == "&" { op = 15 }
         elif node.val_str == ">>" { op = 16 }
         elif node.val_str == "<<" { op = 17 }
-        elif node.val_str == "|" { op = 18 }
+        elif node.val_str.ascii_at(0) == 124 { op = 18 }
         elif node.val_str == "^" { op = 19 }
         if op == 1 {
             end_lbl = next_label(state, "L_and_end")
@@ -834,10 +834,10 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit_call(state, "_malloc", 1)
             emit(state, "    pop %x")   
 
-            emit(state, "    pop %d")   
-            emit(state, "    mov dword ptr [%d], 0")     // starting len = 0
-            emit(state, "    mov dword ptr [%d+4], 32")  // capacity = 32
-            emit(state, "    mov [%d+8], %x")            // array elements storage point
+            emit(state, "    pop %d")  
+            emit(state, "    mov dword ptr [%d], 0")     
+            emit(state, "    mov dword ptr [%d+4], 32")  
+            emit(state, "    mov [%d+8], %x")            
 
             emit(state, "    push %d") 
 
