@@ -461,21 +461,85 @@ __asm__(".globl _system_c\n.set _system_c, __system_c");
 __asm__(".globl _oob_file_ptr\n.set _oob_file_ptr, __oob_file_ptr");
 __asm__(".globl _oob_line\n.set _oob_line, __oob_line");
 __asm__(".globl _out_of_bounds\n.set _out_of_bounds, __out_of_bounds");
+__asm__(".globl _nova_arc_alloc\n.set _nova_arc_alloc, __nova_arc_alloc");
+__asm__(".globl _nova_inc_ref\n.set _nova_inc_ref, __nova_inc_ref");
+__asm__(".globl _nova_dec_ref\n.set _nova_dec_ref, __nova_dec_ref");
 #endif
 
-/* ==================== Dict runtime functions (all platforms) ==================== */
-/* Forward declarations for dict functions (Linux/macOS need these since malloc/free/memset
+/* ==================== Dict & ARC runtime functions (all platforms) ==================== */
+/* Forward declarations for dict & ARC functions (Linux/macOS need these since malloc/free/memset
  * aren't defined yet. On Windows they're already defined above.) */
 #if !defined(_WIN32)
 SYSCALL void *malloc(size_t);
 SYSCALL void free(void *);
-/* Apple defines memset as a fortified macro (__builtin___memset_chk with extra
- * args) in <string.h> — a forward declaration with SYSCALL attribute would expand
- * through the macro and cause parameter mismatch. Rely on the system header. */
 #if !defined(__APPLE__)
 SYSCALL void *memset(void *, int, size_t);
 #endif
 #endif
+
+/* ==================== Automatic Reference Counting (ARC) Engine ==================== */
+#define NOVA_ARC_MAGIC 0x4E4F5641 /* "NOVA" */
+
+typedef struct {
+    uint32_t magic;      /* Magic identifier 0x4E4F5641 */
+    int32_t  ref_count;  /* Active reference count */
+    uint32_t type_tag;   /* 1=LIST, 2=DICT, 3=STRING, 0=GENERIC */
+    uint32_t pad;        /* 16-byte alignment pad */
+} NovaARCHeader;
+
+SYSCALL void *_nova_arc_alloc(unsigned int size, uint32_t type_tag) {
+    unsigned int total_size = size + (unsigned int)sizeof(NovaARCHeader);
+#if defined(_WIN32)
+    NovaARCHeader *hdr = (NovaARCHeader*)STR_PFX(malloc)(total_size);
+#else
+    NovaARCHeader *hdr = (NovaARCHeader*)malloc(total_size);
+#endif
+    if (!hdr) return 0;
+    hdr->magic = NOVA_ARC_MAGIC;
+    hdr->ref_count = 1;
+    hdr->type_tag = type_tag;
+    hdr->pad = 0;
+    return (void*)(hdr + 1);
+}
+
+SYSCALL void _nova_inc_ref(void *ptr) {
+    if (!ptr) return;
+    NovaARCHeader *hdr = ((NovaARCHeader*)ptr) - 1;
+    if (hdr->magic == NOVA_ARC_MAGIC) {
+        hdr->ref_count++;
+    }
+}
+
+SYSCALL void dict_free(void *d);
+
+SYSCALL void _nova_dec_ref(void *ptr) {
+    if (!ptr) return;
+    NovaARCHeader *hdr = ((NovaARCHeader*)ptr) - 1;
+    if (hdr->magic == NOVA_ARC_MAGIC) {
+        hdr->ref_count--;
+        if (hdr->ref_count <= 0) {
+            if (hdr->type_tag == 1) { /* LIST */
+                void *data = *(void**)((char*)ptr + 8);
+                if (data) {
+#if defined(_WIN32)
+                    STR_PFX(free)(data);
+#else
+                    free(data);
+#endif
+                }
+            } else if (hdr->type_tag == 2) { /* DICT */
+                dict_free(ptr);
+                return;
+            }
+#if defined(_WIN32)
+            STR_PFX(free)(hdr);
+#else
+            free(hdr);
+#endif
+        }
+    }
+}
+
 /* strcmp, strlen, strcpy are defined above on Windows, in <string.h> on macOS/Linux */
 /* Dict layout (24 bytes): [count:4][pad/capacity:4][keys_ptr:8][values_ptr:8] */
 
@@ -528,14 +592,14 @@ static void _dg(void *d) {
 }
 
 SYSCALL void *dict_new(void) {
-    void *d = malloc(24);
+    void *d = _nova_arc_alloc(24, 2);
     if (!d) return 0;
     int cap = 8;
     *(int*)d = 0;
     *(int*)((char*)d + 4) = cap;
     char **keys = (char**)malloc((size_t)cap * sizeof(char*));
     intptr_t *values = (intptr_t*)malloc((size_t)cap * sizeof(intptr_t));
-    if (!keys || !values) { free(keys); free(values); free(d); return 0; }
+    if (!keys || !values) { if (keys) free(keys); if (values) free(values); _nova_dec_ref(d); return 0; }
     memset(keys, 0, (size_t)cap * sizeof(char*));
     memset(values, 0, (size_t)cap * sizeof(intptr_t));
     *(char***)((char*)d + 8) = keys;
@@ -602,7 +666,20 @@ SYSCALL void dict_free(void *d) {
     }
     free(keys);
     free(values);
-    free(d);
+    NovaARCHeader *hdr = ((NovaARCHeader*)d) - 1;
+    if (hdr->magic == NOVA_ARC_MAGIC) {
+#if defined(_WIN32)
+        STR_PFX(free)(hdr);
+#else
+        free(hdr);
+#endif
+    } else {
+#if defined(_WIN32)
+        STR_PFX(free)(d);
+#else
+        free(d);
+#endif
+    }
 }
 
 /* Count actual entries in dict (handles tombstones from dict_remove on full table) */
