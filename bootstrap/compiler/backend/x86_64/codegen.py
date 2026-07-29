@@ -463,6 +463,7 @@ class X86_64Codegen:
         for stmt in fn.body:
             self.scan_vars(stmt)
 
+        self.assembly.append(f".global _{fn.name}")
         self.assembly.append(f"_{fn.name}:")
         self.assembly.append("    push rbp")
         self.assembly.append("    mov rbp, rsp")
