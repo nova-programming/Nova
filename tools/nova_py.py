@@ -234,3 +234,45 @@ if __name__ == "__main__":
     print("Available functions:")
     for f in mod.functions_metadata:
         print(f" - {f}")
+
+import importlib.abc
+import importlib.machinery
+import types
+
+class NovaImporter(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path, target=None):
+        name = fullname.split(".")[-1]
+        search_paths = [os.getcwd()] + sys.path
+        if path:
+            search_paths = path
+            
+        for d in search_paths:
+            if not isinstance(d, str): continue
+            if not os.path.isdir(d): continue
+            
+            nv_path = os.path.join(d, f"{name}.nv")
+            if os.path.exists(nv_path):
+                return importlib.machinery.ModuleSpec(fullname, NovaLoader(nv_path))
+        return None
+
+class NovaLoader(importlib.abc.Loader):
+    def __init__(self, path):
+        self.path = path
+        
+    def create_module(self, spec):
+        mod = types.ModuleType(spec.name)
+        mod.__file__ = self.path
+        nova_wrapper = load(self.path)
+        for func_name in nova_wrapper.functions_metadata:
+            setattr(mod, func_name, getattr(nova_wrapper, func_name))
+        return mod
+        
+    def exec_module(self, module):
+        pass
+
+def install_hook():
+    if not any(isinstance(f, NovaImporter) for f in sys.meta_path):
+        sys.meta_path.insert(0, NovaImporter())
+
+install_hook()
+
