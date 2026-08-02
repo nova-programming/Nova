@@ -30,6 +30,9 @@ jobs:
 
       - name: Copy compiler files
         run: |
+          # Ensure destination directory exists
+          mkdir -p galaxy-registry/nova_compiler
+
           # Clean up existing subdirectories to remove any deleted files
           rm -rf galaxy-registry/nova_compiler/compiler
           rm -rf galaxy-registry/nova_compiler/lexer
