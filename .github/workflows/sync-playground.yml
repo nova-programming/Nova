@@ -43,9 +43,9 @@ jobs:
           
           # Copy fresh files from Nova
           cp -r nova/bootstrap/compiler/* galaxy-registry/nova_compiler/
-          cp nova/main.py galaxy-registry/nova_compiler/
-          cp nova/patch.py galaxy-registry/nova_compiler/
-          cp nova/transpile.py galaxy-registry/nova_compiler/
+          cp nova/bootstrap/main.py galaxy-registry/nova_compiler/
+          cp nova/bootstrap/patch.py galaxy-registry/nova_compiler/
+          cp nova/bootstrap/transpile.py galaxy-registry/nova_compiler/
           cp nova/README.md galaxy-registry/nova_compiler/
 
       - name: Commit and push changes
