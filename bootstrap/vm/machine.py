@@ -862,7 +862,10 @@ def _builtin_factorial(m, args):
 
 def _builtin_random(m, args):
     import random as _rng
-    m.stack.append(_rng.randint(0, 2**31 - 1))
+    if len(args) >= 2:
+        m.stack.append(_rng.randint(args[0], args[1]))
+    else:
+        m.stack.append(_rng.randint(0, 2**31 - 1))
 
 def _builtin_int_cast(m, args):
     try:

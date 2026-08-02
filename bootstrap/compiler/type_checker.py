@@ -46,6 +46,7 @@ class TypeInferer:
         self.structs = {}  # name -> StructType
         self.functions = {} # name -> FuncType
         self.current_function_return_type = None
+        self.current_class = None
         self.in_raw = False
         self.const_vars = set()
 
@@ -201,7 +202,8 @@ class TypeInferer:
         self.push_env()
         prev_ret = self.current_function_return_type
         
-        func_type = self.functions[node.name]
+        func_name = f"{self.current_class}.{node.name}" if self.current_class else node.name
+        func_type = self.functions[func_name]
         self.current_function_return_type = func_type.ret
         
         for (p_name, _), p_type in zip(node.params, func_type.params):
@@ -304,8 +306,14 @@ class TypeInferer:
         return AnyType()
 
     def visit_ClassDef(self, node):
+        self.current_class = node.name
         for method in node.methods:
+            full_name = f"{node.name}.{method.name}"
+            params = [resolve_type_annotation(p[1]) for p in method.params]
+            ret_type = resolve_type_annotation(method.return_type)
+            self.functions[full_name] = FuncType(params, ret_type)
             self.visit(method)
+        self.current_class = None
         return AnyType()
 
     def visit_MethodCall(self, node):
