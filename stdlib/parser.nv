@@ -384,6 +384,9 @@ def parse_primary(state: ParserState) -> AstNode {
                 }
             }
             eat_tok(state, "RPAREN")
+            if node.val_str == "char_code" and len(node.args) == 1 {
+                node.args.append(make_num(0, 0))
+            }
         } else {
             node.kind = "Variable"
             node.val_str = tok.val

@@ -379,6 +379,9 @@ class Parser:
                         if self.current() and self.current()[0] != "RPAREN":
                             args.append(self.parse_expr())
                 self.eat("RPAREN")
+                # char_code accepts 1 or 2 args: char_code("s") means char_code("s", 0)
+                if name == "char_code" and len(args) == 1:
+                    args.append(Number(0, line=line))
                 node = Call(name, args, line=line)
             else:
                 node = Variable(name, line=line)
