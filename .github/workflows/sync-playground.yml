@@ -1,0 +1,61 @@
+name: Sync to Galaxy Registry
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'bootstrap/compiler/**'
+      - 'main.py'
+      - 'patch.py'
+      - 'transpile.py'
+      - 'README.md'
+  workflow_dispatch: # allow manual triggering
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Nova
+        uses: actions/checkout@v4
+        with:
+          path: nova
+
+      - name: Checkout Galaxy Registry
+        uses: actions/checkout@v4
+        with:
+          repository: nova-programming/galaxy-registry
+          path: galaxy-registry
+          token: ${{ secrets.SYNC_PAT }}
+
+      - name: Copy compiler files
+        run: |
+          # Clean up existing subdirectories to remove any deleted files
+          rm -rf galaxy-registry/nova_compiler/compiler
+          rm -rf galaxy-registry/nova_compiler/lexer
+          rm -rf galaxy-registry/nova_compiler/modules
+          rm -rf galaxy-registry/nova_compiler/nova_ast
+          rm -rf galaxy-registry/nova_compiler/parser
+          rm -rf galaxy-registry/nova_compiler/vm
+          
+          # Copy fresh files from Nova
+          cp -r nova/bootstrap/compiler/* galaxy-registry/nova_compiler/
+          cp nova/main.py galaxy-registry/nova_compiler/
+          cp nova/patch.py galaxy-registry/nova_compiler/
+          cp nova/transpile.py galaxy-registry/nova_compiler/
+          cp nova/README.md galaxy-registry/nova_compiler/
+
+      - name: Commit and push changes
+        run: |
+          cd galaxy-registry
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add nova_compiler/
+          
+          # Check if there are any changes to commit
+          if ! git diff-index --quiet HEAD; then
+            git commit -m "chore: sync compiler updates from nova-programming/Nova"
+            git push origin main
+          else
+            echo "No changes detected to sync."
+          fi

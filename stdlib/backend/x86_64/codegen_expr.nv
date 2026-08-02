@@ -296,12 +296,17 @@ def compile_leaf_to_reg(state: CodegenState, node: AstNode, reg_name: string) {
         emit(state, "    mov " + reg_name + ", " + str(node.val_int))
     }
     if node.kind == "Variable" {
-        offset = find_var_offset(state, node.val_str)
-        if offset < 0 {
-            abs_off = 0 - offset
-            emit(state, "    mov " + reg_name + ", [%b + " + str(abs_off) + "]")
+        reg_val = find_var_reg(state, node.val_str)
+        if reg_val != "" {
+            emit(state, "    mov " + reg_name + ", " + reg_val)
         } else {
-            emit(state, "    mov " + reg_name + ", [%b - " + str(offset) + "]")
+            offset = find_var_offset(state, node.val_str)
+            if offset < 0 {
+                abs_off = 0 - offset
+                emit(state, "    mov " + reg_name + ", [%b + " + str(abs_off) + "]")
+            } else {
+                emit(state, "    mov " + reg_name + ", [%b - " + str(offset) + "]")
+            }
         }
     }
 }
@@ -325,12 +330,17 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    push " + str(node.val_int))
     }
     if node.kind == "Variable" {
-        offset = find_var_offset(state, node.val_str)
-        if offset < 0 {
-            abs_off = 0 - offset
-            emit(state, "    mov %a, [%b + " + str(abs_off) + "]")
+        reg_val = find_var_reg(state, node.val_str)
+        if reg_val != "" {
+            emit(state, "    mov %a, " + reg_val)
         } else {
-            emit(state, "    mov %a, [%b - " + str(offset) + "]")
+            offset = find_var_offset(state, node.val_str)
+            if offset < 0 {
+                abs_off = 0 - offset
+                emit(state, "    mov %a, [%b + " + str(abs_off) + "]")
+            } else {
+                emit(state, "    mov %a, [%b - " + str(offset) + "]")
+            }
         }
         emit(state, "    push %a")
     }
@@ -438,15 +448,27 @@ def compile_expr(state: CodegenState, node: AstNode) {
                     emit(state, "    push 1")
                     emit(state, label_end2 + ":")
                 } else {
-                    emit(state, "    fld qword ptr [esp + 4]")
-                    emit(state, "    fld qword ptr [esp]")
-                    if op == 10 { emit(state, "    faddp st(1), st(0)") }
-                    elif op == 11 { emit(state, "    fsubp st(1), st(0)") }
-                    elif op == 12 { emit(state, "    fmulp st(1), st(0)") }
-                    elif op == 13 { emit(state, "    fdivp st(1), st(0)") }
-                    clean_n(state, 2)
-                    emit(state, "    sub esp, 4")
-                    emit(state, "    fstp qword ptr [esp]")
+                    if is_x64(state) == 1 {
+                        emit(state, "    movss xmm0, dword ptr [rsp + 8]")
+                        emit(state, "    movss xmm1, dword ptr [rsp]")
+                        if op == 10 { emit(state, "    addss xmm0, xmm1") }
+                        elif op == 11 { emit(state, "    subss xmm0, xmm1") }
+                        elif op == 12 { emit(state, "    mulss xmm0, xmm1") }
+                        elif op == 13 { emit(state, "    divss xmm0, xmm1") }
+                        clean_n(state, 2)
+                        emit(state, "    sub rsp, 8")
+                        emit(state, "    movss dword ptr [rsp], xmm0")
+                    } else {
+                        emit(state, "    fld qword ptr [esp + 4]")
+                        emit(state, "    fld qword ptr [esp]")
+                        if op == 10 { emit(state, "    faddp st(1), st(0)") }
+                        elif op == 11 { emit(state, "    fsubp st(1), st(0)") }
+                        elif op == 12 { emit(state, "    fmulp st(1), st(0)") }
+                        elif op == 13 { emit(state, "    fdivp st(1), st(0)") }
+                        clean_n(state, 2)
+                        emit(state, "    sub esp, 4")
+                        emit(state, "    fstp qword ptr [esp]")
+                    }
                 }
             } else {
                 all_leaf = left_leaf + right_leaf
@@ -819,8 +841,9 @@ def compile_expr(state: CodegenState, node: AstNode) {
         if n > 0 {
             req_cap = n * ptr_sz
         }
+        emit(state, "    push 1")
         emit(state, "    push 16")
-        emit_call(state, "_malloc", 1)
+        emit_call(state, "_nova_arc_alloc", 2)
         emit(state, "    push %a")
         emit(state, "    push " + str(req_cap))
         emit_call(state, "_malloc", 1)

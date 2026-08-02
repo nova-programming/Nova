@@ -18,6 +18,17 @@ def apply(state) {
                     i = i + 2
                     continue
                 }
+                # Simple duplicate mov rax, rax check
+                if line == "    mov rax, rax" or line == "    mov rbx, rbx" {
+                    i = i + 1
+                    continue
+                }
+                # Redundant xor rax, rax to 0
+                if line == "    xor rax, rax" {
+                    result.append("    mov rax, 0")
+                    i = i + 1
+                    continue
+                }
             }
         }
         

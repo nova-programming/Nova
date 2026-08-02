@@ -44,7 +44,7 @@ def append_bytes(dest: list, src: list) {
 def append_string_bytes(dest: list, value: string) {
     i = 0
     while i < len(value) {
-        dest.append(char_code(value[i]))
+        dest.append(get_char_code(value[i]))
         i = i + 1
     }
 }
@@ -52,7 +52,7 @@ def append_string_bytes(dest: list, value: string) {
 def append_string_padded(dest: list, value: string, pad_len: int) {
     i = 0
     while i < len(value) and i < pad_len {
-        dest.append(char_code(value[i]))
+        dest.append(get_char_code(value[i]))
         i = i + 1
     }
     while i < pad_len {
@@ -75,7 +75,7 @@ def pad_to(dest: list, target_len: int) {
     }
 }
 
-def char_code(ch: string) -> int {
+def get_char_code(ch: string) -> int {
     if ch == "\n" { return 10 }
     if ch == "\r" { return 13 }
     if ch == "\t" { return 9 }
@@ -267,14 +267,14 @@ def is_kernel32_func(name: string) -> int {
 def strip_name(raw_name: string) -> string {
     actual_name = raw_name
     # Strip leading underscores
-    while len(actual_name) > 0 and char_code(actual_name[0]) == 95 {
+    while len(actual_name) > 0 and get_char_code(actual_name[0]) == 95 {
         actual_name = str_sub(actual_name, 1, len(actual_name))
     }
     # Strip @N stdcall decoration
     at_idx = -1
     k = 0
     while k < len(actual_name) {
-        if char_code(actual_name[k]) == 64 {
+        if get_char_code(actual_name[k]) == 64 {
             at_idx = k
             break
         }

@@ -838,6 +838,149 @@ def _builtin_file_type(m, args):
     else:
         m.stack.append(bytearray(b""))
 
+def _builtin_square(m, args):
+    m.stack.append(args[0] * args[0])
+
+def _builtin_cube(m, args):
+    m.stack.append(args[0] * args[0] * args[0])
+
+def _builtin_abs_val(m, args):
+    m.stack.append(abs(args[0]))
+
+def _builtin_max_of(m, args):
+    m.stack.append(max(args[0], args[1]))
+
+def _builtin_min_of(m, args):
+    m.stack.append(min(args[0], args[1]))
+
+def _builtin_factorial(m, args):
+    n = args[0]
+    result = 1
+    for i in range(2, n + 1):
+        result *= i
+    m.stack.append(result)
+
+def _builtin_random(m, args):
+    import random as _rng
+    if len(args) >= 2:
+        m.stack.append(_rng.randint(args[0], args[1]))
+    else:
+        m.stack.append(_rng.randint(0, 2**31 - 1))
+
+def _builtin_int_cast(m, args):
+    try:
+        val = args[0]
+        if isinstance(val, bytearray):
+            m.stack.append(int(val.decode('utf-8')))
+        else:
+            m.stack.append(int(val))
+    except (ValueError, TypeError):
+        m.stack.append(0)
+
+def _builtin_float_cast(m, args):
+    try:
+        val = args[0]
+        if isinstance(val, bytearray):
+            m.stack.append(float(val.decode('utf-8')))
+        else:
+            m.stack.append(float(val))
+    except (ValueError, TypeError):
+        m.stack.append(0.0)
+
+def _builtin_input(m, args):
+    prompt = m._to_str(args[0]) if args else ""
+    result = input(prompt)
+    m.stack.append(bytearray(result.encode('utf-8')))
+
+def _builtin_append(m, args):
+    lst = args[0]
+    val = args[1]
+    if isinstance(lst, list):
+        lst.append(val)
+    m.stack.append(lst)
+
+def _builtin_pop(m, args):
+    lst = args[0]
+    if isinstance(lst, list) and len(lst) > 0:
+        m.stack.append(lst.pop())
+    else:
+        m.stack.append(0)
+
+def _builtin_remove(m, args):
+    lst = args[0]
+    val = args[1]
+    if isinstance(lst, list) and val in lst:
+        lst.remove(val)
+    m.stack.append(lst)
+
+def _builtin_keys(m, args):
+    d = args[0]
+    if isinstance(d, dict):
+        m.stack.append([bytearray(str(k).encode('utf-8')) for k in d.keys()])
+    else:
+        m.stack.append([])
+
+def _builtin_values(m, args):
+    d = args[0]
+    if isinstance(d, dict):
+        m.stack.append(list(d.values()))
+    else:
+        m.stack.append([])
+
+def _builtin_range(m, args):
+    if len(args) == 1:
+        m.stack.append(list(range(int(args[0]))))
+    elif len(args) == 2:
+        m.stack.append(list(range(int(args[0]), int(args[1]))))
+    elif len(args) >= 3:
+        m.stack.append(list(range(int(args[0]), int(args[1]), int(args[2]))))
+    else:
+        m.stack.append([])
+
+def _builtin_sqrt(m, args):
+    import math
+    m.stack.append(math.sqrt(args[0]))
+
+def _builtin_pow(m, args):
+    m.stack.append(args[0] ** args[1])
+
+def _builtin_floor(m, args):
+    import math
+    m.stack.append(int(math.floor(args[0])))
+
+def _builtin_ceil(m, args):
+    import math
+    m.stack.append(int(math.ceil(args[0])))
+
+def _builtin_round(m, args):
+    m.stack.append(round(args[0]))
+
+def _builtin_reversed(m, args):
+    val = args[0]
+    if isinstance(val, list):
+        m.stack.append(list(reversed(val)))
+    elif isinstance(val, bytearray):
+        m.stack.append(bytearray(val[::-1]))
+    else:
+        m.stack.append(val)
+
+def _builtin_sorted(m, args):
+    val = args[0]
+    if isinstance(val, list):
+        m.stack.append(sorted(val))
+    else:
+        m.stack.append(val)
+
+def _builtin_to_string(m, args):
+    """Fallback for str() calls that reach the VM as Call nodes."""
+    val = args[0]
+    if isinstance(val, bytearray):
+        m.stack.append(val)
+    elif isinstance(val, bool):
+        m.stack.append(bytearray(str(val).lower().encode('utf-8')))
+    else:
+        m.stack.append(bytearray(str(val).encode('utf-8')))
+
 _BUILTIN_HANDLERS = {
     "type": _builtin_type,
     "call": _builtin_call,
@@ -848,4 +991,34 @@ _BUILTIN_HANDLERS = {
     "file_exists": _builtin_file_exists,
     "file_size": _builtin_file_size,
     "file_type": _builtin_file_type,
+    # Standard library math functions
+    "square": _builtin_square,
+    "cube": _builtin_cube,
+    "abs_val": _builtin_abs_val,
+    "max_of": _builtin_max_of,
+    "min_of": _builtin_min_of,
+    "factorial": _builtin_factorial,
+    "random": _builtin_random,
+    # Type casting
+    "int": _builtin_int_cast,
+    "float": _builtin_float_cast,
+    "str": _builtin_to_string,
+    # I/O
+    "input": _builtin_input,
+    # List/Dict operations
+    "append": _builtin_append,
+    "pop": _builtin_pop,
+    "remove": _builtin_remove,
+    "keys": _builtin_keys,
+    "values": _builtin_values,
+    "range": _builtin_range,
+    # Extended math
+    "sqrt": _builtin_sqrt,
+    "pow": _builtin_pow,
+    "floor": _builtin_floor,
+    "ceil": _builtin_ceil,
+    "round": _builtin_round,
+    # Collection utils
+    "reversed": _builtin_reversed,
+    "sorted": _builtin_sorted,
 }

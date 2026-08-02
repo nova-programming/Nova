@@ -79,6 +79,21 @@ python main.py build program.nv
 python main.py dev program.nv
 ```
 
+## Python Bridge (Seamless Interop)
+
+Nova features a zero-friction Python Bridge (`nova_py.py`) that allows you to natively import `.nv` files directly into Python scripts. The bridge automatically compiles the Nova code into high-speed native assembly (`.dll`/`.so`), handles SysV ABI translations, maps C-types to Python types, and binds the functions—all transparently on import.
+
+To use it, just import `nova_py` once, then import your Nova modules as if they were standard Python modules:
+
+```python
+import nova_py
+import math_lib # Automatically compiles math_lib.nv and loads it natively!
+
+# Call Nova's C-speed functions natively from Python
+result = math_lib.calculate_fibonacci(40)
+print(result)
+```
+
 ## Self-Hosted Bootstrap Chain
 
 The compiler is written in Nova and bootstraps in three stages:

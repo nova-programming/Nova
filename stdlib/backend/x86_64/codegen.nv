@@ -44,6 +44,7 @@ data CodegenState {
     si: string
     di: string
     target_os: string
+    current_fn_name: string
 }
 
 def new_codegen(tgt: int, target_os: string) -> CodegenState {
@@ -184,9 +185,13 @@ def emit_call(state: CodegenState, func_name: string, arg_count: int) {
         if arg_count >= 6 { emit(state, "    pop r9") }
         
         emit(state, "    xor rax, rax")
+        emit(state, "    push rbp")
+        emit(state, "    mov rbp, rsp")
+        emit(state, "    and rsp, -16")
         emit(state, "    sub rsp, 32")
         emit(state, "    call " + func_name)
-        emit(state, "    add rsp, 32")
+        emit(state, "    mov rsp, rbp")
+        emit(state, "    pop rbp")
     } else {
         emit(state, "    call " + func_name)
         if arg_count > 0 {
@@ -232,6 +237,17 @@ def add_string_literal(state: CodegenState, raw_val: string) -> string {
     return label
 }
 
+def find_var_reg(state: CodegenState, name: string) -> string {
+    i = 0
+    while i < len(state.local_var_names) {
+        if state.local_var_names[i] == name {
+            return state.local_var_regs[i]
+        }
+        i = i + 1
+    }
+    return ""
+}
+
 def find_var_offset(state: CodegenState, name: string) -> int {
     if state.var_name_map.has(name) { return state.var_name_map.get(name) }
     return 0
@@ -245,7 +261,19 @@ def register_var(state: CodegenState, name: string) -> int {
     state.var_name_map.set(name, state.local_offset)
     state.local_var_names.append(name)
     state.local_vars.append(state.local_offset)
-    state.local_var_regs.append("")
+    
+    reg = ""
+    num_regs = len(state.used_regs)
+    if is_x64(state) == 1 {
+        if num_regs == 0 { reg = "r12" }
+        elif num_regs == 1 { reg = "r13" }
+        elif num_regs == 2 { reg = "r14" }
+        elif num_regs == 3 { reg = "r15" }
+        if reg != "" {
+            state.used_regs.append(reg)
+        }
+    }
+    state.local_var_regs.append(reg)
     return state.local_offset
 }
 
@@ -492,6 +520,7 @@ def scan_vars(state: CodegenState, node: AstNode) {
 # --- Function compilation ---
 
 def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
+    state.current_fn_name = node.name
     old_var_names = state.local_var_names
     old_vars = state.local_vars
     old_var_map = state.var_name_map
@@ -549,8 +578,9 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
         state.local_offset = state.local_offset + pad
     }
     
-    if state.local_offset > 0 {
-        emit(state, "    sub " + sp + ", " + str(state.local_offset))
+    sub_amount = state.local_offset - regs_size
+    if sub_amount > 0 {
+        emit(state, "    sub " + sp + ", " + str(sub_amount))
     }
     
     r = 0

@@ -124,6 +124,17 @@ class X86_64Codegen:
                 result.append("    mov rax, 0")
                 i += 1
                 continue
+            if stripped.startswith("mov ") and "," in stripped:
+                parts = stripped[4:].split(",")
+                if len(parts) == 2 and parts[0].strip() == parts[1].strip():
+                    i += 1
+                    continue
+            if (i + 1 < len(lines) and 
+                stripped.startswith("mov rax, ") and not "[" in stripped and not "]" in stripped and 
+                lines[i + 1].strip() == f"mov {stripped.split(', ')[1].strip()}, rax"):
+                result.append(line)
+                i += 2
+                continue
             result.append(line)
             i += 1
         self.assembly = result
@@ -390,11 +401,19 @@ class X86_64Codegen:
         pass
 
 
+    def register_var(self, name):
+        if name not in self.local_vars:
+            if hasattr(self, 'available_regs') and len(self.available_regs) > 0:
+                reg = self.available_regs.pop(0)
+                self.local_vars[name] = reg
+                self.used_regs.append(reg)
+            else:
+                self.local_offset += 8
+                self.local_vars[name] = self.local_offset
+
     def scan_vars(self, node):
         if isinstance(node, Assignment):
-            if node.name not in self.local_vars:
-                self.local_offset += 8
-                self.local_vars[node.name] = self.local_offset
+            self.register_var(node.name)
             self.scan_vars(node.value)
         elif isinstance(node, IfElse):
             for s in node.if_body:
@@ -405,15 +424,11 @@ class X86_64Codegen:
             for s in node.body:
                 self.scan_vars(s)
         elif isinstance(node, ForLoop):
-            if node.var_name not in self.local_vars:
-                self.local_offset += 8
-                self.local_vars[node.var_name] = self.local_offset
+            self.register_var(node.var_name)
             for s in node.body:
                 self.scan_vars(s)
         elif isinstance(node, ForIn):
-            if node.var_name not in self.local_vars:
-                self.local_offset += 8
-                self.local_vars[node.var_name] = self.local_offset
+            self.register_var(node.var_name)
             for s in node.body:
                 self.scan_vars(s)
         elif isinstance(node, RawBlock):
@@ -428,15 +443,19 @@ class X86_64Codegen:
     def compile_function(self, fn):
         old_local_vars = self.local_vars.copy()
         old_string_vars = self.string_vars.copy()
+        old_used_regs = getattr(self, 'used_regs', []).copy()
+        old_avail_regs = getattr(self, 'available_regs', []).copy()
+
         self.local_vars = {}
         self.string_vars = set()
         self.local_offset = 0
+        self.used_regs = []
+        self.available_regs = ['r12', 'r13', 'r14', 'r15']
 
         for param in fn.params:
             param_name = param[0] if isinstance(param, (list, tuple)) else param
             param_type = param[1] if isinstance(param, (list, tuple)) and len(param) > 1 else None
-            self.local_offset += 8
-            self.local_vars[param_name] = self.local_offset
+            self.register_var(param_name)
             if param_type == 'string':
                 self.string_vars.add(param_name)
 
@@ -444,45 +463,73 @@ class X86_64Codegen:
         for stmt in fn.body:
             self.scan_vars(stmt)
 
+        self.assembly.append(f".global _{fn.name}")
         self.assembly.append(f"_{fn.name}:")
         self.assembly.append("    push rbp")
         self.assembly.append("    mov rbp, rsp")
         self.assembly.append("    and rsp, -16")
 
+        regs_size = len(self.used_regs) * 8
+        self.local_offset += regs_size
         aligned = (self.local_offset + 15) & ~15
-        if aligned > 0:
-            self.assembly.append(f"    sub rsp, {aligned}")
+        sub_amount = aligned - regs_size
+        if sub_amount > 0:
+            self.assembly.append(f"    sub rsp, {sub_amount}")
+        for reg in self.used_regs:
+            self.assembly.append(f"    push {reg}")
 
         # Save incoming register arguments into their local variable slots
         for i, param in enumerate(fn.params):
             param_name = param[0] if isinstance(param, (list, tuple)) else param
             offset = self.local_vars[param_name]
-            if i == 0:
-                self.assembly.append(f"    mov [rbp - {offset}], rdi")
-            elif i == 1:
-                self.assembly.append(f"    mov [rbp - {offset}], rsi")
-            elif i == 2:
-                self.assembly.append(f"    mov [rbp - {offset}], rdx")
-            elif i == 3:
-                self.assembly.append(f"    mov [rbp - {offset}], rcx")
-            elif i == 4:
-                self.assembly.append(f"    mov [rbp - {offset}], r8")
-            elif i == 5:
-                self.assembly.append(f"    mov [rbp - {offset}], r9")
+            if isinstance(offset, str):
+                if i == 0:
+                    self.assembly.append(f"    mov {offset}, rdi")
+                elif i == 1:
+                    self.assembly.append(f"    mov {offset}, rsi")
+                elif i == 2:
+                    self.assembly.append(f"    mov {offset}, rdx")
+                elif i == 3:
+                    self.assembly.append(f"    mov {offset}, rcx")
+                elif i == 4:
+                    self.assembly.append(f"    mov {offset}, r8")
+                elif i == 5:
+                    self.assembly.append(f"    mov {offset}, r9")
+                else:
+                    stack_offset = 48 + (i - 6) * 8
+                    self.assembly.append(f"    mov rax, [rbp + {stack_offset}]")
+                    self.assembly.append(f"    mov {offset}, rax")
             else:
-                stack_offset = 48 + (i - 6) * 8
-                self.assembly.append(f"    mov rax, [rbp + {stack_offset}]")
-                self.assembly.append(f"    mov [rbp - {offset}], rax")
+                if i == 0:
+                    self.assembly.append(f"    mov [rbp - {offset}], rdi")
+                elif i == 1:
+                    self.assembly.append(f"    mov [rbp - {offset}], rsi")
+                elif i == 2:
+                    self.assembly.append(f"    mov [rbp - {offset}], rdx")
+                elif i == 3:
+                    self.assembly.append(f"    mov [rbp - {offset}], rcx")
+                elif i == 4:
+                    self.assembly.append(f"    mov [rbp - {offset}], r8")
+                elif i == 5:
+                    self.assembly.append(f"    mov [rbp - {offset}], r9")
+                else:
+                    stack_offset = 48 + (i - 6) * 8
+                    self.assembly.append(f"    mov rax, [rbp + {stack_offset}]")
+                    self.assembly.append(f"    mov [rbp - {offset}], rax")
 
         for stmt in fn.body:
             self.compile_stmt(stmt)
 
+        for reg in reversed(self.used_regs):
+            self.assembly.append(f"    pop {reg}")
         self.assembly.append("    mov rsp, rbp")
         self.assembly.append("    pop rbp")
         self.assembly.append("    ret")
 
         self.local_vars = old_local_vars
         self.string_vars = old_string_vars
+        self.used_regs = old_used_regs
+        self.available_regs = old_avail_regs
 
     def _emit_statement_line(self, node):
         if hasattr(node, 'line') and node.line > 0:
@@ -593,6 +640,8 @@ class X86_64Codegen:
         elif isinstance(node, Return):
             self.compile_expr(node.value)
             self.assembly.append("    pop rax")
+            for reg in reversed(getattr(self, 'used_regs', [])):
+                self.assembly.append(f"    pop {reg}")
             self.assembly.append("    mov rsp, rbp")
             self.assembly.append("    pop rbp")
             self.assembly.append("    ret")
@@ -725,6 +774,8 @@ class X86_64Codegen:
             # Check if base is a Variable with name known to be dict-typed
             from nova_ast.nodes import Variable as _Var, DataFieldAccess as _DFA
             if isinstance(node.base, _Var) and node.base.name in ('local_env',):
+                base_type = 'dict'
+            if isinstance(node.base, _DFA) and node.base.field_name in ('name_map', 'func_name_map', 'struct_name_map'):
                 base_type = 'dict'
             self.compile_expr(node.value)
             self.compile_expr(node.index)
@@ -1154,9 +1205,11 @@ class X86_64Codegen:
         elif isinstance(node, ArrayIndex):
             base_type = getattr(node.base, 'inferred_type', 'any')
             # Variable name-based dict detection (fallback when type checker doesn't set inferred_type)
-            from nova_ast.nodes import Variable as _Var
+            from nova_ast.nodes import Variable as _Var, DataFieldAccess as _DFA
             base_var_name = node.base.name if isinstance(node.base, _Var) else ''
             if base_var_name in ('local_env',):
+                base_type = 'dict'
+            if isinstance(node.base, _DFA) and node.base.field_name in ('name_map', 'func_name_map', 'struct_name_map'):
                 base_type = 'dict'
             is_str = self._is_string_expr(node.base) or str(base_type) == 'string'
             if isinstance(node.base, DataFieldAccess) and node.base.field_name in ['struct_names', 'prop_names', 'local_var_names']:
@@ -1233,8 +1286,9 @@ class X86_64Codegen:
             n = len(node.elements)
             req_cap = 16 if n == 0 else n * 8
             self.assembly.append("    mov rdi, 16")
+            self.assembly.append("    mov rsi, 1")
             self.assembly.append("    sub rsp, 32")
-            self.assembly.append("    call _malloc")
+            self.assembly.append("    call _nova_arc_alloc")
             self.assembly.append("    add rsp, 32")
             self.assembly.append("    push rax") # push list struct
             self.assembly.append(f"    mov rdi, {req_cap}")
@@ -1400,17 +1454,17 @@ class X86_64Codegen:
             self.assembly.append("    pop rdx")
             self.assembly.append("    push rdx")  # save value
             self.assembly.append("    mov rdi, 32")
-            self.assembly.append("    sub rsp, 8")
+            self.assembly.append("    sub rsp, 40") # 32 bytes shadow space + 8 byte alignment
             self.assembly.append("    call _malloc")
             self.assembly.append("    mov rdi, rax")
-            self.assembly.append("    add rsp, 8")
+            self.assembly.append("    add rsp, 40")
             self.assembly.append("    pop rdx")  # restore value
             self.assembly.append("    lea rsi, [rip + fmt_int_pure]")
             self.assembly.append("    push rdi")  # save buffer pointer
             self.assembly.append("    xor rax, rax")
-            self.assembly.append("    sub rsp, 8")
+            self.assembly.append("    sub rsp, 40") # 32 bytes shadow space + 8 byte alignment
             self.assembly.append("    call _sprintf")
-            self.assembly.append("    add rsp, 8")
+            self.assembly.append("    add rsp, 40")
             self.assembly.append("    pop rax")  # restore buffer pointer
             self.assembly.append("    push rax")
         elif isinstance(node, Block):

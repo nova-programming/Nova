@@ -96,8 +96,8 @@ def tc_init(tc: TypeChecker) {
     print_t = create_func_type([create_any_type()], create_scalar_type("void"))
     tc_add_func(tc, "print", print_t)
 
-    # char_code(ch: string) -> int
-    char_code_t = create_func_type([create_scalar_type("string")], create_scalar_type("int"))
+    # char_code(s: string, i: int) -> int
+    char_code_t = create_func_type([create_scalar_type("string"), create_scalar_type("int")], create_scalar_type("int"))
     tc_add_func(tc, "char_code", char_code_t)
 
     # str_sub(s: string, start: int, end: int) -> string
