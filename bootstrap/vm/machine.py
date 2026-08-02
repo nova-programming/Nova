@@ -305,9 +305,15 @@ def _op_load_index(vm, arg):
     elif isinstance(base, dict):
         if isinstance(index, bytearray):
             index = index.decode('utf-8')
-        if index not in base:
+        if isinstance(index, int):
+            keys = list(base.keys())
+            if index < 0 or index >= len(keys):
+                raise Exception(f"Index Out Of Bounds: {index} on dictionary with {len(keys)} keys")
+            vm.stack.append(keys[index])
+        elif index not in base:
             raise Exception(f"KeyError: {index} not found in dictionary")
-        vm.stack.append(base[index])
+        else:
+            vm.stack.append(base[index])
     else:
         vm.stack.append(base[index])
 

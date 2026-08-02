@@ -13,7 +13,8 @@ class Compiler:
         self.strings = []    # List of string literals
         self.functions = {}  # name -> starting instruction index
         self.classes = {}    # name -> ClassDef node (metadata)
-        self.loop_stack = [] # Stack of (start_idx, end_jump_indices)
+        self.loop_stack = [] # Stack of (start_idx, break_jumps, continue_jumps)
+        self.temp_counter = 0
         self.resolver = ModuleResolver(base_dir=base_dir)
         self.base_dir = base_dir or os.getcwd()
 
@@ -198,7 +199,7 @@ class Compiler:
             self.compile_expr(node.condition)
             jump_end = self.emit(OpCode.JUMP_IF_FALSE)
 
-            self.loop_stack.append((start_idx, []))
+            self.loop_stack.append((start_idx, [], []))
 
             for stmt in node.body:
                 self.compile_stmt(stmt)
@@ -206,9 +207,58 @@ class Compiler:
             self.emit(OpCode.JUMP, start_idx)
             self.patch_jump(jump_end, len(self.code))
 
-            _, break_jumps = self.loop_stack.pop()
+            _, break_jumps, continue_jumps = self.loop_stack.pop()
             for jump_idx in break_jumps:
                 self.patch_jump(jump_idx, len(self.code))
+            for jump_idx in continue_jumps:
+                self.patch_jump(jump_idx, start_idx)
+
+        elif isinstance(node, ForIn):
+            # for var_name in collection { body }
+            coll_var = f"__forin_coll{self.temp_counter}"
+            idx_var = f"__forin_idx{self.temp_counter}"
+            self.temp_counter += 1
+
+            self.compile_expr(node.collection)
+            self.emit(OpCode.STORE_NAME, coll_var)
+            self.emit(OpCode.LOAD_CONST, self.add_const(0))
+            self.emit(OpCode.STORE_NAME, idx_var)
+
+            start_idx = len(self.code)
+            self.loop_stack.append((start_idx, [], []))
+
+            # while idx < len(coll)
+            self.emit(OpCode.LOAD_NAME, idx_var)
+            self.emit(OpCode.LOAD_NAME, coll_var)
+            self.emit(OpCode.LEN)
+            self.emit(OpCode.CMP_LT)
+            jump_end = self.emit(OpCode.JUMP_IF_FALSE)
+
+            # var_name = coll[idx]
+            self.emit(OpCode.LOAD_NAME, coll_var)
+            self.emit(OpCode.LOAD_NAME, idx_var)
+            self.emit(OpCode.LOAD_INDEX)
+            self.emit(OpCode.STORE_NAME, node.var_name)
+
+            for stmt in node.body:
+                self.compile_stmt(stmt)
+
+            increment_idx = len(self.code)
+
+            # idx += 1
+            self.emit(OpCode.LOAD_NAME, idx_var)
+            self.emit(OpCode.LOAD_CONST, self.add_const(1))
+            self.emit(OpCode.ADD)
+            self.emit(OpCode.STORE_NAME, idx_var)
+
+            self.emit(OpCode.JUMP, start_idx)
+            self.patch_jump(jump_end, len(self.code))
+
+            _, break_jumps, continue_jumps = self.loop_stack.pop()
+            for jump_idx in break_jumps:
+                self.patch_jump(jump_idx, len(self.code))
+            for jump_idx in continue_jumps:
+                self.patch_jump(jump_idx, increment_idx)
 
         elif isinstance(node, Break):
             if self.loop_stack:
@@ -216,8 +266,8 @@ class Compiler:
                 self.loop_stack[-1][1].append(idx)
         elif isinstance(node, Continue):
             if self.loop_stack:
-                start_idx = self.loop_stack[-1][0]
-                self.emit(OpCode.JUMP, start_idx)
+                idx = self.emit(OpCode.JUMP)
+                self.loop_stack[-1][2].append(idx)
         elif isinstance(node, Return):
             self.compile_expr(node.value)
             self.emit(OpCode.RETURN)
@@ -261,7 +311,7 @@ class Compiler:
             self.emit(OpCode.STORE_NAME, node.var_name)
 
             start_idx = len(self.code)
-            self.loop_stack.append((start_idx, []))
+            self.loop_stack.append((start_idx, [], []))
 
             # Condition
             self.emit(OpCode.LOAD_NAME, node.var_name)
@@ -276,6 +326,8 @@ class Compiler:
             for stmt in node.body:
                 self.compile_stmt(stmt)
 
+            step_idx = len(self.code)
+
             # Step
             self.emit(OpCode.LOAD_NAME, node.var_name)
             self.compile_expr(node.step)
@@ -288,9 +340,11 @@ class Compiler:
             self.emit(OpCode.JUMP, start_idx)
             self.patch_jump(jump_end, len(self.code))
 
-            _, break_jumps = self.loop_stack.pop()
+            _, break_jumps, continue_jumps = self.loop_stack.pop()
             for jump_idx in break_jumps:
                 self.patch_jump(jump_idx, len(self.code))
+            for jump_idx in continue_jumps:
+                self.patch_jump(jump_idx, step_idx)
         elif isinstance(node, Data):
             # Data definitions are handled in the first pass metadata collection
             pass
