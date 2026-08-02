@@ -867,6 +867,12 @@ def _builtin_random(m, args):
     else:
         m.stack.append(_rng.randint(0, 2**31 - 1))
 
+def _builtin_chacha20_init(m, args):
+    import random as _rng
+    seed1 = args[0] if len(args) > 0 else 0
+    seed2 = args[1] if len(args) > 1 else 0
+    _rng.seed((seed1 << 32) | seed2)
+
 def _builtin_int_cast(m, args):
     try:
         val = args[0]
@@ -999,6 +1005,7 @@ _BUILTIN_HANDLERS = {
     "min_of": _builtin_min_of,
     "factorial": _builtin_factorial,
     "random": _builtin_random,
+    "chacha20_init": _builtin_chacha20_init,
     # Type casting
     "int": _builtin_int_cast,
     "float": _builtin_float_cast,
