@@ -873,6 +873,14 @@ def _builtin_chacha20_init(m, args):
     seed2 = args[1] if len(args) > 1 else 0
     _rng.seed((seed1 << 32) | seed2)
 
+def _builtin_char_code(m, args):
+    s = args[0]
+    idx = args[1]
+    if isinstance(s, bytearray):
+        m.stack.append(s[idx] if 0 <= idx < len(s) else 0)
+    else:
+        m.stack.append(0)
+
 def _builtin_int_cast(m, args):
     try:
         val = args[0]
@@ -1006,6 +1014,7 @@ _BUILTIN_HANDLERS = {
     "factorial": _builtin_factorial,
     "random": _builtin_random,
     "chacha20_init": _builtin_chacha20_init,
+    "char_code": _builtin_char_code,
     # Type casting
     "int": _builtin_int_cast,
     "float": _builtin_float_cast,
