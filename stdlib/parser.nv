@@ -1474,9 +1474,9 @@ def atoi(str_val: string) -> int {
     while i < len(str_val) {
         ch = str_val[i]
         digit = 0
-        if ch >= "0" and ch <= "9" { digit = char_code(ch) - char_code("0") }
-        elif base == 16 and ch >= "a" and ch <= "f" { digit = char_code(ch) - char_code("a") + 10 }
-        elif base == 16 and ch >= "A" and ch <= "F" { digit = char_code(ch) - char_code("A") + 10 }
+        if ch >= "0" and ch <= "9" { digit = get_char_code(ch) - get_char_code("0") }
+        elif base == 16 and ch >= "a" and ch <= "f" { digit = get_char_code(ch) - get_char_code("a") + 10 }
+        elif base == 16 and ch >= "A" and ch <= "F" { digit = get_char_code(ch) - get_char_code("A") + 10 }
         else { break }
         if digit >= base { break }
         val = val * base + digit

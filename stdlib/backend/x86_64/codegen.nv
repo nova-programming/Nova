@@ -185,9 +185,13 @@ def emit_call(state: CodegenState, func_name: string, arg_count: int) {
         if arg_count >= 6 { emit(state, "    pop r9") }
         
         emit(state, "    xor rax, rax")
+        emit(state, "    push rbp")
+        emit(state, "    mov rbp, rsp")
+        emit(state, "    and rsp, -16")
         emit(state, "    sub rsp, 32")
         emit(state, "    call " + func_name)
-        emit(state, "    add rsp, 32")
+        emit(state, "    mov rsp, rbp")
+        emit(state, "    pop rbp")
     } else {
         emit(state, "    call " + func_name)
         if arg_count > 0 {
@@ -574,8 +578,9 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
         state.local_offset = state.local_offset + pad
     }
     
-    if state.local_offset > 0 {
-        emit(state, "    sub " + sp + ", " + str(state.local_offset))
+    sub_amount = state.local_offset - regs_size
+    if sub_amount > 0 {
+        emit(state, "    sub " + sp + ", " + str(sub_amount))
     }
     
     r = 0

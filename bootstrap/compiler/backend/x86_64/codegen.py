@@ -472,8 +472,9 @@ class X86_64Codegen:
         regs_size = len(self.used_regs) * 8
         self.local_offset += regs_size
         aligned = (self.local_offset + 15) & ~15
-        if aligned > 0:
-            self.assembly.append(f"    sub rsp, {aligned}")
+        sub_amount = aligned - regs_size
+        if sub_amount > 0:
+            self.assembly.append(f"    sub rsp, {sub_amount}")
         for reg in self.used_regs:
             self.assembly.append(f"    push {reg}")
 
@@ -773,6 +774,8 @@ class X86_64Codegen:
             # Check if base is a Variable with name known to be dict-typed
             from nova_ast.nodes import Variable as _Var, DataFieldAccess as _DFA
             if isinstance(node.base, _Var) and node.base.name in ('local_env',):
+                base_type = 'dict'
+            if isinstance(node.base, _DFA) and node.base.field_name in ('name_map', 'func_name_map', 'struct_name_map'):
                 base_type = 'dict'
             self.compile_expr(node.value)
             self.compile_expr(node.index)
@@ -1202,9 +1205,11 @@ class X86_64Codegen:
         elif isinstance(node, ArrayIndex):
             base_type = getattr(node.base, 'inferred_type', 'any')
             # Variable name-based dict detection (fallback when type checker doesn't set inferred_type)
-            from nova_ast.nodes import Variable as _Var
+            from nova_ast.nodes import Variable as _Var, DataFieldAccess as _DFA
             base_var_name = node.base.name if isinstance(node.base, _Var) else ''
             if base_var_name in ('local_env',):
+                base_type = 'dict'
+            if isinstance(node.base, _DFA) and node.base.field_name in ('name_map', 'func_name_map', 'struct_name_map'):
                 base_type = 'dict'
             is_str = self._is_string_expr(node.base) or str(base_type) == 'string'
             if isinstance(node.base, DataFieldAccess) and node.base.field_name in ['struct_names', 'prop_names', 'local_var_names']:
@@ -1449,17 +1454,17 @@ class X86_64Codegen:
             self.assembly.append("    pop rdx")
             self.assembly.append("    push rdx")  # save value
             self.assembly.append("    mov rdi, 32")
-            self.assembly.append("    sub rsp, 8")
+            self.assembly.append("    sub rsp, 40") # 32 bytes shadow space + 8 byte alignment
             self.assembly.append("    call _malloc")
             self.assembly.append("    mov rdi, rax")
-            self.assembly.append("    add rsp, 8")
+            self.assembly.append("    add rsp, 40")
             self.assembly.append("    pop rdx")  # restore value
             self.assembly.append("    lea rsi, [rip + fmt_int_pure]")
             self.assembly.append("    push rdi")  # save buffer pointer
             self.assembly.append("    xor rax, rax")
-            self.assembly.append("    sub rsp, 8")
+            self.assembly.append("    sub rsp, 40") # 32 bytes shadow space + 8 byte alignment
             self.assembly.append("    call _sprintf")
-            self.assembly.append("    add rsp, 8")
+            self.assembly.append("    add rsp, 40")
             self.assembly.append("    pop rax")  # restore buffer pointer
             self.assembly.append("    push rax")
         elif isinstance(node, Block):
