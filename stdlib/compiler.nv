@@ -120,15 +120,10 @@ def cache_key(cache_lines: list, path: string) -> string {
 }
 
 def compile_file(path: string, debug_mode: int, target_arch: string, target_os: string) -> list {
-    system.file_write(2, "CF:begin\n")
     cache_file = cache_path(path)
-    system.file_write(2, "CF:cache_path\n")
     cached_lines = load_cache(cache_file)
-    system.file_write(2, "CF:load_cache\n")
     current_size = file_size(path)
-    system.file_write(2, "CF:file_size\n")
     cached_size_str = cache_key(cached_lines, path)
-    system.file_write(2, "CF:cache_key\n")
     cached_size = 0
     if cached_size_str != "" {
         if cached_size_str == str(current_size) {
@@ -145,43 +140,24 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
         }
     }
     
-    system.file_write(2, "CF:before_open\n")
     fd = sys_open(path, "r")
-    system.file_write(2, "CF:after_open\n")
     source = sys_read(fd)
-    system.file_write(2, "CF:after_read\n")
     sys_close(fd)
-    system.file_write(2, "CF:after_close\n")
     
     tokens = tokenize(source)
-    system.file_write(2, "CF:after_tokenize\n")
     
     ast = parse(tokens, path)
-    system.file_write(2, "CF:after_parse\n")
     
     visited = []
     ast = resolve_imports(ast, visited, target_arch, target_os)
-    system.file_write(2, "CF:after_imports\n")
 
     tc = TypeChecker()
     tc_init(tc)
     tc_check(tc, ast)
-    system.file_write(2, "CF:after_tc\n")
-    system.file_write(2, "CF:arch=$target_arch\n")
 
     is_x64 = 0
     if target_arch == "x86_64" { is_x64 = 1 }
-    system.file_write(2, "CF:is_x64=$is_x64\n")
-    if target_arch == "arm64" {
-        system.file_write(2, "CF:call_arm64_codegen\n")
-        asm = generate_assembly(ast, debug_mode, is_x64, target_os)
-        system.file_write(2, "CF:arm64_codegen_done\n")
-    } else {
-        system.file_write(2, "CF:call_x86_codegen\n")
-        asm = generate_assembly(ast, debug_mode, is_x64, target_os)
-        system.file_write(2, "CF:x86_codegen_done\n")
-    }
-    system.file_write(2, "CF:after_codegen\n")
+    asm = generate_assembly(ast, debug_mode, is_x64, target_os)
     sys_flush()
 
     # Update build cache
@@ -217,7 +193,7 @@ def _find_gcc(target_os: string, target_arch: string, compiler_dir: string) -> s
     # Bundled GCC (Windows)
     if host == "windows" {
         bundled = compiler_dir + "/gcc/bin/gcc.exe"
-        if file_exists(bundled) == 1 { return bundled }
+        if file_exists(bundled) == 1 { return compiler_dir + "\\gcc\\bin\\gcc.exe" }
     }
     # Cross-compilation: look for target-specific cross-toolchain
     if host != target_os {
@@ -238,7 +214,8 @@ def _compile_runtime(gcc_name: string, target_os: string, target_arch: string, c
     if file_exists(runtime_c_path) == 0 { return }
     # Remove stale runtime.o
     if file_exists(runtime_o_path) == 1 {
-        sys_system("rm -f " + runtime_o_path)
+        if target_os == "windows" { sys_system("del /f " + runtime_o_path) }
+        else { sys_system("rm -f " + runtime_o_path) }
     }
     cmd = gcc_name + " -O3 -c " + runtime_c_path + " -o " + runtime_o_path
     if target_os == "macos" {

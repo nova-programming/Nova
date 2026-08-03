@@ -222,8 +222,34 @@ def register_var(state: CodegenState, name: string) -> int {
     return state.local_offset
 }
 
+def lookup_preferred_field(state: CodegenState, field_name: string) -> int {
+    if field_name == "kind" { return 0 }
+    pref = ""
+    if field_name == "name" { pref = "Type" }
+    if field_name == "params" { pref = "AstNode" }
+    if field_name == "inferred_type" { pref = "AstNode" }
+    if pref != "" {
+        si = 0
+        while si < len(state.struct_names) {
+            if state.struct_names[si] == pref {
+                fi = 0
+                while fi < len(state.struct_fields[si]) {
+                    if state.struct_fields[si][fi] == field_name {
+                        return struct_field_offset(state, fi)
+                    }
+                    fi = fi + 1
+                }
+            }
+            si = si + 1
+        }
+    }
+    return -1
+}
+
 def get_prop_offset(state: CodegenState, struct_name: string, field_name: string) -> int {
-    if struct_name == "any" {
+    if struct_name == "" or struct_name == "any" {
+        off = lookup_preferred_field(state, field_name)
+        if off != -1 { return off }
         if field_name == "kind" { return 0 }
         i = 0
         while i < len(state.global_field_names) {
@@ -264,6 +290,9 @@ def get_prop_offset(state: CodegenState, struct_name: string, field_name: string
 def is_string_expr(state: CodegenState, node: AstNode) -> int {
     if node.kind == "String" { return 1 }
     if node.kind == "StrConvert" { return 1 }
+    if node.inferred_type != 0 and node.inferred_type.kind == "scalar" and node.inferred_type.name == "string" {
+        return 1
+    }
     if node.kind == "Variable" {
         if state.string_var_map.has(node.val_str) { return 1 }
         if node.inferred_type != 0 and node.inferred_type.kind == "scalar" and node.inferred_type.name == "string" {
@@ -282,10 +311,10 @@ def is_string_expr(state: CodegenState, node: AstNode) -> int {
         return 0
     }
     if node.kind == "MethodCall" {
-        if node.method_name == "platform" { return 1 }
-        if node.method_name == "file_read" { return 1 }
-        if node.method_name == "read" { return 1 }
-        if node.method_name == "read_all" { return 1 }
+        if node.val_str == "platform" { return 1 }
+        if node.val_str == "file_read" { return 1 }
+        if node.val_str == "read" { return 1 }
+        if node.val_str == "read_all" { return 1 }
     }
     if node.kind == "BinOp" {
         if node.val_str == "+" {
@@ -476,7 +505,6 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
 }
 
 def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -> list {
-    system.file_write(2, "CG:start\n")
     state = new_codegen(1, target_os)
 
     emit(state, ".text")
@@ -488,7 +516,6 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         emit(state, ".extern " + externs[i])
         i = i + 1
     }
-    system.file_write(2, "CG:externs_done\n")
 
     strings = codegen_common.get_data_strings()
     i = 0
@@ -512,7 +539,6 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     emit_data(state, ".global __nova_argv")
     emit_data(state, "__nova_argv:")
     emit_data(state, "    .quad 0")
-    system.file_write(2, "CG:data_section_done\n")
 
     i = 0
     while i < len(ast) {
@@ -534,7 +560,6 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         }
         i = i + 1
     }
-    system.file_write(2, "CG:struct_scan_done\n")
 
     functions = []
     top_level = []
@@ -550,23 +575,12 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         }
         i = i + 1
     }
-    system.file_write(2, "CG:classify_done\n")
-    system.file_write(2, "CG:n_funcs=")
-    system.file_write(2, str(len(functions)))
-    system.file_write(2, "\n")
 
     i_f = 0
     while i_f < len(functions) {
-        system.file_write(2, "CG:compile_func_start=")
-        system.file_write(2, str(i_f))
-        system.file_write(2, "\n")
         compile_function(state, functions[i_f], debug_mode)
-        system.file_write(2, "CG:compile_func_done=")
-        system.file_write(2, str(i_f))
-        system.file_write(2, "\n")
         i_f = i_f + 1
     }
-    system.file_write(2, "CG:func_loop_done\n")
 
     state.local_var_names = []
     state.local_vars = []
@@ -580,7 +594,6 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         scan_vars(state, top_level[i])
         i = i + 1
     }
-    system.file_write(2, "CG:scan_vars_done\n")
 
     # Align and convert offsets for fp-relative access
     stack_size = state.local_offset
@@ -619,19 +632,11 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         r = r + 1
     }
 
-    system.file_write(2, "CG:top_loop_start\n")
     i = 0
     while i < len(top_level) {
-        system.file_write(2, "CG:stmt=")
-        system.file_write(2, str(i))
-        system.file_write(2, "\n")
         compile_stmt(state, top_level[i], debug_mode)
-        system.file_write(2, "CG:stmt_done=")
-        system.file_write(2, str(i))
-        system.file_write(2, "\n")
         i = i + 1
     }
-    system.file_write(2, "CG:top_loop_done\n")
 
     r = len(state.used_regs) - 1
     while r >= 0 {
@@ -722,6 +727,5 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         }
     }
 
-    system.file_write(2, "CG:return\n")
     return result
 }

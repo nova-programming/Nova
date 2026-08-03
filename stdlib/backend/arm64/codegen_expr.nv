@@ -1135,14 +1135,17 @@ def compile_expr(state: CodegenState, node: AstNode) {
         if node.val_str == "type" {
             type_str = "unknown"
             if len(node.args) > 0 {
-                inferred = "unknown"
-                if node.args[0].inferred_type != 0 { inferred = node.args[0].inferred_type }
-                if inferred == "int" { type_str = "int" }
-                elif inferred == "string" { type_str = "string" }
-                elif inferred == "float" { type_str = "float" }
-                elif inferred == "bool" { type_str = "bool" }
-                elif inferred == "list" { type_str = "list" }
-                elif inferred == "dict" { type_str = "dict" }
+                if node.args[0].inferred_type != 0 {
+                    if node.args[0].inferred_type.kind == "scalar" {
+                        if node.args[0].inferred_type.name == "int" { type_str = "int" }
+                        elif node.args[0].inferred_type.name == "string" { type_str = "string" }
+                        elif node.args[0].inferred_type.name == "float" { type_str = "float" }
+                        elif node.args[0].inferred_type.name == "bool" { type_str = "bool" }
+                    } else {
+                        if node.args[0].inferred_type.kind == "list" { type_str = "list" }
+                        elif node.args[0].inferred_type.kind == "dict" { type_str = "dict" }
+                    }
+                }
             }
             push_data_label(state, "str_type_" + type_str)
             return
