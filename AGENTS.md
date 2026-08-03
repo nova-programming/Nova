@@ -579,3 +579,11 @@ galaxy publish             # Publish to registry
   - `stdlib/backend/arm64/codegen.nv` — added `CG:` markers at each major phase (start, externs, data, struct_scan, classify, per-function compile, scan_vars, per-statement compile, return)
   - `.github/workflows/ci.yml` — added `_current_tok` and `_str_sub` otool dumps for macOS
 - **To continue**: Push to `main`, check CI logs for `CG:*` markers, identify which statement/function crashes
+
+### Phase 20: Any-Typed Field Offsets + Native type() Fix (This Session - Aug 4, 2026)
+- **Bug 1 - any-typed field offset** (`codegen.nv` both arches): `get_prop_offset()` returned 0 for struct_name = "" (any-typed), so `node.inferred_type.name` read offset 0 (= `kind`) instead of offset 8 (= `name`). `is_string_expr()` then saw `kind=scalar, name=scalar` instead of `name=string`, mislabeling string-returning function calls and breaking string codegen.
+- **Fix**: Added `lookup_preferred_field(state, field_name)` helper (self-hosted) mapping `name -> Type`, `params -> AstNode`, `inferred_type -> AstNode`, `kind -> 0`. `get_prop_offset` consults it when struct_name is `""` or `"any"`. Bootstrap Python codegens got the same mapping via `_FIELD_PREFERRED` (x86_64 + arm64 `codegen.py`).
+- **Bug #2 - native `type()` always "unknown"**: The self-hosted `type()` handler compared the `Type` struct *pointer* to string literals (`inferred == "int"`) - never true, so every argument returned `"unknown"`. Rewrote to read struct fields (`inferred_type.kind` = "scalar" or "list"/"dict", `inferred_type.name` = int/string/float/bool) in both x86_64 and arm64 `codegen_expr.nv`.
+- **Debug clean-up**: Removed all `CF:`/`CG:`/`TYP:` debug markers from `stdlib/compiler.nv` and both backend codegen files.
+- **Verified**: `nova.exe build nova.nv` self-hosted works; `sftest.nv` (string fn) + `typetest.nv` (native type()) output correctly; full suite **284 passed, 1 skipped, 13 subtests**.
+- **Commit**: `76cf643` - pushed to main.

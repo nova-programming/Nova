@@ -84,7 +84,22 @@ jge _out_of_bounds
 
 Expression codegen reads `node.inferred_type` to select format strings, detect string vs list indexing, and choose integer vs string comparison. The helper functions `is_string_expr()` and `is_float_expr()` check `inferred_type` for Variable nodes — critical for recognizing strings assigned without type annotations (e.g., `s = "hello"`).
 
-The `type()` built-in resolves to a compile-time string constant in native codegen. Both x86_64 and ARM64 backends special-case `BuiltinCall("type", ...)` to emit `.asciz` strings (`"int"`, `"string"`, `"float"`, `"bool"`, `"list"`, `"dict"`, `"unknown"`) based on `node.args[0].inferred_type`. No runtime call needed.
+### Any-Typed Field Offsets
+
+When a field is accessed on a value whose `inferred_type` is unknown (empty struct name or `"any"`), `get_prop_offset()` cannot know which struct's layout to use. Instead of defaulting to offset 0, both backends consult `lookup_preferred_field(state, field_name)`, a helper that maps common field names to their canonical owning struct:
+
+- `kind` → offset 0 (`Type`, `Token`, etc. all store kind first)
+- `name` → `Type` struct (offset 8 — after `kind`, NOT 0 as in `TypeField`/`EnvVar`)
+- `params` → `AstNode` struct
+- `inferred_type` → `AstNode` struct
+
+This matters for self-hosted compiler code like `node.inferred_type.name` — previously it read offset 0 (`kind`), silently returning `"scalar"` instead of the actual type name and breaking `is_string_expr()`/`type()` for any-typed field chains. The bootstrap Python codegens carry the same mapping in their `_FIELD_PREFERRED` dict.
+
+### `type()` Builtin (Native)
+
+The `type()` built-in resolves to a compile-time string constant in native codegen. Both x86_64 and ARM64 backends special-case `Call("type", ...)` to emit `.asciz` strings (`"int"`, `"string"`, `"float"`, `"bool"`, `"list"`, `"dict"`, `"unknown"`) based on `node.args[0].inferred_type`. No runtime call needed.
+
+The self-hosted handlers inspect the `Type` struct's **fields** (`node.args[0].inferred_type.kind` / `.name`) rather than comparing the struct pointer to string literals — a pointer-to-string comparison could never match, and previously made `type()` return `"unknown"` for every argument natively.
 
 ## Variable-to-Register Promotion
 
@@ -119,3 +134,5 @@ The `CodegenState` struct carries a `target_os` field that influences:
 - **Frame pointer optimization (x86_64)**: `state.bp` changed from `"rbp"` to `"rsp"`. No `push rbp; mov rbp, rsp` in prologue. Variables accessed via `[rsp + offset]` with `local_var_base` shift. Epilogue uses `add rsp, local_offset` instead of `mov rsp, rbp; pop rbp`.
 - **Frame pointer optimization (ARM64)**: `state.bp` changed from `"fp"` to `"sp"`. No `mov fp, sp` in prologue. Variables accessed via `[sp, #+K]` with positive offsets from sp.
 - **Dict key/value swap fix**: `_dict_set` parameter order in `ArrayIndexAssign` codegen fixed across all 4 backends — x86_64 Python, ARM64 Python, self-hosted x86_64, self-hosted ARM64.
+- **Any-typed field offset fix**: `get_prop_offset()` returned 0 for empty struct names, so `node.inferred_type.name` read `kind` (offset 0) instead of `name` (offset 8). Added `lookup_preferred_field()` (self-hosted) and `_FIELD_PREFERRED` (bootstrap) mapping `name→Type`, `params→AstNode`, `inferred_type→AstNode`.
+- **Native `type()` builtin fix**: Self-hosted `type()` handler compared the Type struct pointer to string literals (never true → always `"unknown"`). Now reads `inferred_type.kind`/`.name` struct fields to select the result string.
