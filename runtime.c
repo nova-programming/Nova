@@ -410,6 +410,18 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
     void *saved_lr = ((void **)fp)[1];
     char line[512];
     int len;
+    /* Dump the raw ucontext (3rd handler arg, x2 at entry) — contains the
+     * faulted register file: x0-x28, fp, lr, sp, pc. */
+    if (uctx) {
+        unsigned char *ucb = (unsigned char *)uctx;
+        for (int i = 0; i < 256; i += 16) {
+            len = snprintf(line, sizeof(line), "UCTX+%03x:", i);
+            for (int j = 0; j < 16; j++)
+                len += snprintf(line + len, sizeof(line) - len, " %02x", ucb[i + j]);
+            len += snprintf(line + len, sizeof(line) - len, "\n");
+            write(2, line, len);
+        }
+    }
     /* If the fault is in _current_tok called from _parse (frame locals at
      * [fp-8..-56]), dump them to identify what corrupted the ParserState. */
     if ((long long)info->si_addr == 0) {
