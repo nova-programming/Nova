@@ -408,10 +408,31 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
     void *fp = __builtin_frame_address(0);
     void *saved_fp = ((void **)fp)[0];
     void *saved_lr = ((void **)fp)[1];
-    char line[256];
-    int len = snprintf(line, sizeof(line),
-                       "FAULT: addr=%p pc=%p fault_fp=%p fault_lr=%p\n",
-                       info->si_addr, buf[2], saved_fp, saved_lr);
+    char line[512];
+    int len;
+    /* If the fault is in _current_tok called from _parse (frame locals at
+     * [fp-8..-56]), dump them to identify what corrupted the ParserState. */
+    if ((long long)info->si_addr == 0) {
+        void *p_state  = ((void **)((char *)saved_fp - 24))[0];
+        void *p_tok    = ((void **)((char *)saved_fp - 48))[0];
+        void *p_stmt   = ((void **)((char *)saved_fp - 56))[0];
+        void *p_stmts  = ((void **)((char *)saved_fp - 32))[0];
+        void *p_tokarg = ((void **)((char *)saved_fp - 8))[0];
+        void *p_flag   = ((void **)((char *)saved_fp - 40))[0];
+        void *s_tokens = p_state ? ((void **)((char *)p_state + 0))[0] : 0;
+        long long s_pos = p_state ? *(long long *)((char *)p_state + 8) : -1;
+        void *s_filename = p_state ? ((void **)((char *)p_state + 16))[0] : 0;
+        long long s_cc = p_state ? *(long long *)((char *)p_state + 24) : -1;
+        len = snprintf(line, sizeof(line),
+            "PARSE_FRAME: state=%p tok=%p stmt=%p stmts=%p tokarg=%p flag=%p\n"
+            "STATE_MEM: tokens=%p pos=%lld filename=%p comp_counter=%lld\n",
+            p_state, p_tok, p_stmt, p_stmts, p_tokarg, p_flag,
+            s_tokens, s_pos, s_filename, s_cc);
+        write(2, line, len);
+    }
+    len = snprintf(line, sizeof(line),
+                   "FAULT: addr=%p pc=%p fault_fp=%p fault_lr=%p\n",
+                   info->si_addr, buf[2], saved_fp, saved_lr);
     write(2, line, len);
     backtrace_symbols_fd(buf, n, 2);
     _exit(139);
