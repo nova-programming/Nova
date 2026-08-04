@@ -398,7 +398,8 @@ SYSCALL void *_realloc(void *p, size_t s) {
     void *r = _diag_real_realloc(p, s);
     FILE *f = fopen("nova_diag.txt", "a");
     if (f) {
-        fprintf(f, "R: p=%p s=%llu out=%p\n", p, (unsigned long long)s, r);
+        fprintf(f, "R: p=%p s=%llu out=%p from=%p\n", p, (unsigned long long)s, r,
+                __builtin_return_address(0));
         fclose(f);
     }
     return r;
@@ -406,6 +407,8 @@ SYSCALL void *_realloc(void *p, size_t s) {
 #endif /* defined(MACOS) */
 
 /* SIGSEGV/SIGBUS handler for debug — prints fault address, registers, backtrace */
+/* Write to BOTH fd 1 and fd 2 — the failing fd must not hide the dump. */
+static void _w2(const char *s, int n) { (void)!write(1, s, n); (void)!write(2, s, n); }
 #if defined(_WIN32)
 static void _sigsegv(int sig) {
     void *buf[64];
@@ -424,7 +427,7 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
     void *buf[64];
     /* Raw-write the marker FIRST — a corrupted heap can crash fopen/fprintf
      * inside the handler, so everything critical goes to stderr via write(). */
-    write(2, sig == 11 ? "SIGNAL:SIGSEGV\n" : "SIGNAL:SIGBUS\n", 16);
+    _w2(sig == 11 ? "SIGNAL:SIGSEGV\n" : "SIGNAL:SIGBUS\n", 16);
     int n = backtrace(buf, 64);
     char line[512];
     int len;
@@ -437,7 +440,7 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
         unsigned char *mb = (unsigned char *)mctx;
         char hdr[64];
         int hl = snprintf(hdr, sizeof(hdr), "UCTX=%p UC_MCONTEXT=%p\n", uctx, mctx);
-        write(2, hdr, hl);
+        _w2(hdr, hl);
         if (df) fputs(hdr, df);
         if (mb) {
             unsigned long long far = *(unsigned long long *)(mb + 0);
@@ -452,7 +455,7 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
             len = snprintf(line, sizeof(line),
                 "SIG: far=%llx esr=%x x0=%llx fp=%llx lr=%llx sp=%llx pc=%llx cpsr=%x\n",
                 far, esr, x0, x29, x30, x31, pc, cpsr);
-            write(2, line, len);
+            _w2(line, len);
             if (df) fputs(line, df);
             /* _parse frame locals: [fp-8] tokens, [fp-16] filename,
              * [fp-24] ps, [fp-32] stmts, [fp-40] flag, [fp-48] tok. */
@@ -461,7 +464,7 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
                 len = snprintf(line, sizeof(line),
                     "PARSE: tokens=%llx filename=%llx ps=%llx stmts=%llx flag=%llx tok=%llx saved_fp=%llx saved_lr=%llx\n",
                     f[-1], f[-2], f[-3], f[-4], f[-5], f[-6], f[0], f[1]);
-                write(2, line, len);
+                _w2(line, len);
                 if (df) fputs(line, df);
                 unsigned long long ps = f[-3];
                 if (ps > 0x100000000LL && ps < 0x2000000000LL) {
@@ -469,7 +472,7 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
                     len = snprintf(line, sizeof(line),
                         "PS: tokens=%llx pos=%lld filename=%llx comp_counter=%lld\n",
                         p[0], (long long)p[1], p[2], (long long)p[3]);
-                    write(2, line, len);
+                    _w2(line, len);
                     if (df) fputs(line, df);
                     unsigned long long tk = p[0];
                     if (tk > 0x100000000LL && tk < 0x2000000000LL) {
@@ -484,14 +487,14 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
                         len = snprintf(line, sizeof(line),
                             "TOKENS: count=%u cap=%u data=%llx pos=%lld elem=%llx\n",
                             cnt, cap, data, pos, el);
-                        write(2, line, len);
+                        _w2(line, len);
                         if (df) fputs(line, df);
                         if (el > 0x100000000LL && el < 0x2000000000LL) {
                             len = snprintf(line, sizeof(line),
                                 "ELEM: kind=%llx v2=%llx v3=%llx v4=%llx\n",
                                 ((unsigned long long *)el)[0], ((unsigned long long *)el)[1],
                                 ((unsigned long long *)el)[2], ((unsigned long long *)el)[3]);
-                            write(2, line, len);
+                            _w2(line, len);
                             if (df) fputs(line, df);
                         }
                         /* Heap hexdump around the tokens header: covers the
@@ -518,7 +521,7 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
                 ((unsigned long long *)ts)[5], ((unsigned long long *)ts)[6],
                 ((unsigned long long *)ts)[7], ((unsigned long long *)ts)[8],
                 ((unsigned long long *)ts)[9]);
-            write(2, line, len);
+            _w2(line, len);
             len = snprintf(line, sizeof(line),
                 "REGS: x10=%llx x11=%llx x12=%llx x13=%llx x14=%llx x15=%llx x16=%llx x17=%llx x18=%llx\n",
                 ((unsigned long long *)ts)[10], ((unsigned long long *)ts)[11],
@@ -526,7 +529,7 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
                 ((unsigned long long *)ts)[14], ((unsigned long long *)ts)[15],
                 ((unsigned long long *)ts)[16], ((unsigned long long *)ts)[17],
                 ((unsigned long long *)ts)[18]);
-            write(2, line, len);
+            _w2(line, len);
             len = snprintf(line, sizeof(line),
                 "REGS: x19=%llx x20=%llx x21=%llx x22=%llx x23=%llx x24=%llx x25=%llx x26=%llx x27=%llx x28=%llx\n",
                 ((unsigned long long *)ts)[19], ((unsigned long long *)ts)[20],
@@ -534,7 +537,7 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
                 ((unsigned long long *)ts)[23], ((unsigned long long *)ts)[24],
                 ((unsigned long long *)ts)[25], ((unsigned long long *)ts)[26],
                 ((unsigned long long *)ts)[27], ((unsigned long long *)ts)[28]);
-            write(2, line, len);
+            _w2(line, len);
             /* Hexdumps: file only (best-effort; fopen/malloc may crash on a
              * corrupted heap — critical lines are already on stderr). */
             df = fopen("nova_diag.txt", "a");
@@ -566,20 +569,30 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
     }
     len = snprintf(line, sizeof(line),
                    "FAULT: addr=%p bt_pc=%p\n", info->si_addr, buf[2]);
-    write(2, line, len);
+    _w2(line, len);
     if (df) { fputs(line, df); fclose(df); }
+    backtrace_symbols_fd(buf, n, 1);
     backtrace_symbols_fd(buf, n, 2);
     _exit(139);
 }
+/* Alt stack: if the faulting sp is garbage/guard-page, the kernel can't set
+ * up a signal frame on it — the handler silently never runs. SA_ONSTACK +
+ * sigaltstack lets the handler run regardless of the corrupted sp. */
+static char _alt_stack[65536];
 __attribute__((constructor))
 static void _init_sig(void) {
     struct sigaction sa;
+    stack_t ss;
     memset(&sa, 0, sizeof(sa));
     sa.sa_sigaction = _sigsegv;
-    sa.sa_flags = SA_SIGINFO;
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
     sigemptyset(&sa.sa_mask);
     sigaction(SIGSEGV, &sa, NULL);
     sigaction(SIGBUS, &sa, NULL);
+    memset(&ss, 0, sizeof(ss));
+    ss.ss_sp = _alt_stack;
+    ss.ss_size = sizeof(_alt_stack);
+    sigaltstack(&ss, NULL);
 }
 #endif /* defined(_WIN32) */
 
