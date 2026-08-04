@@ -382,7 +382,8 @@ SYSCALL int _fflush(int s) { return fflush((FILE*)(intptr_t)s); }
 SYSCALL void _exit(int c) { exit(c); }
 #endif /* defined(LINUX_WRAP) */
 
-/* SIGSEGV/SIGBUS handler for debug — prints backtrace */
+/* SIGSEGV/SIGBUS handler for debug — prints fault address, registers, backtrace */
+#if defined(_WIN32)
 static void _sigsegv(int sig) {
     void *buf[64];
     int n = backtrace(buf, 64);
@@ -395,6 +396,41 @@ static void _init_sig(void) {
     signal(SIGSEGV, _sigsegv);
     signal(SIGBUS, _sigsegv);
 }
+#else
+#include <ucontext.h>
+static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
+    void *buf[64];
+    int n = backtrace(buf, 64);
+    write(2, sig == 11 ? "SIGNAL:SIGSEGV\n" : "SIGNAL:SIGBUS\n", 16);
+#if defined(__APPLE__)
+    char line[256];
+    ucontext_t *uc = (ucontext_t *)uctx;
+    _STRUCT_ARM64_THREAD_STATE64 *ss = &uc->uc_mcontext->__ss;
+    int len = snprintf(line, sizeof(line),
+                       "FAULT: addr=%p pc=0x%llx fp=0x%llx sp=0x%llx lr=0x%llx\n",
+                       info->si_addr,
+                       (long long)ss->__pc, (long long)ss->__fp,
+                       (long long)ss->__sp, (long long)ss->__lr);
+    write(2, line, len);
+#else
+    char line[128];
+    int len = snprintf(line, sizeof(line), "FAULT: addr=%p\n", info->si_addr);
+    write(2, line, len);
+#endif
+    backtrace_symbols_fd(buf, n, 2);
+    _exit(139);
+}
+__attribute__((constructor))
+static void _init_sig(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = _sigsegv;
+    sa.sa_flags = SA_SIGINFO;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+}
+#endif /* defined(_WIN32) */
 
 /* Out-of-bounds globals and handler (also in Windows section above) */
 long long _oob_file_ptr;
