@@ -703,7 +703,7 @@ def link(sections: list) -> list {
     append_bytes(image, idata)
     pad_to(image, idata_raw_ptr + idata_raw_size)
 
-    return [image, 0]
+    return image
 }
 
 def link_bare(sections: list, load_addr: int) -> list {
