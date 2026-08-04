@@ -117,9 +117,9 @@ jobs:
             echo "=== nova_diag.txt ==="
             cat ./nova_diag.txt 2>&1 || echo "(no nova_diag.txt)"
           fi
-          if [ "${{ runner.os }}" = "macOS" ] && [ -f ./ci-tmp/selfhost.s ]; then
-            echo "=== selfhost.s (first 60 lines) ==="
-            head -60 ./ci-tmp/selfhost.s
+          if [ "${{ runner.os }}" = "macOS" ] && [ -f ./ci-tmp/selfhost.nv.s ]; then
+            echo "=== selfhost.nv.s (first 60 lines) ==="
+            head -60 ./ci-tmp/selfhost.nv.s
           fi
           exit $rc
 
