@@ -287,6 +287,10 @@ int main(void) {
  * need the standard headers for our own runtime functions (dict, etc.). */
 #if defined(LINUX_WRAP)
 #define _GNU_SOURCE
+#else
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 700
+#endif
 #endif
 #include <stdio.h>
 #include <stdlib.h>
