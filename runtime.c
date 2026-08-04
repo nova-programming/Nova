@@ -287,10 +287,6 @@ int main(void) {
  * need the standard headers for our own runtime functions (dict, etc.). */
 #if defined(LINUX_WRAP)
 #define _GNU_SOURCE
-#else
-#ifndef _XOPEN_SOURCE
-#define _XOPEN_SOURCE 700
-#endif
 #endif
 #include <stdio.h>
 #include <stdlib.h>
@@ -401,26 +397,22 @@ static void _init_sig(void) {
     signal(SIGBUS, _sigsegv);
 }
 #else
-#include <ucontext.h>
 static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
     void *buf[64];
     int n = backtrace(buf, 64);
     write(2, sig == 11 ? "SIGNAL:SIGSEGV\n" : "SIGNAL:SIGBUS\n", 16);
-#if defined(__APPLE__)
+    /* On Darwin, the kernel delivers the signal with all GPRs except sp/lr/pc
+     * preserved, so the handler's saved frame pointer at [fp+0] is the
+     * faulted thread's x29 and [fp+8] the interrupted LR. backtrace()'s
+     * frame[2] is the faulting PC (via sigtramp's return address). */
+    void *fp = __builtin_frame_address(0);
+    void *saved_fp = ((void **)fp)[0];
+    void *saved_lr = ((void **)fp)[1];
     char line[256];
-    ucontext_t *uc = (ucontext_t *)uctx;
-    _STRUCT_ARM64_THREAD_STATE64 *ss = &uc->uc_mcontext->__ss;
     int len = snprintf(line, sizeof(line),
-                       "FAULT: addr=%p pc=0x%llx fp=0x%llx sp=0x%llx lr=0x%llx\n",
-                       info->si_addr,
-                       (long long)ss->__pc, (long long)ss->__fp,
-                       (long long)ss->__sp, (long long)ss->__lr);
+                       "FAULT: addr=%p pc=%p fault_fp=%p fault_lr=%p\n",
+                       info->si_addr, buf[2], saved_fp, saved_lr);
     write(2, line, len);
-#else
-    char line[128];
-    int len = snprintf(line, sizeof(line), "FAULT: addr=%p\n", info->si_addr);
-    write(2, line, len);
-#endif
     backtrace_symbols_fd(buf, n, 2);
     _exit(139);
 }
