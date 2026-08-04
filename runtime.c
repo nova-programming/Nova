@@ -410,17 +410,23 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
     void *saved_lr = ((void **)fp)[1];
     char line[512];
     int len;
-    /* Dump the raw ucontext (3rd handler arg, x2 at entry) — contains the
-     * faulted register file: x0-x28, fp, lr, sp, pc. */
+    /* Dump the machine context (thread state) via uc_mcontext pointer at
+     * uctx+0x30 (Darwin arm64 ucontext layout: onstack 4, sigmask 4,
+     * uc_stack 16, uc_link 8, sigmask2 4, pad 4, uc_mcontext 8). */
     if (uctx) {
-        unsigned char *ucb = (unsigned char *)uctx;
-        for (int i = 0; i < 256; i += 16) {
-            len = snprintf(line, sizeof(line), "UCTX+%03x:", i);
-            for (int j = 0; j < 16; j++)
-                len += snprintf(line + len, sizeof(line) - len, " %02x", ucb[i + j]);
-            len += snprintf(line + len, sizeof(line) - len, "\n");
-            write(2, line, len);
-        }
+        void *mctx = *(void **)((char *)uctx + 0x30);
+        unsigned char *mb = (unsigned char *)mctx;
+        char hdr[64];
+        int hl = snprintf(hdr, sizeof(hdr), "UCTX=%p UC_MCONTEXT=%p\n", uctx, mctx);
+        write(2, hdr, hl);
+        if (mb)
+            for (int i = 0; i < 272; i += 16) {
+                len = snprintf(line, sizeof(line), "MCTX+%03x:", i);
+                for (int j = 0; j < 16; j++)
+                    len += snprintf(line + len, sizeof(line) - len, " %02x", mb[i + j]);
+                len += snprintf(line + len, sizeof(line) - len, "\n");
+                write(2, line, len);
+            }
     }
     /* If the fault is in _current_tok called from _parse (frame locals at
      * [fp-8..-56]), dump them to identify what corrupted the ParserState. */
