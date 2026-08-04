@@ -27,6 +27,7 @@ class VirtualMachine:
         self.strings = program["strings"]
         self.functions = program["functions"]
         self.classes = program["classes"]
+        self.line_map = program.get("line_map", {})
         self.stack = []
         self.frames = []
         self.env = {}
@@ -298,6 +299,26 @@ def _op_load_ptr(vm, arg):
     val = struct.unpack_from("<i", vm.heap, ptr)[0]
     vm.stack.append(val)
 
+
+def _op_load_ptr_byte(vm, arg):
+    ptr = vm.stack.pop()
+    if isinstance(ptr, bytearray) and len(ptr) == 1:
+        vm.stack.append(ptr[0])
+    elif isinstance(ptr, int):
+        vm.stack.append(vm.heap[ptr])
+    else:
+        vm.stack.append(0)
+
+
+def _op_load_ptr_word(vm, arg):
+    ptr = vm.stack.pop()
+    if isinstance(ptr, bytearray) and len(ptr) >= 2:
+        vm.stack.append(int.from_bytes(ptr[:2], "little"))
+    elif isinstance(ptr, int):
+        vm.stack.append(struct.unpack_from("<H", vm.heap, ptr)[0])
+    else:
+        vm.stack.append(0)
+
 def _op_load_index(vm, arg):
     index = vm.stack.pop(); base = vm.stack.pop()
     if isinstance(base, bytearray):
@@ -425,7 +446,8 @@ def _op_new(vm, arg):
 def _op_load_attr(vm, arg):
     prop = arg; instance = vm.stack.pop()
     if not isinstance(instance, Instance):
-        raise Exception("Property access on non-object")
+        nm = getattr(instance, "class_name", None)
+        raise Exception(f"Property access on non-object: .{prop} on {type(instance).__name__}{'('+str(nm)+')' if nm else ''}")
     vm.stack.append(instance.fields.get(prop, 0))
 
 def _op_store_attr(vm, arg):
@@ -449,7 +471,7 @@ def _op_call_method(vm, arg):
     args = [vm.stack.pop() for _ in range(num_args)]
     args.reverse()
     if isinstance(instance, int) and instance == 0:
-        raise Exception("Attempted method call on null/uninitialized variable")
+        raise Exception(f"Attempted method call on null/uninitialized variable: .{method_name}()")
     if isinstance(instance, str) and instance in vm.libraries:
         lib = vm.libraries[instance]
         try:
@@ -686,6 +708,8 @@ _OPCODE_DISPATCH = {
     OpCode.FREE: _op_free,
     OpCode.STORE_PTR: _op_store_ptr,
     OpCode.LOAD_PTR: _op_load_ptr,
+    OpCode.LOAD_PTR_BYTE: _op_load_ptr_byte,
+    OpCode.LOAD_PTR_WORD: _op_load_ptr_word,
     OpCode.LOAD_INDEX: _op_load_index,
     OpCode.STORE_INDEX: _op_store_index,
     OpCode.NEW_LIST: _op_new_list,
@@ -710,14 +734,77 @@ _OPCODE_DISPATCH = {
 }
 
 def _vm_run(self):
-    while self.ip < len(self.code):
-        opcode, arg = self.code[self.ip]
-        self.ip += 1
-        handler = _OPCODE_DISPATCH.get(opcode)
-        if handler:
-            handler(self, arg)
-        else:
-            raise Exception(f"Unknown opcode: {opcode}")
+    try:
+        while self.ip < len(self.code):
+            opcode, arg = self.code[self.ip]
+            self.ip += 1
+            handler = _OPCODE_DISPATCH.get(opcode)
+            if handler:
+                handler(self, arg)
+            else:
+                raise Exception(f"Unknown opcode: {opcode}")
+    except Exception as e:
+        print(f"VM traceback (ip={self.ip}):")
+        print(f"  constants[:20] = {self.constants[:20]}")
+        if self.frames:
+            fr = self.frames[-1]
+            keys = list(fr.locals.keys())
+            for k in keys[:8]:
+                v = fr.locals[k]
+                t = type(v).__name__
+                if isinstance(v, Instance):
+                    t = f"Instance({v.class_name}, fields={list(v.fields.keys())[:8]})"
+                    if v.class_name == "AstNode":
+                        t += f" kind={v.fields.get('kind')} val_str={v.fields.get('val_str')}"
+                elif isinstance(v, bytearray):
+                    t = f"bytearray(len={len(v)})"
+                print(f"  local {k}: {t}")
+        loc = self.line_map.get(self.ip) or self.line_map.get(max(self.ip - 1, 0))
+        if loc:
+            print(f"  at {loc[0]} line {loc[1]}")
+        fns = sorted(self.functions.items(), key=lambda kv: kv[1]["ip"])
+        cur_func = None
+        for name, meta in fns:
+            if meta["ip"] <= self.ip:
+                cur_func = name
+        if cur_func:
+            print(f"  in {cur_func}")
+        for fr in reversed(self.frames):
+            print(f"  frame return@ {fr.return_address}")
+            ra = fr.return_address
+            owner = None
+            for nm, meta in fns:
+                if meta["ip"] <= ra - 1:
+                    owner = nm
+            if owner:
+                print(f"    owner: {owner}")
+            for j in range(max(0, ra - 3), ra + 1):
+                if j < len(self.code):
+                    print(f"    [{j}] {self.code[j]}")
+            loc = self.line_map.get(ra)
+            if loc:
+                print(f"    src: {loc[0]} line {loc[1]}")
+        print(f"  [crashed at] [{self.ip}] {self.code[self.ip] if self.ip < len(self.code) else 'EOF'}")
+        for j in range(max(0, self.ip - 8), self.ip):
+            if j < len(self.code):
+                print(f"    [{j}] {self.code[j]}")
+        loc = self.line_map.get(self.ip)
+        if loc:
+            print(f"  src: {loc[0]} line {loc[1]}")
+        # Map enclosing call sites to function names so we get a real call chain
+        chain = []
+        for ra in [fr.return_address for fr in self.frames] + [self.ip]:
+            name = None
+            for nm, meta in fns:
+                if meta["ip"] <= ra:
+                    name = nm
+                else:
+                    break
+            if name and (not chain or chain[-1] != name):
+                chain.append(name)
+        for nm in chain:
+            print(f"  in {nm}")
+        raise
 
 VirtualMachine.run = _vm_run
 
@@ -1001,6 +1088,48 @@ def _builtin_to_string(m, args):
     else:
         m.stack.append(bytearray(str(val).encode('utf-8')))
 
+
+def _builtin_str_sub(m, args):
+    s = args[0]
+    start = args[1] if len(args) > 1 else 0
+    end = args[2] if len(args) > 2 else len(s)
+    if isinstance(s, bytearray):
+        m.stack.append(s[start:end])
+    else:
+        m.stack.append(bytearray())
+
+
+def _builtin_str_eq(m, args):
+    m.stack.append(1 if m._to_str(args[0]) == m._to_str(args[1]) else 0)
+
+
+def _builtin_str_contains(m, args):
+    m.stack.append(1 if m._to_str(args[1]) in m._to_str(args[0]) else 0)
+
+
+def _builtin_str_starts_with(m, args):
+    m.stack.append(1 if m._to_str(args[0]).startswith(m._to_str(args[1])) else 0)
+
+
+def _builtin_str_len(m, args):
+    m.stack.append(len(m._to_str(args[0])))
+
+
+def _builtin_atoi(m, args):
+    try:
+        m.stack.append(int(m._to_str(args[0])))
+    except (ValueError, TypeError):
+        m.stack.append(0)
+
+
+def _builtin_get_char_code(m, args):
+    ch = m._to_str(args[0])
+    m.stack.append(ord(ch[0]) if ch else 0)
+
+
+def _builtin_sys_flush_c(m, args):
+    m.stack.append(0)
+
 _BUILTIN_HANDLERS = {
     "type": _builtin_type,
     "call": _builtin_call,
@@ -1011,6 +1140,15 @@ _BUILTIN_HANDLERS = {
     "file_exists": _builtin_file_exists,
     "file_size": _builtin_file_size,
     "file_type": _builtin_file_type,
+    # String library builtins (used by self-hosted stdlib)
+    "str_sub": _builtin_str_sub,
+    "str_eq": _builtin_str_eq,
+    "str_contains": _builtin_str_contains,
+    "str_starts_with": _builtin_str_starts_with,
+    "str_len": _builtin_str_len,
+    "atoi": _builtin_atoi,
+    "get_char_code": _builtin_get_char_code,
+    "sys_flush_c": _builtin_sys_flush_c,
     # Standard library math functions
     "square": _builtin_square,
     "cube": _builtin_cube,

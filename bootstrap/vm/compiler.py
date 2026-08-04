@@ -17,6 +17,11 @@ class Compiler:
         self.temp_counter = 0
         self.resolver = ModuleResolver(base_dir=base_dir)
         self.base_dir = base_dir or os.getcwd()
+        self.imported_modules = set()
+        self.compiled_modules = set()
+        self.line_map = {}   # ip -> (module_name, line)
+        self._cur_line_ctx = None
+        self._cur_module = None
 
     def add_const(self, value):
         if value in self.constants:
@@ -33,6 +38,8 @@ class Compiler:
     def emit(self, opcode, arg=None):
         idx = len(self.code)
         self.code.append([opcode, arg])
+        if self._cur_line_ctx is not None:
+            self.line_map[idx] = self._cur_line_ctx
         return idx
 
     def patch_jump(self, idx, target):
@@ -41,6 +48,12 @@ class Compiler:
     def compile_import(self, node):
         """Resolve and compile a .nv module import."""
         module_name = node.module
+        if module_name in self.compiled_modules:
+            return
+        self.compiled_modules.add(module_name)
+        self.imported_modules.add(module_name)
+        prev_mod = self._cur_module
+        self._cur_module = module_name
         try:
             imported_ast = self.resolver.resolve(module_name, self.base_dir)
         except FileNotFoundError as e:
@@ -48,7 +61,9 @@ class Compiler:
 
         # First pass: collect functions, classes, and data from the imported module
         for stmt in imported_ast:
-            if isinstance(stmt, ClassDef):
+            if isinstance(stmt, Import):
+                self.imported_modules.add(stmt.module)
+            elif isinstance(stmt, ClassDef):
                 self.classes[stmt.name] = stmt
             elif isinstance(stmt, Data):
                 self.classes[stmt.name] = stmt
@@ -64,6 +79,11 @@ class Compiler:
                             "ip": -1,
                             "params": raw_stmt.params
                         }
+
+        # Recursively compile nested imports of the imported module
+        for stmt in imported_ast:
+            if isinstance(stmt, Import):
+                self.compile_import(stmt)
 
         # Second pass: compile function/method bodies from the imported module
         for stmt in imported_ast:
@@ -84,9 +104,12 @@ class Compiler:
             if not isinstance(stmt, (ClassDef, Function, Data, Import)):
                 self.compile_stmt(stmt)
 
+        self._cur_module = prev_mod
+
     def compile(self, statements):
         # We start by adding a jump to main. Later, we'll patch this.
         entry_jump = self.emit(OpCode.JUMP, 0)
+        self._cur_module = "<main>"
 
         main_start = -1
 
@@ -148,7 +171,8 @@ class Compiler:
             "constants": self.constants,
             "strings": self.strings,
             "functions": self.functions,
-            "classes": self.classes
+            "classes": self.classes,
+            "line_map": self.line_map
         }
 
     def compile_function_body(self, node):
@@ -160,7 +184,39 @@ class Compiler:
         self.emit(OpCode.LOAD_CONST, self.add_const(0))
         self.emit(OpCode.RETURN)
 
+    def compile_andor(self, node):
+        """Short-circuit and/or matching native codegen semantics.
+
+        and: result = right if left truthy else left (kept in temp).
+        or:  result = left if left truthy else right.
+        """
+        tmp = f"__bo_tmp{self.temp_counter}"
+        self.temp_counter += 1
+        if node.op == "and":
+            self.compile_expr(node.left)
+            self.emit(OpCode.STORE_NAME, tmp)
+            self.emit(OpCode.LOAD_NAME, tmp)
+            jif = self.emit(OpCode.JUMP_IF_FALSE, 0)
+            self.compile_expr(node.right)
+            end = self.emit(OpCode.JUMP, 0)
+            jif_target = len(self.code)
+            self.patch_jump(jif, jif_target)
+            self.emit(OpCode.LOAD_NAME, tmp)
+            self.patch_jump(end, len(self.code))
+        else:
+            self.compile_expr(node.left)
+            self.emit(OpCode.STORE_NAME, tmp)
+            self.emit(OpCode.LOAD_NAME, tmp)
+            jif = self.emit(OpCode.JUMP_IF_FALSE, 0)
+            self.emit(OpCode.LOAD_NAME, tmp)
+            end = self.emit(OpCode.JUMP, 0)
+            jif_target = len(self.code)
+            self.patch_jump(jif, jif_target)
+            self.compile_expr(node.right)
+            self.patch_jump(end, len(self.code))
+
     def compile_stmt(self, node):
+        self._cur_line_ctx = (self._cur_module, getattr(node, "line", 0))
         if isinstance(node, Print):
             self.compile_expr(node.value)
             self.emit(OpCode.PRINT)
@@ -386,13 +442,15 @@ class Compiler:
             elif node.op == "~":
                 self.emit(OpCode.BIT_NOT)
         elif isinstance(node, BinOp):
+            if node.op in ("and", "or"):
+                self.compile_andor(node)
+                return
             self.compile_expr(node.left)
             self.compile_expr(node.right)
             ops = {
                 "+": OpCode.ADD, "-": OpCode.SUB,
                 "*": OpCode.MUL, "/": OpCode.DIV,
                 "%": OpCode.MOD,
-                "and": OpCode.AND, "or": OpCode.OR,
                 "&": OpCode.BIT_AND, "|": OpCode.BIT_OR, "^": OpCode.BIT_XOR,
                 "<<": OpCode.SHL, ">>": OpCode.SAR
             }
@@ -429,8 +487,12 @@ class Compiler:
         elif isinstance(node, MethodCall):
             for arg in node.args:
                 self.compile_expr(arg)
-            self.compile_expr(node.instance)
-            self.emit(OpCode.CALL_METHOD, (node.method_name, len(node.args)))
+            # Module-qualified function call? e.g. codegen_common.get_externs()
+            if isinstance(node.instance, Variable) and node.instance.name in self.imported_modules:
+                self.emit(OpCode.CALL, (node.method_name, len(node.args)))
+            else:
+                self.compile_expr(node.instance)
+                self.emit(OpCode.CALL_METHOD, (node.method_name, len(node.args)))
         elif isinstance(node, Call):
             for arg in node.args:
                 self.compile_expr(arg)
@@ -468,6 +530,10 @@ class Compiler:
                 self.emit(OpCode.LOAD_PTR)
             elif node.property == "addr":
                 pass # Already top of stack
+            elif node.property == "value_byte":
+                self.emit(OpCode.LOAD_PTR_BYTE)
+            elif node.property == "value_word":
+                self.emit(OpCode.LOAD_PTR_WORD)
             else:
                 raise Exception(f"Pointer property {node.property} not yet implemented in VM")
         elif isinstance(node, StrConvert):

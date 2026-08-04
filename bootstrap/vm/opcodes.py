@@ -52,6 +52,8 @@ class OpCode(Enum):
     ALLOC = auto()        # Allocate memory on heap
     FREE = auto()         # Free memory from heap
     LOAD_PTR = auto()     # Load value from pointer address
+    LOAD_PTR_BYTE = auto()# Load single byte from pointer address
+    LOAD_PTR_WORD = auto()# Load 16-bit word from pointer address
     STORE_PTR = auto()    # Store value to pointer address
     PTR_OFFSET = auto()   # Calculate pointer offset (for arrays/structs)
     LOAD_INDEX = auto()   # Load from array index

@@ -1,0 +1,41 @@
+# Rich program: data, functions, strings, lists, floats, control flow
+data Point {
+    x: int
+    y: int
+}
+
+def add(a: int, b: int) -> int {
+    return a + b
+}
+
+def greet(name: string) -> string {
+    return "Hello, " + name
+}
+
+def compute(n: int) -> float {
+    sumf = 0.0
+    i = 0
+    while i < n {
+        sumf = sumf + 1.5
+        i = i + 1
+    }
+    return sumf
+}
+
+p = Point()
+p.x = 3
+p.y = 4
+
+items = [1, 2, 3]
+mapping = {"a": 1, "b": 2}
+
+x = 10
+if x > 5 {
+    print(greet("world"))
+    print(add(p.x, p.y))
+    print(compute(5))
+    print(len(items))
+    print(len(mapping))
+} else {
+    print("fail")
+}
