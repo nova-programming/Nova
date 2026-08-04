@@ -346,10 +346,17 @@ SYSCALL int _printf(const char *fmt, int64_t arg) {
     }
     return written;
 }
-/* Fixed-arg signature — same reasoning as _printf above */
+/* Fixed-arg signature — same reasoning as _printf above.
+ * LINUX ONLY: on Linux, libc exports `sprintf` (no underscore) so the
+ * codegen's `bl _sprintf` needs this bridge. On macOS, libc exports
+ * `_sprintf` directly AND this wrapper would recurse infinitely: the
+ * `sprintf()` call inside compiles to `bl _sprintf`, which the Mach-O
+ * alias maps back to this very function. */
+#if defined(LINUX_WRAP)
 SYSCALL int _sprintf(char *b, const char *fmt, int64_t arg) {
     return sprintf(b, fmt, arg);
 }
+#endif
 /* _system_c: called from Nova stdlib's system_exec(). Safe to alias on macOS
  * because it calls system() -> Mach-O _system (not aliased), no recursion. */
 SYSCALL int _system_c(const char *c) { return system(c); }
@@ -723,7 +730,10 @@ __asm__(".globl _sys_write_raw_c\n.set _sys_write_raw_c, __sys_write_raw_c");
  * Defining _malloc on macOS would cause infinite recursion: _malloc calls
  * malloc() → `bl _malloc` → back to _malloc. */
 __asm__(".globl _printf\n.set _printf, __printf");
-__asm__(".globl _sprintf\n.set _sprintf, __sprintf");
+/* _sprintf deliberately NOT aliased: macOS libc exports `_sprintf` (=sprintf)
+ * directly, so the codegen's `bl _sprintf` resolves to the system function.
+ * Aliasing it to __sprintf made the wrapper's internal `sprintf()` call
+ * recurse into itself until stack exhaustion. */
 __asm__(".globl _system_c\n.set _system_c, __system_c");
 __asm__(".globl _oob_file_ptr\n.set _oob_file_ptr, __oob_file_ptr");
 __asm__(".globl _oob_line\n.set _oob_line, __oob_line");
