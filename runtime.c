@@ -499,6 +499,29 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
                     _w2(line, len);
                 }
 #endif
+            /* Walk the frame chain upward from the faulted fp and resolve each
+             * caller's saved lr via dladdr — reveals the recursion cycle on a
+             * stack overflow. Garbage fp chain → nested fault → clean exit. */
+            {
+                unsigned long long cur_fp = x29;
+                int depth = 0;
+                while (cur_fp >= 0x100000000LL && cur_fp < 0x2000000000LL && depth < 64) {
+                    unsigned long long *frm = (unsigned long long *)cur_fp;
+                    unsigned long long rlr = frm[1];
+                    unsigned long long nfp = frm[0];
+                    Dl_info di2;
+                    if (dladdr((void *)rlr, &di2) && di2.dli_sname)
+                        len = snprintf(line, sizeof(line), "FRAME %d: %s+%lld\n",
+                            depth, di2.dli_sname,
+                            (long long)(rlr - (unsigned long long)di2.dli_saddr));
+                    else
+                        len = snprintf(line, sizeof(line), "FRAME %d: %llx\n", depth, rlr);
+                    _w2(line, len);
+                    if (nfp <= cur_fp || nfp >= 0x2000000000LL) break;
+                    cur_fp = nfp;
+                    depth++;
+                }
+            }
             }
             /* _parse frame locals: [fp-8] tokens, [fp-16] filename,
              * [fp-24] ps, [fp-32] stmts, [fp-40] flag, [fp-48] tok. */
