@@ -401,57 +401,128 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
     void *buf[64];
     int n = backtrace(buf, 64);
     write(2, sig == 11 ? "SIGNAL:SIGSEGV\n" : "SIGNAL:SIGBUS\n", 16);
-    /* On Darwin, the kernel delivers the signal with all GPRs except sp/lr/pc
-     * preserved, so the handler's saved frame pointer at [fp+0] is the
-     * faulted thread's x29 and [fp+8] the interrupted LR. backtrace()'s
-     * frame[2] is the faulting PC (via sigtramp's return address). */
-    void *fp = __builtin_frame_address(0);
-    void *saved_fp = ((void **)fp)[0];
-    void *saved_lr = ((void **)fp)[1];
     char line[512];
     int len;
-    /* Dump the machine context (thread state) via uc_mcontext pointer at
-     * uctx+0x30 (Darwin arm64 ucontext layout: onstack 4, sigmask 4,
-     * uc_stack 16, uc_link 8, sigmask2 4, pad 4, uc_mcontext 8). */
+    FILE *df = fopen("nova_diag.txt", "w");
+    /* Darwin arm64: mcontext64 = __es (16: far 0, esr 8, exception 12)
+     * + thread state64 at +0x10 (x0..x28, fp 232, lr 240, sp 248, pc 256,
+     * cpsr 264, pad 268). uc_mcontext pointer read at uctx+0x30. */
     if (uctx) {
         void *mctx = *(void **)((char *)uctx + 0x30);
         unsigned char *mb = (unsigned char *)mctx;
         char hdr[64];
         int hl = snprintf(hdr, sizeof(hdr), "UCTX=%p UC_MCONTEXT=%p\n", uctx, mctx);
         write(2, hdr, hl);
-        if (mb)
-            for (int i = 0; i < 272; i += 16) {
-                len = snprintf(line, sizeof(line), "MCTX+%03x:", i);
-                for (int j = 0; j < 16; j++)
-                    len += snprintf(line + len, sizeof(line) - len, " %02x", mb[i + j]);
-                len += snprintf(line + len, sizeof(line) - len, "\n");
+        if (df) fputs(hdr, df);
+        if (mb) {
+            unsigned long long far = *(unsigned long long *)(mb + 0);
+            unsigned int esr = *(unsigned int *)(mb + 8);
+            unsigned char *ts = mb + 16;
+            unsigned long long x0 = *(unsigned long long *)(ts + 0);
+            unsigned long long x29 = *(unsigned long long *)(ts + 232);
+            unsigned long long x30 = *(unsigned long long *)(ts + 240);
+            unsigned long long x31 = *(unsigned long long *)(ts + 248);
+            unsigned long long pc = *(unsigned long long *)(ts + 256);
+            unsigned int cpsr = *(unsigned int *)(ts + 264);
+            len = snprintf(line, sizeof(line),
+                "SIG: far=%llx esr=%x x0=%llx fp=%llx lr=%llx sp=%llx pc=%llx cpsr=%x\n",
+                far, esr, x0, x29, x30, x31, pc, cpsr);
+            write(2, line, len);
+            if (df) fputs(line, df);
+            /* _parse frame locals: [fp-8] tokens, [fp-16] filename,
+             * [fp-24] ps, [fp-32] stmts, [fp-40] flag, [fp-48] tok. */
+            if (x29 > 0x100000000LL && x29 < 0x2000000000LL) {
+                unsigned long long *f = (unsigned long long *)x29;
+                len = snprintf(line, sizeof(line),
+                    "PARSE: tokens=%llx filename=%llx ps=%llx stmts=%llx flag=%llx tok=%llx saved_fp=%llx saved_lr=%llx\n",
+                    f[-1], f[-2], f[-3], f[-4], f[-5], f[-6], f[0], f[1]);
                 write(2, line, len);
+                if (df) fputs(line, df);
+                unsigned long long ps = f[-3];
+                if (ps > 0x100000000LL && ps < 0x2000000000LL) {
+                    unsigned long long *p = (unsigned long long *)ps;
+                    len = snprintf(line, sizeof(line),
+                        "PS: tokens=%llx pos=%lld filename=%llx comp_counter=%lld\n",
+                        p[0], (long long)p[1], p[2], (long long)p[3]);
+                    write(2, line, len);
+                    if (df) fputs(line, df);
+                    unsigned long long tk = p[0];
+                    if (tk > 0x100000000LL && tk < 0x2000000000LL) {
+                        unsigned int cnt = *(unsigned int *)(tk + 0);
+                        unsigned int cap = *(unsigned int *)(tk + 4);
+                        unsigned long long data = *(unsigned long long *)(tk + 8);
+                        long long pos = (long long)p[1];
+                        unsigned long long el = 0;
+                        if (pos >= 0 && pos < (long long)cnt && cnt < 100000000 &&
+                            data > 0x100000000LL && data < 0x2000000000LL)
+                            el = ((unsigned long long *)data)[pos];
+                        len = snprintf(line, sizeof(line),
+                            "TOKENS: count=%u cap=%u data=%llx pos=%lld elem=%llx\n",
+                            cnt, cap, data, pos, el);
+                        write(2, line, len);
+                        if (df) fputs(line, df);
+                        if (el > 0x100000000LL && el < 0x2000000000LL) {
+                            len = snprintf(line, sizeof(line),
+                                "ELEM: kind=%llx v2=%llx v3=%llx v4=%llx\n",
+                                ((unsigned long long *)el)[0], ((unsigned long long *)el)[1],
+                                ((unsigned long long *)el)[2], ((unsigned long long *)el)[3]);
+                            write(2, line, len);
+                            if (df) fputs(line, df);
+                        }
+                    }
+                }
             }
-    }
-    /* If the fault is in _current_tok called from _parse (frame locals at
-     * [fp-8..-56]), dump them to identify what corrupted the ParserState. */
-    if ((long long)info->si_addr == 0) {
-        void *p_state  = ((void **)((char *)saved_fp - 24))[0];
-        void *p_tok    = ((void **)((char *)saved_fp - 48))[0];
-        void *p_stmt   = ((void **)((char *)saved_fp - 56))[0];
-        void *p_stmts  = ((void **)((char *)saved_fp - 32))[0];
-        void *p_tokarg = ((void **)((char *)saved_fp - 8))[0];
-        void *p_flag   = ((void **)((char *)saved_fp - 40))[0];
-        void *s_tokens = p_state ? ((void **)((char *)p_state + 0))[0] : 0;
-        long long s_pos = p_state ? *(long long *)((char *)p_state + 8) : -1;
-        void *s_filename = p_state ? ((void **)((char *)p_state + 16))[0] : 0;
-        long long s_cc = p_state ? *(long long *)((char *)p_state + 24) : -1;
-        len = snprintf(line, sizeof(line),
-            "PARSE_FRAME: state=%p tok=%p stmt=%p stmts=%p tokarg=%p flag=%p\n"
-            "STATE_MEM: tokens=%p pos=%lld filename=%p comp_counter=%lld\n",
-            p_state, p_tok, p_stmt, p_stmts, p_tokarg, p_flag,
-            s_tokens, s_pos, s_filename, s_cc);
-        write(2, line, len);
+            if (df) {
+                fprintf(df, "REGS: x1=%llx x2=%llx x3=%llx x4=%llx x5=%llx x6=%llx x7=%llx x8=%llx x9=%llx\n",
+                    ((unsigned long long *)ts)[1], ((unsigned long long *)ts)[2],
+                    ((unsigned long long *)ts)[3], ((unsigned long long *)ts)[4],
+                    ((unsigned long long *)ts)[5], ((unsigned long long *)ts)[6],
+                    ((unsigned long long *)ts)[7], ((unsigned long long *)ts)[8],
+                    ((unsigned long long *)ts)[9]);
+                fprintf(df, "REGS: x10=%llx x11=%llx x12=%llx x13=%llx x14=%llx x15=%llx x16=%llx x17=%llx x18=%llx\n",
+                    ((unsigned long long *)ts)[10], ((unsigned long long *)ts)[11],
+                    ((unsigned long long *)ts)[12], ((unsigned long long *)ts)[13],
+                    ((unsigned long long *)ts)[14], ((unsigned long long *)ts)[15],
+                    ((unsigned long long *)ts)[16], ((unsigned long long *)ts)[17],
+                    ((unsigned long long *)ts)[18]);
+                fprintf(df, "REGS: x19=%llx x20=%llx x21=%llx x22=%llx x23=%llx x24=%llx x25=%llx x26=%llx x27=%llx x28=%llx\n",
+                    ((unsigned long long *)ts)[19], ((unsigned long long *)ts)[20],
+                    ((unsigned long long *)ts)[21], ((unsigned long long *)ts)[22],
+                    ((unsigned long long *)ts)[23], ((unsigned long long *)ts)[24],
+                    ((unsigned long long *)ts)[25], ((unsigned long long *)ts)[26],
+                    ((unsigned long long *)ts)[27], ((unsigned long long *)ts)[28]);
+            }
+            /* Full stack hexdump: file only (stderr lines get truncated). */
+            if (df) {
+                if (x31 > 0x100000000LL && x31 < 0x2000000000LL) {
+                    unsigned char *spb = (unsigned char *)x31;
+                    fprintf(df, "STACK@sp=%llx fp=%llx:\n", x31, x29);
+                    for (int i = -0x60; i < 0x160; i += 16) {
+                        char hl2[64];
+                        int l2 = snprintf(hl2, sizeof(hl2), "%s%03x:", i < 0 ? "-" : "+", i < 0 ? -i : i);
+                        for (int j = 0; j < 16; j++)
+                            l2 += snprintf(hl2 + l2, sizeof(hl2) - l2, " %02x", spb[i + j]);
+                        fprintf(df, "%s\n", hl2);
+                    }
+                }
+                if (x29 > 0x100000000LL && x29 < 0x2000000000LL) {
+                    unsigned char *fpb = (unsigned char *)x29;
+                    fprintf(df, "STACK@fp=%llx (caller frame):\n", x29);
+                    for (int i = 0; i < 0x200; i += 16) {
+                        char hl3[64];
+                        int l3 = snprintf(hl3, sizeof(hl3), "+%03x:", i);
+                        for (int j = 0; j < 16; j++)
+                            l3 += snprintf(hl3 + l3, sizeof(hl3) - l3, " %02x", fpb[i + j]);
+                        fprintf(df, "%s\n", hl3);
+                    }
+                }
+            }
+        }
     }
     len = snprintf(line, sizeof(line),
-                   "FAULT: addr=%p pc=%p fault_fp=%p fault_lr=%p\n",
-                   info->si_addr, buf[2], saved_fp, saved_lr);
+                   "FAULT: addr=%p bt_pc=%p\n", info->si_addr, buf[2]);
     write(2, line, len);
+    if (df) { fputs(line, df); fclose(df); }
     backtrace_symbols_fd(buf, n, 2);
     _exit(139);
 }

@@ -113,6 +113,10 @@ jobs:
           set +e
           ./nova-stage1 build ./ci-tmp/selfhost.nv 2>&1; rc=$?
           echo "## Stage1 build exit code: $rc" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            echo "=== nova_diag.txt ==="
+            cat ./nova_diag.txt 2>&1 || echo "(no nova_diag.txt)"
+          fi
           if [ "${{ runner.os }}" = "macOS" ] && [ -f ./ci-tmp/selfhost.s ]; then
             echo "=== selfhost.s (first 60 lines) ==="
             head -60 ./ci-tmp/selfhost.s
