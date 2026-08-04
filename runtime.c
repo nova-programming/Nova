@@ -298,6 +298,12 @@ int main(void) {
 #include <unistd.h>
 #include <signal.h>
 #include <execinfo.h>
+#include <dlfcn.h>
+/* MinGW's dlfcn.h lacks Dl_info/dladdr (real POSIX provides them). */
+#if defined(__MINGW32__) || defined(__MINGW64__)
+typedef struct { const char *dli_fname; void *dli_fbase; const char *dli_sname; void *dli_saddr; } Dl_info;
+int dladdr(const void *, Dl_info *);
+#endif
 
 /* Custom printf: processes fmt manually and writes to fd 1 via write().
  * Avoids va_list/AAPCS64 register save area issues on ARM64 that can occur
@@ -389,6 +395,8 @@ SYSCALL void _exit(int c) { exit(c); }
  * the Mach-O underscore gap for the codegen's `bl _realloc`. */
 #if defined(MACOS)
 #include <dlfcn.h>
+/* Last realloc call site (for symbol resolution at crash time). */
+static void *_last_realloc_from = 0;
 static void *_diag_real_realloc(void *p, size_t s) {
     static void *(*fn)(void *, size_t) = 0;
     if (!fn) fn = (void *(*)(void *, size_t))dlsym(RTLD_NEXT, "realloc");
@@ -396,6 +404,7 @@ static void *_diag_real_realloc(void *p, size_t s) {
 }
 SYSCALL void *_realloc(void *p, size_t s) {
     void *r = _diag_real_realloc(p, s);
+    _last_realloc_from = __builtin_return_address(0);
     FILE *f = fopen("nova_diag.txt", "a");
     if (f) {
         fprintf(f, "R: p=%p s=%llu out=%p from=%p\n", p, (unsigned long long)s, r,
@@ -409,8 +418,14 @@ SYSCALL void *_realloc(void *p, size_t s) {
 /* SIGSEGV/SIGBUS handler for debug — prints fault address, registers, backtrace */
 /* Write to BOTH fd 1 and fd 2 — the failing fd must not hide the dump. */
 static void _w2(const char *s, int n) { (void)!write(1, s, n); (void)!write(2, s, n); }
+/* Nested-fault guard: if a dump read touches unmapped memory, the second
+ * fault re-enters the handler — exit cleanly instead of hanging, keeping all
+ * lines already printed. */
+static volatile int _in_handler = 0;
 #if defined(_WIN32)
 static void _sigsegv(int sig) {
+    if (_in_handler) { _exit(139); }
+    _in_handler = 1;
     void *buf[64];
     int n = backtrace(buf, 64);
     write(2, sig == 11 ? "SIGNAL:SIGSEGV\n" : "SIGNAL:SIGBUS\n", 16);
@@ -425,6 +440,8 @@ static void _init_sig(void) {
 #else
 static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
     void *buf[64];
+    if (_in_handler) { _w2("NESTED-FAULT-EXIT\n", 17); _exit(139); }
+    _in_handler = 1;
     /* Raw-write the marker FIRST — a corrupted heap can crash fopen/fprintf
      * inside the handler, so everything critical goes to stderr via write(). */
     _w2(sig == 11 ? "SIGNAL:SIGSEGV\n" : "SIGNAL:SIGBUS\n", 16);
@@ -457,6 +474,32 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
                 far, esr, x0, x29, x30, x31, pc, cpsr);
             _w2(line, len);
             if (df) fputs(line, df);
+            /* Resolve the faulting instruction and its caller via dladdr —
+             * identifies the exact function + offset without needing the
+             * PIE slide (dladdr returns running addresses). */
+            {
+                Dl_info di;
+                if (dladdr((void *)pc, &di) && di.dli_sname) {
+                    len = snprintf(line, sizeof(line), "PC_SYM: %s+%lld\n",
+                        di.dli_sname, (long long)((unsigned long long)pc -
+                        (unsigned long long)di.dli_saddr));
+                    _w2(line, len);
+                }
+                if (dladdr((void *)x30, &di) && di.dli_sname) {
+                    len = snprintf(line, sizeof(line), "LR_SYM: %s+%lld\n",
+                        di.dli_sname, (long long)((unsigned long long)x30 -
+                        (unsigned long long)di.dli_saddr));
+                    _w2(line, len);
+                }
+#if defined(MACOS)
+                if (_last_realloc_from && dladdr(_last_realloc_from, &di) && di.dli_sname) {
+                    len = snprintf(line, sizeof(line), "FROM_SYM: %s+%lld\n",
+                        di.dli_sname, (long long)((unsigned long long)_last_realloc_from -
+                        (unsigned long long)di.dli_saddr));
+                    _w2(line, len);
+                }
+#endif
+            }
             /* _parse frame locals: [fp-8] tokens, [fp-16] filename,
              * [fp-24] ps, [fp-32] stmts, [fp-40] flag, [fp-48] tok. */
             if (x29 > 0x100000000LL && x29 < 0x2000000000LL) {
