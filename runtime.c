@@ -422,11 +422,13 @@ static void _init_sig(void) {
 #else
 static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
     void *buf[64];
-    int n = backtrace(buf, 64);
+    /* Raw-write the marker FIRST — a corrupted heap can crash fopen/fprintf
+     * inside the handler, so everything critical goes to stderr via write(). */
     write(2, sig == 11 ? "SIGNAL:SIGSEGV\n" : "SIGNAL:SIGBUS\n", 16);
+    int n = backtrace(buf, 64);
     char line[512];
     int len;
-    FILE *df = fopen("nova_diag.txt", "a");
+    FILE *df = NULL;
     /* Darwin arm64: mcontext64 = __es (16: far 0, esr 8, exception 12)
      * + thread state64 at +0x10 (x0..x28, fp 232, lr 240, sp 248, pc 256,
      * cpsr 264, pad 268). uc_mcontext pointer read at uctx+0x30. */
@@ -508,27 +510,34 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
                     }
                 }
             }
-            if (df) {
-                fprintf(df, "REGS: x1=%llx x2=%llx x3=%llx x4=%llx x5=%llx x6=%llx x7=%llx x8=%llx x9=%llx\n",
-                    ((unsigned long long *)ts)[1], ((unsigned long long *)ts)[2],
-                    ((unsigned long long *)ts)[3], ((unsigned long long *)ts)[4],
-                    ((unsigned long long *)ts)[5], ((unsigned long long *)ts)[6],
-                    ((unsigned long long *)ts)[7], ((unsigned long long *)ts)[8],
-                    ((unsigned long long *)ts)[9]);
-                fprintf(df, "REGS: x10=%llx x11=%llx x12=%llx x13=%llx x14=%llx x15=%llx x16=%llx x17=%llx x18=%llx\n",
-                    ((unsigned long long *)ts)[10], ((unsigned long long *)ts)[11],
-                    ((unsigned long long *)ts)[12], ((unsigned long long *)ts)[13],
-                    ((unsigned long long *)ts)[14], ((unsigned long long *)ts)[15],
-                    ((unsigned long long *)ts)[16], ((unsigned long long *)ts)[17],
-                    ((unsigned long long *)ts)[18]);
-                fprintf(df, "REGS: x19=%llx x20=%llx x21=%llx x22=%llx x23=%llx x24=%llx x25=%llx x26=%llx x27=%llx x28=%llx\n",
-                    ((unsigned long long *)ts)[19], ((unsigned long long *)ts)[20],
-                    ((unsigned long long *)ts)[21], ((unsigned long long *)ts)[22],
-                    ((unsigned long long *)ts)[23], ((unsigned long long *)ts)[24],
-                    ((unsigned long long *)ts)[25], ((unsigned long long *)ts)[26],
-                    ((unsigned long long *)ts)[27], ((unsigned long long *)ts)[28]);
-            }
-            /* Full stack hexdump: file only (stderr lines get truncated). */
+            /* REGS to stderr via raw write (heap-safe). */
+            len = snprintf(line, sizeof(line),
+                "REGS: x1=%llx x2=%llx x3=%llx x4=%llx x5=%llx x6=%llx x7=%llx x8=%llx x9=%llx\n",
+                ((unsigned long long *)ts)[1], ((unsigned long long *)ts)[2],
+                ((unsigned long long *)ts)[3], ((unsigned long long *)ts)[4],
+                ((unsigned long long *)ts)[5], ((unsigned long long *)ts)[6],
+                ((unsigned long long *)ts)[7], ((unsigned long long *)ts)[8],
+                ((unsigned long long *)ts)[9]);
+            write(2, line, len);
+            len = snprintf(line, sizeof(line),
+                "REGS: x10=%llx x11=%llx x12=%llx x13=%llx x14=%llx x15=%llx x16=%llx x17=%llx x18=%llx\n",
+                ((unsigned long long *)ts)[10], ((unsigned long long *)ts)[11],
+                ((unsigned long long *)ts)[12], ((unsigned long long *)ts)[13],
+                ((unsigned long long *)ts)[14], ((unsigned long long *)ts)[15],
+                ((unsigned long long *)ts)[16], ((unsigned long long *)ts)[17],
+                ((unsigned long long *)ts)[18]);
+            write(2, line, len);
+            len = snprintf(line, sizeof(line),
+                "REGS: x19=%llx x20=%llx x21=%llx x22=%llx x23=%llx x24=%llx x25=%llx x26=%llx x27=%llx x28=%llx\n",
+                ((unsigned long long *)ts)[19], ((unsigned long long *)ts)[20],
+                ((unsigned long long *)ts)[21], ((unsigned long long *)ts)[22],
+                ((unsigned long long *)ts)[23], ((unsigned long long *)ts)[24],
+                ((unsigned long long *)ts)[25], ((unsigned long long *)ts)[26],
+                ((unsigned long long *)ts)[27], ((unsigned long long *)ts)[28]);
+            write(2, line, len);
+            /* Hexdumps: file only (best-effort; fopen/malloc may crash on a
+             * corrupted heap — critical lines are already on stderr). */
+            df = fopen("nova_diag.txt", "a");
             if (df) {
                 if (x31 > 0x100000000LL && x31 < 0x2000000000LL) {
                     unsigned char *spb = (unsigned char *)x31;
