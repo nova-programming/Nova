@@ -382,6 +382,29 @@ SYSCALL int _fflush(int s) { return fflush((FILE*)(intptr_t)s); }
 SYSCALL void _exit(int c) { exit(c); }
 #endif /* defined(LINUX_WRAP) */
 
+/* macOS: shadow libc realloc to log every list-growth call for the
+ * self-hosting crash diagnosis. dlsym(RTLD_NEXT) returns the real libSystem
+ * realloc — a plain `realloc` call here would auto-underscore to `_realloc`
+ * and recurse infinitely. The `.set _realloc, __realloc` alias below bridges
+ * the Mach-O underscore gap for the codegen's `bl _realloc`. */
+#if defined(MACOS)
+#include <dlfcn.h>
+static void *_diag_real_realloc(void *p, size_t s) {
+    static void *(*fn)(void *, size_t) = 0;
+    if (!fn) fn = (void *(*)(void *, size_t))dlsym(RTLD_NEXT, "realloc");
+    return fn(p, s);
+}
+SYSCALL void *_realloc(void *p, size_t s) {
+    void *r = _diag_real_realloc(p, s);
+    FILE *f = fopen("nova_diag.txt", "a");
+    if (f) {
+        fprintf(f, "R: p=%p s=%llu out=%p\n", p, (unsigned long long)s, r);
+        fclose(f);
+    }
+    return r;
+}
+#endif /* defined(MACOS) */
+
 /* SIGSEGV/SIGBUS handler for debug — prints fault address, registers, backtrace */
 #if defined(_WIN32)
 static void _sigsegv(int sig) {
@@ -403,7 +426,7 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
     write(2, sig == 11 ? "SIGNAL:SIGSEGV\n" : "SIGNAL:SIGBUS\n", 16);
     char line[512];
     int len;
-    FILE *df = fopen("nova_diag.txt", "w");
+    FILE *df = fopen("nova_diag.txt", "a");
     /* Darwin arm64: mcontext64 = __es (16: far 0, esr 8, exception 12)
      * + thread state64 at +0x10 (x0..x28, fp 232, lr 240, sp 248, pc 256,
      * cpsr 264, pad 268). uc_mcontext pointer read at uctx+0x30. */
@@ -468,6 +491,19 @@ static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
                                 ((unsigned long long *)el)[2], ((unsigned long long *)el)[3]);
                             write(2, line, len);
                             if (df) fputs(line, df);
+                        }
+                        /* Heap hexdump around the tokens header: covers the
+                         * header chunk, data buffer, ps/stmts overlap. */
+                        if (df) {
+                            unsigned char *tkh = (unsigned char *)tk - 0x40;
+                            fprintf(df, "HEAP@tk-0x40 (%p):\n", tkh);
+                            for (int i = 0; i < 0x200; i += 16) {
+                                char hl4[64];
+                                int l4 = snprintf(hl4, sizeof(hl4), "%03x:", i);
+                                for (int j = 0; j < 16; j++)
+                                    l4 += snprintf(hl4 + l4, sizeof(hl4) - l4, " %02x", tkh[i + j]);
+                                fprintf(df, "%s\n", hl4);
+                            }
                         }
                     }
                 }
@@ -576,6 +612,7 @@ __asm__(".globl _file_type\n.set _file_type, __file_type");
 __asm__(".globl _max\n.set _max, __max");
 __asm__(".globl _min\n.set _min, __min");
 __asm__(".globl _now\n.set _now, __now");
+__asm__(".globl _realloc\n.set _realloc, __realloc");
 __asm__(".globl _slice_list\n.set _slice_list, __slice_list");
 __asm__(".globl _str_sub\n.set _str_sub, __str_sub");
 __asm__(".globl _sys_alloc_c\n.set _sys_alloc_c, __sys_alloc_c");
