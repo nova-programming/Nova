@@ -969,6 +969,8 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit_call(state, "_realloc", 2)
             emit(state, "    ldr %x, [sp], #16")
             emit(state, "    str x0, [%x, #8]")
+            emit(state, "    ldr w4, [%x, #4]")
+            emit(state, "    lsl x4, x4, #1")
             emit(state, "    str w4, [%x, #4]")
             emit(state, "    ldr %c, [sp], #16")
             
