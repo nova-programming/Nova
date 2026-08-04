@@ -48,6 +48,10 @@ def main():
 
     ModuleResolver._find_module = _arm64_find
 
+    pipeline = "full"
+    if len(sys.argv) >= 3 and sys.argv[2] == "codegen":
+        pipeline = "codegen"
+
     driver_path = os.path.join(ROOT, "tests", "_arm64_driver.nv")
     with open(driver_path, "w", encoding="utf-8") as f:
         f.write(
@@ -60,6 +64,8 @@ def main():
             'import codegen_stmt\n'
             'import codegen_expr\n'
             'import codegen\n'
+            'import assembler\n'
+            'import linker\n'
             f'src_path = "{prog_path.replace(chr(92), chr(92) * 2).replace(chr(34), chr(92) + chr(34))}"\n'
             'fd = open(src_path, "r")\n'
             'source = read(fd)\n'
@@ -78,6 +84,17 @@ def main():
             'asm = generate_assembly(ast, 0, 0, "macos")\n'
             'print("DRIVER: after generate_assembly")\n'
             'print("ASM_LINES=" + str(len(asm)))\n'
+            'if "' + pipeline + '" != "codegen" {\n'
+            '    print("DRIVER: assembling")\n'
+            '    assembled = assemble(asm)\n'
+            '    print("DRIVER: after assemble")\n'
+            '    print("CODE_BYTES=" + str(len(assembled[0])))\n'
+            '    print("DATA_BYTES=" + str(len(assembled[1])))\n'
+            '    print("DRIVER: linking")\n'
+            '    exe_bytes = link(assembled)\n'
+            '    print("DRIVER: after link")\n'
+            '    print("EXE_BYTES=" + str(len(exe_bytes)))\n'
+            '}\n'
         )
 
     from compiler.type_checker import TypeInferer
