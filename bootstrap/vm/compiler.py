@@ -508,6 +508,16 @@ class Compiler:
             self.emit(OpCode.NEW, (node.data_name, 0))
         elif isinstance(node, ApiRequest):
             self.emit(OpCode.LOAD_CONST, self.add_const(0))
+        elif isinstance(node, Comptime):
+            if isinstance(node.target, Block):
+                for stmt in node.target.stmts[:-1]:
+                    self.compile_stmt(stmt)
+                if node.target.stmts:
+                    self.compile_expr(node.target.stmts[-1])
+                else:
+                    self.emit(OpCode.LOAD_CONST, self.add_const(0))
+            else:
+                self.compile_expr(node.target)
         elif isinstance(node, Alloc):
             self.compile_expr(node.size)
             self.emit(OpCode.ALLOC)

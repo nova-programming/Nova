@@ -82,6 +82,7 @@ def match_keyword(word: string) -> string {
         case "string" { return "TYPE_STRING" }
         case "byte" { return "TYPE_BYTE" }
         case "void" { return "TYPE_VOID" }
+        case "comptime" { return "COMPTIME" }
         else { return "IDENT" }
     }
 }

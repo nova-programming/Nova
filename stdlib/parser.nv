@@ -312,6 +312,26 @@ def parse_primary(state: ParserState) -> AstNode {
         node.kind = "SizeOf"
         node.left = parse_expr(state)
         eat_tok(state, "RPAREN")
+    } elif tok.kind == "COMPTIME" {
+        eat_tok(state, "COMPTIME")
+        if current_tok(state).kind == "LBRACE" {
+            body = parse_block(state)
+            block_node = AstNode()
+            block_node.kind = "Block"
+            block_node.body = body
+            block_node.line = node.line
+            block_node.col = node.col
+            node.kind = "Comptime"
+            node.left = block_node
+        } elif current_tok(state).kind == "LPAREN" {
+            eat_tok(state, "LPAREN")
+            node.kind = "Comptime"
+            node.left = parse_expr(state)
+            eat_tok(state, "RPAREN")
+        } else {
+            node.kind = "Comptime"
+            node.left = parse_expr(state)
+        }
     } elif tok.kind == "OPENF" {
         eat_tok(state, "OPENF")
         eat_tok(state, "LPAREN")

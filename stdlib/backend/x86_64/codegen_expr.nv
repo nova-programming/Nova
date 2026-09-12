@@ -1,4 +1,6 @@
 
+import codegen_stmt
+
 # ============================================================
 # Code Generator: Expression Compi
 def float_str_to_hex(s: string) -> int {
@@ -324,6 +326,23 @@ def compile_expr(state: CodegenState, node: AstNode) {
         }
         emit(state, "    mov %a, " + str(sz))
         emit(state, "    push %a")
+        return
+    }
+    if node.kind == "Comptime" {
+        if node.left.kind == "Block" {
+            i = 0
+            while i < len(node.left.body) - 1 {
+                codegen_stmt.compile_stmt(state, node.left.body[i], 0)
+                i = i + 1
+            }
+            if len(node.left.body) > 0 {
+                compile_expr(state, node.left.body[len(node.left.body) - 1])
+            } else {
+                emit(state, "    push 0")
+            }
+        } else {
+            compile_expr(state, node.left)
+        }
         return
     }
     if node.kind == "Number" {

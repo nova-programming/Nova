@@ -489,3 +489,10 @@ class Throw:
         self.value = value
     def __repr__(self):
         return f"Throw({self.value})"
+
+class Comptime:
+    def __init__(self, target, line=0):
+        self.line = line
+        self.target = target
+    def __repr__(self):
+        return f"Comptime({self.target})"

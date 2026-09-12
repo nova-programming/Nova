@@ -268,6 +268,21 @@ class Parser:
             self.eat("RPAREN")
             node = SizeOf(target, line=line)
 
+        elif kind == "COMPTIME":
+            self.eat("COMPTIME")
+            if self.current() and self.current()[0] == "LBRACE":
+                block = self.parse_block()
+                target = Block(block, line=line)
+                node = Comptime(target, line=line)
+            elif self.current() and self.current()[0] == "LPAREN":
+                self.eat("LPAREN")
+                target = self.parse_expr()
+                self.eat("RPAREN")
+                node = Comptime(target, line=line)
+            else:
+                target = self.parse_expr()
+                node = Comptime(target, line=line)
+
         elif kind == "LEN":
             self.eat("LEN")
             self.eat("LPAREN")
