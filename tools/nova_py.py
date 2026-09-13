@@ -9,15 +9,14 @@ bootstrap_dir = os.path.join(nova_root, "bootstrap")
 if bootstrap_dir not in sys.path:
     sys.path.insert(0, bootstrap_dir)
 
-print("SYS PATH:", sys.path)
-print("BOOTSTRAP DIR:", os.listdir(bootstrap_dir))
-
-from main import _find_gcc, _host_os
+try:
+    from main import _find_gcc, _host_os, expand_imports
+except ImportError:  # pip install / different sys.path layout
+    from bootstrap.main import _find_gcc, _host_os, expand_imports
 from lexer.tokenizer import tokenize
 from parser.parser import Parser
 from compiler.type_checker import TypeInferer
 from compiler.backend.x86_64.codegen import X86_64Codegen
-from main import expand_imports
 from compiler.types import IntType, FloatType, StringType, ListType
 
 class NovaListStruct(ctypes.Structure):

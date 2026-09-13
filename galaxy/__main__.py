@@ -1,3 +1,6 @@
 """Allow python -m galaxy to work."""
-from galaxy import main
+try:
+    from _galaxy import main
+except ImportError:
+    from galaxy import main
 main()

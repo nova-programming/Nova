@@ -170,8 +170,8 @@ class Parser:
         while self.current() and self.current()[0] in ("AND", "OR"):
             op = self.eat(self.current()[0])[1]
             right = self.parse_compare()
-            # Desugar: a == b or c -> (a == b) or (a == c)
-            if isinstance(left, Compare) and not isinstance(right, Compare) and not isinstance(right, BinOp):
+            # Desugar: a == b or c -> (a == b) or (a == c), only for leaf c
+            if isinstance(left, Compare) and isinstance(right, (Number, String, Boolean, Variable)):
                 right_line = getattr(right, 'line', 0)
                 right = Compare(left.left, left.op, right, line=right_line)
             left = BinOp(left, op, right, line=line)
@@ -239,7 +239,10 @@ class Parser:
 
         if kind == "NUMBER":
             self.eat("NUMBER")
-            node = Number(int(value, 0), line=line)
+            try:
+                node = Number(int(value, 0), line=line)
+            except ValueError:
+                self._syntax_error(f"Invalid number literal '{value}'", token)
         elif kind == "FLOAT":
             self.eat("FLOAT")
             node = Number(float(value), line=line)

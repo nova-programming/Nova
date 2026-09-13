@@ -161,8 +161,10 @@ def tokenize(code):
             j = i
             # Hex or binary
             if c == '0' and i + 1 < n and code[i+1] in 'xXbB':
+                is_hex = code[i+1] in 'xX'
+                allowed = '0123456789abcdefABCDEF' if is_hex else '01'
                 prefix_end = i + 2
-                while prefix_end < n and code[prefix_end] in '0123456789abcdefABCDEF':
+                while prefix_end < n and code[prefix_end] in allowed:
                     prefix_end += 1
                 tokens.append(("NUMBER", code[i:prefix_end], line_num, i - line_start))
                 i = prefix_end

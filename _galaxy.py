@@ -418,6 +418,7 @@ def _verify_hashes(dest_dir, version_data, pkg_name):
     """Verify SHA-256 hashes of extracted files against registry metadata."""
     expected_files = version_data.get("files") if version_data else None
     if not expected_files:
+        print(f"  [WARN] No file hashes in registry metadata for '{pkg_name}' — skipping verification")
         return
 
     ok = True
@@ -582,7 +583,7 @@ def cmd_list(args):
     print(f"  {'Package':<20} {'Source':<30}")
     print(f"  {'-'*20} {'-'*30}")
     for pkg, source in deps.items():
-        pkg_dir = os.path.join(GALAXY_MODULES_DIR, pkg)
+        pkg_dir = os.path.join(GALAXY_MODULES_DIR, pkg.replace("/", "_"))
         installed = "installed" if os.path.exists(pkg_dir) else "not installed"
         print(f"  {pkg:<20} {installed:<30}")
         print(f"  {'':<20} {source:<30}")
@@ -977,10 +978,15 @@ def cmd_update(args):
             print(f"Corrupted archive: {bad}")
             return
         for name in zf.namelist():
-            parts = name.split("/")
+            rel = name
+            if rel.startswith(ZIP_PREFIX + "/"):
+                rel = rel[len(ZIP_PREFIX) + 1:]
+            if not rel or rel.endswith("/"):
+                continue
+            parts = rel.split("/")
             top = parts[0]
-            if top in ("_galaxy.py",) or top == "galaxy" or name.startswith("galaxy/"):
-                dst = os.path.join(install_dir, name)
+            if top in ("_galaxy.py",) or top == "galaxy" or rel.startswith("galaxy/"):
+                dst = os.path.join(install_dir, rel)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 with zf.open(name) as src, open(dst, "wb") as df:
                     shutil.copyfileobj(src, df)
@@ -1018,7 +1024,7 @@ def cmd_upgrade(args):
             print(f"  Could not check registry for '{pkg}'")
             continue
 
-        latest = data.get("version")
+        latest = data.get("newestVersion") or data.get("version")
         print(f"  Installed: {source}  Registry: {latest}")
         if latest and latest != source:
             answer = input(f"  Update to v{latest}? (y/N): ").strip().lower()

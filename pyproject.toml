@@ -7,16 +7,19 @@ name = "nova-lang"
 version = "0.8.0"
 description = "Nova Programming Language compiler and Galaxy Package Manager"
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "CC-BY-NC-4.0"}
 requires-python = ">=3.10"
 
 [project.scripts]
-nova = "main:main"
+nova = "bootstrap.main:main"
 galaxy = "_galaxy:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["galaxy*", "tools*", "nova_ast*", "compiler*", "parser*", "lexer*", "vm*", "modules*"]
+include = ["bootstrap*", "galaxy*", "tools*", "nova_ast*", "compiler*", "parser*", "lexer*", "vm*", "modules*"]
+
+[tool.setuptools]
+py-modules = ["_galaxy"]
 
 [tool.setuptools.package-data]
 "*" = ["*.nv", "*.txt", "*.json"]
