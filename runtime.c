@@ -1293,6 +1293,20 @@ SYSCALL void *_dict_keys(void *d) { return dict_keys(d); }
 SYSCALL void *_dict_values(void *d) { return dict_values(d); }
 SYSCALL void *_dict_items(void *d) { return dict_items(d); }
 
+/* ===== Pointer/alloc bridge helpers ===== */
+SYSCALL void *_list_wrap(void *ptr, intptr_t count) {
+    void *list = malloc(16);
+    if (!list) return 0;
+    *(int*)list = (int)count;
+    *(int*)((char*)list + 4) = (int)count;
+    *(intptr_t*)((char*)list + 8) = (intptr_t)ptr;
+    return list;
+}
+
+SYSCALL void *_as_list(void *ptr, intptr_t count) {
+    return _list_wrap(ptr, count);
+}
+
 /* ===== Platform-specific helpers ===== */
 #if defined(LINUX_WRAP)
 SYSCALL const char *_sys_platform_c(void) { return "linux"; }

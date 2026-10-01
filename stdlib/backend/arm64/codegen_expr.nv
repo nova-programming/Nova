@@ -715,6 +715,13 @@ def compile_expr(state: CodegenState, node: AstNode) {
     if node.kind == "PointerProperty" {
         compile_expr(state, node.left)
         emit(state, "    ldr %d, [sp], #16")
+        if node.val_str == "ptr" {
+            if is_string_expr(state, node.left) == 1 {
+                emit(state, "    mov %a, %d")
+            } else {
+                emit(state, "    ldr %a, [%d, #8]")
+            }
+        } else {
         if node.val_str == "value_byte" {
             emit(state, "    mov x0, x3")
             emit(state, "    ldrb w0, [x0]")
@@ -742,10 +749,19 @@ def compile_expr(state: CodegenState, node: AstNode) {
                 }
             }
         }
+        }
         emit(state, "    str %a, [sp, #-16]!")
     }
     if node.kind == "Alloc" {
         compile_expr(state, node.left)
+        sz = 1
+        if node.val_int != 0 { sz = node.val_int }
+        if sz != 1 {
+            emit(state, "    ldr x0, [sp], #16")
+            emit(state, "    mov x1, #" + str(sz))
+            emit(state, "    mul x0, x0, x1")
+            emit(state, "    str x0, [sp, #-16]!")
+        }
         emit_call(state, "_malloc", 1)
         emit(state, "    str %a, [sp, #-16]!")
     }
@@ -862,6 +878,22 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    ldr %c, [sp], #16")
         compile_expr(state, node.left)
         emit(state, "    ldr %d, [sp], #16")
+
+        raw_sz = 0
+        if node.left != 0 and node.left.kind == "Variable" {
+            if state.ptr_vars.has(node.left.val_str) == 1 {
+                raw_sz = state.ptr_vars.get(node.left.val_str)
+            }
+        }
+        if raw_sz != 0 {
+            if raw_sz == 1 {
+                emit(state, "    ldrb w0, [%d, %c]")
+            } else {
+                emit(state, "    ldr %a, [%d, %c, lsl #3]")
+            }
+            emit(state, "    str %a, [sp, #-16]!")
+            return
+        }
         
         is_dict = 0
         if node.left.inferred_type != 0 and node.left.inferred_type.kind == "dict" {
@@ -971,7 +1003,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
             }
     }
     if node.kind == "MethodCall" {
-        method_id_map = {"append": 1, "pop": 2, "get": 3, "set": 4, "has": 5, "remove": 6, "keys": 7, "values": 8, "items": 9, "write": 10, "awrite": 11, "read": 12, "close": 13, "flush": 14, "insert": 15, "clear": 16}
+        method_id_map = {"append": 1, "pop": 2, "get": 3, "set": 4, "has": 5, "remove": 6, "keys": 7, "values": 8, "items": 9, "write": 10, "awrite": 11, "read": 12, "close": 13, "flush": 14, "insert": 15, "clear": 16, "as_list": 17}
         h = method_id_map.get(node.val_str)
         if h == 1 {
             compile_expr(state, node.args[0])
@@ -1145,6 +1177,13 @@ def compile_expr(state: CodegenState, node: AstNode) {
             compile_expr(state, node.left)
             emit_call(state, "_list_clear", 1)
             emit(state, "    mov %a, 0")
+            emit(state, "    str %a, [sp, #-16]!")
+            return
+        }
+        if h == 17 {
+            compile_expr(state, node.args[0])
+            compile_expr(state, node.left)
+            emit_call(state, "_list_wrap", 2)
             emit(state, "    str %a, [sp, #-16]!")
             return
         }

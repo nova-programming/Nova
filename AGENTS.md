@@ -682,3 +682,29 @@ galaxy publish             # Publish to registry
   - Stage 2 (`nova_stage1` → `nova.exe`, 167k asm lines) completed; `nova.exe --version` works and compiles user programs.
   - `nova.exe` retained as canonical binary; all temporary/intermediate artifacts cleaned.
 
+
+### Instant Execution - `nova run` + Feature Roadmap Docs (This Session)
+- **`nova run <file.nv> [args...]`** (`nova.nv`): compiles, links, and immediately executes via `system_exec`; program args forwarded. Mirrors `build` flags (`-d`/`-b`/`-arch`/`--os`). CLI-only change (no codegen), validated end-to-end through self-hosted compiler incl. arg forwarding. Usage strings updated.
+- **`docs/features.md`** (new): full specification + honest delivery status for ten requested features. Shipped: `nova run`, BCE, folding/pruning, `_str_sub` elision, diagnostics markers. Sequenced with rationale: `defer`, C FFI `extern def`, zero-copy `{ptr,len}` slices, `.ptr`/`.as_list`, `alloc[T]`, multi-returns, auto-inline, `@entry`, did-you-mean, macOS ARM64, POSIX layer. Full SSO deferred (char* ABI); website (galaxy-registry, separate repo) flagged as follow-up.
+- **README.md / ROADMAP.md**: `nova run` usage; roadmap records shipped items + sequenced backlog.
+- **Scope note**: the seven heavy features are ABI/codegen overhauls (calling conventions, value representations, scope-injection). Landing them together would risk the self-hosting stability secured above; each needs isolated design + stage1/stage2 validation. Recommended order: `@entry` (smallest, machinery exists) -> `defer` -> `alloc[T]` -> FFI -> slices/bridge -> multi-return -> inlining.
+
+### Phase 26: Validation & Full Documentation Updates (This Session — October 2026)
+- **Bootstrap Fixes**:
+  - Fixed `isinstance(t, AnyType)` in `bootstrap/compiler/type_checker.py` (was passing instance `AnyType()` instead of class).
+  - Fixed `did_you_mean` in `type_checker.py` to skip exact matches (`candidate == name`) and redirect compiler diagnostic warnings to `sys.stderr` rather than `stdout`, preserving clean stdout capture across unit test suites.
+  - Removed un-prefixed `"entry": "ENTRY"` from `bootstrap/lexer/tokenizer.py` KEYWORDS so variables named `entry` (e.g. `entry = get_entry_name(...)`) are not erroneously treated as keywords.
+- **CLI & Execution Fixes**:
+  - Fixed `run_cmd` path construction in `nova.nv` for `nova run` command on Windows (`.\` backslash prefix instead of `./`).
+  - Rebuilt canonical native `nova.exe` with `nova run` support via Python bootstrap.
+- **Verification**:
+  - `nova run test_defer1.nv`: verified single-line `defer` in LIFO order (`d2` then `d1` on exit).
+  - `nova run test_defer2.nv`: verified block-form `defer { ... }` prior to return value propagation.
+  - `nova run test_defer3.nv`: verified `defer` execution on early `return` and loop `break` paths.
+  - `nova run t_rawptr.nv`: verified raw pointer allocation, property mutation, and deallocation.
+  - Full test suite: **275 passed, 18 skipped, 13 subtests** (6 passed in `ci_test.py`).
+- **Documentation & Website Updates**:
+  - Updated `KEYWORDS_AND_LOGIC.md` with `defer`, `extern def`, `alloc[T]`, `.ptr`, `.as_list`, `@entry`, `@noinline`, and `nova run` in CLI tables.
+  - Updated `galaxy-registry/reference.html`: Quick Reference syntax table + dedicated `defer` and `extern def` sections.
+  - Updated `galaxy-registry/documentation.html`: CLI command table with `nova run` and language syntax guides.
+

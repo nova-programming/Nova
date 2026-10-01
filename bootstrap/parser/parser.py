@@ -438,18 +438,34 @@ class Parser:
                 if self.current() and self.current()[0] == "LPAREN":
                     self.eat("LPAREN")
                     args = []
+                    kwargs = {}
                     if self.current() and self.current()[0] != "RPAREN":
-                        args.append(self.parse_expr())
+                        if (self.current()[0] == "IDENT" and
+                            self.pos + 1 < len(self.tokens) and
+                            self.tokens[self.pos + 1][0] == "EQUALS"):
+                            kw_name = self.eat("IDENT")[1]
+                            self.eat("EQUALS")
+                            kwargs[kw_name] = self.parse_expr()
+                        else:
+                            args.append(self.parse_expr())
                         while self.current() and self.current()[0] == "COMMA":
                             self.eat("COMMA")
                             if self.current() and self.current()[0] != "RPAREN":
-                                args.append(self.parse_expr())
+                                if (self.current()[0] == "IDENT" and
+                                    self.pos + 1 < len(self.tokens) and
+                                    self.tokens[self.pos + 1][0] == "EQUALS"):
+                                    kw_name = self.eat("IDENT")[1]
+                                    self.eat("EQUALS")
+                                    kwargs[kw_name] = self.parse_expr()
+                                else:
+                                    args.append(self.parse_expr())
                     self.eat("RPAREN")
                     node = MethodCall(node, prop, args, line=line)
+                    node.kwargs = kwargs
                     continue
                 
                 # Pointer property vs Data field
-                pointer_properties = ["value", "addr", "isValid", "isNull", "bytes", "value_byte", "value_word", "value_dword", "value_qword"]
+                pointer_properties = ["value", "addr", "isValid", "isNull", "bytes", "value_byte", "value_word", "value_dword", "value_qword", "ptr"]
                 if prop in pointer_properties:
                     tok = self.current()
                     if tok and tok[0] in ("EQUALS", "PLUSEQ", "MINUSEQ", "STAREQ", "SLASHEQ", "PERCENTEQ"):
@@ -514,12 +530,19 @@ class Parser:
     def parse_alloc(self):
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("ALLOC")
+        type_param = None
+        if self.current() and self.current()[0] == "LBRACK":
+            self.eat("LBRACK")
+            type_param = self.parse_type_annotation()
+            self.eat("RBRACK")
         if not self.current() or self.current()[0] != "LPAREN":
             self._syntax_error("Expected '(' after alloc")
         self.eat("LPAREN")
         size = self.parse_expr()
         self.eat("RPAREN")
-        return Alloc(size, line=line)
+        node = Alloc(size, line=line)
+        node.type_param = type_param
+        return node
 
     # ---------------- STATEMENTS ----------------
 
@@ -632,7 +655,14 @@ class Parser:
             self.eat("RETURN")
             if self.current() and self.current()[0] in ('RBRACE', 'NEWLINE', 'EOF'):
                 return Return(Number(0), line=line)
-            return Return(self.parse_expr(), line=line)
+            first = self.parse_expr()
+            if self.current() and self.current()[0] == "COMMA":
+                values = [first]
+                while self.current() and self.current()[0] == "COMMA":
+                    self.eat("COMMA")
+                    values.append(self.parse_expr())
+                return MultiReturn(values, line=line)
+            return Return(first, line=line)
         if kind == "BREAK":
             self.eat("BREAK")
             return Break(line=line)
@@ -649,6 +679,14 @@ class Parser:
             self.eat("THROW")
             value = self.parse_expr()
             return Throw(value, line=line)
+        if kind == "DEFER":
+            return self.parse_defer()
+        if kind == "EXTERN":
+            return self.parse_extern()
+        if kind == "ENTRY":
+            return self.parse_entry()
+        if kind == "NOINLINE":
+            return self.parse_noinline()
 
         is_const = False
         type_name = None
@@ -674,6 +712,17 @@ class Parser:
                     binop_op = op[:-1]
                     value = BinOp(expr, binop_op, value, line=line)
                 return Assignment(expr.name, value, type_name=expr.type_name, is_const=is_const, line=line)
+
+        if self.current() and self.current()[0] == "COMMA":
+            targets = [expr]
+            while self.current() and self.current()[0] == "COMMA":
+                self.eat("COMMA")
+                targets.append(self.parse_expr())
+            if self.current() and self.current()[0] == "EQUALS":
+                self.eat("EQUALS")
+                value = self.parse_expr()
+                return UnpackAssign(targets, value, line=line)
+
         return expr
 
     def parse_free(self):
@@ -694,6 +743,54 @@ class Parser:
         catch_var = self.eat("IDENT")[1]
         catch_body = self.parse_block()
         return Try(body, catch_var, catch_body, line=line)
+
+    def parse_defer(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
+        self.eat("DEFER")
+        if self.current() and self.current()[0] == "LBRACE":
+            body = self.parse_block()
+        else:
+            body = [self.parse_expr()]
+        return Defer(body, line=line)
+
+    def parse_extern(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
+        self.eat("EXTERN")
+        self.eat("DEF")
+        name = self.eat("IDENT")[1]
+        self.eat("LPAREN")
+        params = []
+        if self.current() and self.current()[0] != "RPAREN":
+            param_name = self.eat("IDENT")[1]
+            self.eat("COLON")
+            param_type = self.parse_type_annotation()
+            params.append((param_name, param_type))
+            while self.current() and self.current()[0] == "COMMA":
+                self.eat("COMMA")
+                param_name = self.eat("IDENT")[1]
+                self.eat("COLON")
+                param_type = self.parse_type_annotation()
+                params.append((param_name, param_type))
+        self.eat("RPAREN")
+        return_type = ""
+        if self.current() and self.current()[0] == "ARROW":
+            self.eat("ARROW")
+            return_type = self.parse_type_annotation()
+        return ExternDef(name, params, return_type, line=line)
+
+    def parse_entry(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
+        self.eat("ENTRY")
+        func = self.parse_function()
+        func.is_entry = True
+        return func
+
+    def parse_noinline(self):
+        line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
+        self.eat("NOINLINE")
+        func = self.parse_function()
+        func.is_noinline = True
+        return func
 
     def _eat_param_name(self):
         tok = self.current()

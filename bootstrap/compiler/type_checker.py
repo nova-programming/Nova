@@ -43,6 +43,34 @@ class StaticTypeError(Exception):
         else:
             super().__init__(f"{prefix} {message}")
 
+def levenshtein_distance(s1, s2):
+    if len(s1) < len(s2):
+        return levenshtein_distance(s2, s1)
+    if len(s2) == 0:
+        return len(s1)
+    prev_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        curr_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = prev_row[j + 1] + 1
+            deletions = curr_row[j] + 1
+            substitutions = prev_row[j] + (c1 != c2)
+            curr_row.append(min(insertions, deletions, substitutions))
+        prev_row = curr_row
+    return prev_row[-1]
+
+def did_you_mean(name, candidates, max_distance=3):
+    best = None
+    best_dist = max_distance + 1
+    for candidate in candidates:
+        if candidate == name:
+            continue
+        dist = levenshtein_distance(name, candidate)
+        if dist < best_dist and dist <= max_distance:
+            best = candidate
+            best_dist = dist
+    return best
+
 class TypeInferer:
     def __init__(self):
         self.env_stack = [{}]
@@ -202,6 +230,18 @@ class TypeInferer:
 
     def visit_Variable(self, node):
         t = self.get_var_type(node.name)
+        if isinstance(t, AnyType):
+            all_names = set()
+            for env in self.env_stack:
+                all_names.update(env.keys())
+            all_names.update(self.functions.keys())
+            all_names.update(self.structs.keys())
+            all_names.update(BUILTIN_SIGS.keys())
+            if node.name not in all_names:
+                suggestion = did_you_mean(node.name, all_names)
+                if suggestion:
+                    import sys
+                    print(f"  warning: unknown identifier '{node.name}' at line {node.line} — did you mean '{suggestion}'?", file=sys.stderr)
         return t
 
     def visit_BinOp(self, node):
@@ -484,6 +524,12 @@ class TypeInferer:
             inst_t = self.structs[inst_t.name]
         if isinstance(inst_t, StructType) and node.field_name in inst_t.fields:
             return inst_t.fields[node.field_name]
+        if isinstance(inst_t, StructType) and inst_t.fields:
+            if node.field_name not in inst_t.fields:
+                suggestion = did_you_mean(node.field_name, inst_t.fields.keys())
+                if suggestion:
+                    import sys
+                    print(f"  warning: unknown field '{node.field_name}' on {inst_t.name} at line {node.line} — did you mean '{suggestion}'?", file=sys.stderr)
         return AnyType()
 
     def visit_LoadLib(self, node):

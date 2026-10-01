@@ -47,6 +47,10 @@ data CodegenState {
     current_fn_name: string
     bce_loop_vars: list
     bce_loop_lists: list
+    defer_nodes: list
+    defer_marks: list
+    defer_loop_marks: list
+    ptr_vars: dict
 }
 
 def new_codegen(tgt: int, target_os: string) -> CodegenState {
@@ -77,6 +81,10 @@ def new_codegen(tgt: int, target_os: string) -> CodegenState {
     state.used_regs = []
     state.bce_loop_vars = []
     state.bce_loop_lists = []
+    state.defer_nodes = []
+    state.defer_marks = []
+    state.defer_loop_marks = []
+    state.ptr_vars = {}
     if tgt == 0 {
         state.bp = "ebp"
         state.sp = "esp"
@@ -532,6 +540,17 @@ def scan_vars(state: CodegenState, node: AstNode) {
         if node.left != 0 { scan_vars(state, node.left) }
         return
     }
+    if node.kind == "Defer" {
+        if node.left != 0 { scan_vars(state, node.left) }
+        if node.body != 0 {
+            i = 0
+            while i < len(node.body) {
+                scan_vars(state, node.body[i])
+                i = i + 1
+            }
+        }
+        return
+    }
     if node.kind == "ListLiteral" {
         i = 0
         while i < len(node.args) {
@@ -565,6 +584,10 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     old_used_regs = state.used_regs
     old_bce_vars = state.bce_loop_vars
     old_bce_lists = state.bce_loop_lists
+    old_defer_nodes = state.defer_nodes
+    old_defer_marks = state.defer_marks
+    old_defer_loop = state.defer_loop_marks
+    old_ptr_vars = state.ptr_vars
 
     state.local_var_names = []
     state.local_vars = []
@@ -576,6 +599,10 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     state.used_regs = []
     state.bce_loop_vars = []
     state.bce_loop_lists = []
+    state.defer_nodes = []
+    state.defer_marks = []
+    state.defer_loop_marks = []
+    state.ptr_vars = {}
 
     psize = ptr_size(state)
     bp = reg32(state, "ebp", "rbp")
@@ -652,11 +679,13 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
         }
     }
 
+    defer_push_scope(state)
     s = 0
     while s < len(node.body) {
         compile_stmt(state, node.body[s], debug_mode)
         s = s + 1
     }
+    defer_end_scope(state, debug_mode)
 
     r = len(state.used_regs) - 1
     while r >= 0 {
@@ -677,6 +706,10 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     state.used_regs = old_used_regs
     state.bce_loop_vars = old_bce_vars
     state.bce_loop_lists = old_bce_lists
+    state.defer_nodes = old_defer_nodes
+    state.defer_marks = old_defer_marks
+    state.defer_loop_marks = old_defer_loop
+    state.ptr_vars = old_ptr_vars
 }
 
 # --- Main entry point ---
@@ -756,6 +789,17 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         i_f = i_f + 1
     }
 
+    i_f = 0
+    while i_f < len(functions) {
+        fn = functions[i_f]
+        if fn.val_int == 1 {
+            emit(state, ".global _entry")
+            emit(state, "_entry:")
+            emit(state, "    jmp _" + fn.val_str)
+        }
+        i_f = i_f + 1
+    }
+
     state.local_var_names = []
     state.local_vars = []
     state.var_name_map = {}
@@ -764,6 +808,7 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     state.used_regs = []
     state.bce_loop_vars = []
     state.bce_loop_lists = []
+    state.ptr_vars = {}
     
     i = 0
     while i < len(top_level) {
@@ -805,11 +850,13 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         r = r + 1
     }
 
+    defer_push_scope(state)
     i = 0
     while i < len(top_level) {
         compile_stmt(state, top_level[i], debug_mode)
         i = i + 1
     }
+    defer_end_scope(state, debug_mode)
     
     r = len(state.used_regs) - 1
     while r >= 0 {

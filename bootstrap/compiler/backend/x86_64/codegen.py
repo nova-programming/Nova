@@ -31,6 +31,11 @@ class X86_64Codegen:
         self._prop_offset_cache = {}
         self.string_vars = set()
         self.func_returns = {}
+        self.deferred_stack = [[]]
+        self.inline_candidates = set()
+        self.noinline_funcs = set()
+        self.entry_func = None
+        self.extern_decls = {}
 
     def get_prop_offset(self, name):
         """Fallback: scan ALL known structs for this field name, return per-struct offset.
@@ -257,7 +262,10 @@ class X86_64Codegen:
             self.data_section.append(f"    .byte 0")
 
         functions = [node for node in self.ast if isinstance(node, Function)]
-        # Collect class methods as functions (mangled as Class_method for asm)
+        for fn in functions:
+            if self._is_inline_candidate(fn):
+                self.inline_candidates.add(fn.name)
+
         class_method_list = []
         for node in self.ast:
             if isinstance(node, ClassDef):
@@ -294,6 +302,8 @@ class X86_64Codegen:
                 self.compile_function(fn)
 
         entry = "_main" if self.target_os != "linux" else "main"
+        if self.entry_func:
+            entry = f"_{self.entry_func}"
         self.assembly.append(f"{entry}:")
         self.assembly.append("    push rbp")
         self.assembly.append("    mov rbp, rsp")
@@ -502,6 +512,12 @@ class X86_64Codegen:
         self.local_offset = 0
         self.used_regs = []
         self.available_regs = ['r12', 'r13', 'r14', 'r15']
+        self.push_defer_scope()
+
+        if fn.is_entry:
+            self.entry_func = fn.name
+        if fn.is_noinline:
+            self.noinline_funcs.add(fn.name)
 
         for param in fn.params:
             param_name = param[0] if isinstance(param, (list, tuple)) else param
@@ -510,7 +526,6 @@ class X86_64Codegen:
             if param_type == 'string':
                 self.string_vars.add(param_name)
 
-        # Allocate space for locals and parameters
         for stmt in fn.body:
             self.scan_vars(stmt)
 
@@ -529,7 +544,6 @@ class X86_64Codegen:
         for reg in self.used_regs:
             self.assembly.append(f"    push {reg}")
 
-        # Save incoming register arguments into their local variable slots
         for i, param in enumerate(fn.params):
             param_name = param[0] if isinstance(param, (list, tuple)) else param
             offset = self.local_vars[param_name]
@@ -571,12 +585,15 @@ class X86_64Codegen:
         for stmt in fn.body:
             self.compile_stmt(stmt)
 
+        self.emit_deferred()
+
         for reg in reversed(self.used_regs):
             self.assembly.append(f"    pop {reg}")
         self.assembly.append("    mov rsp, rbp")
         self.assembly.append("    pop rbp")
         self.assembly.append("    ret")
 
+        self.pop_defer_scope()
         self.local_vars = old_local_vars
         self.string_vars = old_string_vars
         self.used_regs = old_used_regs
@@ -585,6 +602,53 @@ class X86_64Codegen:
     def _emit_statement_line(self, node):
         if hasattr(node, 'line') and node.line > 0:
             self.assembly.append(f"    # line {node.line}")
+
+    def push_defer_scope(self):
+        self.deferred_stack.append([])
+
+    def pop_defer_scope(self):
+        if len(self.deferred_stack) > 1:
+            return self.deferred_stack.pop()
+        return []
+
+    def add_defer(self, stmt):
+        self.deferred_stack[-1].append(stmt)
+
+    def emit_deferred(self):
+        deferred = self.deferred_stack[-1]
+        for stmt in reversed(deferred):
+            self.compile_stmt(stmt)
+
+    def _sizeof_type(self, type_name):
+        sizes = {"int": 8, "float": 8, "bool": 8, "byte": 1, "string": 8, "void": 0}
+        return sizes.get(type_name, 8)
+
+    def _is_inline_candidate(self, fn):
+        if fn.name in self.noinline_funcs:
+            return False
+        if fn.is_entry or fn.is_extern:
+            return False
+        node_count = self._count_nodes(fn.body)
+        return node_count <= 8
+
+    def _count_nodes(self, body):
+        count = 0
+        for stmt in body:
+            count += 1
+            for attr in dir(stmt):
+                if attr.startswith('_'):
+                    continue
+                try:
+                    child = getattr(stmt, attr)
+                except Exception:
+                    continue
+                if hasattr(child, '__dict__'):
+                    count += 1
+                elif isinstance(child, list):
+                    for item in child:
+                        if hasattr(item, '__dict__'):
+                            count += 1
+        return count
 
     def compile_stmt(self, node):
         self._emit_statement_line(node)
@@ -691,6 +755,7 @@ class X86_64Codegen:
         elif isinstance(node, Return):
             self.compile_expr(node.value)
             self.assembly.append("    pop rax")
+            self.emit_deferred()
             for reg in reversed(getattr(self, 'used_regs', [])):
                 self.assembly.append(f"    pop {reg}")
             self.assembly.append("    mov rsp, rbp")
@@ -897,6 +962,60 @@ class X86_64Codegen:
                         self.assembly.append(f"    mov {offset}, rax")
                     else:
                         self.assembly.append(f"    mov [rbp - {abs(offset)}], rax")
+        elif isinstance(node, Defer):
+            self.add_defer(node)
+        elif isinstance(node, ExternDef):
+            self.extern_decls[node.name] = node
+            self.assembly.append(f".extern _{node.name}")
+        elif isinstance(node, MultiReturn):
+            for i, val in enumerate(node.values):
+                self.compile_expr(val)
+                self.assembly.append("    pop rax")
+                if i == 0:
+                    self.assembly.append("    mov rbx, rax")
+                elif i == 1:
+                    self.assembly.append("    mov rcx, rax")
+                elif i == 2:
+                    self.assembly.append("    mov rdx, rax")
+            self.assembly.append("    mov rax, rbx")
+            for reg in reversed(getattr(self, 'used_regs', [])):
+                self.assembly.append(f"    pop {reg}")
+            self.assembly.append("    mov rsp, rbp")
+            self.assembly.append("    pop rbp")
+            self.assembly.append("    ret")
+        elif isinstance(node, UnpackAssign):
+            self.compile_expr(node.value)
+            self.assembly.append("    pop rax")
+            for i, target in enumerate(node.targets):
+                if isinstance(target, Variable) and target.name == '_':
+                    continue
+                if i == 0:
+                    self.assembly.append(f"    mov rbx, rax")
+                    if isinstance(target, Variable):
+                        offset = self.local_vars.get(target.name)
+                        if offset is not None:
+                            if isinstance(offset, str):
+                                self.assembly.append(f"    mov {offset}, rbx")
+                            else:
+                                self.assembly.append(f"    mov [rbp - {offset}], rbx")
+                elif i == 1:
+                    self.assembly.append(f"    mov rcx, rax")
+                    if isinstance(target, Variable):
+                        offset = self.local_vars.get(target.name)
+                        if offset is not None:
+                            if isinstance(offset, str):
+                                self.assembly.append(f"    mov {offset}, rcx")
+                            else:
+                                self.assembly.append(f"    mov [rbp - {offset}], rcx")
+                elif i == 2:
+                    self.assembly.append(f"    mov rdx, rax")
+                    if isinstance(target, Variable):
+                        offset = self.local_vars.get(target.name)
+                        if offset is not None:
+                            if isinstance(offset, str):
+                                self.assembly.append(f"    mov {offset}, rdx")
+                            else:
+                                self.assembly.append(f"    mov [rbp - {offset}], rdx")
             for stmt in node.catch_body:
                 self.compile_stmt(stmt)
             self.assembly.append(f"{after_label}:")
@@ -1250,6 +1369,26 @@ class X86_64Codegen:
                 self.assembly.append("    call _malloc")
                 self.assembly.append("    add rsp, 32")
                 self.assembly.append("    push rax")
+            elif node.name in self.inline_candidates and not node.name.startswith("_"):
+                for arg in reversed(node.args):
+                    self.compile_expr(arg)
+                n_args = len(node.args)
+                if n_args > 0:
+                    self.assembly.append("    pop rdi")
+                if n_args > 1:
+                    self.assembly.append("    pop rsi")
+                if n_args > 2:
+                    self.assembly.append("    pop rdx")
+                if n_args > 3:
+                    self.assembly.append("    pop rcx")
+                if n_args > 4:
+                    self.assembly.append("    pop r8")
+                if n_args > 5:
+                    self.assembly.append("    pop r9")
+                self.assembly.append("    sub rsp, 32")
+                self.assembly.append(f"    call _{node.name}")
+                self.assembly.append("    add rsp, 32")
+                self.assembly.append("    push rax")
             else:
                 for arg in reversed(node.args):
                     self.compile_expr(arg)
@@ -1266,7 +1405,7 @@ class X86_64Codegen:
                     self.assembly.append("    pop r8")
                 if n_args > 5:
                     self.assembly.append("    pop r9")
-                
+
                 self.assembly.append("    sub rsp, 32")
                 if hasattr(node, 'module') and node.module:
                     module_prefix = node.module.replace(".", "_")
@@ -1274,7 +1413,7 @@ class X86_64Codegen:
                 else:
                     self.assembly.append(f"    call _{node.name}")
                 self.assembly.append("    add rsp, 32")
-                
+
                 if n_args > 0:
                     pass
                 self.assembly.append("    push rax")
@@ -1294,6 +1433,12 @@ class X86_64Codegen:
         elif isinstance(node, Alloc):
             self.compile_expr(node.size)
             self.assembly.append("    pop rdi")
+            type_param = getattr(node, 'type_param', None)
+            if type_param:
+                elem_size = self._sizeof_type(type_param)
+                if elem_size > 1:
+                    self.assembly.append(f"    mov rax, {elem_size}")
+                    self.assembly.append("    imul rdi, rax")
             self.assembly.append("    sub rsp, 32")
             self.assembly.append("    call _malloc")
             self.assembly.append("    add rsp, 32")
@@ -1535,6 +1680,22 @@ class X86_64Codegen:
                 self.assembly.append("    sub rsp, 32")
                 self.assembly.append("    call _fclose")
                 self.assembly.append("    add rsp, 32")
+            elif node.method_name == "as_list":
+                self.compile_expr(node.instance)
+                self.assembly.append("    pop rax")
+                count = 100
+                if hasattr(node, 'kwargs') and 'count' in node.kwargs:
+                    count_node = node.kwargs['count']
+                    if isinstance(count_node, Number):
+                        count = count_node.value
+                self.assembly.append("    mov rdi, 16")
+                self.assembly.append("    sub rsp, 32")
+                self.assembly.append("    call _malloc")
+                self.assembly.append("    add rsp, 32")
+                self.assembly.append("    mov dword ptr [rax], 0")
+                self.assembly.append("    mov dword ptr [rax + 4], " + str(count))
+                self.assembly.append("    mov [rax + 8], rax")
+                self.assembly.append("    push rax")
             elif node.method_name == "flush":
                 self.compile_expr(node.instance)
                 self.assembly.append("    pop rdi")

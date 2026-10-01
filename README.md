@@ -26,6 +26,7 @@ After installation, open a **new** terminal, then:
 ```bash
 nova --version           # Check Nova version
 nova build hello.nv      # Compile a Nova program (requires GCC)
+nova run hello.nv        # Compile, link, and immediately execute
 nova dev hello.nv        # Run in VM mode (no GCC needed)
 galaxy --version         # Check Galaxy version
 galaxy init my-lib       # Create a library
@@ -58,6 +59,9 @@ python install.py --uninstall   # Remove Nova, Galaxy, and PATH entries
 ```bash
 # Build to native executable (GCC-free, uses self-hosted assembler+linker)
 nova.exe build program.nv
+
+# Compile, link, and immediately execute (args after the file are forwarded)
+nova.exe run program.nv arg1 arg2
 
 # Assemble .s file and link directly
 nova.exe assemble-link input.s output.exe

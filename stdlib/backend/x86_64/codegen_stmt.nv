@@ -147,8 +147,93 @@ def bce_len_list_of(state: CodegenState, node: AstNode) -> string {
     return a.val_str
 }
 
+def defer_is_stmt_kind(k: string) -> int {
+    if k == "Assignment" { return 1 }
+    if k == "DataFieldAssign" { return 1 }
+    if k == "PointerAssign" { return 1 }
+    if k == "ArrayIndexAssign" { return 1 }
+    if k == "PrintD" { return 1 }
+    if k == "Print" { return 1 }
+    if k == "Return" { return 1 }
+    if k == "IfElse" { return 1 }
+    if k == "While" { return 1 }
+    if k == "ForLoop" { return 1 }
+    if k == "ForIn" { return 1 }
+    if k == "Break" { return 1 }
+    if k == "Continue" { return 1 }
+    if k == "RawBlock" { return 1 }
+    if k == "TRY" { return 1 }
+    if k == "THROW" { return 1 }
+    if k == "Call" { return 1 }
+    if k == "MethodCall" { return 1 }
+    if k == "Block" { return 1 }
+    if k == "Defer" { return 1 }
+    return 0
+}
+
+def defer_emit_one(state: CodegenState, node: AstNode, debug_mode: int) {
+    if node == 0 { return }
+    if node.body != 0 and len(node.body) > 0 {
+        i = 0
+        while i < len(node.body) {
+            compile_stmt(state, node.body[i], debug_mode)
+            i = i + 1
+        }
+        return
+    }
+    if node.left != 0 {
+        if node.left.kind != 0 and defer_is_stmt_kind(node.left.kind) == 1 {
+            compile_stmt(state, node.left, debug_mode)
+        } else {
+            compile_expr(state, node.left)
+            clean_n(state, 1)
+        }
+    }
+}
+
+def defer_push_scope(state: CodegenState) {
+    state.defer_marks.append(len(state.defer_nodes))
+}
+
+def defer_end_scope(state: CodegenState, debug_mode: int) {
+    if len(state.defer_marks) == 0 { return }
+    mark = state.defer_marks[len(state.defer_marks) - 1]
+    state.defer_marks.pop()
+    while len(state.defer_nodes) > mark {
+        n = state.defer_nodes[len(state.defer_nodes) - 1]
+        state.defer_nodes.pop()
+        defer_emit_one(state, n, debug_mode)
+    }
+}
+
+def defer_emit_down_to(state: CodegenState, h: int, debug_mode: int) {
+    idx = len(state.defer_nodes) - 1
+    while idx >= h {
+        defer_emit_one(state, state.defer_nodes[idx], debug_mode)
+        idx = idx - 1
+    }
+}
+
+def defer_loop_mark(state: CodegenState) -> int {
+    if len(state.defer_loop_marks) == 0 { return 0 }
+    return state.defer_loop_marks[len(state.defer_loop_marks) - 1]
+}
+
 def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
     if node.kind == "Assignment" {
+        if node.left != 0 and node.left.kind == "Alloc" {
+            sz = node.left.val_int
+            if sz == 0 { sz = 1 }
+            state.ptr_vars.set(node.val_str, sz)
+        } elif node.left != 0 and node.left.kind == "Variable" {
+            if state.ptr_vars.has(node.left.val_str) == 1 {
+                state.ptr_vars.set(node.val_str, state.ptr_vars.get(node.left.val_str))
+            } else {
+                state.ptr_vars.remove(node.val_str)
+            }
+        } else {
+            state.ptr_vars.remove(node.val_str)
+        }
         is_str_val = 0
         if is_string_expr(state, node.left) == 1 {
             is_str_val = 1
@@ -223,6 +308,14 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             emit(state, "    push %c")
             emit(state, "    push %d")
             emit_call(state, "_dict_set", 3)
+        } elif node.left != 0 and node.left.kind == "Variable" and state.ptr_vars.has(node.left.val_str) == 1 {
+            raw_sz = state.ptr_vars.get(node.left.val_str)
+            if raw_sz == 1 {
+                emit(state, "    mov [%d + %c], al")
+            } else {
+                emit(state, "    mov [%d + %c*8], %a")
+            }
+            return
         } else {
             skip_upper = 0
             if node.right != 0 and node.right.kind == "Variable" {
@@ -300,8 +393,14 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    push 0")
         emit_call(state, "_fflush", 1)
     }
+    if node.kind == "Defer" {
+        state.defer_nodes.append(node)
+    }
     if node.kind == "Return" {
         if node.left != 0 { compile_expr(state, node.left) }
+        emit(state, "    pop %a")
+        emit(state, "    push %a")
+        defer_emit_down_to(state, 0, debug_mode)
         emit(state, "    pop %a")
         r = len(state.used_regs) - 1
         while r >= 0 {
@@ -323,19 +422,23 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    cmp %a, 0")
         emit(state, "    je " + else_label)
         
+        defer_push_scope(state)
         i = 0
         while i < len(node.body) {
             compile_stmt(state, node.body[i], debug_mode)
             i = i + 1
         }
+        defer_end_scope(state, debug_mode)
         emit(state, "    jmp " + end_label)
         
         emit(state, else_label + ":")
+        defer_push_scope(state)
         i = 0
         while i < len(node.else_body) {
             compile_stmt(state, node.else_body[i], debug_mode)
             i = i + 1
         }
+        defer_end_scope(state, debug_mode)
         
         emit(state, end_label + ":")
     }
@@ -351,11 +454,15 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    cmp %a, 0")
         emit(state, "    je " + end_label)
 
+        defer_push_scope(state)
+        state.defer_loop_marks.append(len(state.defer_nodes))
         i = 0
         while i < len(node.body) {
             compile_stmt(state, node.body[i], debug_mode)
             i = i + 1
         }
+        defer_end_scope(state, debug_mode)
+        state.defer_loop_marks.pop()
 
         emit(state, "    jmp " + start_label)
         emit(state, end_label + ":")
@@ -363,6 +470,7 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         state.loop_end_labels.pop()
     }
     if node.kind == "ForLoop" {
+        state.ptr_vars.remove(node.val_str)
         compile_expr(state, node.left)
         emit(state, "    pop %a")
         reg_val = find_var_reg(state, node.val_str)
@@ -414,12 +522,16 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         }
         state.bce_loop_vars.append(node.val_str)
         state.bce_loop_lists.append(bce_list)
+        defer_push_scope(state)
+        state.defer_loop_marks.append(len(state.defer_nodes))
 
         i = 0
         while i < len(node.body) {
             compile_stmt(state, node.body[i], debug_mode)
             i = i + 1
         }
+        defer_end_scope(state, debug_mode)
+        state.defer_loop_marks.pop()
         state.bce_loop_vars.pop()
         state.bce_loop_lists.pop()
 
@@ -458,6 +570,7 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         state.loop_end_labels.pop()
     }
     if node.kind == "ForIn" {
+        state.ptr_vars.remove(node.val_str)
         compile_expr(state, node.left)
         
         ptr_sz = ptr_size(state)
@@ -498,12 +611,16 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         
         state.bce_loop_vars.append(node.val_str)
         state.bce_loop_lists.append("")
+        defer_push_scope(state)
+        state.defer_loop_marks.append(len(state.defer_nodes))
 
         i = 0
         while i < len(node.body) {
             compile_stmt(state, node.body[i], debug_mode)
             i = i + 1
         }
+        defer_end_scope(state, debug_mode)
+        state.defer_loop_marks.pop()
         state.bce_loop_vars.pop()
         state.bce_loop_lists.pop()
         
@@ -519,12 +636,14 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
     if node.kind == "Break" {
         if len(state.loop_end_labels) > 0 {
             lbl = state.loop_end_labels[len(state.loop_end_labels) - 1]
+            defer_emit_down_to(state, defer_loop_mark(state), debug_mode)
             emit(state, "    jmp " + lbl)
         }
     }
     if node.kind == "Continue" {
         if len(state.loop_start_labels) > 0 {
             lbl = state.loop_start_labels[len(state.loop_start_labels) - 1]
+            defer_emit_down_to(state, defer_loop_mark(state), debug_mode)
             emit(state, "    jmp " + lbl)
         }
     }
@@ -602,11 +721,13 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    lea %c, [rip + " + catch_label + "]")
         emit(state, "    mov [%a], %c")
         
+        defer_push_scope(state)
         i = 0
         while i < len(node.body) {
             compile_stmt(state, node.body[i], debug_mode)
             i = i + 1
         }
+        defer_end_scope(state, debug_mode)
         
         emit(state, "    lea %a, [rip + _try_catch_sp]")
         emit(state, "    xor %c, %c")
@@ -616,6 +737,7 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    lea %a, [rip + _exception_val]")
         emit(state, "    mov %a, [%a]")
         
+        defer_push_scope(state)
         if node.val_str != "" {
             err_reg = find_var_reg(state, node.val_str)
             if err_reg != "" {
@@ -631,6 +753,7 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             compile_stmt(state, node.else_body[i], debug_mode)
             i = i + 1
         }
+        defer_end_scope(state, debug_mode)
         
         emit(state, after_label + ":")
     }
@@ -639,6 +762,7 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    pop %j")
         emit(state, "    lea %a, [rip + _exception_val]")
         emit(state, "    mov [%a], %j")
+        defer_emit_down_to(state, 0, debug_mode)
         emit(state, "    lea %c, [rip + _try_catch_sp]")
         emit(state, "    mov %s, [%c]")
         emit(state, "    lea %c, [rip + _catch_ip]")

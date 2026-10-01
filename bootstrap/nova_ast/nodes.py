@@ -80,12 +80,15 @@ class PrintD:
         return f"PrintD({self.value})"
 
 class Function:
-    def __init__(self, name, params, body, return_type=None, line=0):
+    def __init__(self, name, params, body, return_type=None, line=0, is_entry=False, is_noinline=False, is_extern=False):
         self.line = line
         self.name = name
         self.params = params
         self.body = body
         self.return_type = return_type
+        self.is_entry = is_entry
+        self.is_noinline = is_noinline
+        self.is_extern = is_extern
     def __repr__(self):
         return f"Function('{self.name}', {self.params}, {self.body}, return_type={self.return_type})"
 
@@ -496,3 +499,34 @@ class Comptime:
         self.target = target
     def __repr__(self):
         return f"Comptime({self.target})"
+
+class Defer:
+    def __init__(self, body, line=0):
+        self.line = line
+        self.body = body
+    def __repr__(self):
+        return f"Defer({self.body})"
+
+class ExternDef:
+    def __init__(self, name, params, return_type, line=0):
+        self.line = line
+        self.name = name
+        self.params = params
+        self.return_type = return_type
+    def __repr__(self):
+        return f"ExternDef('{self.name}', {self.params}, {self.return_type})"
+
+class MultiReturn:
+    def __init__(self, values, line=0):
+        self.line = line
+        self.values = values
+    def __repr__(self):
+        return f"MultiReturn({self.values})"
+
+class UnpackAssign:
+    def __init__(self, targets, value, line=0):
+        self.line = line
+        self.targets = targets
+        self.value = value
+    def __repr__(self):
+        return f"UnpackAssign({self.targets}, {self.value})"

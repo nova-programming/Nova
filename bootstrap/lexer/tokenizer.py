@@ -34,7 +34,9 @@ KEYWORDS = {
     "string": "TYPE_STRING", "byte": "TYPE_BYTE", "void": "TYPE_VOID", "const": "CONST", "enum": "ENUM",
     "comptime": "COMPTIME",
     "str": "STR",
-    "@raw": "RAW", "@export": "EXPORT",
+    "defer": "DEFER",
+    "extern": "EXTERN",
+    "@raw": "RAW", "@export": "EXPORT", "@entry": "ENTRY", "@noinline": "NOINLINE",
 }
 
 ESCAPE_MAP = {

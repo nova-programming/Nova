@@ -48,6 +48,7 @@ def match_keyword(word: string) -> string {
         case "try" { return "TRY" }
         case "catch" { return "CATCH" }
         case "throw" { return "THROW" }
+        case "defer" { return "DEFER" }
         case "const" { return "CONST" }
         case "enum" { return "ENUM" }
         case "class" { return "CLASS" }
@@ -120,6 +121,18 @@ def tokenize(src: string) -> list {
                     tok.col = col
                     tokens.append(tok)
                     i = i + 4
+                    continue
+                }
+            }
+            if i + 5 < length {
+                if src[i + 1] == "e" and src[i + 2] == "n" and src[i + 3] == "t" and src[i + 4] == "r" and src[i + 5] == "y" {
+                    tok = Token()
+                    tok.kind = "ENTRY"
+                    tok.val = "@entry"
+                    tok.line = line_num
+                    tok.col = col
+                    tokens.append(tok)
+                    i = i + 6
                     continue
                 }
             }

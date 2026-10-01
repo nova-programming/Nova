@@ -375,9 +375,34 @@ def parse_primary(state: ParserState) -> AstNode {
         eat_tok(state, "RPAREN")
     } elif tok.kind == "ALLOC" {
         eat_tok(state, "ALLOC")
+        elem_name = ""
+        elem_size = 1
+        if current_tok(state).kind == "LBRACK" {
+            eat_tok(state, "LBRACK")
+            t = current_tok(state)
+            if t.kind == "TYPE_INT" { elem_name = "int" }
+            elif t.kind == "TYPE_FLOAT" { elem_name = "float" }
+            elif t.kind == "TYPE_BOOL" { elem_name = "bool" }
+            elif t.kind == "TYPE_STRING" { elem_name = "string" }
+            elif t.kind == "TYPE_BYTE" { elem_name = "byte" }
+            elif t.kind == "TYPE_VOID" { elem_name = "void" }
+            elif t.kind == "IDENT" { elem_name = t.val }
+            else {
+                errors.err("Syntax", state.filename, t.line, "unexpected token: expected element type inside alloc[T]", "use int, float, bool, string, byte, or a struct name - e.g. alloc[int](10)", t.col)
+            }
+            eat_tok(state, t.kind)
+            eat_tok(state, "RBRACK")
+            if elem_name == "byte" {
+                elem_size = 1
+            } else {
+                elem_size = 8
+            }
+        }
         eat_tok(state, "LPAREN")
         node.kind = "Alloc"
         node.left = parse_expr(state)
+        node.val_str = elem_name
+        node.val_int = elem_size
         eat_tok(state, "RPAREN")
     } elif tok.kind == "FREE" {
         eat_tok(state, "FREE")
@@ -471,6 +496,7 @@ def parse_primary(state: ParserState) -> AstNode {
                 elif prop_tok.val == "value_word" { is_ptr = 1 }
                 elif prop_tok.val == "value_dword" { is_ptr = 1 }
                 elif prop_tok.val == "value_qword" { is_ptr = 1 }
+                elif prop_tok.val == "ptr" { is_ptr = 1 }
 
                 if is_ptr == 1 {
                     if next_after.kind == "EQUALS" or next_after.kind == "PLUSEQ" or next_after.kind == "MINUSEQ" or next_after.kind == "STAREQ" or next_after.kind == "SLASHEQ" or next_after.kind == "PERCENTEQ" {
@@ -1113,6 +1139,43 @@ def parse_statement(state: ParserState) -> AstNode {
         return node
     }
 
+    if tok.kind == "DEFER" {
+        eat_tok(state, "DEFER")
+        node = AstNode()
+        node.line = stmt_line
+        node.col = stmt_col
+        node.kind = "Defer"
+        node.left = 0
+        node.body = []
+        if current_tok(state).kind == "LBRACE" {
+            node.body = parse_block(state)
+        } else {
+            stmt = parse_statement(state)
+            if stmt.kind == "NONE" {
+                node.left = 0
+            } else {
+                node.left = stmt
+            }
+        }
+        return node
+    }
+
+    if tok.kind == "ENTRY" {
+        eat_tok(state, "ENTRY")
+        if current_tok(state).kind != "DEF" {
+            errors.err("Syntax", state.filename, stmt_line, "unexpected token: @entry must precede def", "@entry marks the program entry function - write '@entry def name' with parens and body", stmt_col)
+            node = AstNode()
+            node.line = stmt_line
+            node.col = stmt_col
+            node.kind = "NONE"
+            return node
+        }
+        is_entry = 1
+        tok = current_tok(state)
+    } else {
+        is_entry = 0
+    }
+
     if tok.kind == "DEF" {
         eat_tok(state, "DEF")
         name = eat_tok(state, "IDENT").val
@@ -1160,6 +1223,10 @@ def parse_statement(state: ParserState) -> AstNode {
         node.param_types = param_types
         node.return_type = return_type
         node.body = body
+        node.val_int = 0
+        if is_entry == 1 {
+            node.val_int = 1
+        }
         return node
     }
 

@@ -11,7 +11,30 @@ Galaxy is a fully functional package manager with a Git-backed registry website,
 ### 3. Small Function Inlining (Phase 4)
 Implement advanced compiler optimizations to inline extremely short, non-recursive functions, entirely eliminating call/ret overhead for utility methods.
 
+### 4. Language Feature Roadmap (Specified — Sequenced Delivery)
+Ten features specified with developer-vs-backend contracts. Delivered first: `nova run` (instant execution). The remainder are sequenced by blast radius to protect self-hosting stability:
+- **Next:** `@entry` annotations (bare-metal), `defer` (LIFO scope cleanup), `alloc[T]` typed pointers.
+- **Later (ABI changes):** C FFI `extern def`, zero-copy `{ptr,len}` slices, `.ptr`/`.as_list` bridge, multiple returns with `_` discard, auto-inlining with `@noinline`.
+- **Tooling:** "Did you mean?" Levenshtein diagnostics, macOS ARM64 bootstrap, POSIX layer completion.
+- Full SSO (inline ≤15B string buffers) deferred: it changes the `char*` ABI at every codegen/VM boundary; shipped instead the ABI-preserving subset (empty-slice static, full-slice aliasing in `_str_sub`).
+- See `docs/features.md` for the full specification and status of each item.
+
 ## Completed Milestones
+
+### Instant Execution — `nova run` (Oct 2026)
+`nova run <file.nv> [args...]` compiles, links, and immediately executes in one command (args forwarded to the program). Implemented as a CLI-level composition of `compile_to_exe` + `system_exec` in `nova.nv`; no codegen changes, works identically in Python and self-hosted compilers. Validated end-to-end including argument forwarding.
+
+### Loop Bounds-Check Elimination (Oct 2026)
+Self-hosted x86_64 backend detects canonical `for i = 0 to len(L)-1 { ... L[i] = ... }` loops and elides the upper-bound `cmp`+`jge` branch (lower check retained). Guarded by a conservative purity walker (unknown node kinds default to keeping checks; any non-`len` call, method call, `free`, `RawBlock`, or reassignment blocks elimination; innermost loop binding wins for shadowing). Verified in emitted assembly (−2 instructions per store) with correct outputs, plus negative tests proving checks are kept when the body mutates.
+
+### Parse-Time Constant Folding & Dead-Code Pruning (Oct 2026)
+Self-hosted parser folds `"a"+"b"` string literals and `true and x` / `false or x` boolean logic, and prunes `if false` / `if true` / `elif` dead branches (multi-statement branches become `Block` nodes, empty branches become `NONE`). `Block` statement support added to both native backends and the type checker. All folding is semantics-preserving; validated via self-hosted builds with correct outputs.
+
+### Native List-Write Correctness Fix (Oct 2026)
+Fixed a critical pre-existing bug: the bounds check in list index assignment clobbered the value register (`mov eax,[rbx]` overwrote the value in `rax`, and the `_oob_line` setup clobbered it earlier), so every `lst[i] = x` stored garbage. Fixed with save/restore in the Python bootstrap backend. The self-hosted backend already used the correct non-clobbering form.
+
+### Self-Hosted `for` Loop Fix (Oct 2026)
+Fixed a pre-existing self-hosted codegen bug where `ForLoop` reused a possibly-unbound `offset` variable when the loop variable was register-allocated, emitting garbage displacements (e.g. `[rbp-140696080088216]`). Bound-load and step sections now use the register directly or a freshly resolved offset.
 
 ### Frame Pointer Optimization (June 2026)
 x86_64 now uses `rsp`-relative offsets (`state.bp="rsp"`), ARM64 uses `sp`-relative (`state.bp="sp"`). No `push rbp; mov rbp, rsp` in x86_64 prologue, no `mov fp, sp` in ARM64. Saves 1-2 instructions per function call, frees RBP/FP as GP register. Verified by all 229 tests.

@@ -41,6 +41,8 @@ Nova bridges high-level Pythonic simplicity with low-level C-like control. This 
 * **`null`**: Evaluates to the memory address `0` (used for pointer checks and object initialization checks).
 * **`switch`/`case`/`else`**: Multi-branch selection. `switch expr { case val { body } else { body } }` desugars to an if-elif-else chain at parse time (no AST or codegen changes needed).
 * **`try`/`catch`/`throw`**: Exception handling. `try { ... } catch e { ... }` compiles to setjmp/longjmp in native mode. `throw val` triggers the exception. Both VM (OP_TRY/OP_THROW/OP_CATCHEND) and native runtimes supported.
+* **`defer`**: Deterministic scope cleanup. Executes statements in LIFO (reverse) order right before function or scope exit (`return`, `break`, or block closing `}`). Supports both single-line (`defer sys_close(f)`) and block form (`defer { free(p); sys_close(f) }`).
+* **`extern def`**: Direct zero-boilerplate C FFI. Declares external C functions (`extern def puts(s: string) -> int`) with automatic argument register placement (SysV / Win64) and null-terminated string pointer unwrapping.
 
 ### Heap Allocation & Raw Memory
 * **`data`**: Declares C-style structs with statically typed fields. Offsets are resolved during codegen based on field order (4 bytes per field).
@@ -51,8 +53,8 @@ Nova bridges high-level Pythonic simplicity with low-level C-like control. This 
         y: int
     }
     ```
-* **`alloc(size)`**: Dynamically allocates `size` bytes of raw memory on the heap. Only allowed inside `@raw` blocks. Calls `_malloc` (`HeapAlloc` on Windows) under the hood.
-* **`free(ptr)`**: Deallocates memory pointed to by `ptr`. Only allowed inside `@raw` blocks. Calls `_free` (`HeapFree` on Windows) under the hood.
+* **`alloc(size)` / `alloc[T](count)`**: Dynamically allocates memory on the heap. `alloc[T](count)` automatically scales the allocation by `sizeof(T)` at compile time.
+* **`free(ptr)`**: Deallocates memory pointed to by `ptr`. Calls `_free` (`HeapFree` on Windows) under the hood.
 
 ### File I/O Keywords
 * **`open(path, mode)`**: Opens the file at `path` using mode `mode` (`"r"` or `"w"`). Returns a 32-bit integer file descriptor.
@@ -97,6 +99,8 @@ Within `@raw` blocks, pointers (integer addresses representing memory locations)
 * **`ptr.isValid`**: Checks if the pointer address is valid (returns `true` if `addr != 0`, `false` if `addr == 0`).
 * **`ptr.isNull`**: Checks if the pointer address is null (returns `true` if `addr == 0`, `false` if `addr != 0`).
 * **`ptr.bytes`**: Accesses raw byte-level array representations of memory.
+* **`lst.ptr`**: Returns the raw memory address of the list's internal backing buffer.
+* **`ptr.as_list(count)`**: Wraps a raw memory pointer into a high-level `list` header with `count` elements with zero copying.
 
 ---
 
@@ -172,6 +176,8 @@ These functions are available natively in all programs without requiring manual 
     }
     ```
 * **`@export { name1, name2 }`**: Exports defined symbols globally, allowing them to be resolved externally or by other compiled modules.
+* **`@entry`**: Marks a bare-metal function as the executable entry point when building with `--bare` (bypasses runtime CRT initialization).
+* **`@noinline`**: Disables automatic function inlining for a specific function.
 
 ---
 
@@ -213,6 +219,7 @@ The compiler supports building for different target platforms via the `target_os
 | `python main.py build <file.nv>` | Production | Compiles to native x86 executable using python codegen + GCC |
 | `python main.py dev <file.nv>` | Development | Runs in Python bytecode VM |
 | `nova.exe build <file.nv>` | Self-hosted | Nova-compiled compiler compiles directly to native PE executable using internal assembler + linker (no external toolchain required) |
+| `nova.exe run <file.nv> [args...]` | Self-hosted | Compiles and immediately executes native binary with argument forwarding |
 | `nova.exe assemble-link <file.s> <out.exe>` | Assembler/Linker | Assembles and links a raw x86 assembly file directly to a PE executable |
 | `nova.exe build-bare <file.nv> <org> <entry>` | Flat Binary | Compiles to a flat, headerless binary (ideal for bare-metal/bootloader use) |
 | `nova.exe dev <file.nv>` | Development | Runs in the Nova-written bytecode VM (stdlib/vm.nv) |
@@ -226,6 +233,7 @@ After installing with `python install.py`, the `nova` and `galaxy` commands are 
 |---------|-------------|
 | `nova --version` | Show Nova compiler version |
 | `nova build <file.nv>` | Compile a Nova program (alias for `python main.py build`) |
+| `nova run <file.nv> [args...]` | Compile and run native binary immediately |
 | `nova dev <file.nv>` | Run in the Nova bytecode VM |
 | `nova repl` | Start the interactive REPL |
 | `nova update` | Update Nova compiler itself |
