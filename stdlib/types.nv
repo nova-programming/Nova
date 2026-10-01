@@ -9,6 +9,7 @@ data Type {
     params: list
     ret: Type
     fields: list
+    field_names: list
 }
 
 data TypeField {
@@ -61,11 +62,20 @@ def create_func_type(params: list, ret: Type) -> Type {
     return t
 }
 
+def type_params(t: Type) -> list {
+    return t.params
+}
+
+def type_ret(t: Type) -> Type {
+    return t.ret
+}
+
 def create_struct_type(name: string) -> Type {
     t = Type()
     t.kind = "struct"
     t.name = name
     t.fields = []
+    t.field_names = []
     return t
 }
 

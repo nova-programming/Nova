@@ -28,6 +28,7 @@ Thumbs.db
 # Compiler cache
 .nova_cache.json
 .nova_cache.txt
+.nova_*.txt
 
 # GCC bundle
 gcc/
@@ -46,5 +47,7 @@ test_*.c
 test_*.nv
 test_*.txt
 ver_*.txt
+probe*.nv
+probe_*.nv
 ci-tmp/
 

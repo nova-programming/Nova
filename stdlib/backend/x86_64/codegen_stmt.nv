@@ -2,6 +2,151 @@
 # Code Generator: Statement Compilation
 # ============================================================
 
+def bce_list_safe(lst: list, loopvar: string, listname: string) -> int {
+    if lst == 0 { return 1 }
+    i = 0
+    while i < len(lst) {
+        if bce_node_safe(lst[i], loopvar, listname) == 0 { return 0 }
+        i = i + 1
+    }
+    return 1
+}
+
+def bce_node_safe(node: AstNode, loopvar: string, listname: string) -> int {
+    if node == 0 { return 1 }
+    k = node.kind
+    if k == 0 { return 0 }
+    if k == "Number" { return 1 }
+    if k == "String" { return 1 }
+    if k == "Boolean" { return 1 }
+    if k == "Variable" { return 1 }
+    if k == "NONE" { return 1 }
+    if k == "Break" { return 1 }
+    if k == "Continue" { return 1 }
+    if k == "Data" { return 1 }
+    if k == "ClassDef" { return 1 }
+    if k == "Function" { return 1 }
+    if k == "Import" { return 1 }
+    if k == "Export" { return 1 }
+    if k == "Comptime" { return 1 }
+    if k == "RawBlock" { return 0 }
+    if k == "MethodCall" { return 0 }
+    if k == "Free" { return 0 }
+    if k == "Assignment" {
+        if node.val_str == loopvar { return 0 }
+        if node.val_str == listname { return 0 }
+        return bce_node_safe(node.left, loopvar, listname)
+    }
+    if k == "ForLoop" {
+        if node.val_str == loopvar { return 0 }
+        if node.val_str == listname { return 0 }
+        if bce_node_safe(node.left, loopvar, listname) == 0 { return 0 }
+        if bce_node_safe(node.right, loopvar, listname) == 0 { return 0 }
+        if bce_node_safe(node.cond, loopvar, listname) == 0 { return 0 }
+        return bce_list_safe(node.body, loopvar, listname)
+    }
+    if k == "ForIn" {
+        if node.val_str == loopvar { return 0 }
+        if node.val_str == listname { return 0 }
+        if bce_node_safe(node.left, loopvar, listname) == 0 { return 0 }
+        return bce_list_safe(node.body, loopvar, listname)
+    }
+    if k == "While" {
+        if bce_node_safe(node.cond, loopvar, listname) == 0 { return 0 }
+        return bce_list_safe(node.body, loopvar, listname)
+    }
+    if k == "IfElse" {
+        if bce_node_safe(node.cond, loopvar, listname) == 0 { return 0 }
+        if bce_list_safe(node.body, loopvar, listname) == 0 { return 0 }
+        return bce_list_safe(node.else_body, loopvar, listname)
+    }
+    if k == "TRY" {
+        if bce_list_safe(node.body, loopvar, listname) == 0 { return 0 }
+        return bce_list_safe(node.else_body, loopvar, listname)
+    }
+    if k == "Return" { return bce_node_safe(node.left, loopvar, listname) }
+    if k == "Throw" { return bce_node_safe(node.left, loopvar, listname) }
+    if k == "Print" { return bce_node_safe(node.left, loopvar, listname) }
+    if k == "PrintD" { return bce_node_safe(node.left, loopvar, listname) }
+    if k == "Block" { return bce_list_safe(node.body, loopvar, listname) }
+    if k == "Call" {
+        if node.val_str == "len" {
+            return bce_list_safe(node.args, loopvar, listname)
+        }
+        return 0
+    }
+    if k == "BinOp" {
+        if bce_node_safe(node.left, loopvar, listname) == 0 { return 0 }
+        return bce_node_safe(node.right, loopvar, listname)
+    }
+    if k == "Compare" {
+        if bce_node_safe(node.left, loopvar, listname) == 0 { return 0 }
+        return bce_node_safe(node.right, loopvar, listname)
+    }
+    if k == "UnaryOp" { return bce_node_safe(node.left, loopvar, listname) }
+    if k == "ArrayIndex" {
+        if bce_node_safe(node.left, loopvar, listname) == 0 { return 0 }
+        return bce_node_safe(node.right, loopvar, listname)
+    }
+    if k == "ArrayIndexAssign" {
+        if bce_node_safe(node.cond, loopvar, listname) == 0 { return 0 }
+        if bce_node_safe(node.right, loopvar, listname) == 0 { return 0 }
+        return bce_node_safe(node.left, loopvar, listname)
+    }
+    if k == "DataFieldAssign" {
+        if bce_node_safe(node.left, loopvar, listname) == 0 { return 0 }
+        return bce_node_safe(node.right, loopvar, listname)
+    }
+    if k == "PointerAssign" {
+        if bce_node_safe(node.left, loopvar, listname) == 0 { return 0 }
+        return bce_node_safe(node.right, loopvar, listname)
+    }
+    if k == "DataFieldAccess" { return bce_node_safe(node.left, loopvar, listname) }
+    if k == "PointerProperty" { return bce_node_safe(node.left, loopvar, listname) }
+    if k == "ListLiteral" { return bce_list_safe(node.args, loopvar, listname) }
+    if k == "DictLiteral" { return bce_list_safe(node.args, loopvar, listname) }
+    if k == "Slice" {
+        if bce_node_safe(node.left, loopvar, listname) == 0 { return 0 }
+        if bce_node_safe(node.right, loopvar, listname) == 0 { return 0 }
+        return bce_node_safe(node.cond, loopvar, listname)
+    }
+    if k == "StrConvert" { return bce_node_safe(node.left, loopvar, listname) }
+    if k == "Len" { return bce_node_safe(node.left, loopvar, listname) }
+    if k == "SizeOf" { return bce_node_safe(node.left, loopvar, listname) }
+    if k == "Alloc" { return bce_node_safe(node.left, loopvar, listname) }
+    if k == "Openf" {
+        if bce_node_safe(node.left, loopvar, listname) == 0 { return 0 }
+        return bce_node_safe(node.right, loopvar, listname)
+    }
+    return 0
+}
+
+def bce_len_list_of(state: CodegenState, node: AstNode) -> string {
+    if node == 0 { return "" }
+    if node.kind != "BinOp" { return "" }
+    if node.val_str != "-" { return "" }
+    l = node.left
+    r = node.right
+    if l == 0 or r == 0 { return "" }
+    if l.kind == "Len" {
+        la = l.left
+        if la == 0 or la.kind != "Variable" { return "" }
+        if r.kind != "Number" { return "" }
+        if r.is_float == 1 { return "" }
+        if r.val_int != 1 { return "" }
+        return la.val_str
+    }
+    if l.kind != "Call" { return "" }
+    if l.val_str != "len" { return "" }
+    if l.args == 0 or len(l.args) != 1 { return "" }
+    a = l.args[0]
+    if a == 0 or a.kind != "Variable" { return "" }
+    if r.kind != "Number" { return "" }
+    if r.is_float == 1 { return "" }
+    if r.val_int != 1 { return "" }
+    return a.val_str
+}
+
 def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
     if node.kind == "Assignment" {
         is_str_val = 0
@@ -79,12 +224,32 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             emit(state, "    push %d")
             emit_call(state, "_dict_set", 3)
         } else {
+            skip_upper = 0
+            if node.right != 0 and node.right.kind == "Variable" {
+                if node.left != 0 and node.left.kind == "Variable" {
+                    if is_string_expr(state, node.left) == 0 {
+                        idx = len(state.bce_loop_vars) - 1
+                        while idx >= 0 {
+                            if state.bce_loop_vars[idx] == node.right.val_str {
+                                blist = state.bce_loop_lists[idx]
+                                if blist != "" and blist == node.left.val_str {
+                                    skip_upper = 1
+                                }
+                                break
+                            }
+                            idx = idx - 1
+                        }
+                    }
+                }
+            }
             emit(state, "    lea %x, [rip + _oob_line]")
             emit(state, "    mov qword ptr [%x], " + str(node.line))
             emit(state, "    cmp rcx, 0")
             emit(state, "    jl _out_of_bounds")
-            emit(state, "    cmp ecx, dword ptr [%d]")
-            emit(state, "    jge _out_of_bounds")
+            if skip_upper == 0 {
+                emit(state, "    cmp ecx, dword ptr [%d]")
+                emit(state, "    jge _out_of_bounds")
+            }
             ptr_sz = ptr_size(state)
             emit(state, "    mov %x, [%d + 8]")
             if ptr_sz == 8 {
@@ -136,7 +301,7 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit_call(state, "_fflush", 1)
     }
     if node.kind == "Return" {
-        compile_expr(state, node.left)
+        if node.left != 0 { compile_expr(state, node.left) }
         emit(state, "    pop %a")
         r = len(state.used_regs) - 1
         while r >= 0 {
@@ -221,10 +386,15 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, loop_label + ":")
         compile_expr(state, node.right)
         emit(state, "    pop %x")
-        if offset < 0 {
-            emit(state, "    mov %a, [%b + " + str(0 - offset) + "]")
+        if reg_val != "" {
+            emit(state, "    mov %a, " + reg_val)
         } else {
-            emit(state, "    mov %a, [%b - " + str(offset) + "]")
+            off2 = find_var_offset(state, node.val_str)
+            if off2 < 0 {
+                emit(state, "    mov %a, [%b + " + str(0 - off2) + "]")
+            } else {
+                emit(state, "    mov %a, [%b - " + str(off2) + "]")
+            }
         }
         emit(state, "    cmp %a, %x")
         if node.val_int == 1 {
@@ -233,29 +403,53 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             emit(state, "    jg " + end_label)
         }
 
+        bce_list = ""
+        if node.val_int == 0 {
+            cand = bce_len_list_of(state, node.right)
+            if cand != "" {
+                if bce_list_safe(node.body, node.val_str, cand) == 1 {
+                    bce_list = cand
+                }
+            }
+        }
+        state.bce_loop_vars.append(node.val_str)
+        state.bce_loop_lists.append(bce_list)
+
         i = 0
         while i < len(node.body) {
             compile_stmt(state, node.body[i], debug_mode)
             i = i + 1
         }
+        state.bce_loop_vars.pop()
+        state.bce_loop_lists.pop()
 
         emit(state, cont_label + ":")
         compile_expr(state, node.cond)
         emit(state, "    pop %x")
-        if offset < 0 {
-            emit(state, "    mov %a, [%b + " + str(0 - offset) + "]")
+        if reg_val != "" {
+            emit(state, "    mov %a, " + reg_val)
         } else {
-            emit(state, "    mov %a, [%b - " + str(offset) + "]")
+            off2 = find_var_offset(state, node.val_str)
+            if off2 < 0 {
+                emit(state, "    mov %a, [%b + " + str(0 - off2) + "]")
+            } else {
+                emit(state, "    mov %a, [%b - " + str(off2) + "]")
+            }
         }
         if node.val_int == 1 {
             emit(state, "    sub %a, %x")
         } else {
             emit(state, "    add %a, %x")
         }
-        if offset < 0 {
-            emit(state, "    mov [%b + " + str(0 - offset) + "], %a")
+        if reg_val != "" {
+            emit(state, "    mov " + reg_val + ", %a")
         } else {
-            emit(state, "    mov [%b - " + str(offset) + "], %a")
+            off2 = find_var_offset(state, node.val_str)
+            if off2 < 0 {
+                emit(state, "    mov [%b + " + str(0 - off2) + "], %a")
+            } else {
+                emit(state, "    mov [%b - " + str(off2) + "], %a")
+            }
         }
 
         emit(state, "    jmp " + loop_label)
@@ -302,11 +496,16 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             }
         }
         
+        state.bce_loop_vars.append(node.val_str)
+        state.bce_loop_lists.append("")
+
         i = 0
         while i < len(node.body) {
             compile_stmt(state, node.body[i], debug_mode)
             i = i + 1
         }
+        state.bce_loop_vars.pop()
+        state.bce_loop_lists.pop()
         
         emit(state, "    mov rax, qword ptr [%s]")
         emit(state, "    inc rax")
@@ -329,10 +528,17 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             emit(state, "    jmp " + lbl)
         }
     }
+    if node.kind == "Block" {
+        i = 0
+        while i < len(node.body) {
+            compile_stmt(state, node.body[i], debug_mode)
+            i = i + 1
+        }
+    }
     if node.kind == "RawBlock" {
         i = 0
-        while i < len(node.str_args) {
-            emit(state, "    .global " + node.str_args[i])
+        while i < len(node.args) {
+            emit(state, "    .global " + node.args[i])
             i = i + 1
         }
         lines = []

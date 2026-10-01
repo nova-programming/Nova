@@ -9,7 +9,9 @@ def get_externs() -> list {
             "_str_sub", "_slice_list", "_char_code", "_list_insert", "_list_clear", "_sys_awrite_c",
             "_random", "_random_range", "_chacha20_init", "_api_open_internal",
             "_try_catch_sp", "_catch_ip", "_exception_val",
-            "_oob_file_ptr", "_oob_line"]
+            "_oob_file_ptr", "_oob_line",
+            "_out_of_bounds",
+            "arena_init", "arena_alloc", "arena_reset", "arena_free"]
 }
 
 def get_data_strings() -> list {

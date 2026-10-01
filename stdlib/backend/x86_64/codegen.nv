@@ -45,6 +45,8 @@ data CodegenState {
     di: string
     target_os: string
     current_fn_name: string
+    bce_loop_vars: list
+    bce_loop_lists: list
 }
 
 def new_codegen(tgt: int, target_os: string) -> CodegenState {
@@ -73,6 +75,8 @@ def new_codegen(tgt: int, target_os: string) -> CodegenState {
     state.prop_offset_map = {}
     state.local_var_regs = []
     state.used_regs = []
+    state.bce_loop_vars = []
+    state.bce_loop_lists = []
     if tgt == 0 {
         state.bp = "ebp"
         state.sp = "esp"
@@ -253,6 +257,7 @@ def find_var_offset(state: CodegenState, name: string) -> int {
     return 0
 }
 
+
 def register_var(state: CodegenState, name: string) -> int {
     if state.var_name_map.has(name) { return state.var_name_map.get(name) }
     
@@ -261,7 +266,6 @@ def register_var(state: CodegenState, name: string) -> int {
     state.var_name_map.set(name, state.local_offset)
     state.local_var_names.append(name)
     state.local_vars.append(state.local_offset)
-    
     reg = ""
     num_regs = len(state.used_regs)
     if is_x64(state) == 1 {
@@ -559,6 +563,8 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     old_string_vars = state.string_vars
     old_string_map = state.string_var_map
     old_used_regs = state.used_regs
+    old_bce_vars = state.bce_loop_vars
+    old_bce_lists = state.bce_loop_lists
 
     state.local_var_names = []
     state.local_vars = []
@@ -568,6 +574,8 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     state.string_vars = []
     state.string_var_map = {}
     state.used_regs = []
+    state.bce_loop_vars = []
+    state.bce_loop_lists = []
 
     psize = ptr_size(state)
     bp = reg32(state, "ebp", "rbp")
@@ -667,6 +675,8 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     state.string_vars = old_string_vars
     state.string_var_map = old_string_map
     state.used_regs = old_used_regs
+    state.bce_loop_vars = old_bce_vars
+    state.bce_loop_lists = old_bce_lists
 }
 
 # --- Main entry point ---
@@ -752,6 +762,8 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     state.local_var_regs = []
     state.local_offset = 0
     state.used_regs = []
+    state.bce_loop_vars = []
+    state.bce_loop_lists = []
     
     i = 0
     while i < len(top_level) {

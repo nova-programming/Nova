@@ -190,8 +190,8 @@ def tc_set_var(tc: TypeChecker, name: string, typ: Type) {
     if len(tc.env_stack) == 0 { return 0 }
     frame = tc.env_stack[len(tc.env_stack) - 1]
     
-    if frame.name_map.has(name) {
-        v = frame.name_map[name]
+    if frame.name_map.has(name) == 1 {
+        v = frame.name_map.get(name)
         v.typ = typ
         return 0
     }
@@ -200,15 +200,16 @@ def tc_set_var(tc: TypeChecker, name: string, typ: Type) {
     v.name = name
     v.typ = typ
     frame.vars.append(v)
-    frame.name_map[name] = v
+    frame.name_map.set(name, v)
+    return 0
 }
 
 def tc_get_var(tc: TypeChecker, name: string) -> Type {
     i = len(tc.env_stack) - 1
     while i >= 0 {
         frame = tc.env_stack[i]
-        if frame.name_map.has(name) {
-            v = frame.name_map[name]
+        if frame.name_map.has(name) == 1 {
+            v = frame.name_map.get(name)
             return v.typ
         }
         i = i - 1
@@ -241,7 +242,7 @@ def tc_visit(tc: TypeChecker, node: AstNode) -> Type {
 
 def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     if node == 0 { return create_any_type() }
-    kind_handlers = {"Number": 1, "String": 2, "Boolean": 3, "Variable": 4, "BinOp": 5, "Compare": 6, "Assignment": 7, "Function": 8, "Return": 9, "Print": 10, "PrintD": 11, "TRY": 12, "THROW": 13, "Call": 14, "IfElse": 15, "While": 16, "MethodCall": 17, "DataFieldAccess": 18, "DataFieldAssign": 19, "ArrayIndex": 20, "ArrayIndexAssign": 21, "DictLiteral": 22, "ListLiteral": 23, "RawBlock": 24, "ForLoop": 25, "ForIn": 26, "Len": 27, "SizeOf": 28, "Comptime": 29}
+    kind_handlers = {"Number": 1, "String": 2, "Boolean": 3, "Variable": 4, "BinOp": 5, "Compare": 6, "Assignment": 7, "Function": 8, "Return": 9, "Print": 10, "PrintD": 11, "TRY": 12, "THROW": 13, "Call": 14, "IfElse": 15, "While": 16, "MethodCall": 17, "DataFieldAccess": 18, "DataFieldAssign": 19, "ArrayIndex": 20, "ArrayIndexAssign": 21, "DictLiteral": 22, "ListLiteral": 23, "RawBlock": 24, "ForLoop": 25, "ForIn": 26, "Len": 27, "SizeOf": 28, "Comptime": 29, "Block": 30}
     h = kind_handlers.get(node.kind)
     if h == 1 {
         if node.is_float == 1 { return create_scalar_type("float") }
@@ -289,6 +290,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     if h == 7 {
         t = tc_visit(tc, node.left)
         existing = tc_get_var(tc, node.val_str)
+        print("TC Assignexists")
         if existing == 0 {
             tc_set_var(tc, node.val_str, t)
         } else {
@@ -307,12 +309,13 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         
         func_type = tc_find_func(tc, node.val_str)
         if func_type != 0 {
-            tc.current_ret = func_type.ret
+            tc.current_ret = type_ret(func_type)
+            fparams = type_params(func_type)
             i = 0
             n = len(node.params)
-            if len(func_type.params) < n { n = len(func_type.params) }
+            if len(fparams) < n { n = len(fparams) }
             while i < n {
-                tc_set_var(tc, node.params[i], func_type.params[i])
+                tc_set_var(tc, node.params[i], fparams[i])
                 i = i + 1
             }
         }
@@ -397,18 +400,19 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         }
         func_type = tc_find_func(tc, node.val_str)
         if func_type != 0 {
-            if len(node.args) != len(func_type.params) {
-                errors.warn("Args", "", node.line, "function " + node.val_str + " expects " + str(len(func_type.params)) + " args but got " + str(len(node.args)), "add or remove arguments to match the declaration", node.col)
+            fparams = type_params(func_type)
+            if len(node.args) != len(fparams) {
+                errors.warn("Args", "", node.line, "function " + node.val_str + " expects " + str(len(fparams)) + " args but got " + str(len(node.args)), "add or remove arguments to match the declaration", node.col)
             }
             i = 0
             n = len(node.args)
-            if len(func_type.params) < n { n = len(func_type.params) }
+            if len(fparams) < n { n = len(fparams) }
             while i < n {
                 arg_t = tc_visit(tc, node.args[i])
-                tc_unify(tc, func_type.params[i], arg_t, node.args[i])
+                tc_unify(tc, fparams[i], arg_t, node.args[i])
                 i = i + 1
             }
-            return func_type.ret
+            return type_ret(func_type)
         }
         i = 0
         while i < len(node.args) {
@@ -449,6 +453,17 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         }
         return create_any_type()
     }
+
+    if h == 30 {
+        tc_push_env(tc)
+        i = 0
+        while i < len(node.body) {
+            tc_visit(tc, node.body[i])
+            i = i + 1
+        }
+        tc_pop_env(tc)
+        return create_any_type()
+    }
     
     if h == 17 {
         # Module-scope function call (e.g. system.get_args()): resolve the
@@ -456,19 +471,21 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         if node.left.kind == "Variable" {
             mfunc = tc_find_func(tc, node.val_str)
             if mfunc != 0 {
+                mparams = type_params(mfunc)
                 i = 0
                 n = len(node.args)
-                if len(mfunc.params) < n { n = len(mfunc.params) }
+                if len(mparams) < n { n = len(mparams) }
                 while i < n {
                     arg_t = tc_visit(tc, node.args[i])
-                    tc_unify(tc, mfunc.params[i], arg_t, node.args[i])
+                    tc_unify(tc, mparams[i], arg_t, node.args[i])
                     i = i + 1
                 }
                 while i < len(node.args) {
                     tc_visit(tc, node.args[i])
                     i = i + 1
                 }
-                if mfunc.ret != 0 { return mfunc.ret }
+                mret = type_ret(mfunc)
+                if mret != 0 { return mret }
             }
         }
         tc_visit(tc, node.left)
@@ -482,12 +499,23 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
 
     if h == 18 {
         inst_t = tc_visit(tc, node.left)
+        if inst_t != 0 and inst_t.kind == "struct" {
+            field_t = tc_find_field(inst_t, node.val_str)
+            if field_t != 0 { return field_t }
+        }
         return create_any_type()
     }
 
     if h == 19 {
         inst_t = tc_visit(tc, node.left)
-        tc_visit(tc, node.right)
+        right_t = tc_visit(tc, node.right)
+        if inst_t != 0 and inst_t.kind == "struct" {
+            field_t = tc_find_field(inst_t, node.val_str)
+            if field_t != 0 {
+                tc_unify(tc, field_t, right_t, node)
+                return field_t
+            }
+        }
         return create_any_type()
     }
 
@@ -591,6 +619,76 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     # Default fallback
     return create_any_type()
 }
+def tc_link_struct(tc: TypeChecker, t: Type, seen: list) -> Type {
+    # Recursively replace field-less StructType stubs with the registered struct
+    # seen is a list of Type pointers we've already visited to handle cycles
+    i = 0
+    while i < len(seen) {
+        if seen[i] == t { return t }
+        i = i + 1
+    }
+    seen.append(t)
+    
+    if t == 0 { return 0 }
+    if t.kind == "struct" {
+        # Look up the registered struct
+        reg = tc_find_struct_by_name(tc, t.name)
+        if reg != 0 and reg != t {
+            return tc_link_struct(tc, reg, seen)
+        }
+        # Link fields
+        if t.fields != 0 {
+            j = 0
+            while j < len(t.fields) {
+                t.fields[j] = tc_link_struct(tc, t.fields[j], seen)
+                j = j + 1
+            }
+        }
+        return t
+    }
+    if t.kind == "list" {
+        t.element_type = tc_link_struct(tc, t.element_type, seen)
+        return t
+    }
+    if t.kind == "func" {
+        j = 0
+        while j < len(t.params) {
+            t.params[j] = tc_link_struct(tc, t.params[j], seen)
+            j = j + 1
+        }
+        t.ret = tc_link_struct(tc, t.ret, seen)
+        return t
+    }
+    return t
+}
+
+def tc_find_struct_by_name(tc: TypeChecker, name: string) -> Type {
+    i = 0
+    while i < len(tc.structs) {
+        if tc.structs[i].name == name { return tc.structs[i] }
+        i = i + 1
+    }
+    return 0
+}
+
+def tc_link_all_structs(tc: TypeChecker) {
+    return
+}
+
+def tc_find_field(t: Type, name: string) -> Type {
+    if t == 0 or t.kind != "struct" { return 0 }
+    i = 0
+    while i < len(t.fields) {
+        if t.field_names != 0 and i < len(t.field_names) {
+            if t.field_names[i] == name {
+                return t.fields[i]
+            }
+        }
+        i = i + 1
+    }
+    return 0
+}
+
 def tc_check(tc: TypeChecker, ast: list) {
     tc_push_env(tc)
     
@@ -641,6 +739,29 @@ def tc_check(tc: TypeChecker, ast: list) {
         }
         i = i + 1
     }
+    
+    # Pass 1.5: Resolve struct fields (Data/ClassDef store fields in params/param_types)
+    i = 0
+    while i < len(ast) {
+        stmt = ast[i]
+        if stmt.kind == "Data" or stmt.kind == "ClassDef" {
+            t = tc_find_struct(tc, stmt.val_str)
+            if t != 0 {
+                j = 0
+                while j < len(stmt.params) {
+                    field_name = stmt.params[j]
+                    field_type_str = stmt.param_types[j]
+                    t.fields.append(resolve_type_annotation(field_type_str))
+                    t.field_names.append(field_name)
+                    j = j + 1
+                }
+            }
+        }
+        i = i + 1
+    }
+    
+    # Pass 1.6: Link struct types (replace stubs with registered structs)
+    tc_link_all_structs(tc)
     
     # Pass 2: Infer everything
     i = 0

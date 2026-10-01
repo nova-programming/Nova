@@ -57,7 +57,15 @@ class VirtualMachine:
         return str(val)
 
     def _to_bytes(self, val):
-        return bytearray(self._to_str(val).encode('utf-8'))
+        if isinstance(val, bytearray):
+            return val
+        return bytearray(str(val).encode('utf-8'))
+
+    def _b_str(self, val):
+        """Internal helper: convert to bytearray without double encoding"""
+        if isinstance(val, bytearray):
+            return val
+        return bytearray(str(val).encode('utf-8'))
 
     def _call_builtin(self, func_name, args):
         handler = _STRING_HANDLERS.get(func_name)
@@ -733,17 +741,223 @@ _OPCODE_DISPATCH = {
     OpCode.RETURN: _op_return,
 }
 
+_OPCODE_TABLE = [None] * (max(k.value for k in _OPCODE_DISPATCH.keys()) + 1)
+for k, v in _OPCODE_DISPATCH.items():
+    _OPCODE_TABLE[k.value] = v
+
 def _vm_run(self):
     try:
-        while self.ip < len(self.code):
-            opcode, arg = self.code[self.ip]
-            self.ip += 1
-            handler = _OPCODE_DISPATCH.get(opcode)
-            if handler:
-                handler(self, arg)
+        code = self.code
+        ip = self.ip
+        stack = self.stack
+        frames = self.frames
+        env = self.env
+        constants = self.constants
+        strings = self.strings
+        functions = self.functions
+        classes = self.classes
+        handler_stack = self.handler_stack
+        open_files = self.open_files
+        next_fd = self.next_fd
+        libraries = self.libraries
+        line_map = self.line_map
+        heap = self.heap
+        heap_ptr = self.heap_ptr
+        allocations = self.allocations
+
+        while ip < len(code):
+            opcode, arg = code[ip]
+            ip += 1
+            
+            if opcode.value == OpCode.LOAD_CONST.value:
+                stack.append(constants[arg])
+            elif opcode.value == OpCode.LOAD_STR.value:
+                stack.append(bytearray(strings[arg].encode('utf-8')))
+            elif opcode.value == OpCode.LOAD_BOOL.value:
+                stack.append(arg)
+            elif opcode.value == OpCode.LOAD_NAME.value:
+                name = arg
+                if frames and name in frames[-1].locals:
+                    stack.append(frames[-1].locals[name])
+                elif name in env:
+                    stack.append(env[name])
+                else:
+                    stack.append(0)
+            elif opcode.value == OpCode.STORE_NAME.value:
+                val = stack.pop()
+                if frames:
+                    old_val = frames[-1].locals.get(arg)
+                    self.release(old_val)
+                    self.retain(val)
+                    frames[-1].locals[arg] = val
+                else:
+                    old_val = env.get(arg)
+                    self.release(old_val)
+                    self.retain(val)
+                    env[arg] = val
+            elif opcode.value == OpCode.ADD.value:
+                b = stack.pop()
+                a = stack.pop()
+                if isinstance(a, Instance):
+                    method_name = f"{a.class_name}.__add__"
+                    if method_name in functions:
+                        func_meta = functions[method_name]
+                        local_env = {}
+                        params = func_meta["params"]
+                        if len(params) > 0:
+                            p = params[0][0] if isinstance(params[0], (list, tuple)) else params[0]
+                            local_env[p] = b
+                        frames.append(Frame(ip, local_env, self_context=a, handler_depth=len(handler_stack)))
+                        ip = func_meta["ip"]
+                        continue
+                if isinstance(a, bytearray) and not isinstance(b, bytearray):
+                    b = bytearray(str(b).encode('utf-8'))
+                elif isinstance(b, bytearray) and not isinstance(a, bytearray):
+                    a = bytearray(str(a).encode('utf-8'))
+                stack.append(a + b)
+            elif opcode.value == OpCode.JUMP_IF_FALSE.value:
+                cond = stack.pop()
+                if not cond:
+                    ip = arg
+            elif opcode.value == OpCode.JUMP.value:
+                ip = arg
+            elif opcode.value == OpCode.THROW.value:
+                exc_val = stack.pop()
+                if not handler_stack:
+                    print(f"Unhandled exception: {exc_val}")
+                    ip = len(code)
+                    continue
+                catch_ip, saved_sp = handler_stack.pop()
+                del stack[saved_sp:]
+                stack.append(exc_val)
+                ip = catch_ip
+                continue
+            elif opcode.value == OpCode.PUSH_HANDLER.value:
+                handler_stack.append((arg, len(stack)))
+            elif opcode.value == OpCode.POP_HANDLER.value:
+                if handler_stack:
+                    handler_stack.pop()
+            elif opcode.value == OpCode.RETURN.value:
+                if frames:
+                    frame = frames.pop()
+                    del handler_stack[frame.handler_depth:]
+                    for val in frame.locals.values():
+                        self.release(val)
+                    if frame.is_init:
+                        stack.pop()
+                    if frame.pending_action == 'print':
+                        ret_val = stack.pop()
+                        if isinstance(ret_val, bytearray):
+                            print(ret_val.decode('utf-8'))
+                        else:
+                            print(ret_val)
+                    ip = frame.return_address
+                    continue
+                else:
+                    ip = len(code)
+                    continue
+            elif opcode.value == OpCode.CALL.value:
+                func_name, num_args = arg
+                args = [stack.pop() for _ in range(num_args)]
+                args.reverse()
+                if func_name in classes:
+                    instance = Instance(func_name)
+                    init_name = f"{func_name}.__init__"
+                    if init_name in functions:
+                        func_meta = functions[init_name]
+                        local_env = {}
+                        for i, param in enumerate(func_meta["params"]):
+                            param_name = param[0] if isinstance(param, (list, tuple)) else param
+                            local_env[param_name] = args[i] if i < len(args) else 0
+                        stack.append(instance)
+                        frames.append(Frame(ip, local_env, self_context=instance, is_init=True, handler_depth=len(handler_stack)))
+                        ip = func_meta["ip"]
+                        continue
+                    else:
+                        stack.append(instance)
+                        continue
+                if func_name not in functions:
+                    self.ip = ip
+                    self.stack = stack
+                    self.frames = frames
+                    self.env = env
+                    self.handler_stack = handler_stack
+                    self.open_files = open_files
+                    self.next_fd = next_fd
+                    self.libraries = libraries
+                    self.heap_ptr = heap_ptr
+                    self.heap = heap
+                    self.allocations = allocations
+                    if self._call_builtin(func_name, args):
+                        ip = self.ip
+                        stack = self.stack
+                        frames = self.frames
+                        env = self.env
+                        handler_stack = self.handler_stack
+                        open_files = self.open_files
+                        next_fd = self.next_fd
+                        libraries = self.libraries
+                        heap = self.heap
+                        heap_ptr = self.heap_ptr
+                        allocations = self.allocations
+                        continue
+                    self.ip = ip
+                    raise Exception(f"Function {func_name} not found")
+                func_meta = functions[func_name]
+                local_env = {}
+                for i, param in enumerate(func_meta["params"]):
+                    param_name = param[0] if isinstance(param, (list, tuple)) else param
+                    local_env[param_name] = args[i] if i < len(args) else 0
+                frames.append(Frame(ip, local_env, handler_depth=len(handler_stack)))
+                ip = func_meta["ip"]
+                continue
             else:
-                raise Exception(f"Unknown opcode: {opcode}")
+                self.ip = ip
+                self.stack = stack
+                self.frames = frames
+                self.env = env
+                self.handler_stack = handler_stack
+                self.open_files = open_files
+                self.next_fd = next_fd
+                self.libraries = libraries
+                self.heap_ptr = heap_ptr
+                self.heap = heap
+                self.allocations = allocations
+                handler = _OPCODE_TABLE[opcode.value] if opcode.value < len(_OPCODE_TABLE) else None
+                if handler:
+                    handler(self, arg)
+                else:
+                    raise Exception(f"Unknown opcode: {opcode}")
+                ip = self.ip
+                stack = self.stack
+                frames = self.frames
+                env = self.env
+                handler_stack = self.handler_stack
+                open_files = self.open_files
+                next_fd = self.next_fd
+                libraries = self.libraries
+                heap = self.heap
+                heap_ptr = self.heap_ptr
+                allocations = self.allocations
+
+        self.ip = ip
+        self.stack = stack
+        self.frames = frames
+        self.env = env
+        self.handler_stack = handler_stack
+        self.open_files = open_files
+        self.next_fd = next_fd
+        self.libraries = libraries
+        self.heap_ptr = heap_ptr
     except Exception as e:
+        try:
+            self.ip = ip
+            self.stack = stack
+            self.frames = frames
+            self.env = env
+            self.handler_stack = handler_stack
+        except Exception:
+            pass
         print(f"VM traceback (ip={self.ip}):")
         print(f"  constants[:20] = {self.constants[:20]}")
         if self.frames:
@@ -791,7 +1005,6 @@ def _vm_run(self):
         loc = self.line_map.get(self.ip)
         if loc:
             print(f"  src: {loc[0]} line {loc[1]}")
-        # Map enclosing call sites to function names so we get a real call chain
         chain = []
         for ra in [fr.return_address for fr in self.frames] + [self.ip]:
             name = None
@@ -815,32 +1028,70 @@ def _string_split(m, args):
 
 def _string_join(m, args):
     lst = args[0]
-    delim = m._to_str(args[1]) if len(args) > 1 else ""
-    m.stack.append(bytearray(delim.join(m._to_str(x) for x in lst).encode('utf-8')))
+    delim = args[1] if len(args) > 1 else bytearray(b"")
+    if isinstance(delim, bytearray):
+        delim = delim.decode('utf-8')
+    parts = []
+    for x in lst:
+        if isinstance(x, bytearray):
+            parts.append(x.decode('utf-8'))
+        else:
+            parts.append(str(x))
+    m.stack.append(bytearray(delim.join(parts).encode('utf-8')))
 
 def _string_trim(m, args):
-    m.stack.append(bytearray(m._to_str(args[0]).strip().encode('utf-8')))
+    s = args[0]
+    if isinstance(s, bytearray):
+        m.stack.append(bytearray(s.strip()))
+    else:
+        m.stack.append(bytearray(str(s).strip().encode('utf-8')))
 
 def _string_contains(m, args):
-    m.stack.append(1 if m._to_str(args[1]) in m._to_str(args[0]) else 0)
+    s = args[0]
+    sub = args[1]
+    if isinstance(s, bytearray) and isinstance(sub, bytearray):
+        m.stack.append(1 if sub in s else 0)
+    else:
+        m.stack.append(1 if m._to_str(sub) in m._to_str(s) else 0)
 
 def _string_replace(m, args):
-    s = m._to_str(args[0])
-    old = m._to_str(args[1]) if len(args) > 1 else ""
-    new = m._to_str(args[2]) if len(args) > 2 else ""
-    m.stack.append(bytearray(s.replace(old, new).encode('utf-8')))
+    s = args[0]
+    old = args[1] if len(args) > 1 else bytearray(b"")
+    new = args[2] if len(args) > 2 else bytearray(b"")
+    if isinstance(s, bytearray) and isinstance(old, bytearray) and isinstance(new, bytearray):
+        m.stack.append(bytearray(s.replace(old, new)))
+    else:
+        m.stack.append(bytearray(m._to_str(s).replace(m._to_str(old), m._to_str(new)).encode('utf-8')))
 
 def _string_to_upper(m, args):
-    m.stack.append(bytearray(m._to_str(args[0]).upper().encode('utf-8')))
+    s = args[0]
+    if isinstance(s, bytearray):
+        m.stack.append(bytearray(s.upper()))
+    else:
+        m.stack.append(bytearray(str(s).upper().encode('utf-8')))
 
 def _string_to_lower(m, args):
-    m.stack.append(bytearray(m._to_str(args[0]).lower().encode('utf-8')))
+    s = args[0]
+    if isinstance(s, bytearray):
+        m.stack.append(bytearray(s.lower()))
+    else:
+        m.stack.append(bytearray(str(s).lower().encode('utf-8')))
 
 def _string_starts_with(m, args):
-    m.stack.append(1 if m._to_str(args[0]).startswith(m._to_str(args[1])) else 0)
+    s = args[0]
+    prefix = args[1]
+    if isinstance(s, bytearray) and isinstance(prefix, bytearray):
+        m.stack.append(1 if s.startswith(prefix) else 0)
+    else:
+        m.stack.append(1 if m._to_str(s).startswith(m._to_str(prefix)) else 0)
 
 def _string_ends_with(m, args):
-    m.stack.append(1 if m._to_str(args[0]).endswith(m._to_str(args[1])) else 0)
+    s = args[0]
+    suffix = args[1]
+    if isinstance(s, bytearray) and isinstance(suffix, bytearray):
+        m.stack.append(1 if s.endswith(suffix) else 0)
+    else:
+        m.stack.append(1 if m._to_str(s).endswith(m._to_str(suffix)) else 0)
 
 _STRING_HANDLERS = {
     "split": _string_split,
@@ -873,7 +1124,7 @@ def _builtin_call(m, args):
     """call(name: string, args_list: list) -> any
     Dynamically look up a Nova function by name and call it with the given args.
     The return value is left on the VM stack."""
-    func_name = m._to_str(args[0])
+    func_name = args[0].decode('utf-8') if isinstance(args[0], bytearray) else str(args[0])
     call_args = args[1] if len(args) > 1 else []
 
     if func_name not in m.functions:
@@ -911,7 +1162,8 @@ def _builtin_type(m, args):
 
 def _builtin_file_exists(m, args):
     import os
-    m.stack.append(1 if os.path.exists(m._to_str(args[0])) else 0)
+    path = m._to_str(args[0])
+    m.stack.append(1 if os.path.exists(path) else 0)
 
 def _builtin_file_size(m, args):
     import os
@@ -1020,7 +1272,7 @@ def _builtin_float_cast(m, args):
         m.stack.append(0.0)
 
 def _builtin_input(m, args):
-    prompt = m._to_str(args[0]) if args else ""
+    prompt = args[0].decode('utf-8') if args and isinstance(args[0], bytearray) else (str(args[0]) if args else "")
     result = input(prompt)
     m.stack.append(bytearray(result.encode('utf-8')))
 
@@ -1125,31 +1377,58 @@ def _builtin_str_sub(m, args):
 
 
 def _builtin_str_eq(m, args):
-    m.stack.append(1 if m._to_str(args[0]) == m._to_str(args[1]) else 0)
+    a, b = args[0], args[1]
+    if isinstance(a, bytearray) and isinstance(b, bytearray):
+        m.stack.append(1 if a == b else 0)
+    else:
+        m.stack.append(1 if m._to_str(a) == m._to_str(b) else 0)
 
 
 def _builtin_str_contains(m, args):
-    m.stack.append(1 if m._to_str(args[1]) in m._to_str(args[0]) else 0)
+    a, b = args[0], args[1]
+    if isinstance(a, bytearray) and isinstance(b, bytearray):
+        m.stack.append(1 if b in a else 0)
+    else:
+        m.stack.append(1 if m._to_str(b) in m._to_str(a) else 0)
 
 
 def _builtin_str_starts_with(m, args):
-    m.stack.append(1 if m._to_str(args[0]).startswith(m._to_str(args[1])) else 0)
+    a, b = args[0], args[1]
+    if isinstance(a, bytearray) and isinstance(b, bytearray):
+        m.stack.append(1 if a.startswith(b) else 0)
+    else:
+        m.stack.append(1 if m._to_str(a).startswith(m._to_str(b)) else 0)
 
 
 def _builtin_str_len(m, args):
-    m.stack.append(len(m._to_str(args[0])))
+    a = args[0]
+    if isinstance(a, bytearray):
+        m.stack.append(len(a))
+    else:
+        m.stack.append(len(m._to_str(a)))
 
 
 def _builtin_atoi(m, args):
-    try:
-        m.stack.append(int(m._to_str(args[0])))
-    except (ValueError, TypeError):
-        m.stack.append(0)
+    a = args[0]
+    if isinstance(a, bytearray):
+        try:
+            m.stack.append(int(a.decode('utf-8')))
+        except (ValueError, TypeError):
+            m.stack.append(0)
+    else:
+        try:
+            m.stack.append(int(str(a)))
+        except (ValueError, TypeError):
+            m.stack.append(0)
 
 
 def _builtin_get_char_code(m, args):
-    ch = m._to_str(args[0])
-    m.stack.append(ord(ch[0]) if ch else 0)
+    a = args[0]
+    if isinstance(a, bytearray):
+        m.stack.append(a[0] if len(a) > 0 else 0)
+    else:
+        ch = str(a)
+        m.stack.append(ord(ch[0]) if ch else 0)
 
 
 def _builtin_sys_flush_c(m, args):

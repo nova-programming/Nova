@@ -144,21 +144,30 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     source = sys_read(fd)
     sys_close(fd)
     
+    print("[1/5] Tokenizing " + path)
     tokens = tokenize(source)
-    
+    print("[1/5] done: " + str(len(tokens)) + " tokens")
+
+    print("[2/5] Parsing " + path)
     ast = parse(tokens, path)
-    
+    print("[2/5] done: " + str(len(ast)) + " top-level nodes")
+
+    print("[3/5] Resolving imports")
     visited = []
     ast = resolve_imports(ast, visited, target_arch, target_os)
+    print("[3/5] done: " + str(len(ast)) + " nodes after imports")
 
+    print("[4/5] Type checking")
     tc = TypeChecker()
     tc_init(tc)
     tc_check(tc, ast)
+    print("[4/5] done")
 
+    print("[5/5] Codegen")
     is_x64 = 0
     if target_arch == "x86_64" { is_x64 = 1 }
     asm = generate_assembly(ast, debug_mode, is_x64, target_os)
-    sys_flush()
+    print("[5/5] done: " + str(len(asm)) + " asm lines")
 
     # Update build cache
     new_cached_lines = cached_lines
@@ -182,6 +191,104 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     return asm
 }
 
+def to_win_path(p: string) -> string {
+    out = ""
+    i = 0
+    while i < len(p) {
+        ch = p[i]
+        if ch == "/" { out = out + "\\" } else { out = out + ch }
+        i = i + 1
+    }
+    return out
+}
+
+def _quote(s: string) -> string {
+    return "\"" + s + "\""
+}
+
+def _rstrip(s: string) -> string {
+    e = len(s)
+    while e > 0 {
+        ch = str_sub(s, e - 1, e)
+        if ch == " " or ch == "\t" or ch == "\r" or ch == "\n" { e = e - 1 } else { break }
+    }
+    return str_sub(s, 0, e)
+}
+
+def _str_has(hay: string, needle: string) -> int {
+    hlen = len(hay)
+    nlen = len(needle)
+    if nlen == 0 { return 1 }
+    if nlen > hlen { return 0 }
+    i = 0
+    while i + nlen <= hlen {
+        if str_sub(hay, i, i + nlen) == needle { return 1 }
+        i = i + 1
+    }
+    return 0
+}
+
+def _gcc_is_64bit(gcc_cmd: string) -> int {
+    probe = ".nova_gcc_machine.txt"
+    system.system_exec(gcc_cmd + " -dumpmachine > " + probe + " 2>&1")
+    if file_exists(probe) == 0 { return 0 }
+    lines = read_lines(probe)
+    if len(lines) == 0 { return 0 }
+    return _str_has(lines[0], "64")
+}
+
+def _probe_bundled_via_env() -> string {
+    host = sys_platform()
+    if host == "windows" {
+        system.system_exec("cmd /c (echo %LOCALAPPDATA%)>.nova_env_root.txt 2>&1")
+        if file_exists(".nova_env_root.txt") == 0 { return "" }
+        lines = read_lines(".nova_env_root.txt")
+        if len(lines) == 0 { return "" }
+        root = _rstrip(lines[0])
+        if len(root) == 0 { return "" }
+        if root == "%LOCALAPPDATA%" { return "" }
+        cand = root + "\\nova\\gcc\\bin\\gcc.exe"
+        if file_exists(cand) == 1 {
+            if _gcc_is_64bit(_quote(cand)) == 1 { return cand }
+        }
+    } else {
+        system.system_exec("echo $HOME>.nova_env_root.txt 2>/dev/null")
+        if file_exists(".nova_env_root.txt") == 0 { return "" }
+        lines = read_lines(".nova_env_root.txt")
+        if len(lines) == 0 { return "" }
+        root = _rstrip(lines[0])
+        if len(root) == 0 { return "" }
+        cand = root + "/.nova/gcc/bin/gcc"
+        if file_exists(cand) == 1 {
+            if _gcc_is_64bit(cand) == 1 { return cand }
+        }
+    }
+    return ""
+}
+
+def _find_on_path() -> string {
+    host = sys_platform()
+    list_file = ".nova_gcc_list.txt"
+    if host == "windows" {
+        system.system_exec("where gcc > " + list_file + " 2>&1")
+    } else {
+        system.system_exec("which -a gcc > " + list_file + " 2>/dev/null || which gcc > " + list_file + " 2>/dev/null")
+    }
+    if file_exists(list_file) == 0 { return "" }
+    cands = read_lines(list_file)
+    i = 0
+    while i < len(cands) {
+        cand = _rstrip(cands[i])
+        if len(cand) > 0 {
+            q = cand
+            if host == "windows" { q = _quote(to_win_path(cand)) }
+            if _gcc_is_64bit(q) == 1 { return cand }
+        }
+        i = i + 1
+    }
+    return ""
+}
+
 def _find_gcc(target_os: string, target_arch: string, compiler_dir: string) -> string {
     host = sys_platform()
     # On macOS native, prefer clang
@@ -190,26 +297,41 @@ def _find_gcc(target_os: string, target_arch: string, compiler_dir: string) -> s
             return "clang"
         }
     }
-    # Bundled GCC (Windows): repo-relative, then co-located with this nova.exe
-    if host == "windows" {
-        bundled = compiler_dir + "/gcc/bin/gcc.exe"
-        if file_exists(bundled) == 1 { return compiler_dir + "\\gcc\\bin\\gcc.exe" }
-        args = system.get_args()
-        if len(args) > 0 {
-            exe_path = args[0]
-            last = -1
-            k = 0
-            while k < len(exe_path) {
-                ch = exe_path[k]
-                if ch == "/" or ch == "\\" { last = k }
-                k = k + 1
-            }
-            if last > 0 {
-                exe_dir = str_sub(exe_path, 0, last)
-                bundled2 = exe_dir + "/gcc/bin/gcc.exe"
-                if file_exists(bundled2) == 1 { return exe_dir + "\\gcc\\bin\\gcc.exe" }
+    gcc_bin = "gcc.exe"
+    if host != "windows" { gcc_bin = "gcc" }
+    # Bundled GCC next to compiler_dir (repo checkout with gcc/ subdir)
+    bundled = compiler_dir + "/gcc/bin/" + gcc_bin
+    if file_exists(bundled) == 1 {
+        q = bundled
+        if host == "windows" { q = _quote(to_win_path(bundled)) }
+        if _gcc_is_64bit(q) == 1 { return q }
+    }
+    # Bundled GCC co-located with this nova.exe (installed layout)
+    args = system.get_args()
+    if len(args) > 0 {
+        exe_path = args[0]
+        last = -1
+        k = 0
+        while k < len(exe_path) {
+            ch = exe_path[k]
+            if ch == "/" or ch == "\\" { last = k }
+            k = k + 1
+        }
+        if last > 0 {
+            exe_dir = str_sub(exe_path, 0, last)
+            bundled2 = exe_dir + "/gcc/bin/" + gcc_bin
+            if file_exists(bundled2) == 1 {
+                q2 = bundled2
+                if host == "windows" { q2 = _quote(to_win_path(bundled2)) }
+                if _gcc_is_64bit(q2) == 1 { return q2 }
             }
         }
+    }
+    # Bundled GCC via install root from shell env (%LOCALAPPDATA% / $HOME)
+    env_hit = _probe_bundled_via_env()
+    if len(env_hit) > 0 {
+        if host == "windows" { return _quote(to_win_path(env_hit)) }
+        return env_hit
     }
     # Cross-compilation: look for target-specific cross-toolchain
     if host != target_os {
@@ -221,16 +343,40 @@ def _find_gcc(target_os: string, target_arch: string, compiler_dir: string) -> s
         if cross_key == "macos_x86_64" { return "x86_64-apple-darwin-gcc" }
         if cross_key == "macos_arm64" { return "aarch64-apple-darwin-gcc" }
     }
-    return "gcc"
+    # Enumerate gccs on PATH, first 64-bit wins (rejects 32-bit MinGW)
+    onpath = _find_on_path()
+    if len(onpath) > 0 {
+        if host == "windows" { return _quote(to_win_path(onpath)) }
+        return onpath
+    }
+    return ""
+}
+
+def _verify_output(output_path: string) {
+    if file_exists(output_path) == 0 {
+        print("ERROR: build failed; output not produced: " + output_path)
+        print("  A 32-bit gcc cannot assemble 64-bit Nova output; install 64-bit GCC")
+        print("  Windows: re-run install.ps1 to bundle MinGW, macOS: xcode-select --install, Linux: sudo apt install build-essential")
+        sys_exit(1)
+    }
+    if file_size(output_path) == 0 {
+        print("ERROR: build failed; output is empty: " + output_path)
+        sys_exit(1)
+    }
 }
 
 def _compile_runtime(gcc_name: string, target_os: string, target_arch: string, compiler_dir: string) {
     runtime_c_path = compiler_dir + "/runtime.c"
     runtime_o_path = compiler_dir + "/runtime.o"
     if file_exists(runtime_c_path) == 0 { return }
-    # Remove stale runtime.o
+    if len(gcc_name) == 0 {
+        print("ERROR: no 64-bit C compiler found; cannot build runtime.o")
+        print("  Windows: re-run install.ps1 to bundle MinGW, macOS: xcode-select --install, Linux: sudo apt install build-essential")
+        sys_exit(1)
+    }
+    # Remove stale runtime.o (cmd's del treats / as a switch, so use backslashes)
     if file_exists(runtime_o_path) == 1 {
-        if target_os == "windows" { sys_system("del /f " + runtime_o_path) }
+        if target_os == "windows" { sys_system("cmd /c del /f /q " + _quote(to_win_path(runtime_o_path))) }
         else { sys_system("rm -f " + runtime_o_path) }
     }
     cmd = gcc_name + " -O3 -c " + runtime_c_path + " -o " + runtime_o_path
@@ -244,6 +390,7 @@ def _compile_runtime(gcc_name: string, target_os: string, target_arch: string, c
     }
     print("Compiling runtime.c: " + cmd)
     system.system_exec(cmd)
+    _verify_output(runtime_o_path)
 }
 
 def compile_to_file(input_path: string, output_path: string, debug_mode: int, target_arch: string, target_os: string) {
@@ -318,6 +465,7 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
     if is_windows == 1 and target_arch == "x86_64" {
         print("Using GCC to assemble and link...")
         system.system_exec(gcc_name + " -O3 " + input_path + ".s -o " + output_path + " -mconsole -lkernel32 -Wl,--stack,16777216 " + runtime_o_path)
+        _verify_output(output_path)
     } elif is_windows == 1 {
         print("Assembling...")
         assembled = assemble(asm)
@@ -326,6 +474,7 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
         fd = sys_open(output_path, "wb")
         sys_write_raw(fd, exe_bytes)
         sys_close(fd)
+        _verify_output(output_path)
     } else {
         print("Using GCC to assemble and link...")
         gcc_cmd = gcc_name + " -O3 " + input_path + ".s -o " + output_path + " " + runtime_o_path
@@ -336,6 +485,7 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
             gcc_cmd = gcc_cmd + " -no-pie"
         }
         system.system_exec(gcc_cmd)
+        _verify_output(output_path)
     }
     print("Compiled: " + input_path + " -> " + output_path)
 }

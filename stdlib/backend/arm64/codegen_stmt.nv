@@ -301,6 +301,13 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             emit(state, "    b " + lbl)
         }
     }
+    if node.kind == "Block" {
+        i = 0
+        while i < len(node.body) {
+            compile_stmt(state, node.body[i], debug_mode)
+            i = i + 1
+        }
+    }
     if node.kind == "RawBlock" {
         i = 0
         while i < len(node.args) {

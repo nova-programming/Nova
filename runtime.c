@@ -36,6 +36,7 @@
 #include <windows.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <stdio.h>
 
 #if defined(_WIN64)
 #undef _exit
@@ -45,7 +46,7 @@
  * Inside the function body, Win32 API calls use the default Windows convention —
  * the compiler handles the ABI translation at call sites automatically. */
 
-/* Minimal printf: handles %s, %d, %% for Nova codegen.
+/* Minimal printf: handles %s, %d, %f, %% for Nova codegen.
  * Uses SysV ABI variadic args directly (read from registers) to avoid MinGW
  * va_start/va_arg incompatibility with __attribute__((sysv_abi)). */
 SYSCALL int STR_PFX(printf)(const char *fmt, const void *arg_s) {
@@ -73,6 +74,14 @@ SYSCALL int STR_PFX(printf)(const char *fmt, const void *arg_s) {
                     dlen = 31 - pos;
                     WriteFile(h, buf + pos, dlen, &wn, 0);
                     written += dlen;
+                    break;
+                }
+                case 'f': {
+                    double val = *((double*)&arg_s);
+                    char buf[64];
+                    int len = sprintf(buf, "%.6f", val);
+                    WriteFile(h, buf, len, &wn, 0);
+                    written += len;
                     break;
                 }
                 case '%': {
@@ -145,6 +154,61 @@ SYSCALL void STR_PFX(free)(void *p) {
 SYSCALL void *STR_PFX(realloc)(void *p, unsigned int s) {
     if (!_nova_heap) _nova_heap = GetProcessHeap();
     return HeapReAlloc(_nova_heap, 0, p, s);
+}
+
+/* Arena/Bump Allocator for compiler pipeline — fast linear allocation with bulk free */
+#define ARENA_DEFAULT_SIZE (1024 * 1024)
+
+typedef struct {
+    char *base;
+    char *ptr;
+    char *end;
+} NovaArena;
+
+static NovaArena _compile_arena = {0};
+
+SYSCALL void arena_init(void) {
+    if (!_compile_arena.base) {
+        _compile_arena.base = (char*)STR_PFX(malloc)(ARENA_DEFAULT_SIZE);
+        _compile_arena.ptr = _compile_arena.base;
+        _compile_arena.end = _compile_arena.base + ARENA_DEFAULT_SIZE;
+    }
+}
+
+SYSCALL void *arena_alloc(size_t size) {
+    if (!_compile_arena.base) arena_init();
+    
+    size = (size + 7) & ~7;  // 8-byte align
+    
+    if (_compile_arena.ptr + size > _compile_arena.end) {
+        size_t new_size = ARENA_DEFAULT_SIZE * 2;
+        char *new_base = (char*)STR_PFX(malloc)(new_size);
+        if (!new_base) return 0;
+        STR_PFX(memcpy)(new_base, _compile_arena.base, _compile_arena.ptr - _compile_arena.base);
+        STR_PFX(free)(_compile_arena.base);
+        _compile_arena.base = new_base;
+        _compile_arena.ptr = new_base + (_compile_arena.ptr - _compile_arena.base);
+        _compile_arena.end = new_base + new_size;
+    }
+    
+    void *result = _compile_arena.ptr;
+    _compile_arena.ptr += size;
+    return result;
+}
+
+SYSCALL void arena_reset(void) {
+    if (_compile_arena.base) {
+        _compile_arena.ptr = _compile_arena.base;
+    }
+}
+
+SYSCALL void arena_free(void) {
+    if (_compile_arena.base) {
+        STR_PFX(free)(_compile_arena.base);
+        _compile_arena.base = 0;
+        _compile_arena.ptr = 0;
+        _compile_arena.end = 0;
+    }
 }
 
 /* strstr — we may not need it but define for completeness */
@@ -393,6 +457,60 @@ SYSCALL int _fseek(int s, long o, int w) { return fseek((FILE*)(intptr_t)s, o, w
 SYSCALL long _ftell(int s) { return ftell((FILE*)(intptr_t)s); }
 SYSCALL int _fflush(int s) { return fflush((FILE*)(intptr_t)s); }
 SYSCALL void _exit(int c) { exit(c); }
+
+/* Arena/Bump Allocator for Linux */
+#define ARENA_DEFAULT_SIZE (1024 * 1024)
+typedef struct {
+    char *base;
+    char *ptr;
+    char *end;
+} NovaArena;
+static NovaArena _compile_arena = {0};
+
+SYSCALL void arena_init(void) {
+    if (!_compile_arena.base) {
+        _compile_arena.base = (char*)malloc(ARENA_DEFAULT_SIZE);
+        _compile_arena.ptr = _compile_arena.base;
+        _compile_arena.end = _compile_arena.base + ARENA_DEFAULT_SIZE;
+    }
+}
+
+SYSCALL void *arena_alloc(size_t size) {
+    if (!_compile_arena.base) arena_init();
+    
+    size = (size + 7) & ~7;
+    
+    if (_compile_arena.ptr + size > _compile_arena.end) {
+        size_t new_size = ARENA_DEFAULT_SIZE * 2;
+        char *new_base = (char*)malloc(new_size);
+        if (!new_base) return 0;
+        memcpy(new_base, _compile_arena.base, _compile_arena.ptr - _compile_arena.base);
+        free(_compile_arena.base);
+        _compile_arena.base = new_base;
+        _compile_arena.ptr = new_base + (_compile_arena.ptr - _compile_arena.base);
+        _compile_arena.end = new_base + new_size;
+    }
+    
+    void *result = _compile_arena.ptr;
+    _compile_arena.ptr += size;
+    return result;
+}
+
+SYSCALL void arena_reset(void) {
+    if (_compile_arena.base) {
+        _compile_arena.ptr = _compile_arena.base;
+    }
+}
+
+SYSCALL void arena_free(void) {
+    if (_compile_arena.base) {
+        free(_compile_arena.base);
+        _compile_arena.base = 0;
+        _compile_arena.ptr = 0;
+        _compile_arena.end = 0;
+    }
+}
+
 #endif /* defined(LINUX_WRAP) */
 
 /* macOS: shadow libc realloc to log every list-growth call for the
@@ -413,6 +531,60 @@ SYSCALL void *_realloc(void *p, size_t s) {
     _last_realloc_from = __builtin_return_address(0);
     return r;
 }
+
+/* Arena/Bump Allocator for macOS */
+#define ARENA_DEFAULT_SIZE (1024 * 1024)
+typedef struct {
+    char *base;
+    char *ptr;
+    char *end;
+} NovaArena;
+static NovaArena _compile_arena = {0};
+
+SYSCALL void arena_init(void) {
+    if (!_compile_arena.base) {
+        _compile_arena.base = (char*)malloc(ARENA_DEFAULT_SIZE);
+        _compile_arena.ptr = _compile_arena.base;
+        _compile_arena.end = _compile_arena.base + ARENA_DEFAULT_SIZE;
+    }
+}
+
+SYSCALL void *arena_alloc(size_t size) {
+    if (!_compile_arena.base) arena_init();
+    
+    size = (size + 7) & ~7;
+    
+    if (_compile_arena.ptr + size > _compile_arena.end) {
+        size_t new_size = ARENA_DEFAULT_SIZE * 2;
+        char *new_base = (char*)malloc(new_size);
+        if (!new_base) return 0;
+        memcpy(new_base, _compile_arena.base, _compile_arena.ptr - _compile_arena.base);
+        free(_compile_arena.base);
+        _compile_arena.base = new_base;
+        _compile_arena.ptr = new_base + (_compile_arena.ptr - _compile_arena.base);
+        _compile_arena.end = new_base + new_size;
+    }
+    
+    void *result = _compile_arena.ptr;
+    _compile_arena.ptr += size;
+    return result;
+}
+
+SYSCALL void arena_reset(void) {
+    if (_compile_arena.base) {
+        _compile_arena.ptr = _compile_arena.base;
+    }
+}
+
+SYSCALL void arena_free(void) {
+    if (_compile_arena.base) {
+        free(_compile_arena.base);
+        _compile_arena.base = 0;
+        _compile_arena.ptr = 0;
+        _compile_arena.end = 0;
+    }
+}
+
 #endif /* defined(MACOS) */
 
 /* SIGSEGV/SIGBUS handler for debug — prints fault address, registers, backtrace */
@@ -818,131 +990,203 @@ SYSCALL void _nova_dec_ref(void *ptr) {
 }
 
 /* strcmp, strlen, strcpy are defined above on Windows, in <string.h> on macOS/Linux */
-/* Dict layout (24 bytes): [count:4][pad/capacity:4][keys_ptr:8][values_ptr:8] */
+/* Dict layout (open addressing, single flat entry array):
+ * struct NovaDict {
+ *   int count;       // offset 0
+ *   int capacity;    // offset 4 (always power of 2)
+ *   Entry *entries;  // offset 8 (separately allocated, flat array)
+ * }
+ * Entry: { uint64_t hash; char *key; intptr_t value; } (24 bytes)
+ * Empty: key == NULL, Tombstone: key == (char*)1
+ */
 
-/* FNV-1a hash */
-static unsigned long _dh(const char *s) {
-    unsigned long h = 2166136261UL;
-    while (*s) { h ^= (unsigned char)(*s++); h *= 16777619UL; }
+typedef struct {
+    uint64_t hash;
+    char *key;
+    intptr_t value;
+} DictEntry;
+
+#if defined(_WIN32)
+#define DICT_MALLOC(s) STR_PFX(malloc)(s)
+#define DICT_FREE(p) STR_PFX(free)(p)
+#else
+#define DICT_MALLOC(s) malloc(s)
+#define DICT_FREE(p) free(p)
+#endif
+
+static uint64_t _dh64(const char *s) {
+    uint64_t h = 14695981039346656037ULL;
+    while (*s) {
+        h ^= (unsigned char)(*s++);
+        h *= 1099511628211ULL;
+    }
     return h;
 }
 
-/* Find key slot; returns index or -1 */
-static int _df(char **keys, int cap, const char *key) {
-    if (!keys || cap < 1) return -1;
-    unsigned long h = _dh(key);
-    unsigned long mask = (unsigned long)(cap - 1);
-    int idx = (int)(h & mask);
+#define TOMBSTONE_KEY ((char*)1)
+#define IS_EMPTY(e)   ((e)->key == NULL)
+#define IS_TOMBSTONE(e) ((e)->key == TOMBSTONE_KEY)
+#define IS_OCCUPIED(e) (!IS_EMPTY(e) && !IS_TOMBSTONE(e))
+
+static DictEntry *_dict_entries(void *d) {
+    return *(DictEntry**)((char*)d + 8);
+}
+
+static int _df_idx(void *d, const char *key, uint64_t hash) {
+    int cap = *(int*)((char*)d + 4);
+    if (cap < 1) return -1;
+    DictEntry *entries = _dict_entries(d);
+    if (!entries) return -1;
+    uint64_t mask = (uint64_t)(cap - 1);
+    int idx = (int)(hash & mask);
     for (int i = 0; i < cap; i++) {
-        int j = (idx + i) & (int)mask;
-        if (!keys[j]) return -1;
-        if (strcmp(keys[j], key) == 0) return j;
+        int probe = (idx + i) & (int)mask;
+        DictEntry *e = &entries[probe];
+        if (IS_EMPTY(e)) return -1;
+        if (IS_TOMBSTONE(e)) continue;
+        if (e->hash == hash && strcmp(e->key, key) == 0) return probe;
     }
     return -1;
 }
 
-/* Grow: double capacity, rehash */
-static void _dg(void *d) {
+static int _df_find_or_insert(void *d, const char *key, uint64_t hash) {
     int cap = *(int*)((char*)d + 4);
-    char **ok = *(char***)((char*)d + 8);
-    intptr_t *ov = *(intptr_t**)((char*)d + 16);
-    int nc = cap * 2;
-    char **nk = (char**)malloc((size_t)nc * sizeof(char*));
-    intptr_t *nv = (intptr_t*)malloc((size_t)nc * sizeof(intptr_t));
-    if (!nk || !nv) { free(nk); free(nv); return; }
-    memset(nk, 0, (size_t)nc * sizeof(char*));
-    memset(nv, 0, (size_t)nc * sizeof(intptr_t));
+    DictEntry *entries = _dict_entries(d);
+    if (!entries) return -1;
+    uint64_t mask = (uint64_t)(cap - 1);
+    int idx = (int)(hash & mask);
+    int first_tombstone = -1;
     for (int i = 0; i < cap; i++) {
-        if (ok[i]) {
-            unsigned long h = _dh(ok[i]);
-            unsigned long nmask = (unsigned long)(nc - 1);
-            int idx = (int)(h & nmask);
-            while (nk[idx]) idx = (idx + 1) & (int)nmask;
-            nk[idx] = ok[i];
-            nv[idx] = ov[i];
+        int probe = (idx + i) & (int)mask;
+        DictEntry *e = &entries[probe];
+        if (IS_EMPTY(e)) {
+            if (first_tombstone >= 0) return first_tombstone;
+            return probe;
         }
+        if (IS_TOMBSTONE(e)) {
+            if (first_tombstone < 0) first_tombstone = probe;
+            continue;
+        }
+        if (e->hash == hash && strcmp(e->key, key) == 0) return probe;
     }
-    free(ok); free(ov);
-    *(char***)((char*)d + 8) = nk;
-    *(intptr_t**)((char*)d + 16) = nv;
-    *(int*)((char*)d + 4) = nc;
+    if (first_tombstone >= 0) return first_tombstone;
+    return -1;
+}
+
+static void _dg(void *d) {
+    int old_cap = *(int*)((char*)d + 4);
+    DictEntry *old_entries = _dict_entries(d);
+    int new_cap = old_cap * 2;
+    size_t entry_size = (size_t)new_cap * sizeof(DictEntry);
+    DictEntry *new_entries = (DictEntry*)DICT_MALLOC(entry_size);
+    if (!new_entries) return;
+    memset(new_entries, 0, entry_size);
+    if (old_entries) {
+        for (int i = 0; i < old_cap; i++) {
+            DictEntry *e = &old_entries[i];
+            if (IS_OCCUPIED(e)) {
+                uint64_t mask = (uint64_t)(new_cap - 1);
+                int idx = (int)(e->hash & mask);
+                for (int j = 0; j < new_cap; j++) {
+                    int probe = (idx + j) & (int)mask;
+                    if (IS_EMPTY(&new_entries[probe])) {
+                        new_entries[probe] = *e;
+                        break;
+                    }
+                }
+            }
+        }
+        DICT_FREE(old_entries);
+    }
+    *(DictEntry**)((char*)d + 8) = new_entries;
+    *(int*)((char*)d + 4) = new_cap;
 }
 
 SYSCALL void *dict_new(void) {
-    void *d = _nova_arc_alloc(24, 2);
-    if (!d) return 0;
     int cap = 8;
+    void *d = _nova_arc_alloc(16, 2);
+    if (!d) return 0;
+    DictEntry *entries = (DictEntry*)DICT_MALLOC((size_t)cap * sizeof(DictEntry));
+    if (!entries) { _nova_dec_ref(d); return 0; }
+    memset(entries, 0, (size_t)cap * sizeof(DictEntry));
     *(int*)d = 0;
     *(int*)((char*)d + 4) = cap;
-    char **keys = (char**)malloc((size_t)cap * sizeof(char*));
-    intptr_t *values = (intptr_t*)malloc((size_t)cap * sizeof(intptr_t));
-    if (!keys || !values) { if (keys) free(keys); if (values) free(values); _nova_dec_ref(d); return 0; }
-    memset(keys, 0, (size_t)cap * sizeof(char*));
-    memset(values, 0, (size_t)cap * sizeof(intptr_t));
-    *(char***)((char*)d + 8) = keys;
-    *(intptr_t**)((char*)d + 16) = values;
+    *(DictEntry**)((char*)d + 8) = entries;
     return d;
 }
 
 SYSCALL int dict_has(void *d, const char *key) {
-    int cap = *(int*)((char*)d + 4);
-    char **keys = *(char***)((char*)d + 8);
-    return _df(keys, cap, key) >= 0 ? 1 : 0;
+    if (!d || !key) return 0;
+    uint64_t hash = _dh64(key);
+    return _df_idx(d, key, hash) >= 0 ? 1 : 0;
 }
 
 SYSCALL intptr_t dict_get(void *d, const char *key) {
-    int cap = *(int*)((char*)d + 4);
-    char **keys = *(char***)((char*)d + 8);
-    intptr_t *values = *(intptr_t**)((char*)d + 16);
-    int idx = _df(keys, cap, key);
-    return idx >= 0 ? values[idx] : 0;
+    if (!d || !key) return 0;
+    uint64_t hash = _dh64(key);
+    int idx = _df_idx(d, key, hash);
+    if (idx < 0) return 0;
+    DictEntry *entries = _dict_entries(d);
+    return entries[idx].value;
 }
 
 SYSCALL void dict_set(void *d, const char *key, intptr_t value) {
+    if (!d || !key) return;
     int count = *(int*)d;
     int cap = *(int*)((char*)d + 4);
-    char **keys = *(char***)((char*)d + 8);
-    intptr_t *values = *(intptr_t**)((char*)d + 16);
-    int idx = _df(keys, cap, key);
-    if (idx >= 0) { values[idx] = value; return; }
-    /* Grow if load > 70% */
-    if (count * 10 >= cap * 7) {
+    uint64_t hash = _dh64(key);
+    int idx = _df_find_or_insert(d, key, hash);
+    if (idx < 0) {
         _dg(d);
         cap = *(int*)((char*)d + 4);
-        keys = *(char***)((char*)d + 8);
-        values = *(intptr_t**)((char*)d + 16);
+        idx = _df_find_or_insert(d, key, hash);
+        if (idx < 0) return;
     }
-    unsigned long h = _dh(key);
-    unsigned long mask = (unsigned long)(cap - 1);
-    idx = (int)(h & mask);
-    while (keys[idx]) idx = (idx + 1) & (int)mask;
+    DictEntry *entries = _dict_entries(d);
+    DictEntry *e = &entries[idx];
+    if (IS_OCCUPIED(e)) {
+        e->value = value;
+        return;
+    }
     size_t len = strlen(key) + 1;
-    keys[idx] = (char*)malloc(len);
-    if (keys[idx]) { strcpy(keys[idx], key); }
-    values[idx] = value;
+    char *key_copy = (char*)DICT_MALLOC(len);
+    if (!key_copy) return;
+    strcpy(key_copy, key);
+    e->hash = hash;
+    e->key = key_copy;
+    e->value = value;
     *(int*)d = count + 1;
+    if (*(int*)d * 10 >= cap * 7) {
+        _dg(d);
+    }
 }
 
 SYSCALL void dict_remove(void *d, const char *key) {
-    int cap = *(int*)((char*)d + 4);
-    char **keys = *(char***)((char*)d + 8);
-    intptr_t *values = *(intptr_t**)((char*)d + 16);
-    int idx = _df(keys, cap, key);
+    if (!d || !key) return;
+    uint64_t hash = _dh64(key);
+    int idx = _df_idx(d, key, hash);
     if (idx < 0) return;
-    free(keys[idx]); keys[idx] = 0; values[idx] = 0;
+    DictEntry *entries = _dict_entries(d);
+    DictEntry *e = &entries[idx];
+    DICT_FREE(e->key);
+    e->key = TOMBSTONE_KEY;
+    e->value = 0;
+    e->hash = 0;
     *(int*)d = *(int*)d - 1;
 }
 
 SYSCALL void dict_free(void *d) {
     if (!d) return;
     int cap = *(int*)((char*)d + 4);
-    char **keys = *(char***)((char*)d + 8);
-    intptr_t *values = *(intptr_t**)((char*)d + 16);
-    for (int i = 0; i < cap; i++) {
-        if (keys[i]) free(keys[i]);
+    DictEntry *entries = _dict_entries(d);
+    if (entries) {
+        for (int i = 0; i < cap; i++) {
+            if (IS_OCCUPIED(&entries[i])) {
+                DICT_FREE(entries[i].key);
+            }
+        }
+        DICT_FREE(entries);
     }
-    free(keys);
-    free(values);
     NovaARCHeader *hdr = ((NovaARCHeader*)d) - 1;
     if (hdr->magic == NOVA_ARC_MAGIC) {
 #if defined(_WIN32)
@@ -970,23 +1214,22 @@ static int _dc(void *d) {
  * Data is a separate malloc'd buffer at [data_ptr]. */
 SYSCALL void *dict_keys(void *d) {
     int cap = *(int*)((char*)d + 4);
-    char **keys = *(char***)((char*)d + 8);
+    DictEntry *entries = _dict_entries(d);
     int n = _dc(d);
     void *list = malloc(16);
     if (!list) return 0;
-    void *data = malloc((size_t)n * sizeof(intptr_t));
+    void *data = malloc((size_t)(n ? n : 1) * sizeof(intptr_t));
     if (!data) { free(list); return 0; }
     *(int*)list = n;
     *(int*)((char*)list + 4) = n;
     *(intptr_t*)((char*)list + 8) = (intptr_t)data;
     int out = 0;
     for (int i = 0; i < cap; i++) {
-        if (keys[i]) {
-            /* Deep-copy key string so it survives dict_remove */
-            size_t sl = strlen(keys[i]) + 1;
+        if (IS_OCCUPIED(&entries[i])) {
+            size_t sl = strlen(entries[i].key) + 1;
             char *copy = (char*)malloc(sl);
-            if (copy) { strcpy(copy, keys[i]); }
-            *(intptr_t*)((char*)data + out * sizeof(intptr_t)) = (intptr_t)(copy ? copy : keys[i]);
+            if (copy) { strcpy(copy, entries[i].key); }
+            *(intptr_t*)((char*)data + out * sizeof(intptr_t)) = (intptr_t)(copy ? copy : entries[i].key);
             out++;
         }
     }
@@ -995,20 +1238,19 @@ SYSCALL void *dict_keys(void *d) {
 
 SYSCALL void *dict_values(void *d) {
     int cap = *(int*)((char*)d + 4);
-    char **keys = *(char***)((char*)d + 8);
-    intptr_t *values = *(intptr_t**)((char*)d + 16);
+    DictEntry *entries = _dict_entries(d);
     int n = _dc(d);
     void *list = malloc(16);
     if (!list) return 0;
-    void *data = malloc((size_t)n * sizeof(intptr_t));
+    void *data = malloc((size_t)(n ? n : 1) * sizeof(intptr_t));
     if (!data) { free(list); return 0; }
     *(int*)list = n;
     *(int*)((char*)list + 4) = n;
     *(intptr_t*)((char*)list + 8) = (intptr_t)data;
     int out = 0;
     for (int i = 0; i < cap; i++) {
-        if (keys[i]) {
-            *(intptr_t*)((char*)data + out * sizeof(intptr_t)) = (intptr_t)values[i];
+        if (IS_OCCUPIED(&entries[i])) {
+            *(intptr_t*)((char*)data + out * sizeof(intptr_t)) = (intptr_t)entries[i].value;
             out++;
         }
     }
@@ -1017,26 +1259,24 @@ SYSCALL void *dict_values(void *d) {
 
 SYSCALL void *dict_items(void *d) {
     int cap = *(int*)((char*)d + 4);
-    char **keys = *(char***)((char*)d + 8);
-    intptr_t *values = *(intptr_t**)((char*)d + 16);
+    DictEntry *entries = _dict_entries(d);
     int n = _dc(d);
     void *list = malloc(16);
     if (!list) return 0;
-    void *data = malloc((size_t)n * 2 * sizeof(intptr_t));
+    void *data = malloc((size_t)(n ? n : 1) * 2 * sizeof(intptr_t));
     if (!data) { free(list); return 0; }
     *(int*)list = n * 2;
     *(int*)((char*)list + 4) = n * 2;
     *(intptr_t*)((char*)list + 8) = (intptr_t)data;
     int out = 0;
     for (int i = 0; i < cap; i++) {
-        if (keys[i]) {
-            /* Deep-copy key string */
-            size_t sl = strlen(keys[i]) + 1;
+        if (IS_OCCUPIED(&entries[i])) {
+            size_t sl = strlen(entries[i].key) + 1;
             char *copy = (char*)malloc(sl);
-            if (copy) { strcpy(copy, keys[i]); }
-            *(intptr_t*)((char*)data + out * sizeof(intptr_t)) = (intptr_t)(copy ? copy : keys[i]);
+            if (copy) { strcpy(copy, entries[i].key); }
+            *(intptr_t*)((char*)data + out * sizeof(intptr_t)) = (intptr_t)(copy ? copy : entries[i].key);
             out++;
-            *(intptr_t*)((char*)data + out * sizeof(intptr_t)) = (intptr_t)values[i];
+            *(intptr_t*)((char*)data + out * sizeof(intptr_t)) = (intptr_t)entries[i].value;
             out++;
         }
     }
@@ -1211,6 +1451,8 @@ SYSCALL int _char_code(const char *s, int i) {
     return (unsigned char)s[i];
 }
 
+static char _str_empty[1] = {0};
+
 SYSCALL char *_str_sub(const char *s, int start, int end) {
     if (!s) return 0;
     int actual_len = 0;
@@ -1219,6 +1461,12 @@ SYSCALL char *_str_sub(const char *s, int start, int end) {
     if (end > actual_len) end = actual_len;
     int len = end - start;
     if (len < 0) len = 0;
+    if (len == 0) {
+        return _str_empty;
+    }
+    if (len == actual_len) {
+        return (char*)s;
+    }
 #if defined(_WIN32)
     char *res = (char*)STR_PFX(malloc)(len + 1);
 #else
