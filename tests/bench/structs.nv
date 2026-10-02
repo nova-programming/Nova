@@ -1,0 +1,14 @@
+data Particle {
+    x: int
+    y: int
+    vx: int
+    vy: int
+}
+p = Particle(0, 0, 3, 5)
+for tick in range(20000000) {
+    p.x = (p.x + p.vx) % 1000
+    p.y = (p.y + p.vy) % 1000
+    if p.x > 500 { p.vx = 3 } else { p.vx = 4 }
+}
+print(p.x)
+print(p.y)

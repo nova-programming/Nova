@@ -104,3 +104,28 @@ Each phase MUST:
 3. Self-hosted compile: `.\nova.exe build tests/bench.nv` → run and verify same output
 4. Bootstrap: `python main.py build nova.nv && .\nova.exe build nova.nv`
 5. Commit: `.\nova.exe build nova.nv && .\nova.exe build tests/hello.nv`
+
+
+## Batch 7 — whole-language performance (zero surface change)
+
+Benchmarks live in `tests/bench/*.nv` (C twins in `tests/bench/c/`); run `python tools/bench.py` (best of 3, stage-1
+compiler built from the checkout, C = `gcc -O2`). Behavior is guarded by `tests/test_diff_fuzz.py` (random programs,
+VM vs native) and the stage-2 tests.
+
+Baseline before Batch 7 (same machine, quiet):
+
+| benchmark | run (s) | C -O2 (s) | Nova/C |
+|---|---|---|---|
+| fib (fib(36)) | 0.137 | 0.071 | 1.93x |
+| loops (60M iterations, mixed arithmetic) | 0.495 | 0.322 | 1.53x |
+| primes (< 300000, trial division) | 0.095 | 0.088 | 1.09x |
+| collatz (< 400000) | 0.453 | 0.127 | 3.58x |
+| sieve (5M, lists) | 0.164 | - | - |
+| bubble sort (3500) | 0.069 | - | - |
+| matmul (130x130, flat lists) | 0.052 | - | - |
+| dict counting (300k) | 0.075 | - | - |
+| structs (20M field updates) | 0.183 | - | - |
+| strings (40k appends) | 6.042 | - | - |
+
+Standouts: `strings` (every `s = s + x` does four passes over both operands and the old string is never freed),
+`collatz` (`% 2` and `/ 2` use `idiv`), `loops` (`%` by a constant uses `idiv`), and call-heavy `fib`.

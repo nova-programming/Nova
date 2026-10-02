@@ -1,0 +1,21 @@
+n = 130
+a = []
+b = []
+c = []
+for i in range(n * n) {
+    a.append((i * 7 + 3) % 10)
+    b.append((i * 5 + 1) % 10)
+    c.append(0)
+}
+for i in range(n) {
+    for j in range(n) {
+        s = 0
+        for k in range(n) {
+            s = s + a[i * n + k] * b[k * n + j]
+        }
+        c[i * n + j] = s
+    }
+}
+total = 0
+for i in range(n * n) { total = total + c[i] }
+print(total)

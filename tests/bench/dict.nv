@@ -1,0 +1,12 @@
+counts = {}
+for i in range(300000) {
+    key = str(i % 997)
+    if key in counts {
+        counts[key] = counts[key] + 1
+    } else {
+        counts[key] = 1
+    }
+}
+print(len(counts))
+print(counts["5"])
+print(counts["996"])

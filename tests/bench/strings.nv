@@ -1,0 +1,10 @@
+s = ""
+for i in range(40000) {
+    s = s + "ab"
+}
+count = 0
+for i in range(len(s)) {
+    if s[i] == "a" { count = count + 1 }
+}
+print(len(s))
+print(count)

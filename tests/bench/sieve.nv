@@ -1,0 +1,21 @@
+limit = 5000000
+flags = []
+for i in range(limit + 1) { flags.append(1) }
+flags[0] = 0
+flags[1] = 0
+i = 2
+while i * i <= limit {
+    if flags[i] == 1 {
+        j = i * i
+        while j <= limit {
+            flags[j] = 0
+            j = j + i
+        }
+    }
+    i = i + 1
+}
+count = 0
+for k in range(limit + 1) {
+    if flags[k] == 1 { count = count + 1 }
+}
+print(count)

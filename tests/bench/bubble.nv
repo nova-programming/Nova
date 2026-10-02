@@ -1,0 +1,19 @@
+n = 3500
+xs = []
+seed = 12345
+for i in range(n) {
+    seed = (seed * 1103 + 12345) % 100003
+    xs.append(seed)
+}
+for i in range(n) {
+    for j in range(n - i - 1) {
+        if xs[j] > xs[j + 1] {
+            t = xs[j]
+            xs[j] = xs[j + 1]
+            xs[j + 1] = t
+        }
+    }
+}
+print(xs[0])
+print(xs[n - 1])
+print(xs[n / 2])

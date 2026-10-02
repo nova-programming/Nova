@@ -1,0 +1,10 @@
+def work(limit) {
+    s = 0
+    i = 0
+    while i < limit {
+        s = (s + i * 3 + (i % 7)) % 1000003
+        i = i + 1
+    }
+    return s
+}
+print(work(60000000))
