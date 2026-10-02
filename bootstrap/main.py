@@ -10,6 +10,10 @@ import shutil
 import re
 import subprocess
 
+# Make the bootstrap sub-packages (lexer, parser, ...) importable when launched
+# as a console-script entry point (bootstrap.main:main) rather than as a script.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from lexer.tokenizer import tokenize
 from parser.parser import Parser
 from vm.compiler import Compiler
@@ -876,6 +880,48 @@ def _detect_install_dir():
     return script_dir
 
 
+MAX_UPDATE_ARCHIVE_BYTES = 50 * 1024 * 1024
+
+
+def extract_update_archive(zip_data, install_dir):
+    """Extract an update zip into install_dir; returns the number of files written.
+
+    Validates every member before writing anything: no absolute or ``..``
+    paths, no symlinks, and the resolved destination must stay inside
+    install_dir. Raises ValueError (without touching disk) on any violation.
+    """
+    if len(zip_data) > MAX_UPDATE_ARCHIVE_BYTES:
+        raise ValueError("archive exceeds size limit")
+    root = os.path.abspath(install_dir)
+    planned = []
+    with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
+        bad = zf.testzip()
+        if bad is not None:
+            raise ValueError(f"corrupted archive: {bad}")
+        for info in zf.infolist():
+            rel = info.filename.replace("\\", "/")
+            if rel.startswith(ZIP_PREFIX + "/"):
+                rel = rel[len(ZIP_PREFIX) + 1:]
+            if not rel or rel.endswith("/"):
+                continue
+            parts = rel.split("/")
+            if parts[0] not in ALLOWED_UPDATE_FILES and parts[0] not in ALLOWED_UPDATE_DIRS:
+                continue
+            if rel.startswith("/") or any(p in ("", ".", "..") or ":" in p for p in parts):
+                raise ValueError(f"unsafe archive path: {info.filename}")
+            if (info.external_attr >> 16) & 0o170000 == 0o120000:
+                raise ValueError(f"archive contains symlink: {info.filename}")
+            dst = os.path.abspath(os.path.join(root, *parts))
+            if not dst.startswith(root + os.sep):
+                raise ValueError(f"unsafe archive path: {info.filename}")
+            planned.append((info, dst))
+        for info, dst in planned:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with zf.open(info) as src, open(dst, "wb") as df:
+                shutil.copyfileobj(src, df)
+    return len(planned)
+
+
 def cmd_update():
     """Update the Nova compiler itself."""
     print(f"Nova v{NOVA_VERSION}")
@@ -923,26 +969,11 @@ def cmd_update():
             return
 
     print("Extracting...")
-    count = 0
-    with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
-        bad = zf.testzip()
-        if bad is not None:
-            print(f"Corrupted archive: {bad}")
-            return
-        for name in zf.namelist():
-            rel = name
-            if rel.startswith(ZIP_PREFIX + "/"):
-                rel = rel[len(ZIP_PREFIX) + 1:]
-            if not rel or rel.endswith("/"):
-                continue
-            parts = rel.split("/")
-            top = parts[0]
-            if top in ALLOWED_UPDATE_FILES or top in ALLOWED_UPDATE_DIRS:
-                dst = os.path.join(install_dir, rel)
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                with zf.open(name) as src, open(dst, "wb") as df:
-                    shutil.copyfileobj(src, df)
-                count += 1
+    try:
+        count = extract_update_archive(zip_data, install_dir)
+    except ValueError as e:
+        print(f"Update aborted: {e}")
+        return
 
     print(f"Updated {count} files.")
     print(f"Nova has been updated to v{latest}.")

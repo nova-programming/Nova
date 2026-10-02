@@ -475,12 +475,16 @@ def cmd_init(args):
     print("  4. Run 'galaxy publish' to submit to the registry")
 
 
-def _verify_hashes(dest_dir, version_data, pkg_name):
+def _verify_hashes(dest_dir, version_data, pkg_name, allow_unverified=False):
     """Verify SHA-256 hashes of extracted files against registry metadata."""
     expected_files = version_data.get("files") if version_data else None
     if not expected_files:
-        print(f"  [WARN] No file hashes in registry metadata for '{pkg_name}' — skipping verification")
-        return True
+        if allow_unverified or os.environ.get("GALAXY_ALLOW_UNVERIFIED") == "1":
+            print(f"  [WARN] No file hashes in registry metadata for '{pkg_name}' — skipping verification")
+            return True
+        print(f"  [FAIL] Registry metadata for '{pkg_name}' has no file hashes; refusing to install unverified code.")
+        print("         Set GALAXY_ALLOW_UNVERIFIED=1 to override.")
+        return False
 
     ok = True
     for ef in expected_files:
@@ -631,7 +635,8 @@ def _install_package(pkg_name, visited=None, force=False):
                 if v.get("version") == version_str:
                     version_entry = v
                     break
-        if not _verify_hashes(dest_dir, version_entry, pkg_name):
+        # Direct GitHub refs (owner/repo) have no registry metadata and are explicitly unverified.
+        if not _verify_hashes(dest_dir, version_entry, pkg_name, allow_unverified=data is None):
             shutil.rmtree(dest_dir, ignore_errors=True)
             if backup_dir and os.path.exists(backup_dir):
                 os.replace(backup_dir, dest_dir)

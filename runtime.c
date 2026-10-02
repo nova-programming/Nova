@@ -79,8 +79,10 @@ SYSCALL int STR_PFX(printf)(const char *fmt, const void *arg_s) {
                 }
                 case 'f': {
                     double val = *((double*)&arg_s);
-                    char buf[64];
-                    int len = sprintf(buf, "%.6f", val);
+                    char buf[512];
+                    int len = snprintf(buf, sizeof(buf), "%.6f", val);
+                    if (len < 0) len = 0;
+                    if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
                     WriteFile(h, buf, len, &wn, 0);
                     written += len;
                     break;
