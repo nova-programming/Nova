@@ -84,3 +84,23 @@ def selfhost_run(selfhost):
         return r, asm_path.read_text() if asm_path.exists() else ""
 
     return run
+
+
+@pytest.fixture(scope="session")
+def stage2(selfhost, tmp_path_factory):
+    """(stage2 exe, work dir, env): the compiler as built by the self-hosted compiler itself.
+
+    Stage 1 is compiled by the Python bootstrap, stage 2 by stage 1. Bugs in how the self-hosted
+    code generator compiles the compiler's own sources only show up here (e.g. parser desugars that
+    misparse the compiler's source), so shipped behavior is tested against stage 2 as well.
+    """
+    stage1, work1, env = selfhost
+    work = tmp_path_factory.mktemp("stage2")
+    shutil.copytree(work1 / "stdlib", work / "stdlib")
+    for name in ("nova.nv", "runtime.c"):
+        shutil.copy(work1 / name, work / name)
+    r = subprocess.run([str(stage1), "build", str(work / "nova.nv"), "-o", str(work / ("stage2" + EXE))],
+                       capture_output=True, text=True, timeout=600, cwd=work, env=env)
+    exe = work / ("stage2" + EXE)
+    assert exe.exists(), r.stdout[-2000:] + r.stderr[-2000:]
+    return exe, work, env

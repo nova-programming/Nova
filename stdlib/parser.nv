@@ -1071,7 +1071,7 @@ def parse_logic(state: ParserState) -> AstNode {
                     }
                 }
             } else {
-                if left.kind == "Compare" and right.kind != "Compare" and right.kind != "BinOp" {
+                if left.kind == "Compare" and (right.kind == "Number" or right.kind == "String") {
                 new_right = AstNode()
                 new_right.kind = "Compare"
                 new_right.val_str = left.val_str
