@@ -10,6 +10,7 @@ import parser
 import codegen_expr
 import codegen_stmt
 import codegen_common
+import peephole
 
 data CodegenState {
     asm_lines: list
@@ -969,10 +970,11 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     emit(state, "    pop rbp")
     emit(state, "    ret")
 
+    optimized = peephole.optimize(state.asm_lines)
     final_asm = []
     i = 0
-    while i < len(state.asm_lines) {
-        final_asm.append(state.asm_lines[i])
+    while i < len(optimized) {
+        final_asm.append(optimized[i])
         i = i + 1
     }
     final_asm.append(".data")

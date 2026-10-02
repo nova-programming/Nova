@@ -2,10 +2,23 @@
 
 ## Goal: Match C/C++ performance
 
-## Benchmark Baseline
+## Measured Results (Oct 2026, x86_64 Windows, self-hosted compiler vs `gcc -O2`)
 
-| Benchmark | Nova | C (-O3) | Gap |
+The older "25x on fib" figure was stale. Measured steady-state, best of 8:
+
+| Benchmark | Before | After call fast path + peephole | C -O2 |
 |---|---|---|---|
+| fib(38) recursive | ~0.44-0.48s | ~0.32-0.35s | ~0.14-0.16s |
+| `tests/bench_heavy.nv` (fib 35 + sum 10M + primes 50k) | ~0.21s | ~0.155s | n/a |
+
+Remaining fib gap is ~2.2-2.5x, dominated by the function prologue
+(`push rbp; mov rbp,rsp; and rsp,-16; sub rsp,N; push r12`) and the stack-machine
+expression evaluation. Done so far: Nova-to-Nova calls skip the C-interop frame
+(`emit_internal_call`), and `stdlib/peephole.nv` is now wired into the x86_64 backend
+(it was previously dead code). Next: leaf-function prologue elision, direct-register
+argument passing, compare-and-branch fusion (`cmp; setle; movzx; cmp 0; je` -> `cmp; jg`).
+
+---|---|---|---|
 | fib(30) recursive | ~0.025s | 0.001s | 25× |
 | sum_to(100k) loop | <0.001s | <0.0005s | ~2× |
 | primes(10000) | <0.001s | <0.0005s | ~2× |

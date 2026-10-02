@@ -126,3 +126,21 @@ def test_internal_then_c_calls_keep_stack_aligned(selfhost):
     r, _ = _compile_run(selfhost, src, "fp_align")
     assert r.returncode == 0
     assert r.stdout.split("\n")[:3] == ["hi x", "4", "hi x"]
+
+
+def test_peephole_cleans_generated_code(selfhost):
+    src = (
+        "def fib(n) {\n    if n <= 1 { return n }\n    return fib(n - 1) + fib(n - 2)\n}\n"
+        "def total(n) {\n    s = 0\n    i = 0\n    while i <= n {\n        s = s + i\n        i = i + 1\n    }\n    return s\n}\n"
+        "print(fib(15))\nprint(total(100))\n"
+    )
+    r, asm = _compile_run(selfhost, src, "fp_peep")
+    assert r.returncode == 0
+    assert r.stdout.split() == ["610", "5050"]
+    lines = asm.splitlines()
+    regs = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"}
+    for a, b in zip(lines, lines[1:]):
+        if a.startswith("    push ") and b.startswith("    pop "):
+            assert not (a[9:] in regs and b[8:] in regs), f"unfused push/pop: {a.strip()} / {b.strip()}"
+        if a == "    ret" or a.startswith("    jmp "):
+            assert not (b.startswith("    ") and not b.startswith("    .")), f"dead code after {a.strip()}: {b.strip()}"
