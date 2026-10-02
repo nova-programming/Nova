@@ -162,12 +162,40 @@ def _file_hash(file_path):
         return None
 
 
+def _build_fingerprint(file_path):
+    """Hash of everything that affects the build output of file_path.
+
+    Covers the source itself, sibling .nv modules it may import, the standard
+    library, runtime.c and the bootstrap compiler, so editing any of them
+    invalidates the cache (previously only the file itself was hashed, which
+    could silently reuse a stale compiler after a stdlib change).
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    h = hashlib.sha256()
+    paths = [os.path.abspath(file_path), os.path.join(root, "runtime.c")]
+    src_dir = os.path.dirname(os.path.abspath(file_path))
+    try:
+        paths += [os.path.join(src_dir, n) for n in os.listdir(src_dir) if n.endswith(".nv")]
+    except OSError:
+        pass
+    for sub, exts in (("stdlib", (".nv",)), ("bootstrap", (".py",))):
+        for dirpath, dirnames, filenames in os.walk(os.path.join(root, sub)):
+            dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+            paths += [os.path.join(dirpath, n) for n in filenames if n.endswith(exts)]
+    for p in sorted(set(paths)):
+        digest = _file_hash(p)
+        if digest:
+            h.update(os.path.relpath(p, root).encode("utf-8", "replace") if p.startswith(root) else p.encode("utf-8", "replace"))
+            h.update(digest.encode())
+    return h.hexdigest()
+
+
 def _check_cache(project_dir, file_path):
     """Check if a file is unchanged since last build. Returns True if cached."""
     cache = _load_cache(project_dir)
     if cache.get("version") != NOVA_VERSION:
         return False
-    fhash = _file_hash(file_path)
+    fhash = _build_fingerprint(file_path)
     if fhash is None:
         return False
     return cache.get("files", {}).get(file_path) == fhash
@@ -177,7 +205,7 @@ def _update_cache(project_dir, file_path):
     """Update the cache with the current file hash."""
     cache = _load_cache(project_dir)
     cache["version"] = NOVA_VERSION
-    fhash = _file_hash(file_path)
+    fhash = _build_fingerprint(file_path)
     if fhash:
         cache["files"][file_path] = fhash
     _save_cache(project_dir, cache)
