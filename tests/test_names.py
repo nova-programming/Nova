@@ -121,18 +121,21 @@ def test_camel_case_members_parse_to_internal_names():
 
 SOFT_PROGRAM = (
     "read = 1\nwrite = 2\nclose = 3\napi = 4\nprint(read + write + close + api)\n"
-    'fd = open("names_soft_tmp.txt", "w")\nwrite(fd, "hello")\nclose(fd)\n'
-    'fd2 = open("names_soft_tmp.txt", "r")\ndata = read(fd2)\nclose(fd2)\nprint(data)\n'
+    'fd = open("{path}", "w")\nwrite(fd, "hello")\nclose(fd)\n'
+    'fd2 = open("{path}", "r")\ndata = read(fd2)\nclose(fd2)\nprint(data)\n'
 )
 
 
-def test_soft_keywords_vm(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    assert _vm_output(SOFT_PROGRAM).split() == ["10", "hello"]
+def _soft_program(tmp_path):
+    return SOFT_PROGRAM.replace("{path}", str(tmp_path / "soft.txt").replace("\\", "/"))
+
+
+def test_soft_keywords_vm(tmp_path):
+    assert _vm_output(_soft_program(tmp_path)).split() == ["10", "hello"]
 
 
 def test_soft_keywords_selfhost(selfhost_run, tmp_path):
-    r, _ = selfhost_run(SOFT_PROGRAM.replace("print(data)\n", ""), "names_soft")
+    r, _ = selfhost_run(_soft_program(tmp_path).replace("print(data)\n", ""), "names_soft")
     assert r.returncode == 0 and r.stdout.split() == ["10"]
 
 
