@@ -74,3 +74,28 @@ def test_stage2_lays_out_data_structs_like_stage1(selfhost, stage2):
     )
     stage1, work1, env = selfhost
     assert _run((stage1, work1, env), "lay1", src) == _run(stage2, "lay2", src) == ["54321"]
+
+
+def _oob_lines(stage, name, source):
+    """The line numbers written to _oob_line (bounds-check records) in the emitted assembly."""
+    exe, work, env = stage
+    _run(stage, name, source)
+    asm = (work / (name + ".nv.s")).read_text()
+    out = []
+    marker = "lea rbx, [rip + _oob_line]"
+    for i, line in enumerate(asm.splitlines()):
+        if marker in line:
+            out.append(asm.splitlines()[i + 1].strip())
+    return out
+
+
+def test_stage2_records_bounds_check_lines_like_stage1(selfhost, stage2):
+    """Regression: the type checker did not visit the operand of str(...), so `node.line` inside
+    str(node.line) had no struct type and the self-hosted backend read Token.line's offset instead
+    of AstNode.line's: stage 2 wrote `mov qword ptr [rbx], 0` for every bounds-check line record."""
+    src = "xs = [1, 2, 3]\n\nxs[1] = 5\nprint(xs[2])\n"
+    stage1, work1, env = selfhost
+    l1 = _oob_lines((stage1, work1, env), "oob1", src)
+    l2 = _oob_lines(stage2, "oob2", src)
+    assert l1 and l1 == l2
+    assert "mov qword ptr [rbx], 3" in l1

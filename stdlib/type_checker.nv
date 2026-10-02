@@ -630,6 +630,23 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return create_any_type()
     }
 
+    # Kinds without a dedicated handler still contain expressions (e.g. str(node.line)). Visit the
+    # children so they get inferred types; otherwise the backend can't tell which struct a field
+    # access like node.line belongs to and falls back to the first struct that has such a field.
+    k = node.kind
+    if k == "StrConvert" or k == "UnaryOp" or k == "Slice" or k == "Alloc" or k == "Free" or k == "PointerProperty" or k == "PointerAssign" or k == "ReadFile" or k == "WriteFile" or k == "Openf" or k == "CloseFile" {
+        tc_visit(tc, node.left)
+        tc_visit(tc, node.right)
+        tc_visit(tc, node.cond)
+        if node.args != 0 {
+            i = 0
+            while i < len(node.args) {
+                tc_visit(tc, node.args[i])
+                i = i + 1
+            }
+        }
+    }
+
     # Default fallback
     return create_any_type()
 }
