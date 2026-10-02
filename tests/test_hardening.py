@@ -125,3 +125,10 @@ def test_pyproject_uses_valid_build_backend():
     text = open(os.path.join(ROOT, "pyproject.toml"), encoding="utf-8").read()
     assert 'build-backend = "setuptools.build_meta"' in text
     assert "setuptools.backends" not in text
+
+
+def test_update_includes_the_bootstrap_compiler(nova_main, tmp_path):
+    """`nova update` used to skip bootstrap/ entirely (allow-list had the pre-restructure layout)."""
+    data = _zip([("Nova-main/bootstrap/names.py", "x = 1"), ("Nova-main/bootstrap/api_tools.py", "y = 2")])
+    assert nova_main.extract_update_archive(data, str(tmp_path)) == 2
+    assert (tmp_path / "bootstrap" / "names.py").exists()

@@ -27,7 +27,7 @@ ZIP_PREFIX = "Nova-main"
 NOVA_RELEASE_BASE = "https://github.com/nova-programming/Nova/releases/download"
 
 ALLOWED_UPDATE_FILES = {"main.py", "_galaxy.py", "nova.nv", "runtime.c"}
-ALLOWED_UPDATE_DIRS = {"compiler", "parser", "lexer", "nova_ast", "vm", "stdlib", "modules", "tools", "galaxy"}
+ALLOWED_UPDATE_DIRS = {"bootstrap", "compiler", "parser", "lexer", "nova_ast", "vm", "stdlib", "modules", "tools", "galaxy"}
 
 BUNDLED_GCC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gcc")
 
