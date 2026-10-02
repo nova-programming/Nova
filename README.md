@@ -67,7 +67,7 @@ print(time.ticks())
 | `process` | `run shell exit` |
 | `time` | `now ticks` |
 | `json` | `stringify` |
-| `text` | `toInt trim startsWith endsWith indexOf contains replace split join repeat upper lower` |
+| `text` | `toInt trim startsWith endsWith indexOf contains replace split join repeat upper lower words lines padLeft padRight count capitalize` |
 
 Members use camelCase (`makeDir`, `startsWith`, `.asList`, `.valueByte`).
 `nova lint` flags old spellings (`STYLE003`) and

@@ -38,7 +38,9 @@ def names_module_function(module: string, member: string) -> string {
         "text.toInt": "text_to_int", "text.trim": "text_trim", "text.startsWith": "text_starts_with",
         "text.endsWith": "text_ends_with", "text.indexOf": "text_index_of", "text.contains": "text_contains",
         "text.replace": "text_replace", "text.split": "text_split", "text.join": "text_join",
-        "text.repeat": "text_repeat", "text.upper": "text_upper", "text.lower": "text_lower"
+        "text.repeat": "text_repeat", "text.upper": "text_upper", "text.lower": "text_lower",
+        "text.words": "text_words", "text.lines": "text_lines", "text.padLeft": "text_pad_left",
+        "text.padRight": "text_pad_right", "text.count": "text_count", "text.capitalize": "text_capitalize"
     }
     if table.has(key) { return table.get(key) }
     return ""

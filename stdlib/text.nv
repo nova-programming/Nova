@@ -162,3 +162,79 @@ def text_upper(s: string) -> string {
 def text_lower(s: string) -> string {
     return text_swap_case(s, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
 }
+
+# Split on runs of whitespace ("  a  b " -> ["a", "b"]).
+def text_words(s: string) -> list[string] {
+    parts = []
+    n = len(s)
+    i = 0
+    while i < n {
+        while i < n and text_is_space(s[i]) == 1 {
+            i = i + 1
+        }
+        if i >= n { break }
+        start = i
+        while i < n and text_is_space(s[i]) == 0 {
+            i = i + 1
+        }
+        parts.append(str_sub(s, start, i))
+    }
+    return parts
+}
+
+# Split on newlines like Python's splitlines (a trailing newline adds no empty last line; \r is dropped).
+def text_lines(s: string) -> list[string] {
+    parts = []
+    n = len(s)
+    start = 0
+    i = 0
+    while i < n {
+        if s[i] == "\n" {
+            stop = i
+            if stop > start and s[stop - 1] == "\r" { stop = stop - 1 }
+            parts.append(str_sub(s, start, stop))
+            start = i + 1
+        }
+        i = i + 1
+    }
+    if start < n { parts.append(str_sub(s, start, n)) }
+    return parts
+}
+
+def text_pad_left(s: string, width: int, fill: string) -> string {
+    if len(fill) == 0 { fill = " " }
+    missing = width - len(s)
+    if missing <= 0 { return s }
+    return text_repeat(str_sub(fill, 0, 1), missing) + s
+}
+
+def text_pad_right(s: string, width: int, fill: string) -> string {
+    if len(fill) == 0 { fill = " " }
+    missing = width - len(s)
+    if missing <= 0 { return s }
+    return s + text_repeat(str_sub(fill, 0, 1), missing)
+}
+
+# Non-overlapping occurrences of part in s (0 when part is empty).
+def text_count(s: string, part: string) -> int {
+    n = len(part)
+    total = len(s)
+    if n == 0 { return 0 }
+    found = 0
+    i = 0
+    while i + n <= total {
+        if str_sub(s, i, i + n) == part {
+            found = found + 1
+            i = i + n
+        } else {
+            i = i + 1
+        }
+    }
+    return found
+}
+
+# First letter upper case, the rest lower case.
+def text_capitalize(s: string) -> string {
+    if len(s) == 0 { return s }
+    return text_upper(str_sub(s, 0, 1)) + text_lower(str_sub(s, 1, len(s)))
+}

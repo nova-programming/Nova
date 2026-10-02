@@ -34,6 +34,8 @@ MODULE_FUNCS = {
         "endsWith": "text_ends_with", "indexOf": "text_index_of", "contains": "text_contains",
         "replace": "text_replace", "split": "text_split", "join": "text_join",
         "repeat": "text_repeat", "upper": "text_upper", "lower": "text_lower",
+        "words": "text_words", "lines": "text_lines", "padLeft": "text_pad_left",
+        "padRight": "text_pad_right", "count": "text_count", "capitalize": "text_capitalize",
     },
 }
 
