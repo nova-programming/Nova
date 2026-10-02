@@ -61,6 +61,34 @@ def process_escapes(s):
     return "".join(result)
 
 
+def _protect_braces(text):
+    """Turn an escaped brace (backslash-open or backslash-close) into a sentinel so it is never
+    mistaken for string interpolation; a doubled backslash is not an escape."""
+    out = []
+    k = 0
+    n = len(text)
+    while k < n:
+        if text[k] == '\\' and k + 1 < n:
+            nxt = text[k + 1]
+            if nxt == "{":
+                out.append("\x01")
+            elif nxt == "}":
+                out.append("\x02")
+            else:
+                out.append(text[k] + nxt)
+            k += 2
+        else:
+            out.append(text[k])
+            k += 1
+    return "".join(out)
+
+
+def _restore_braces(tok):
+    if tok[0] == "STRING" and ("\x01" in tok[1] or "\x02" in tok[1]):
+        return (tok[0], tok[1].replace("\x01", "{").replace("\x02", "}")) + tuple(tok[2:])
+    return tok
+
+
 def tokenize(code):
     tokens = []
     n = len(code)
@@ -118,7 +146,8 @@ def tokenize(code):
                     j += 1
             value = code[i:j]
             inner = value[1:-1]
-            inner = process_escapes(inner)
+            inner = process_escapes(_protect_braces(inner))
+            string_start = len(tokens)
 
             if "{" in inner and "}" in inner:
                 new_tokens = []
@@ -155,6 +184,7 @@ def tokenize(code):
                 tokens.extend(new_tokens)
             else:
                 tokens.append(("STRING", '"' + inner + '"', line_num, i - line_start))
+            tokens[string_start:] = [_restore_braces(t) for t in tokens[string_start:]]
             i = j
             continue
 

@@ -9,6 +9,41 @@ data Token {
     col: int
 }
 
+# True when the character at idx is preceded by an odd number of backslashes (an escape).
+def brace_escaped(s: string, idx: int) -> int {
+    count = 0
+    k = idx - 1
+    while k >= 0 and s[k] == "\\" {
+        count = count + 1
+        k = k - 1
+    }
+    if count % 2 == 1 { return 1 }
+    return 0
+}
+
+# Drop the backslash of an escaped brace (backslash-open / backslash-close); a doubled backslash stays a pair.
+def unescape_braces(s: string) -> string {
+    out = ""
+    i = 0
+    n = len(s)
+    while i < n {
+        ch = s[i]
+        if ch == "\\" and i + 1 < n {
+            nx = s[i + 1]
+            if nx == "{" or nx == "}" {
+                out = out + nx
+            } else {
+                out = out + ch + nx
+            }
+            i = i + 2
+        } else {
+            out = out + ch
+            i = i + 1
+        }
+    }
+    return out
+}
+
 def is_digit(ch: string) -> int {
     if "0" <= ch and ch <= "9" { return 1 }
     return 0
@@ -281,12 +316,25 @@ def tokenize(src: string) -> list {
             inner = str_sub(str_val, 1, len(str_val) - 1)
             inner_len = len(inner)
             has_interp = 0
+            has_brace_escape = 0
             ci = 0
             while ci < inner_len {
-                if inner[ci] == "{" { has_interp = 1 }
+                if inner[ci] == "{" {
+                    if brace_escaped(inner, ci) == 1 {
+                        has_brace_escape = 1
+                    } else {
+                        has_interp = 1
+                    }
+                }
+                if inner[ci] == "}" {
+                    if brace_escaped(inner, ci) == 1 { has_brace_escape = 1 }
+                }
                 ci = ci + 1
             }
             if has_interp == 0 {
+                if has_brace_escape == 1 {
+                    str_val = "\"" + unescape_braces(inner) + "\""
+                }
                 tok = Token()
                 tok.kind = "STRING"
                 tok.val = str_val
@@ -298,7 +346,7 @@ def tokenize(src: string) -> list {
                 needs_plus = 0
                 ci = 0
                 while ci < inner_len {
-                    if inner[ci] == "{" {
+                    if inner[ci] == "{" and brace_escaped(inner, ci) == 0 {
                         depth = 1
                         cj = ci + 1
                         while cj < inner_len and depth > 0 {
@@ -388,10 +436,10 @@ def tokenize(src: string) -> list {
                         }
                     } else {
                         text_start = ci
-                        while ci < inner_len and inner[ci] != "{" {
+                        while ci < inner_len and (inner[ci] != "{" or brace_escaped(inner, ci) == 1) {
                             ci = ci + 1
                         }
-                        text = str_sub(inner, text_start, ci)
+                        text = unescape_braces(str_sub(inner, text_start, ci))
                         if needs_plus == 1 {
                             t = Token()
                             t.kind = "PLUS"
