@@ -1,0 +1,14 @@
+# Process boundary. `process_exit` is portable; shell execution is explicit.
+import system
+
+def process_exit(code: int) {
+    system_exit(code)
+}
+
+def process_shell(command: string) {
+    system_exec(command)
+}
+
+def process_run(args: list) -> int {
+    return system_process_run(args)
+}

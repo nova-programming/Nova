@@ -1,0 +1,3 @@
+def json_stringify(value) -> string {
+    return nova_json_stringify(value)
+}

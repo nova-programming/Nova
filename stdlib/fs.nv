@@ -1,0 +1,61 @@
+# Simple cross-platform filesystem API.
+# Operations return 1/0 for success where the runtime exposes status, and
+# empty/zero values for failed reads or metadata queries.
+import system
+
+def fs_exists(path: string) -> int {
+    return file_exists(path)
+}
+
+def fs_size(path: string) -> int {
+    return file_size(path)
+}
+
+def fs_kind(path: string) -> string {
+    return file_type(path)
+}
+
+def fs_mkdir(path: string) -> int {
+    return file_mkdir(path)
+}
+
+def fs_delete(path: string) -> int {
+    return file_delete(path)
+}
+
+def fs_copy(source: string, destination: string) -> int {
+    return file_copy(source, destination)
+}
+
+def fs_move(source: string, destination: string) -> int {
+    return file_move(source, destination)
+}
+
+def fs_read(path: string) -> string {
+    fd = file_open(path, "r")
+    if fd == 0 {
+        return ""
+    }
+    value = file_read(fd)
+    file_close(fd)
+    return value
+}
+
+def fs_write(path: string, content: string) -> int {
+    fd = file_open(path, "w")
+    if fd == 0 {
+        return 0
+    }
+    file_write(fd, content)
+    file_close(fd)
+    return 1
+}
+
+# Descriptive aliases retained for readability and compatibility.
+def fs_read_text(path: string) -> string {
+    return fs_read(path)
+}
+
+def fs_write_text(path: string, content: string) -> int {
+    return fs_write(path, content)
+}

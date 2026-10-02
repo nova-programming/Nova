@@ -25,6 +25,22 @@ def file_close(fd: int) {
     os_impl.sys_close(fd)
 }
 
+def file_mkdir(path: string) -> int {
+    return os_impl.sys_mkdir(path)
+}
+
+def file_delete(path: string) -> int {
+    return os_impl.sys_delete(path)
+}
+
+def file_copy(source: string, destination: string) -> int {
+    return os_impl.sys_copy(source, destination)
+}
+
+def file_move(source: string, destination: string) -> int {
+    return os_impl.sys_move(source, destination)
+}
+
 def system_alloc(size: int) -> int {
     return os_impl.sys_alloc(size)
 }
@@ -49,6 +65,15 @@ def get_tick_count() -> int {
     return os_impl.sys_get_tick_count()
 }
 
+def system_env_get(name: string) -> string {
+    return os_impl.sys_env_get(name)
+}
+
+def system_env_set(name: string, value: string) -> int {
+    return os_impl.sys_env_set(name, value)
+}
+
+
 def system_exit(code: int) {
     os_impl.sys_exit(code)
 }
@@ -58,3 +83,6 @@ def system_exec(cmd: string) {
     os_impl.sys_system(cmd)
 }
 
+def system_process_run(args: list) -> int {
+    return os_impl.sys_process_run(args)
+}

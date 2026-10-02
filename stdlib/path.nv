@@ -1,0 +1,71 @@
+# Portable path helpers.
+# Inputs may use either slash style. These helpers return slash-separated
+# paths so source code remains portable; OS backends accept both styles.
+
+def path_join(parts: list[string]) -> string {
+    result = ""
+    i = 0
+    while i < len(parts) {
+        part = parts[i]
+        if len(part) > 0 {
+            if len(result) > 0 {
+                result = result + "/"
+            }
+            result = result + part
+        }
+        i = i + 1
+    }
+    return result
+}
+
+def path_join2(first: string, second: string) -> string {
+    return path_join([first, second])
+}
+
+def path_basename(value: string) -> string {
+    end = len(value)
+    i = end - 1
+    while i >= 0 {
+        if value[i] == "/" {
+            return str_sub(value, i + 1, end)
+        }
+        if value[i] == "\\" {
+            return str_sub(value, i + 1, end)
+        }
+        i = i - 1
+    }
+    return value
+}
+
+def path_dirname(value: string) -> string {
+    end = len(value)
+    i = end - 1
+    while i >= 0 {
+        if value[i] == "/" {
+            if i == 0 {
+                return "/"
+            }
+            return str_sub(value, 0, i)
+        }
+        if value[i] == "\\" {
+            if i == 0 {
+                return "/"
+            }
+            return str_sub(value, 0, i)
+        }
+        i = i - 1
+    }
+    return "."
+}
+
+def path_extension(value: string) -> string {
+    name = path_basename(value)
+    i = len(name) - 1
+    while i >= 0 {
+        if name[i] == "." {
+            return str_sub(name, i, len(name))
+        }
+        i = i - 1
+    }
+    return ""
+}

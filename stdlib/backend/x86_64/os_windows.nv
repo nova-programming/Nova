@@ -7,6 +7,10 @@
     "    .extern _sys_write_c"
     "    .extern _sys_write_raw_c"
     "    .extern _sys_close_c"
+    "    .extern _sys_mkdir_c"
+    "    .extern _sys_delete_c"
+    "    .extern _sys_copy_c"
+    "    .extern _sys_move_c"
     "    .extern _sys_alloc_c"
     "    .extern _sys_free_c"
     "    .extern _sys_flush_c"
@@ -14,6 +18,9 @@
     "    .extern _sys_platform_c"
     "    .extern _sys_get_args_c"
     "    .extern _sys_get_tick_count_c"
+    "    .extern _sys_env_get_c"
+    "    .extern _sys_env_set_c"
+    "    .extern _sys_process_run_c"
     "    .extern _system_c"
 }
 
@@ -35,6 +42,22 @@ def sys_write_raw(fd: int, content: list) {
 
 def sys_close(fd: int) {
     sys_close_c(fd)
+}
+
+def sys_mkdir(path: string) -> int {
+    return sys_mkdir_c(path)
+}
+
+def sys_delete(path: string) -> int {
+    return sys_delete_c(path)
+}
+
+def sys_copy(source: string, destination: string) -> int {
+    return sys_copy_c(source, destination)
+}
+
+def sys_move(source: string, destination: string) -> int {
+    return sys_move_c(source, destination)
 }
 
 def sys_alloc(size: int) -> int {
@@ -63,6 +86,18 @@ def sys_get_args() -> list {
 
 def sys_get_tick_count() -> int {
     return sys_get_tick_count_c()
+}
+
+def sys_env_get(name: string) -> string {
+    return sys_env_get_c(name)
+}
+
+def sys_env_set(name: string, value: string) -> int {
+    return sys_env_set_c(name, value)
+}
+
+def sys_process_run(args: list) -> int {
+    return sys_process_run_c(args)
 }
 
 def sys_system(cmd: string) {

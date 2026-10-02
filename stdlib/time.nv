@@ -1,0 +1,10 @@
+# Portable time helpers.
+import system
+
+def time_now() -> string {
+    return now()
+}
+
+def time_ticks_ms() -> int {
+    return get_tick_count()
+}

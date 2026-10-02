@@ -91,6 +91,23 @@ galaxy init library my-lib
 cd my-lib
 ```
 
+Galaxy records installed packages in `galaxy.json` and places their source
+under `galaxy_modules/`. Registry downloads are checked against the file
+hashes published in package metadata when hashes are available. Archives are
+extracted into a temporary directory, reject traversal and symlink entries,
+and are only moved into place after extraction succeeds. Use `galaxy upgrade`
+to refresh an installed package; use `galaxy remove <name>` to remove it.
+
+Successful registry installs also create `galaxy.lock`, which records the
+resolved package version and registry-published integrity value. Reinstalling a
+locked package refuses to silently move to a different registry version;
+`galaxy upgrade` is the intentional update operation.
+
+Package names and dependency references must use letters, numbers, `.`, `_`,
+and `-`; GitHub references may additionally use one `owner/repository` slash.
+Do not install packages from untrusted repositories without reviewing their
+source.
+
 This creates:
 
 ```
@@ -288,3 +305,30 @@ python -m unittest tests.test_codegen_x86_64 -v
 python bootstrap/main.py build nova.nv
 ./nova --version
 ```
+## Portable modules
+
+Prefer the small standard modules over direct runtime calls:
+
+| Module | Examples | Failure behavior |
+|---|---|---|
+| `path` | `path_join`, `path_join2`, `path_basename`, `path_dirname`, `path_extension` | Pure value helpers |
+| `fs` | `fs_exists`, `fs_mkdir`, `fs_read`, `fs_write`, `fs_delete`, `fs_copy`, `fs_move` | `0`, `""`, or metadata sentinel |
+| `env` | `env_args`, `env_platform`, `env_get`, `env_set` | `env_get` returns `""` when absent; `env_set` returns `1`/`0` |
+| `time` | `time_now`, `time_ticks_ms` | Runtime values |
+| `process` | `process_exit`, `process_shell`, `process_run` | `process_run` returns the child exit code or `-1` on launch failure |
+
+Paths accept either slash style and return slash-separated portable paths.
+`process_shell` is intentionally explicit; do not pass untrusted input to it.
+`process_run(args)` executes an argument list without a shell. The first
+element is the executable name, and an empty list returns `-1`.
+`json_stringify(value)` is available through the `json` module. It emits
+compact JSON for strings, integers, boxed booleans/none, lists, and
+dictionaries. Use `value_box_bool`, `value_box_none`, and the other value
+helpers when a JSON scalar's type must be preserved across native boundaries.
+`json_parse` remains pending until the recursive native conversion
+contract is complete.
+
+Function calls accept camelCase aliases for canonical snake_case names
+(for example, `jsonStringify` and `valueBoxBool`). The compiler resolves
+these aliases to the canonical implementation, so they do not create
+duplicate runtime or native symbols.
