@@ -62,3 +62,15 @@ def test_comparison_and_call_is_not_rewritten_as_chained_comparison(tmp_path):
         'if x == 1 or 2 { print("lit-a") }\nif x == 3 or 1 { print("lit-b") }\n'
     )
     assert _vm_output(src).split() == ["yes", "both", "lit-a", "lit-b"]
+
+
+def test_stage2_lays_out_data_structs_like_stage1(selfhost, stage2):
+    """Regression: len(state.struct_fields[si]) was compiled as strlen by the self-hosted backend,
+    so a self-built compiler gave every struct two fields' worth of offsets (fields 2.. aliased)."""
+    src = (
+        "data J {\n    aa: int\n    bb: int\n    cc: int\n    dd: int\n    ee: int\n}\n"
+        "v = J()\nv.aa = 1\nv.bb = 2\nv.cc = 3\nv.dd = 4\nv.ee = 5\n"
+        "print(v.aa + v.bb * 10 + v.cc * 100 + v.dd * 1000 + v.ee * 10000)\n"
+    )
+    stage1, work1, env = selfhost
+    assert _run((stage1, work1, env), "lay1", src) == _run(stage2, "lay2", src) == ["54321"]

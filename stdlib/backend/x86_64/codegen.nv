@@ -305,6 +305,14 @@ def register_var(state: CodegenState, name: string) -> int {
     return state.local_offset
 }
 
+# Number of fields recorded for struct `si`. Kept as a function because len() applied directly
+# to a list element (`len(state.struct_fields[si])`) is compiled as strlen by the self-hosted
+# backend, which made every struct look like it had one field in a self-built compiler.
+def struct_field_count(state: CodegenState, si: int) -> int {
+    fields = state.struct_fields[si]
+    return len(fields)
+}
+
 def lookup_preferred_field(state: CodegenState, field_name: string) -> int {
     if field_name == "kind" { return 0 }
     pref = ""
@@ -316,7 +324,7 @@ def lookup_preferred_field(state: CodegenState, field_name: string) -> int {
         while si < len(state.struct_names) {
             if state.struct_names[si] == pref {
                 fi = 0
-                while fi < len(state.struct_fields[si]) {
+                while fi < struct_field_count(state, si) {
                     if state.struct_fields[si][fi] == field_name {
                         return struct_field_offset(state, fi)
                     }
@@ -337,7 +345,7 @@ def get_prop_offset(state: CodegenState, struct_name: string, field_name: string
         si = 0
         while si < len(state.struct_names) {
             fi = 0
-            while fi < len(state.struct_fields[si]) {
+            while fi < struct_field_count(state, si) {
                 if state.struct_fields[si][fi] == field_name {
                     return struct_field_offset(state, fi)
                 }
@@ -364,7 +372,7 @@ def get_prop_offset(state: CodegenState, struct_name: string, field_name: string
     while si < len(state.struct_names) {
         if state.struct_names[si] == struct_name {
             fi = 0
-            while fi < len(state.struct_fields[si]) {
+            while fi < struct_field_count(state, si) {
                 if state.struct_fields[si][fi] == field_name {
                     off = struct_field_offset(state, fi)
                     state.prop_offset_map.set(key, off)
