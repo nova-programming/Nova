@@ -21,7 +21,7 @@ BUILTIN_SIGS = {
     "sys_free":      (AnyType(), [AnyType()]),
     "sys_exit":      (AnyType(), [IntType]),
     "sys_platform":  (StringType, []),
-    "sys_flush":     (AnyType(), [IntType]),
+    "sys_flush":     (AnyType(), []),
     "sys_system":    (IntType, [StringType]),
     "sys_get_args":  (ListType(AnyType()), []),
     "sys_get_tick_count": (IntType, []),

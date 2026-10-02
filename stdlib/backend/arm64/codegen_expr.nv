@@ -337,7 +337,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
         i = 0
         while i < len(node.body) {
             if i < len(node.body) - 1 {
-                codegen_stmt.compile_stmt(state, node.body[i])
+                codegen_stmt.compile_stmt(state, node.body[i], 0)
             } else {
                 compile_expr(state, node.body[i])
             }
