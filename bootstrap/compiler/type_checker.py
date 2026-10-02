@@ -485,6 +485,10 @@ class TypeInferer:
         inst_t = self.visit(node.instance)
         for arg in node.args:
             self.visit(arg)
+        if (node.method_name == "has" and len(node.args) == 1 and
+                (isinstance(inst_t, ListType) or (isinstance(inst_t, ScalarType) and inst_t.name == "string"))):
+            raise StaticTypeError("'in' and .has() work on dictionaries only", node.line,
+                "use text.contains(s, part) for strings, or loop over the list")
         # FileType method validation
         if isinstance(inst_t, ScalarType) and inst_t.name == "file":
             if node.method_name == "write":

@@ -237,10 +237,26 @@ class Parser:
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         left = self.parse_add()
         ops = {"GT", "LT", "GE", "LE", "EQEQ", "NOTEQ", "HAS"}
-        while self.current() and self.current()[0] in ops:
-            op = self.eat(self.current()[0])[1]
-            right = self.parse_add()
-            left = Compare(left, op, right, line=line)
+        while self.current():
+            kind = self.current()[0]
+            nxt = self.tokens[self.pos + 1][0] if self.pos + 1 < len(self.tokens) else None
+            if kind in ops:
+                op = self.eat(kind)[1]
+                right = self.parse_add()
+                left = Compare(left, op, right, line=line)
+            elif kind == "IN" or (kind == "NOT" and nxt == "IN"):
+                # `key in d` -> d.has(key); `key not in d` -> not d.has(key). Dictionaries only.
+                negate = kind == "NOT"
+                if negate:
+                    self.eat("NOT")
+                self.eat("IN")
+                container = self.parse_add()
+                left = MethodCall(container, "has", [left], line=line)
+                left.kwargs = {}
+                if negate:
+                    left = UnaryOp("not", left, line=line)
+            else:
+                break
         return left
 
     def parse_add(self):

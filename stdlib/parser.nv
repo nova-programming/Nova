@@ -1004,7 +1004,34 @@ def parse_compare(state: ParserState) -> AstNode {
     loop = 1
     while loop == 1 {
         tok = current_tok(state)
-        if tok.kind == "EQEQ" or tok.kind == "NOTEQ" or tok.kind == "LT" or tok.kind == "GT" or tok.kind == "LE" or tok.kind == "GE" or tok.kind == "HAS" {
+        after_tok = peek_tok(state, 1)
+        if tok.kind == "IN" or (tok.kind == "NOT" and after_tok.kind == "IN") {
+            # `key in d` -> d.has(key); `key not in d` -> not d.has(key). Dictionaries only.
+            negate = 0
+            if tok.kind == "NOT" {
+                negate = 1
+                eat_tok(state, "NOT")
+            }
+            eat_tok(state, "IN")
+            container = parse_add(state)
+            has_node = AstNode()
+            has_node.kind = "MethodCall"
+            has_node.val_str = "has"
+            has_node.line = tok.line
+            has_node.col = tok.col
+            has_node.left = container
+            has_node.args = [left]
+            left = has_node
+            if negate == 1 {
+                not_node = AstNode()
+                not_node.kind = "UnaryOp"
+                not_node.val_str = "not"
+                not_node.line = tok.line
+                not_node.col = tok.col
+                not_node.left = left
+                left = not_node
+            }
+        } elif tok.kind == "EQEQ" or tok.kind == "NOTEQ" or tok.kind == "LT" or tok.kind == "GT" or tok.kind == "LE" or tok.kind == "GE" or tok.kind == "HAS" {
             eat_tok(state, tok.kind)
             right = parse_add(state)
             node = AstNode()

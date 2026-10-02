@@ -98,3 +98,31 @@ def test_data_constructor_errors():
     assert bad_kw.returncode != 0 and "no field 'z'" in bad_kw.stdout + bad_kw.stderr
     mixed = _run_vm("data P {\n    x: int\n    y: int\n}\nq = P(1, y=2)\n")
     assert mixed.returncode != 0 and "cannot mix" in mixed.stdout + mixed.stderr
+
+
+# ---- dict shortcuts ------------------------------------------------------------------
+
+DICT_PROGRAM = (
+    'd = {"a": 1, "b": 2}\n'
+    'd["c"] = 3\n'
+    'k = "b"\n'
+    'print(d["a"] + d[k] + d["c"])\n'
+    'if "a" in d { print("has a") }\n'
+    'if "z" in d { print("has z") } else { print("no z") }\n'
+    'if "z" not in d { print("z missing") }\n'
+    'if k in d and "c" in d { print("both") }\n'
+    'for x in [1, 2] { print(x) }\n'
+)
+DICT_EXPECTED = ["6", "has", "a", "no", "z", "z", "missing", "both", "1", "2"]
+
+
+def test_dict_index_and_in_all_pipelines(tmp_path, selfhost_run):
+    vm, native, selfhost, _ = all_pipelines(DICT_PROGRAM, tmp_path, selfhost_run, "sugar_dict")
+    assert vm == native == selfhost == DICT_EXPECTED
+
+
+def test_in_on_lists_and_strings_is_a_clear_error():
+    from test_native_exec import _run_vm
+    for src in ('xs = [1, 2]\nif 1 in xs { print(1) }\n', 's = "abc"\nif "a" in s { print(1) }\n'):
+        r = _run_vm(src)
+        assert r.returncode != 0 and "dictionaries only" in r.stdout + r.stderr
