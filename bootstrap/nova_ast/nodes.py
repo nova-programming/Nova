@@ -508,13 +508,14 @@ class Defer:
         return f"Defer({self.body})"
 
 class ExternDef:
-    def __init__(self, name, params, return_type, line=0):
+    def __init__(self, name, params, return_type, line=0, lib=None):
         self.line = line
         self.name = name
         self.params = params
         self.return_type = return_type
+        self.lib = lib
     def __repr__(self):
-        return f"ExternDef('{self.name}', {self.params}, {self.return_type})"
+        return f"ExternDef('{self.name}', {self.params}, {self.return_type}, lib='{self.lib}')"
 
 class MultiReturn:
     def __init__(self, values, line=0):

@@ -821,3 +821,117 @@ galaxy publish             # Publish to registry
   - `python -m unittest discover tests -q`: **216 passed, 1 skipped**.
   - `python ci_test.py`: All 6 pipeline suites passed (pytest, galaxy, installer, x86_64, arm64, cross-target asm).
   - Tested `gui_nss_demo.nv` both in headless `--test` mode (code 0) and interactive GDI window mode.
+
+### Phase 30: Zero-Copy Slices & Advanced C FFI Linkage / Dynamic Runtime (This Session — October 2026)
+- **Zero-Copy Slices** (`stdlib/slice.nv` & `runtime.c`):
+  - Struct `data Slice { ptr: int, len: int }` representing a non-owning borrowed view into string or byte-buffer memory without allocating or copying.
+  - Native runtime primitives in `runtime.c`: `_slice_from_str`, `_slice_from_list_data`, `_slice_byte_at`, `_slice_cmp`, `_slice_eq`, `_slice_find`, and `_slice_to_str`.
+  - Slice API in `stdlib/slice.nv`:
+    - `from_str(s)`, `from_ptr(p, len)`, `from_list(lst)`.
+    - `sub(sl, start, len)`, `sub_from(sl, start)`, `sub_to(sl, end)`.
+    - `byte_at(sl, index)`, `to_str(sl)`.
+    - `cmp(a, b)`, `equals(a, b)`, `equals_str(sl, s)`.
+    - `starts_with(sl, prefix)`, `starts_with_str(sl, s)`.
+    - `ends_with(sl, suffix)`, `ends_with_str(sl, s)`.
+    - `find(sl, needle)`, `find_str(sl, needle)`.
+- **Advanced C FFI Linkage & Calling Convention** (`extern "lib" def`):
+  - Compiler AST & Parser support: `ExternDef` node extended with optional `lib: string`. Parser accepts `extern "libname" def symbol(...) -> type`.
+  - Automatic Linker Flags: Compiler backend tracks `linked_libs` and automatically passes `-l<lib>` flags to GCC during linking.
+  - Windows x64 Calling Convention Bridging:
+    - Microsoft x64 ABI requires arguments in `rcx, rdx, r8, r9` rather than System V AMD64 (`rdi, rsi, rdx, rcx, r8, r9`).
+    - Codegen detects platform and bridges arguments accordingly for external C functions.
+    - Added `xor eax, eax` before external calls to ensure zero vector registers for variadic call safety.
+    - Bare symbol emission (no leading underscore) for non-macOS targets when invoking standard C library functions.
+  - Type Inference Pass 1 Preservation:
+    - Registered `ExternDef` in `self.functions` during Pass 1 of `TypeInferer` to prevent external camelCase symbols (e.g. `SetLastError`, `GetCurrentProcessId`) from being mangled into snake_case aliases.
+- **Dynamic FFI Runtime** (`stdlib/ffi.nv` & `runtime.c`):
+  - Struct `data Library { handle: int, name: string }`.
+  - Cross-platform dynamic library loading via `_ffi_open` (`LoadLibraryA` / `dlopen`), `_ffi_sym` (`GetProcAddress` / `dlsym`), and `_ffi_close` (`FreeLibrary` / `dlclose`).
+  - Dynamic function invocations: `call0` through `call6` with native parameter passing and 64-bit integer return values.
+- **Parser Robustness**:
+  - Allowed contextual keywords (`len`, `type_*`, `str`) as field names in struct/data declarations (`parse_data`).
+  - Removed `"ptr"` from `pointer_properties` table to ensure struct fields named `ptr` parse as field accesses (`DataFieldAccess`).
+- **Validation**:
+  - `tests/test_slice.py`: End-to-end integration and native execution tests for zero-copy slicing, substring slicing, and string reconstruction.
+  - `tests/test_ffi.py`: Tests for `extern "lib"` parsing, codegen `-l` linkage, and runtime FFI symbol calls.
+  - Pytest suite: **295 passed, 28 skipped** (zero failures across all 323 test items).
+
+### Phase 31: NSS Pseudo-Classes (:hover, :active) & Interactive GUI Widgets (This Session — October 2026)
+- **NSS Pseudo-Classes Engine** (`stdlib/nss.nv`):
+  - Added native selector support for `:hover` and `:active` (as well as `:press` and `:pressed`) across tag, class, and ID rules (e.g. `.btn:hover`, `button:active`, `#save:hover`).
+  - Automatic Property Normalization: properties inside pseudo-class blocks are prefixed into state keys (`hover-background-color`, `hover-color`, `hover-border-color`, `pressed-background-color`, `pressed-color`, etc.).
+  - Cascaded specificity preserved: `tag:pseudo` -> `class:pseudo` -> `id:pseudo`.
+  - Zero allocation overhead during 60 FPS animation/render loop — state properties are calculated once during stylesheet application.
+- **Dynamic Pseudo-State Rendering** (`stdlib/gui.nv`):
+  - In `renderWidget`, dynamically selects active visual properties based on `w.is_pressed` and `w.is_hovered`:
+    - Background: `pressed-background-color` -> `hover-background-color` -> `background-color`.
+    - Border: `pressed-border-color` / `pressed-border-width` -> `hover-border-color` / `hover-border-width` -> base border.
+    - Foreground Text: `pressed-color` -> `hover-color` -> base text color.
+- **New Modern GUI Widgets** (`stdlib/gui.nv`):
+  - `checkbox(text, isChecked, props)`: Modern toggleable checkbox with rounded borders, accent check fill, label typography, and click toggle.
+  - `toggle(isOn, props)`: Smooth pill-style capsule switch with circular thumb displaced to left (off) or right (on) with accent active color.
+  - `slider(value, minVal, maxVal, props)`: Horizontal range track with active fill, circular draggable/clickable thumb, live mouse scrubbing, and target label synchronization.
+  - `dropdown(options, selectedIndex, props)`: Compact select box displaying current item, chevron indicator, and sequential selection advance on click.
+  - `canvas(children, props)`: Dedicated 2D drawing and graphic layout container supporting custom dimensions, background panels, borders, and nested chart elements.
+- **GDI Text Drawing Fix** (`runtime.c`):
+  - Added `DT_NOPREFIX` to `DrawTextA` in `gui_draw_text` so ampersands (`&`) render literally rather than as underline mnemonics.
+- **Showcase Application & Tests**:
+  - `examples/styles/widgets.nss`: Full stylesheet featuring Catppuccin Mocha colors, card styles, and `.btn-primary:hover` / `.btn-secondary:active` transitions.
+  - `examples/gui_widgets_demo.nv`: Comprehensive showcase dashboard demonstrating selection controls, sliders, dropdowns, telemetry chart canvas, and action buttons. Supports `--test` automated mode and `--screenshot`.
+### Phase 32: Live Keyboard Input, Text Editing & UI Screen Print (This Session — October 2026)
+- **Native Keyboard Capture & FIFO Ring Buffer** (`runtime.c`):
+  - Added 64-entry keystroke FIFO ring buffer (`g_gui_key_queue`, `_gui_push_key`) in native Win32 runtime.
+  - Intercepted `WM_CHAR` in `_NovaWndProc` for all printable ASCII characters, space, Enter (13), and Backspace (8).
+  - Intercepted `WM_KEYDOWN` for non-character control keys (Delete 127, Arrow keys 1001/1002).
+  - Exposed runtime primitives: `gui_poll_char() -> int` and `gui_char_to_str(c: int) -> string`.
+  - Added cross-platform non-Windows stubs in `runtime.c` for build portability.
+- **Focus Management & Text Editing Engine** (`stdlib/gui.nv`):
+  - Focus tracking: `hitTestEx` sets `w.props.set("is_focused", 1)` when clicking inside an `input` widget and clears focus (`0`) when clicking outside.
+  - Active visual feedback in `renderWidget`: when focused, renders an accent border (`focus-border-color` default `#89b4fa`) and an active text cursor (`|`).
+  - Key event dispatcher: `_dispatch_key_event` recursively routes polled keystrokes to the focused input:
+    - Backspace (`8`): strips the last character via `_str_delete_last`.
+    - Delete (`127`): clears the text.
+    - Enter (`13`): triggers optional `on_submit` callback.
+    - Printable characters (`32..126`): appends character string to `w.text`.
+  - App loop integration: `runAppStep` automatically polls and drains `gui_poll_char()` on every frame before layout and hit testing.
+- **Declarative Text Transfer, Actions & onClick Event Support** (`stdlib/gui.nv`):
+  - Extended `dispatchAction` with `action: "submit"` and `action: "copy_text"`.
+  - Supports transferring text from `source: input_widget` to `target: display_widget` with configurable `prefix` and `suffix`.
+  - Added `action: "clear"` to reset target text.
+  - Added native **`onClick`** support: developers can specify `onClick: "submit"` or `onClick: "clear"` directly on buttons.
+  - Action unification: `dispatchAction` checks `onClick` and `on_click`, automatically setting the action handler without needing a separate `action` property.
+  - Fixed property propagation: explicitly passed through `source` property in `_expand_props`.
+- **Latency Optimization & Layout Sizing** (`stdlib/gui.nv`):
+  - Reduced event loop sleep interval from `16ms` to `4ms` (`gui_sleep(4)`), enabling 200+ FPS event loop dispatching and eliminating perceptual keystroke latency during fast typing.
+  - Added explicit `w.tag == "input"` sizing branch in `layoutWidget` so textboxes compute explicit dimensions and padding without collapsing into generic container layout.
+- **Showcase Application & Tests**:
+  - `examples/styles/input_demo.nss`: Dedicated Catppuccin Mocha stylesheet decoupling all visual styles (window background, cards, header, input field, buttons with `:hover`/`:active`, display monitor) from code logic.
+  - `examples/gui_input_demo.nv`: Refactored to pure declarative structure with semantic class bindings (`.app-root`, `.card-section`, `.text-input`, `.btn-primary`, `.btn-secondary`, `.monitor-box`, `.monitor-text`), using `"onClick": "submit"` and `"onClick": "clear"`.
+  - `tests/test_widgets.py`:
+    - `test_gui_input_showcase`: verifies automated compilation and headless execution with external NSS loading.
+    - `test_gui_input_click_action`: automated end-to-end test verifying button click action dispatch, text transfer to screen display, and screen reset.
+  - Validation: Full widget test suite passing cleanly (4 passed in 15.0s).
+
+### Phase 33: Contextual `class` Identifiers, Direct `class, id, onClick` Parameters & Pure NSS Layout (This Session — October 2026)
+- **Contextual `class` Keyword & Parameter Support** (`bootstrap/parser/parser.py`, `stdlib/parser.nv`):
+  - Enabled `class` as a contextual identifier in parameter lists (`_eat_param_name`), primary expressions (`parse_primary` as `Variable("class")`), and call-site named keyword arguments (`class = ...`).
+  - Preserved `class Name { ... }` declarations by checking lookahead (`peek_tok(state, 1).kind == "IDENT"`).
+  - Maintained full bootstrap parity between Python bootstrap parser and self-hosted `stdlib/parser.nv`.
+- **Direct `class, id, onClick` Parameter Signature** (`stdlib/gui.nv`):
+  - Refactored `btn` widget constructor to accept literal `class`, `id`, `onClick`, `text`, and `props`:
+    ```nova
+    def btn(class: string, id: string, onClick: string, text: string, props: dict) -> Widget
+    ```
+  - Automatically binds `class`, `id`, and sets `onClick`, `on_click`, and `action` in props dictionary.
+- **Pure NSS Layout & Decoupled Styling** (`examples/gui_input_demo.nv`, `examples/styles/input_demo.nss`):
+  - Updated button instantiation to pass direct arguments:
+    `submit_btn = btn("btn-primary", "print_btn", "submit", "Print to Screen", {"source": user_input, "target": screen_display, "prefix": "Text: "})`
+    `clear_btn = btn("btn-secondary", "clear_btn", "clear", "Clear Screen", {"target": screen_display})`
+  - Eliminated all inline `gap_w(4)` and `gap_w(8)` layout spacers in favor of pure NSS `.card-section` (`gap: 10;`) and `.button-row` (`gap: 8;`) rules.
+- **Linker Fix** (`stdlib/backend/x86_64/linker.nv`):
+  - Added missing `append_u64` implementation in `x86_64/linker.nv` matching `arm64/linker.nv`, resolving undefined symbol errors during self-hosting.
+- **Repository Call Site Updates & Validation**:
+  - Updated all existing `btn(...)` invocations across `examples/gui_nss_demo.nv`, `examples/gui_widgets_demo.nv`, `examples/gui_v2_demo.nv`, and `tests/test_widgets.py`.
+  - Rebuilt canonical self-hosted `nova.exe` compiler via `python bootstrap/main.py build nova.nv`.
+  - Verified `examples/gui_input_demo.nv --test`, `examples/gui_nss_demo.nv --test`, and `examples/gui_widgets_demo.nv --test` all exit code 0 (`Demo completed successfully!`).
+  - Verified `python -m pytest tests/test_widgets.py -v`: 4 passed (100% green).

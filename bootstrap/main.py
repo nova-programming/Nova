@@ -662,6 +662,13 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
         cmd += ["-Wl,-no_compact_unwind"]
     else:
         cmd += ["-no-pie"]
+
+    for lib in getattr(codegen, "linked_libs", []):
+        clean_lib = lib.strip('"\'')
+        if clean_lib:
+            lib_flag = f"-l{clean_lib}"
+            if lib_flag not in cmd:
+                cmd.append(lib_flag)
     # Debug: show symbols in runtime.o on macOS
     if is_macos:
         try:

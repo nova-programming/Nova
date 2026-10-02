@@ -184,6 +184,13 @@ class TypeInferer:
                 ret_type = resolve_type_annotation(stmt.return_type)
                 func_type = FuncType(params, ret_type)
                 self.functions[stmt.name] = func_type
+            elif isinstance(stmt, ExternDef):
+                params = []
+                for p_name, p_type_str in stmt.params:
+                    params.append(resolve_type_annotation(p_type_str))
+                ret_type = resolve_type_annotation(stmt.return_type)
+                func_type = FuncType(params, ret_type)
+                self.functions[stmt.name] = func_type
 
         # Pass 1.5: Resolve struct fields
         for stmt in ast:

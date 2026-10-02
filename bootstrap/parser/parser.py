@@ -43,7 +43,11 @@ class Parser:
             if self.current()[0] == "RBRACE":
                 break
             
-            field_name = self.eat("IDENT")[1]
+            tok = self.current()
+            if tok and tok[0] in ("IDENT", "LEN", "TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING", "TYPE_BYTE", "TYPE_VOID", "STR"):
+                field_name = self.eat(tok[0])[1]
+            else:
+                field_name = self.eat("IDENT")[1]
             self.eat("COLON")
             
             type_name = self.parse_type_annotation()
@@ -388,6 +392,10 @@ class Parser:
             self.eat("RBRACE")
             node = DictLiteral(keys, values, line=line)
 
+        elif kind == "CLASS":
+            self.eat("CLASS")
+            node = Variable("class", line=line)
+
         elif kind == "IDENT":
             name = self.eat("IDENT")[1]
             
@@ -397,10 +405,10 @@ class Parser:
                 args = []
                 kwargs = {}
                 if self.current() and self.current()[0] != "RPAREN":
-                    if (self.current()[0] == "IDENT" and
+                    if (self.current()[0] in ("IDENT", "CLASS") and
                         self.pos + 1 < len(self.tokens) and
                         self.tokens[self.pos + 1][0] == "EQUALS"):
-                        kw_name = self.eat("IDENT")[1]
+                        kw_name = self.eat(self.current()[0])[1]
                         self.eat("EQUALS")
                         val = self.parse_expr()
                         args.append(val)
@@ -410,10 +418,10 @@ class Parser:
                     while self.current() and self.current()[0] == "COMMA":
                         self.eat("COMMA")
                         if self.current() and self.current()[0] != "RPAREN":
-                            if (self.current()[0] == "IDENT" and
+                            if (self.current()[0] in ("IDENT", "CLASS") and
                                 self.pos + 1 < len(self.tokens) and
                                 self.tokens[self.pos + 1][0] == "EQUALS"):
-                                kw_name = self.eat("IDENT")[1]
+                                kw_name = self.eat(self.current()[0])[1]
                                 self.eat("EQUALS")
                                 val = self.parse_expr()
                                 args.append(val)
@@ -490,7 +498,7 @@ class Parser:
                     continue
                 
                 # Pointer property vs Data field
-                pointer_properties = ["value", "addr", "isValid", "isNull", "bytes", "value_byte", "value_word", "value_dword", "value_qword", "ptr"]
+                pointer_properties = ["value", "addr", "isValid", "isNull", "bytes", "value_byte", "value_word", "value_dword", "value_qword"]
                 if prop in pointer_properties:
                     tok = self.current()
                     if tok and tok[0] in ("EQUALS", "PLUSEQ", "MINUSEQ", "STAREQ", "SLASHEQ", "PERCENTEQ"):
@@ -627,7 +635,8 @@ class Parser:
         if kind == "ENUM":
             return self.parse_enum()
         if kind == "CLASS":
-            return self.parse_class()
+            if self.pos + 1 < len(self.tokens) and self.tokens[self.pos + 1][0] == "IDENT":
+                return self.parse_class()
         if kind == "IMPORT":
             return self.parse_import()
         if kind == "RAW":
@@ -781,6 +790,9 @@ class Parser:
     def parse_extern(self):
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         self.eat("EXTERN")
+        lib = None
+        if self.current() and self.current()[0] == "STRING":
+            lib = self.eat("STRING")[1].strip('"\'')
         self.eat("DEF")
         name = self.eat("IDENT")[1]
         self.eat("LPAREN")
@@ -801,7 +813,7 @@ class Parser:
         if self.current() and self.current()[0] == "ARROW":
             self.eat("ARROW")
             return_type = self.parse_type_annotation()
-        return ExternDef(name, params, return_type, line=line)
+        return ExternDef(name, params, return_type, line=line, lib=lib)
 
     def parse_entry(self):
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
@@ -819,7 +831,7 @@ class Parser:
 
     def _eat_param_name(self):
         tok = self.current()
-        if tok and tok[0] in ("IDENT", "SELF"):
+        if tok and tok[0] in ("IDENT", "SELF", "CLASS"):
             return self.eat(tok[0])[1]
         return self.eat("IDENT")[1]
 

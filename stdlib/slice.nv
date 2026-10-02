@@ -1,0 +1,142 @@
+# ============================================================
+# Nova Standard Library: Zero-Copy Slices (stdlib/slice.nv)
+# ============================================================
+# Represents an immutable, zero-allocation {ptr, len} view over
+# strings, list buffers, or raw memory.
+
+data Slice {
+    ptr: int
+    len: int
+}
+
+# Create a zero-copy slice over a Nova string
+def from_str(s: string) -> Slice {
+    sl = Slice()
+    sl.ptr = slice_from_str(s)
+    sl.len = len(s)
+    return sl
+}
+
+# Create a slice from a raw memory pointer and length
+def from_ptr(p: int, length: int) -> Slice {
+    sl = Slice()
+    sl.ptr = p
+    sl.len = length
+    return sl
+}
+
+# Create a zero-copy slice over a list's contiguous element storage
+def from_list(l: list) -> Slice {
+    sl = Slice()
+    if len(l) == 0 {
+        sl.ptr = 0
+        sl.len = 0
+        return sl
+    }
+    sl.ptr = slice_from_list_data(l)
+    sl.len = len(l)
+    return sl
+}
+
+# Sub-slice in constant O(1) time with 0 allocations
+def sub(sl: Slice, start: int, end: int) -> Slice {
+    res = Slice()
+    if sl.ptr == 0 or sl.len <= 0 {
+        res.ptr = 0
+        res.len = 0
+        return res
+    }
+    s = start
+    e = end
+    if s < 0 { s = 0 }
+    if e > sl.len { e = sl.len }
+    if s >= e {
+        res.ptr = 0
+        res.len = 0
+        return res
+    }
+    res.ptr = sl.ptr + s
+    res.len = e - s
+    return res
+}
+
+# Sub-slice from start to end of slice
+def sub_from(sl: Slice, start: int) -> Slice {
+    return sub(sl, start, sl.len)
+}
+
+# Sub-slice from beginning to end
+def sub_to(sl: Slice, end: int) -> Slice {
+    return sub(sl, 0, end)
+}
+
+# Read byte at 0-indexed position (returns -1 if out of bounds)
+def byte_at(sl: Slice, idx: int) -> int {
+    if idx < 0 or idx >= sl.len or sl.ptr == 0 {
+        return -1
+    }
+    return slice_byte_at(sl.ptr, sl.len, idx)
+}
+
+# Lexicographical comparison (-1 if a < b, 0 if a == b, 1 if a > b)
+def cmp(a: Slice, b: Slice) -> int {
+    return slice_cmp(a.ptr, a.len, b.ptr, b.len)
+}
+
+# Check if two slices are byte-for-byte identical
+def equals(a: Slice, b: Slice) -> bool {
+    if a.len != b.len { return false }
+    if a.len == 0 { return true }
+    return slice_eq(a.ptr, a.len, b.ptr, b.len) == 1
+}
+
+# Check if slice matches a string
+def equals_str(sl: Slice, s: string) -> bool {
+    sl_b = from_str(s)
+    return equals(sl, sl_b)
+}
+
+# Check prefix match with another slice
+def starts_with(sl: Slice, prefix: Slice) -> bool {
+    if prefix.len > sl.len { return false }
+    if prefix.len == 0 { return true }
+    p_sl = sub(sl, 0, prefix.len)
+    return equals(p_sl, prefix)
+}
+
+# Check prefix match with a string
+def starts_with_str(sl: Slice, prefix: string) -> bool {
+    return starts_with(sl, from_str(prefix))
+}
+
+# Check suffix match with another slice
+def ends_with(sl: Slice, suffix: Slice) -> bool {
+    if suffix.len > sl.len { return false }
+    if suffix.len == 0 { return true }
+    p_sl = sub(sl, sl.len - suffix.len, sl.len)
+    return equals(p_sl, suffix)
+}
+
+# Check suffix match with a string
+def ends_with_str(sl: Slice, suffix: string) -> bool {
+    return ends_with(sl, from_str(suffix))
+}
+
+# Search for needle slice (returns 0-indexed offset or -1)
+def find(sl: Slice, needle: Slice) -> int {
+    return slice_find(sl.ptr, sl.len, needle.ptr, needle.len)
+}
+
+# Search for needle string (returns 0-indexed offset or -1)
+def find_str(sl: Slice, needle: string) -> int {
+    n_sl = from_str(needle)
+    return find(sl, n_sl)
+}
+
+# Convert slice into a null-terminated Nova heap string
+def to_str(sl: Slice) -> string {
+    if sl.len <= 0 or sl.ptr == 0 {
+        return ""
+    }
+    return slice_to_str(sl.ptr, sl.len)
+}
