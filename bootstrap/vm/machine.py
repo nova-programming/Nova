@@ -23,7 +23,8 @@ def _camel_alias(name):
     return re.sub(r"(?<!^)([A-Z])", r"_\1", name).lower()
 
 class Frame:
-    def __init__(self, return_address, local_env, self_context=None, is_init=False, pending_action=None, handler_depth=0):
+    def __init__(self, return_address, local_env, self_context=None, is_init=False, pending_action=None, handler_depth=0, stack_base=None):
+        self.stack_base = stack_base  # operand-stack height at call time; garbage above the return value is dropped on return
         self.return_address = return_address
         self.locals = local_env.copy() if local_env else {}
         self.self_context = self_context
@@ -875,6 +876,13 @@ def _vm_run(self):
                     del handler_stack[frame.handler_depth:]
                     for val in frame.locals.values():
                         self.release(val)
+                    if (frame.stack_base is not None and frame.pending_action is None and not frame.is_init
+                            and len(stack) > frame.stack_base + 1):
+                        # statement-level calls/method calls leave their result on the operand stack;
+                        # keep only the return value so callers' pending operands are not corrupted
+                        ret_top = stack[-1]
+                        del stack[frame.stack_base:]
+                        stack.append(ret_top)
                     if frame.is_init:
                         stack.pop()
                     if frame.pending_action == 'print':
@@ -940,7 +948,7 @@ def _vm_run(self):
                 for i, param in enumerate(func_meta["params"]):
                     param_name = param[0] if isinstance(param, (list, tuple)) else param
                     local_env[param_name] = args[i] if i < len(args) else 0
-                frames.append(Frame(ip, local_env, handler_depth=len(handler_stack)))
+                frames.append(Frame(ip, local_env, handler_depth=len(handler_stack), stack_base=len(stack)))
                 ip = func_meta["ip"]
                 continue
             else:

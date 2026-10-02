@@ -501,9 +501,25 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         state.loop_start_labels.append(cont_label)
         state.loop_end_labels.append(end_label)
 
+        # Pure, invariant loop bounds (e.g. len(s)) are evaluated once into a hidden slot.
+        hoisted_off = 0
+        if for_end_hoistable(node) == 1 {
+            hoisted_name = hoist_name(state, node)
+            if state.var_name_map.has(hoisted_name) {
+                hoisted_off = find_var_offset(state, hoisted_name)
+                compile_expr(state, node.right)
+                emit(state, "    pop %a")
+                emit(state, "    mov [%b - " + str(hoisted_off) + "], %a")
+            }
+        }
+
         emit(state, loop_label + ":")
-        compile_expr(state, node.right)
-        emit(state, "    pop %x")
+        if hoisted_off != 0 {
+            emit(state, "    mov %x, [%b - " + str(hoisted_off) + "]")
+        } else {
+            compile_expr(state, node.right)
+            emit(state, "    pop %x")
+        }
         if reg_val != "" {
             emit(state, "    mov %a, " + reg_val)
         } else {
@@ -535,11 +551,13 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         defer_push_scope(state)
         state.defer_loop_marks.append(len(state.defer_nodes))
 
+        state.for_depth = state.for_depth + 1
         i = 0
         while i < len(node.body) {
             compile_stmt(state, node.body[i], debug_mode)
             i = i + 1
         }
+        state.for_depth = state.for_depth - 1
         defer_end_scope(state, debug_mode)
         state.defer_loop_marks.pop()
         state.bce_loop_vars.pop()

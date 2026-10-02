@@ -53,6 +53,7 @@ data CodegenState {
     defer_loop_marks: list
     ptr_vars: dict
     internal_fns: dict
+    for_depth: int
 }
 
 def new_codegen(tgt: int, target_os: string) -> CodegenState {
@@ -88,6 +89,7 @@ def new_codegen(tgt: int, target_os: string) -> CodegenState {
     state.defer_loop_marks = []
     state.ptr_vars = {}
     state.internal_fns = {}
+    state.for_depth = 0
     if tgt == 0 {
         state.bp = "ebp"
         state.sp = "esp"
@@ -505,6 +507,139 @@ def is_float_expr(state: CodegenState, node: AstNode) -> int {
 
 # --- Variable scanning ---
 
+# --- Loop-bound hoisting -------------------------------------------------------------
+# `for i = a to b` re-evaluates b on every iteration. When b is pure (numbers, variables, len(variable) and
+# arithmetic), mentions a len(), and nothing in the body can change it, b is computed once into a hidden slot.
+# (`for i in range(len(s))` over a string was quadratic: strlen on every iteration.)
+
+def hoist_same(a: string, b: string) -> int {
+    if a == b { return 1 }
+    return 0
+}
+
+# Does any statement under `node` rebind variable `name`?
+def hoist_rebinds(node: AstNode, name: string) -> int {
+    if node == 0 { return 0 }
+    k = node.kind
+    if k == "Assignment" or k == "ForLoop" or k == "ForIn" {
+        if hoist_same(node.val_str, name) == 1 { return 1 }
+    }
+    if k == "UnpackAssign" { return 1 }
+    if hoist_rebinds(node.left, name) == 1 { return 1 }
+    if hoist_rebinds(node.right, name) == 1 { return 1 }
+    if hoist_rebinds(node.cond, name) == 1 { return 1 }
+    if hoist_list_rebinds(node.body, name) == 1 { return 1 }
+    if hoist_list_rebinds(node.else_body, name) == 1 { return 1 }
+    if hoist_list_rebinds(node.args, name) == 1 { return 1 }
+    return 0
+}
+
+def hoist_list_rebinds(nodes: list, name: string) -> int {
+    if nodes == 0 { return 0 }
+    i = 0
+    while i < len(nodes) {
+        if hoist_rebinds(nodes[i], name) == 1 { return 1 }
+        i = i + 1
+    }
+    return 0
+}
+
+# Can code under `node` call something that mutates a list or touch raw memory?
+def hoist_has_effects(node: AstNode) -> int {
+    if node == 0 { return 0 }
+    k = node.kind
+    if k == "Call" or k == "MethodCall" or k == "RawBlock" or k == "Free" or k == "Alloc" or k == "Try" or k == "Throw" or k == "Defer" or k == "Comptime" {
+        return 1
+    }
+    if hoist_has_effects(node.left) == 1 { return 1 }
+    if hoist_has_effects(node.right) == 1 { return 1 }
+    if hoist_has_effects(node.cond) == 1 { return 1 }
+    if hoist_list_effects(node.body) == 1 { return 1 }
+    if hoist_list_effects(node.else_body) == 1 { return 1 }
+    if hoist_list_effects(node.args) == 1 { return 1 }
+    return 0
+}
+
+def hoist_list_effects(nodes: list) -> int {
+    if nodes == 0 { return 0 }
+    i = 0
+    while i < len(nodes) {
+        if hoist_has_effects(nodes[i]) == 1 { return 1 }
+        i = i + 1
+    }
+    return 0
+}
+
+# Classify a loop-end expression. -1: not hoistable. Otherwise bit 1 = contains len(), bit 2 = len() of a
+# variable that is not known to be a string (a list can change length through calls in the body).
+def hoist_end_check(node: AstNode, body: list, loop_var: string) -> int {
+    if node == 0 { return -1 }
+    k = node.kind
+    if k == "Number" {
+        if node.is_float == 1 { return -1 }
+        return 0
+    }
+    if k == "Boolean" { return 0 }
+    if k == "Variable" {
+        if hoist_same(node.val_str, loop_var) == 1 { return -1 }
+        if hoist_list_rebinds(body, node.val_str) == 1 { return -1 }
+        return 0
+    }
+    if k == "Len" {
+        operand = node.left
+        if operand == 0 { return -1 }
+        if operand.kind != "Variable" { return -1 }
+        if hoist_same(operand.val_str, loop_var) == 1 { return -1 }
+        if hoist_list_rebinds(body, operand.val_str) == 1 { return -1 }
+        flags = 1
+        is_str = 0
+        if operand.inferred_type != 0 and operand.inferred_type.kind == "scalar" and operand.inferred_type.name == "string" { is_str = 1 }
+        if is_str == 0 { flags = 3 }
+        return flags
+    }
+    if k == "UnaryOp" {
+        if node.val_str != "-" { return -1 }
+        return hoist_end_check(node.left, body, loop_var)
+    }
+    if k == "BinOp" {
+        op = node.val_str
+        if op == "+" or op == "-" or op == "*" or op == "/" or op == "%" {
+            a = hoist_end_check(node.left, body, loop_var)
+            if a < 0 { return -1 }
+            b = hoist_end_check(node.right, body, loop_var)
+            if b < 0 { return -1 }
+            return a | b
+        }
+        return -1
+    }
+    return -1
+}
+
+def for_end_hoistable(node: AstNode) -> int {
+    flags = hoist_end_check(node.right, node.body, node.val_str)
+    if flags < 1 { return 0 }
+    if (flags & 2) != 0 {
+        if hoist_list_effects(node.body) == 1 { return 0 }
+    }
+    return 1
+}
+
+def hoist_name(state: CodegenState, node: AstNode) -> string {
+    return "__fe_" + str(node.line) + "_" + str(node.col) + "_" + str(state.for_depth)
+}
+
+# A stack slot that is never promoted to a register (hidden compiler temporaries).
+def register_hidden(state: CodegenState, name: string) -> int {
+    if state.var_name_map.has(name) { return state.var_name_map.get(name) }
+    psize = ptr_size(state)
+    state.local_offset = state.local_offset + psize
+    state.var_name_map.set(name, state.local_offset)
+    state.local_var_names.append(name)
+    state.local_vars.append(state.local_offset)
+    state.local_var_regs.append("")
+    return state.local_offset
+}
+
 def scan_vars(state: CodegenState, node: AstNode) {
     if node.kind == "Assignment" {
         register_var(state, node.val_str)
@@ -542,11 +677,16 @@ def scan_vars(state: CodegenState, node: AstNode) {
     }
     if node.kind == "ForLoop" {
         register_var(state, node.val_str)
+        if for_end_hoistable(node) == 1 {
+            register_hidden(state, hoist_name(state, node))
+        }
+        state.for_depth = state.for_depth + 1
         i = 0
         while i < len(node.body) {
             scan_vars(state, node.body[i])
             i = i + 1
         }
+        state.for_depth = state.for_depth - 1
         return
     }
     if node.kind == "ForIn" {
@@ -914,33 +1054,7 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     emit(state, "    ret")
 
     emit(state, "_concat_strings:")
-    emit(state, "    push rbp")
-    emit(state, "    mov rbp, rsp")
-    emit(state, "    push rbx")
-    emit(state, "    sub rsp, 40")
-    emit(state, "    mov [rsp + 8], rdi")
-    emit(state, "    mov [rsp + 16], rsi")
-    emit(state, "    call _strlen")
-    emit(state, "    mov rbx, rax")
-    emit(state, "    mov rdi, [rsp + 16]")
-    emit(state, "    call _strlen")
-    emit(state, "    add rbx, rax")
-    emit(state, "    inc rbx")
-    emit(state, "    mov rdi, rbx")
-    emit(state, "    call _malloc")
-    emit(state, "    mov [rsp], rax")
-    emit(state, "    mov rsi, [rsp + 8]")
-    emit(state, "    mov rdi, rax")
-    emit(state, "    call _strcpy")
-    emit(state, "    mov rax, [rsp]")
-    emit(state, "    mov rsi, [rsp + 16]")
-    emit(state, "    mov rdi, rax")
-    emit(state, "    call _strcat")
-    emit(state, "    mov rax, [rsp]")
-    emit(state, "    add rsp, 40")
-    emit(state, "    pop rbx")
-    emit(state, "    pop rbp")
-    emit(state, "    ret")
+    emit(state, "    jmp _nova_str_concat")
 
     emit(state, "_slice_string:")
     emit(state, "    push rbp")

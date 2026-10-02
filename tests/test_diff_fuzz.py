@@ -27,6 +27,11 @@ class Gen:
         self.r = random.Random(seed)
         self.funcs = []          # (name, nparams)
         self.lines = []
+        self._uid = 0
+
+    def uid(self):
+        self._uid += 1
+        return self._uid
 
     # ---- expressions (always yield a value in [0, 999] when wrapped by wrap()) ----
     def atom(self, scope):
@@ -79,9 +84,9 @@ class Gen:
         for _ in range(budget):
             kind = self.r.random()
             target = self.r.choice(locals_)
-            if kind < 0.45 or depth >= 2:
+            if kind < 0.38 or depth >= 2:
                 out.append(f"{pad}{target} = {self.wrap(self.expr(scope))}")
-            elif kind < 0.65:
+            elif kind < 0.56:
                 out.append(f"{pad}if {self.cond(scope)} {{")
                 out += self.stmts(scope, locals_, indent + 1, depth + 1, 2)
                 if self.r.random() < 0.5:
@@ -91,17 +96,42 @@ class Gen:
                     out.append(f"{pad}}} else {{")
                     out += self.stmts(scope, locals_, indent + 1, depth + 1, 1)
                 out.append(f"{pad}}}")
-            elif kind < 0.8:
-                counter = f"w{depth}_{self.r.randint(0, 999)}"
+            elif kind < 0.68:
+                counter = f"w{depth}_{self.uid()}"
                 out.append(f"{pad}{counter} = 0")
                 out.append(f"{pad}while {counter} < {self.r.randint(1, 5)} {{")
                 out += self.stmts(scope, locals_, indent + 1, depth + 1, 2)
                 out.append(f"{pad}    {counter} = {counter} + 1")
                 out.append(f"{pad}}}")
-            elif kind < 0.9:
-                counter = f"f{depth}_{self.r.randint(0, 999)}"
+            elif kind < 0.76:
+                counter = f"f{depth}_{self.uid()}"
                 out.append(f"{pad}for {counter} in range({self.r.randint(1, 4)}) {{")
                 out += self.stmts(scope + [counter], locals_, indent + 1, depth + 1, 2)
+                out.append(f"{pad}}}")
+            elif kind < 0.82:
+                # loop bound is len(list): hoistable only while the body cannot change the list's length
+                counter = f"l{depth}_{self.uid()}"
+                out.append(f"{pad}for {counter} in range(len(xs)) {{")
+                out.append(f"{pad}    {target} = (xs[{counter}] + {self.wrap(self.expr(scope, 2))}) % 1000")
+                out += self.stmts(scope + [counter], locals_, indent + 1, depth + 1, 1)
+                out.append(f"{pad}}}")
+            elif kind < 0.87:
+                # the body grows the list, so len(xs) must be re-evaluated every iteration
+                counter = f"g{depth}_{self.uid()}"
+                out.append(f"{pad}for {counter} in range(len(xs) - 6) {{")
+                out.append(f"{pad}    if len(xs) < 11 {{")
+                out.append(f"{pad}        xs.append({self.wrap(self.expr(scope, 2))})")
+                out.append(f"{pad}    }}")
+                out.append(f"{pad}    {target} = (xs[{counter}] + {counter}) % 1000")
+                out.append(f"{pad}}}")
+            elif kind < 0.93:
+                # string loop; the body may rebind the string, so its length must not be hoisted then
+                counter = f"c{depth}_{self.uid()}"
+                rebinds = self.r.random() < 0.5
+                out.append(f"{pad}for {counter} in range(len(sv)) {{")
+                out.append(f"{pad}    if sv[{counter}] == \"l\" {{ {target} = ({target} + {counter} + 1) % 1000 }}")
+                if rebinds:
+                    out.append(f"{pad}    if len(sv) < 9 {{ sv = sv + \"l\" }}")
                 out.append(f"{pad}}}")
             else:
                 idx = self.wrap(self.expr(scope, 2))
@@ -121,6 +151,7 @@ class Gen:
             body.append(f"    {v} = {self.wrap(self.expr(scope))}")
             scope.append(v)
         body.append("    xs = [1, 2, 3, 4, 5, 6, 7, 8]")
+        body.append("    sv = \"hello\"")
         body += self.stmts(scope, locals_, 1, 0, self.r.randint(3, 7))
         ret = self.wrap(" + ".join(self.r.sample(scope, min(len(scope), 3))) if scope else "0")
         body.append(f"    return {ret}")

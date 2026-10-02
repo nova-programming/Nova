@@ -157,6 +157,11 @@ SYSCALL void *STR_PFX(malloc)(unsigned int s) {
 SYSCALL void STR_PFX(free)(void *p) {
     if (p) { if (!_nova_heap) _nova_heap = GetProcessHeap(); HeapFree(_nova_heap, 0, p); }
 }
+/* Allocation whose contents the caller fully overwrites (strings): skips HEAP_ZERO_MEMORY's memset. */
+static void *_nova_alloc_raw(unsigned int s) {
+    if (!_nova_heap) _nova_heap = GetProcessHeap();
+    return HeapAlloc(_nova_heap, 0, s);
+}
 SYSCALL void *STR_PFX(realloc)(void *p, unsigned int s) {
     if (!_nova_heap) _nova_heap = GetProcessHeap();
     return HeapReAlloc(_nova_heap, 0, p, s);
@@ -940,6 +945,7 @@ __asm__(".globl _now\n.set _now, __now");
 __asm__(".globl _realloc\n.set _realloc, __realloc");
 __asm__(".globl _slice_list\n.set _slice_list, __slice_list");
 __asm__(".globl _str_sub\n.set _str_sub, __str_sub");
+__asm__(".globl _nova_str_concat\n.set _nova_str_concat, __nova_str_concat");
 __asm__(".globl _sys_alloc_c\n.set _sys_alloc_c, __sys_alloc_c");
 __asm__(".globl _sys_close_c\n.set _sys_close_c, __sys_close_c");
 __asm__(".globl _sys_exit_c\n.set _sys_exit_c, __sys_exit_c");
@@ -1895,10 +1901,25 @@ SYSCALL int _char_code(const char *s, int i) {
 
 static char _str_empty[1] = {0};
 
+/* String concatenation: one length pass per operand and two memcpy calls (was strlen x2 + strcpy + strcat). */
+SYSCALL char *_nova_str_concat(const char *a, const char *b) {
+    size_t la = a ? strlen(a) : 0;
+    size_t lb = b ? strlen(b) : 0;
+#if defined(_WIN32)
+    char *res = (char*)_nova_alloc_raw((unsigned int)(la + lb + 1));
+#else
+    char *res = (char*)malloc(la + lb + 1);
+#endif
+    if (!res) return 0;
+    if (la) memcpy(res, a, la);
+    if (lb) memcpy(res + la, b, lb);
+    res[la + lb] = '\0';
+    return res;
+}
+
 SYSCALL char *_str_sub(const char *s, int start, int end) {
     if (!s) return 0;
-    int actual_len = 0;
-    while (s[actual_len] != '\0') actual_len++;
+    int actual_len = (int)strlen(s);
     if (start < 0) start = 0;
     if (end > actual_len) end = actual_len;
     int len = end - start;
@@ -1910,14 +1931,12 @@ SYSCALL char *_str_sub(const char *s, int start, int end) {
         return (char*)s;
     }
 #if defined(_WIN32)
-    char *res = (char*)STR_PFX(malloc)(len + 1);
+    char *res = (char*)_nova_alloc_raw((unsigned int)(len + 1));
 #else
     char *res = (char*)malloc(len + 1);
 #endif
     if (!res) return 0;
-    for (int i = 0; i < len; i++) {
-        res[i] = s[start + i];
-    }
+    memcpy(res, s + start, (size_t)len);
     res[len] = '\0';
     return res;
 }
