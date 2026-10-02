@@ -33,6 +33,7 @@ nova lint --strict hello.nv  # Treat advisory warnings as failures
 nova fmt hello.nv        # Check deterministic formatting
 nova fmt --write hello.nv  # Apply formatting explicitly
 nova dev hello.nv        # Run in VM mode (no GCC needed)
+```
 
 ## Portable standard library
 
@@ -68,6 +69,10 @@ destination where the platform supports it, and `fs_delete` removes files
 only; all three return `1` on success or `0` on failure.
 `process_run(["program", "argument"])` executes without a shell and returns
 the child exit code, or `-1` when the process cannot be launched.
+
+## Galaxy package manager
+
+```bash
 galaxy --version         # Check Galaxy version
 galaxy init my-lib       # Create a library
 galaxy install pkg       # Install a package
@@ -162,48 +167,32 @@ Additional standard library modules:
 - `errors.nv` — Structured error/warning printer with fix suggestions
 - `assembler.nv` — target-specific instruction encoder (assembles supported .s text into byte streams)
 - `linker.nv` — Windows PE executable generator (packages bytes into .exe directly, integrated)
-- `memory.nv` — Raw memory byte access utilities
+- `slice.nv`, `ffi.nv`, `fs.nv`, `path.nv`, `env.nv`, `process.nv`, `time.nv`, `json.nv` — portable standard-library modules
 
 ## Project Structure
 
 ```
 nova/
-├── nova_ast/         # AST node definitions (Python)
-├── compiler/         # Compiler pipeline (Python)
-├── vm/               # Python bytecode VM (Python)
-├── modules/          # Module resolver (Python)
-├── lexer/            # Reference tokenizer (Python)
-├── parser/           # Reference parser (Python)
-├── stdlib/           # Self-hosted compiler written in Nova
-│   ├── backend/          # Architecture-specific codegen backends
-│   │   ├── x86_64/       # x86_64 codegen (codegen.nv, codegen_expr.nv, codegen_stmt.nv)
-│   │   └── arm64/        # ARM64 codegen (same file layout)
-│   ├── lexer.nv          # Tokenizer (Nova)
-│   ├── parser.nv         # Recursive-descent parser (Nova)
-│   ├── compiler.nv       # Pipeline orchestrator (Nova)
-│   ├── assembler.nv      # x86 assembler (Nova, integrated via assemble_link_file)
-│   ├── assembler_parse.nv# Assembly line/operand parsing (Nova)
-│   ├── assembler_encode.nv# Instruction encoding (Nova)
-│   ├── assembler_pass.nv # Pass1 + fixup resolution (Nova)
-│   ├── types.nv          # Type system abstraction (Nova)
-│   ├── type_checker.nv   # Static type inference (Nova)
-│   ├── linker.nv         # Native PE linker (Nova, integrated via assemble_link_file)
-│   ├── memory.nv         # Raw memory byte access (Nova)
-│   ├── errors.nv         # Structured error/warning printer (Nova)
-│   ├── os_win.nv         # Windows syscall/runtime facade (Nova)
-│   ├── os_linux.nv       # Linux syscall/runtime facade (Nova)
-│   ├── os_macos.nv       # macOS syscall/runtime facade (Nova)
-│   ├── codegen_common.nv # Shared codegen externs + data strings (Nova)
-│   └── peephole.nv       # Assembly peephole optimizer (Nova)
-├── bootstrap/        # Python bootstrap compiler (frozen)
-│   ├── main.py           # Bootstrap entry point
-│   ├── compiler/         # Bootstrap codegen (Python)
-│   └── README.md         # Bootstrap status
-├── main.py           # Python bootstrap compiler entry point (aliases bootstrap/main.py)
-├── nova.nv           # Self-hosted compiler entry point
+├── nova.nv           # Self-hosted compiler entry point / CLI driver
 ├── runtime.c         # C runtime wrappers for native compilation
-├── docs/             # Documentation
-└── tests/            # Test programs
+├── _galaxy.py        # Galaxy package manager (also exposed as galaxy/ and tools/galaxy.py)
+├── install.py|.sh|.ps1  # Installers
+├── bootstrap/        # Python bootstrap compiler (Stage 0) and VM
+│   ├── main.py           # Bootstrap CLI entry point
+│   ├── lexer/ parser/ nova_ast/ modules/   # Front end
+│   ├── compiler/         # Type checker + x86_64/ARM64 codegen backends
+│   └── vm/               # Bytecode compiler and VM (`nova dev`)
+├── stdlib/           # Self-hosted compiler and standard library, written in Nova
+│   ├── lexer.nv parser.nv type_checker.nv types.nv compiler.nv
+│   ├── codegen_common.nv peephole.nv errors.nv vm.nv
+│   ├── backend/x86_64/   # codegen*.nv, assembler*.nv, linker.nv, os_windows.nv, os_unix.nv
+│   ├── backend/arm64/    # same layout for ARM64
+│   ├── fs.nv path.nv env.nv process.nv time.nv json.nv slice.nv ffi.nv system.nv
+│   └── gui.nv nss.nv     # Win32 GDI GUI toolkit and NSS stylesheets
+├── tools/            # nova_py (Python bridge), libtest, galaxy wrapper
+├── docs/             # Language features, internals, libraries
+├── examples/         # GUI and UI demos
+└── tests/            # Python tests and .nv fixtures (run with `python -m pytest`)
 ```
 
 ## Language Features

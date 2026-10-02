@@ -1,4 +1,6 @@
-# Agent Session Summary
+# Agent Session Log (historical)
+
+Full chronological notes moved out of AGENTS.md. Contains duplicated sections; treat as an archive, not as current policy.
 
 ## Latest Portable Standard-Library Work
 - Added `env_get(name)` and `env_set(name, value)` to `stdlib/env.nv`.
