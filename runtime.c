@@ -78,7 +78,10 @@ SYSCALL int STR_PFX(printf)(const char *fmt, const void *arg_s) {
                     break;
                 }
                 case 'f': {
-                    double val = *((double*)&arg_s);
+                    /* Nova floats are IEEE single precision held in the low 32 bits of the value */
+                    union { uint32_t u; float f; } cv;
+                    cv.u = (uint32_t)(uintptr_t)arg_s;
+                    double val = (double)cv.f;
                     char buf[512];
                     int len = snprintf(buf, sizeof(buf), "%.6f", val);
                     if (len < 0) len = 0;
