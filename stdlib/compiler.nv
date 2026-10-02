@@ -379,7 +379,7 @@ def _compile_runtime(gcc_name: string, target_os: string, target_arch: string, c
         if target_os == "windows" { sys_system("cmd /c del /f /q " + _quote(to_win_path(runtime_o_path))) }
         else { sys_system("rm -f " + runtime_o_path) }
     }
-    cmd = gcc_name + " -O3 -c " + runtime_c_path + " -o " + runtime_o_path
+    cmd = gcc_name + " -O3 -c " + _quote(to_win_path(runtime_c_path)) + " -o " + _quote(to_win_path(runtime_o_path))
     if target_os == "macos" {
         cmd = cmd + " -D MACOS"
         if target_arch == "arm64" { cmd = cmd + " -arch arm64" }
@@ -464,7 +464,7 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
     
     if is_windows == 1 and target_arch == "x86_64" {
         print("Using GCC to assemble and link...")
-        system.system_exec(gcc_name + " -O3 " + input_path + ".s -o " + output_path + " -mconsole -lkernel32 -Wl,--stack,16777216 " + runtime_o_path)
+        system.system_exec(gcc_name + " -O3 " + _quote(to_win_path(input_path + ".s")) + " " + _quote(to_win_path(runtime_o_path)) + " -o " + _quote(to_win_path(output_path)) + " -mconsole -Wl,--stack,16777216 -lkernel32 -lgdi32 -luser32")
         _verify_output(output_path)
     } elif is_windows == 1 {
         print("Assembling...")
@@ -477,7 +477,7 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
         _verify_output(output_path)
     } else {
         print("Using GCC to assemble and link...")
-        gcc_cmd = gcc_name + " -O3 " + input_path + ".s -o " + output_path + " " + runtime_o_path
+        gcc_cmd = gcc_name + " -O3 " + _quote(input_path + ".s") + " -o " + _quote(output_path) + " " + _quote(runtime_o_path)
         if is_macos == 1 {
             if target_arch == "arm64" { gcc_cmd = gcc_cmd + " -arch arm64" }
             gcc_cmd = gcc_cmd + " -Wl,-no_compact_unwind"
@@ -498,7 +498,7 @@ def compile_to_bare(input_path: string, output_path: string, debug_mode: int, lo
     print("Assembling...")
     assembled = assemble(asm)
     print("Linking bare-metal...")
-    bare_bytes = link_bare(assembled, load_addr)
+    bare_bytes = link_bare(assembled, load_addr, entry_name)
     fd2 = sys_open(output_path, "wb")
     sys_write_raw(fd2, bare_bytes)
     sys_close(fd2)
@@ -511,7 +511,7 @@ def assemble_bare_file(asm_path: string, output_path: string, load_addr: int) {
     
     assembled = assemble(asm_lines)
     print("Linking bare-metal...")
-    bare_bytes = link_bare(assembled, load_addr)
+    bare_bytes = link_bare(assembled, load_addr, "")
     fd2 = sys_open(output_path, "wb")
     sys_write_raw(fd2, bare_bytes)
     sys_close(fd2)

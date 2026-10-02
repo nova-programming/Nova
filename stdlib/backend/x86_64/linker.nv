@@ -548,12 +548,12 @@ def link(sections: list) -> list {
     append_u32(image, 0)   # TimeDateStamp
     append_u32(image, 0)   # PointerToSymbolTable
     append_u32(image, 0)   # NumberOfSymbols
-    append_u16(image, 224) # SizeOfOptionalHeader
+    append_u16(image, 240) # SizeOfOptionalHeader (PE32+)
     append_u16(image, 258) # Characteristics = 0x0102
     
-    # Optional Header (224 bytes)
+    # Optional Header (240 bytes for PE32+)
     opt_hdr_start = len(image)
-    append_u16(image, 267) # Magic = 0x010B
+    append_u16(image, 523) # Magic = 0x020B
     image.append(1)        # MajorLinker
     image.append(0)        # MinorLinker
     
@@ -575,8 +575,7 @@ def link(sections: list) -> list {
     append_u32(image, 0)   # SizeOfUninitializedData
     append_u32(image, main_rva) # AddressOfEntryPoint
     append_u32(image, text_rva) # BaseOfCode
-    append_u32(image, data_rva) # BaseOfData
-    append_u32(image, image_base) # ImageBase
+    append_u64(image, image_base) # ImageBase
     append_u32(image, section_align)
     append_u32(image, file_align)
     append_u16(image, 4) # MajorOS
@@ -593,10 +592,10 @@ def link(sections: list) -> list {
     append_u32(image, 0) # CheckSum
     append_u16(image, 3) # Subsystem = 3 (Console)
     append_u16(image, 0) # DllCharacteristics = 0 (No ASLR)
-    append_u32(image, 1048576) # StackReserve
-    append_u32(image, 4096)    # StackCommit
-    append_u32(image, 16777216) # HeapReserve
-    append_u32(image, 4096)    # HeapCommit
+    append_u64(image, 1048576) # StackReserve
+    append_u64(image, 4096)     # StackCommit
+    append_u64(image, 16777216) # HeapReserve
+    append_u64(image, 4096)     # HeapCommit
     append_u32(image, 0)       # LoaderFlags
     append_u32(image, 16)      # NumberOfRvaAndSizes
     
@@ -666,7 +665,7 @@ def link(sections: list) -> list {
 
 # --- Bare-metal flat binary linker ---
 
-def link_bare(sections: list, load_addr: int) -> list {
+def link_bare(sections: list, load_addr: int, entry_name: string) -> list {
     code = sections[0]
     data_sec = sections[1]
     labels = sections[2]
@@ -683,6 +682,27 @@ def link_bare(sections: list, load_addr: int) -> list {
         i = i + 1
     }
     
+    if entry_name != "" {
+        found = 0
+        i = 0
+        while i < len(labels) {
+            if labels[i].name == entry_name {
+                found = 1
+                if labels[i].offset != 0 {
+                    print("ERROR: Bare-metal entry symbol must be at offset zero: " + entry_name)
+                    sys_flush()
+                    sys_exit(1)
+                }
+            }
+            i = i + 1
+        }
+        if found == 0 {
+            print("ERROR: Entry symbol not found in bare-metal mode: " + entry_name)
+            sys_flush()
+            sys_exit(1)
+        }
+    }
+
     # Layout: code at offset 0, data immediately after code
     text_base = 0
     data_base = len(code)

@@ -1,0 +1,480 @@
+# =============================================================================
+# NSS — Nova Style Sheets (stdlib/nss.nv)
+# CSS-like external styling for Nova GUI
+#
+# Syntax:
+#   /* comment */
+#   # comment
+#   tag_name  { property: value; property: value; }
+#   .class    { property: value; }
+#   #id       { property: value; }
+#
+# Shorthand properties (same as _expand_props):
+#   background / bg / hover / press / color / size / bold (no value needed)
+#   radius / border / border_color / gap / width / height
+#   padding / p / px / py / pl / pr / pt / pb
+#   align / justify / direction / flex / fit-content
+#
+# Specificity (lowest → highest):  tag < class < id
+# Multiple classes are space-separated in the widget's "class" prop.
+# =============================================================================
+import system
+
+# --- Read the full .nss file into a string ---
+def nss_read_file(path: string) -> string {
+    fd = file_open(path, "r")
+    if fd < 0 {
+        print("NSS: could not open file: " + path)
+        return ""
+    }
+    content = file_read(fd)
+    file_close(fd)
+    return content
+}
+
+# --- Low-level char helpers ---
+def _is_ws(c: string) -> int {
+    if c == " "  { return 1 }
+    if c == "\t" { return 1 }
+    if c == "\n" { return 1 }
+    if c == "\r" { return 1 }
+    return 0
+}
+
+def _is_alpha(c: string) -> int {
+    if c == "a" or c == "b" or c == "c" or c == "d" or c == "e" or c == "f" or c == "g" or c == "h" or c == "i" or c == "j" or c == "k" or c == "l" or c == "m" or c == "n" or c == "o" or c == "p" or c == "q" or c == "r" or c == "s" or c == "t" or c == "u" or c == "v" or c == "w" or c == "x" or c == "y" or c == "z" {
+        return 1
+    }
+    if c == "A" or c == "B" or c == "C" or c == "D" or c == "E" or c == "F" or c == "G" or c == "H" or c == "I" or c == "J" or c == "K" or c == "L" or c == "M" or c == "N" or c == "O" or c == "P" or c == "Q" or c == "R" or c == "S" or c == "T" or c == "U" or c == "V" or c == "W" or c == "X" or c == "Y" or c == "Z" {
+        return 1
+    }
+    return 0
+}
+
+def _is_digit(c: string) -> int {
+    if c == "0" or c == "1" or c == "2" or c == "3" or c == "4" or c == "5" or c == "6" or c == "7" or c == "8" or c == "9" {
+        return 1
+    }
+    return 0
+}
+
+def _digit_val(c: string) -> int {
+    if c == "0" { return 0 }
+    if c == "1" { return 1 }
+    if c == "2" { return 2 }
+    if c == "3" { return 3 }
+    if c == "4" { return 4 }
+    if c == "5" { return 5 }
+    if c == "6" { return 6 }
+    if c == "7" { return 7 }
+    if c == "8" { return 8 }
+    if c == "9" { return 9 }
+    return 0
+}
+
+# Skip whitespace, return new position
+def _skip_ws(src: string, i: int) -> int {
+    while i < len(src) and _is_ws(src[i]) == 1 {
+        i = i + 1
+    }
+    return i
+}
+
+# Skip to end of line comment (# or //), return position after newline
+def _skip_line(src: string, i: int) -> int {
+    while i < len(src) and src[i] != "\n" {
+        i = i + 1
+    }
+    if i < len(src) { i = i + 1 }
+    return i
+}
+
+# Skip /* ... */ block comment, return position after */
+def _skip_block_comment(src: string, i: int) -> int {
+    # i is currently on '/'
+    i = i + 2   # skip /*
+    while i < len(src) {
+        if src[i] == "*" and i + 1 < len(src) and src[i + 1] == "/" {
+            i = i + 2
+            return i
+        }
+        i = i + 1
+    }
+    return i
+}
+
+# Read a token (selector name, property name, or value) until stop chars
+def _read_token(src: string, i: int, stop: string) -> string {
+    result = ""
+    while i < len(src) {
+        c = src[i]
+        found_stop = 0
+        si = 0
+        while si < len(stop) {
+            if c == stop[si] { found_stop = 1 }
+            si = si + 1
+        }
+        if found_stop == 1 { return result }
+        result = result + c
+        i = i + 1
+    }
+    return result
+}
+
+# Trim leading/trailing whitespace from a string
+def _trim(s: string) -> string {
+    start = 0
+    while start < len(s) and _is_ws(s[start]) == 1 { start = start + 1 }
+    end = len(s) - 1
+    while end >= start and _is_ws(s[end]) == 1 { end = end - 1 }
+    result = ""
+    k = start
+    while k <= end {
+        result = result + s[k]
+        k = k + 1
+    }
+    return result
+}
+
+# Convert NSS shorthand property name → full CSS property name + handle special cases
+# Returns a list: [full_prop_name, final_value_string]
+# For "bold" (no value), returns ["font-weight", "bold"]
+def _nss_prop_to_css(name: string, value: string) -> list {
+    n = _trim(name)
+    v = _trim(value)
+
+    if n == "background" or n == "bg"   { return ["background-color",        v] }
+    if n == "hover"                      { return ["hover-background-color",   v] }
+    if n == "press"                      { return ["pressed-background-color", v] }
+    if n == "color"                      { return ["color",                    v] }
+    if n == "size"                       { return ["font-size",                v] }
+    if n == "bold"                       { return ["font-weight",          "bold"] }
+    if n == "radius"  or n == "r"        { return ["border-radius",            v] }
+    if n == "border"                     { return ["border-width",             v] }
+    if n == "border_color"               { return ["border-color",             v] }
+    if n == "gap"                        { return ["gap",                      v] }
+    if n == "width"   or n == "w"        { return ["width",                    v] }
+    if n == "height"  or n == "h"        { return ["height",                   v] }
+    if n == "padding" or n == "p"        { return ["padding",                  v] }
+    if n == "px"                         { return ["padding-x",                v] }
+    if n == "py"                         { return ["padding-y",                v] }
+    if n == "pl"                         { return ["padding-left",             v] }
+    if n == "pr"                         { return ["padding-right",            v] }
+    if n == "pt"                         { return ["padding-top",              v] }
+    if n == "pb"                         { return ["padding-bottom",           v] }
+    if n == "align"                      { return ["align-items",              v] }
+    if n == "justify"                    { return ["justify-content",          v] }
+    if n == "direction"                  { return ["flex-direction",           v] }
+    if n == "flex"                       { return ["flex",                     v] }
+    # pass through any already-full-form name
+    return [n, v]
+}
+
+# Convert a string value to int (for numeric props) or keep as string (for colors etc.)
+# The render engine handles both int and string values in props already.
+# We store everything as strings in the parsed NSS dict;
+# _apply_nss_props will convert to int where needed.
+def _nss_str_to_int(s: string) -> int {
+    result = 0
+    negative = 0
+    i = 0
+    if len(s) > 0 and s[0] == "-" { negative = 1  i = 1 }
+    while i < len(s) {
+        c = s[i]
+        if _is_digit(c) == 1 {
+            result = result * 10 + _digit_val(c)
+        }
+        i = i + 1
+    }
+    if negative == 1 { result = 0 - result }
+    return result
+}
+
+def _is_numeric_value(v: string) -> int {
+    if len(v) == 0 { return 0 }
+    i = 0
+    if v[0] == "-" { i = 1 }
+    if i >= len(v) { return 0 }
+    while i < len(v) {
+        if _is_digit(v[i]) == 0 { return 0 }
+        i = i + 1
+    }
+    return 1
+}
+
+# Parse the property block (between { and }) into a dict
+# src: full file content, i: position right after '{'
+# Returns a dict of full-form CSS prop → value (string or int)
+def _parse_block(src: string, start_i: int) -> list {
+    # returns [props_dict, next_i_after_closing_brace]
+    props = {}
+    i = start_i
+
+    while i < len(src) {
+        i = _skip_ws(src, i)
+        if i >= len(src) { return [props, i] }
+
+        c = src[i]
+
+        # End of block
+        if c == "}" { return [props, i + 1] }
+
+        # Comment (// or /* */)
+        if c == "/" and i + 1 < len(src) and src[i + 1] == "/" {
+            i = _skip_line(src, i)  continue
+        }
+        if c == "/" and i + 1 < len(src) and src[i + 1] == "*" {
+            i = _skip_block_comment(src, i)  continue
+        }
+
+        # Property name (read until : or { or } or ;)
+        prop_name = ""
+        while i < len(src) and src[i] != ":" and src[i] != ";" and src[i] != "}" {
+            prop_name = prop_name + src[i]
+            i = i + 1
+        }
+        prop_name = _trim(prop_name)
+
+        if len(prop_name) == 0 {
+            if i < len(src) and src[i] == ";" { i = i + 1 }
+            continue
+        }
+
+        # If we hit ';' or '}' — this is a value-less property (like "bold;")
+        if i >= len(src) or src[i] == ";" or src[i] == "}" {
+            mapped = _nss_prop_to_css(prop_name, "")
+            css_name = mapped[0]
+            css_val  = mapped[1]
+            if len(css_val) > 0 {
+                if _is_numeric_value(css_val) == 1 {
+                    props.set(css_name, _nss_str_to_int(css_val))
+                } else {
+                    props.set(css_name, css_val)
+                }
+            }
+            if i < len(src) and src[i] == ";" { i = i + 1 }
+            continue
+        }
+
+        # Skip ':'
+        i = i + 1
+        i = _skip_ws(src, i)
+
+        # Property value (read until ; or } or newline)
+        prop_value = ""
+        while i < len(src) and src[i] != ";" and src[i] != "}" and src[i] != "\n" {
+            prop_value = prop_value + src[i]
+            i = i + 1
+        }
+        prop_value = _trim(prop_value)
+        if i < len(src) and src[i] == ";" { i = i + 1 }
+
+        # Expand the property name + store
+        mapped = _nss_prop_to_css(prop_name, prop_value)
+        css_name = mapped[0]
+        css_val  = mapped[1]
+
+        # Expand padding-x and padding-y into left/right and top/bottom
+        if css_name == "padding-x" {
+            if _is_numeric_value(css_val) == 1 {
+                v = _nss_str_to_int(css_val)
+                props.set("padding-left",  v)
+                props.set("padding-right", v)
+            } else {
+                props.set("padding-left",  css_val)
+                props.set("padding-right", css_val)
+            }
+        } elif css_name == "padding-y" {
+            if _is_numeric_value(css_val) == 1 {
+                v = _nss_str_to_int(css_val)
+                props.set("padding-top",    v)
+                props.set("padding-bottom", v)
+            } else {
+                props.set("padding-top",    css_val)
+                props.set("padding-bottom", css_val)
+            }
+        } else {
+            if _is_numeric_value(css_val) == 1 {
+                props.set(css_name, _nss_str_to_int(css_val))
+            } else {
+                props.set(css_name, css_val)
+            }
+        }
+    }
+
+    return [props, i]
+}
+
+# --- Main NSS parser ---
+# Returns a dict with three sub-dicts packed into a flat dict:
+#   "TAG__<tagname>"   → props dict
+#   "CLS__<classname>" → props dict
+#   "ID__<idname>"     → props dict
+def nss_parse(src: string) -> dict {
+    styles = {}
+    i = 0
+    n = len(src)
+
+    while i < n {
+        i = _skip_ws(src, i)
+        if i >= n { break }
+        c = src[i]
+
+        # Skip comments (// or /* */)
+        if c == "/" and i + 1 < n and src[i + 1] == "/" {
+            i = _skip_line(src, i)  continue
+        }
+        if c == "/" and i + 1 < n and src[i + 1] == "*" {
+            i = _skip_block_comment(src, i)  continue
+        }
+
+        # Read selector (until '{')
+        selector = ""
+        while i < n and src[i] != "{" {
+            selector = selector + src[i]
+            i = i + 1
+        }
+        selector = _trim(selector)
+
+        if i >= n or len(selector) == 0 { break }
+
+        # Skip '{'
+        i = i + 1
+
+        # Parse block
+        result = _parse_block(src, i)
+        block_props = result[0]
+        i = result[1]
+
+        # Store under the right key
+        if len(selector) > 0 {
+            first = selector[0]
+            if first == "#" {
+                # ID selector
+                id_name = ""
+                k = 1
+                while k < len(selector) {
+                    if _is_ws(selector[k]) == 0 { id_name = id_name + selector[k] }
+                    k = k + 1
+                }
+                styles.set("ID__" + id_name, block_props)
+            } elif first == "." {
+                # Class selector
+                cls_name = ""
+                k = 1
+                while k < len(selector) {
+                    if _is_ws(selector[k]) == 0 { cls_name = cls_name + selector[k] }
+                    k = k + 1
+                }
+                styles.set("CLS__" + cls_name, block_props)
+            } else {
+                # Tag selector (clean selector of whitespace)
+                tag_name = ""
+                k = 0
+                while k < len(selector) {
+                    if _is_ws(selector[k]) == 0 { tag_name = tag_name + selector[k] }
+                    k = k + 1
+                }
+                styles.set("TAG__" + tag_name, block_props)
+            }
+        }
+    }
+
+    return styles
+}
+
+# --- Load NSS from file ---
+def nss_load(path: string) -> dict {
+    content = nss_read_file(path)
+    if len(content) == 0 { return {} }
+    return nss_parse(content)
+}
+
+# --- Copy all props from src dict into dest dict ---
+def _merge_props(dest: dict, src: dict) -> dict {
+    keys = src.keys()
+    ki = 0
+    while ki < len(keys) {
+        k = keys[ki]
+        dest.set(k, src.get(k))
+        ki = ki + 1
+    }
+    return dest
+}
+
+# --- Split a space-separated class string into a list ---
+def _split_classes(class_str: string) -> list {
+    classes = []
+    current = ""
+    i = 0
+    while i < len(class_str) {
+        c = class_str[i]
+        if c == " " {
+            if len(current) > 0 {
+                classes.append(current)
+                current = ""
+            }
+        } else {
+            current = current + c
+        }
+        i = i + 1
+    }
+    if len(current) > 0 { classes.append(current) }
+    return classes
+}
+
+# --- Apply styles to a single widget from the style map ---
+# Cascade: tag styles → class styles → id styles
+# Visual styles go into widget.props; behavioral props preserved as-is
+def _apply_widget_styles(w: any, styles: dict) {
+    p = w.props
+
+    # Get class and id from props
+    class_str = ""
+    id_str = ""
+    if p.has("class") == 1 { class_str = p.get("class") }
+    if p.has("id") == 1    { id_str    = p.get("id") }
+
+    # 1. Tag styles
+    tag_key = "TAG__" + w.tag
+    if styles.has(tag_key) == 1 {
+        tag_props = styles.get(tag_key)
+        p = _merge_props(p, tag_props)
+    }
+
+    # 2. Class styles (space-separated, applied in order)
+    if len(class_str) > 0 {
+        classes = _split_classes(class_str)
+        ci = 0
+        while ci < len(classes) {
+            cls_key = "CLS__" + classes[ci]
+            if styles.has(cls_key) == 1 {
+                cls_props = styles.get(cls_key)
+                p = _merge_props(p, cls_props)
+            }
+            ci = ci + 1
+        }
+    }
+
+    # 3. ID styles (highest specificity)
+    if len(id_str) > 0 {
+        id_key = "ID__" + id_str
+        if styles.has(id_key) == 1 {
+            id_props = styles.get(id_key)
+            p = _merge_props(p, id_props)
+        }
+    }
+
+    w.props = p
+}
+
+# --- Walk the entire widget tree and apply NSS styles ---
+def nss_apply(w: any, styles: dict) {
+    _apply_widget_styles(w, styles)
+
+    ci = 0
+    while ci < len(w.children) {
+        nss_apply(w.children[ci], styles)
+        ci = ci + 1
+    }
+}

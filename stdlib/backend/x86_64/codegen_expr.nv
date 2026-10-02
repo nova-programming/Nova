@@ -345,6 +345,9 @@ def compile_expr(state: CodegenState, node: AstNode) {
         }
         return
     }
+    if node.kind == "None" {
+        emit(state, "    push 0")
+    }
     if node.kind == "Number" {
         if is_float_expr(state, node) == 1 {
             f_hex = float_str_to_hex(node.val_str)

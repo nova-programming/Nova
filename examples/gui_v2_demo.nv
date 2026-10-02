@@ -1,0 +1,147 @@
+import gui
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Nova GUI v2 — Declarative API Demo
+#  Everything is nested inline. No pre-declared variables needed.
+#  Uses shorthand props: bg, hover, press, p, gap, r, size, color, align, etc.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Counter text — kept as a variable only because btn() needs to reference it
+counter_val = txt("0 clicks", {"color": "#89b4fa", "size": 28, "bold": 1})
+status_log  = txt("Ready — click a button below.", {"color": "#6c7086", "size": 12})
+
+gui("Nova GUI v2 — Declarative Demo", 720, 560,
+    div([
+
+        # ── Header bar ──────────────────────────────────────────────────────
+        row([
+            badge("NV", {"bg": "#cba6f7", "color": "#11111b"}),
+            h2("Nova GUI", {"color": "#cdd6f4"}),
+            spacer({}),
+            badge("v2.0  declarative", {"bg": "#313244", "color": "#a6adc8",
+                "border": 1, "border_color": "#45475a"})
+        ], {"bg": "#181825", "p": 14, "gap": 10, "align": "center"}),
+
+        divider({}),
+
+        # ── Main content ────────────────────────────────────────────────────
+        row([
+
+            # Left panel — navigation sidebar
+            col([
+                label("SECTIONS", {}),
+                nav_item("  Overview",   {"bg": "#313244"}),
+                nav_item("  Counter",    {}),
+                nav_item("  Components", {}),
+                nav_item("  Settings",   {}),
+                divider({"py": 4}),
+                label("RESOURCES", {}),
+                nav_item("  Documentation", {}),
+                nav_item("  Examples",      {}),
+                nav_item("  Galaxy Pkgs",   {})
+            ], {"bg": "#1e1e2e", "p": 10, "gap": 4, "w": 180,
+                "border": 1, "border_color": "#313244"}),
+
+            # Right panel — content area
+            div([
+
+                # Counter card
+                card([
+                    label("EVENT COUNTER", {"color": "#a6adc8"}),
+                    row([
+                        counter_val,
+                        spacer({}),
+                        col([
+                            label("clicks", {}),
+                            label("recorded", {})
+                        ], {"gap": 2, "align": "center"})
+                    ], {"gap": 12, "align": "center"}),
+
+                    # Buttons row — fully inline, no IDs needed
+                    row([
+                        btn("+ Increment", {
+                            "bg":    "#89b4fa",
+                            "hover": "#b4befe",
+                            "press": "#74c7ec",
+                            "color": "#11111b",
+                            "r": 8, "px": 18, "py": 9, "size": 13,
+                            "action": "increment",
+                            "target": counter_val,
+                            "suffix": " clicks",
+                            "log": status_log
+                        }),
+                        btn("Reset", {
+                            "bg":    "#313244",
+                            "hover": "#45475a",
+                            "press": "#181825",
+                            "color": "#cdd6f4",
+                            "r": 8, "px": 18, "py": 9, "size": 13,
+                            "action": "reset",
+                            "target": counter_val,
+                            "suffix": " clicks",
+                            "log": status_log
+                        })
+                    ], {"gap": 10})
+                ], {"bg": "#1e1e2e", "r": 10, "border": 1,
+                    "border_color": "#313244", "p": 20, "gap": 14}),
+
+                # Widget showcase card
+                card([
+                    h3("Widget Gallery", {}),
+                    txt("New v2 constructors — all inline, zero boilerplate:", {}),
+
+                    # Badges row
+                    row([
+                        badge("btn()",          {"bg": "#89b4fa", "color": "#11111b"}),
+                        badge("div()",          {"bg": "#a6e3a1", "color": "#11111b"}),
+                        badge("row()",          {"bg": "#f9e2af", "color": "#11111b"}),
+                        badge("card()",         {"bg": "#cba6f7", "color": "#11111b"}),
+                        badge("input_field()",  {"bg": "#fab387", "color": "#11111b"}),
+                        badge("spacer()",       {"bg": "#89dceb", "color": "#11111b"})
+                    ], {"gap": 8}),
+
+                    # Input fields
+                    row([
+                        input_field("Search components...", {}),
+                        input_field("Filter by tag...",     {"w": 180})
+                    ], {"gap": 8}),
+
+                    # justify-content demo
+                    label("justify: space-between", {}),
+                    row([
+                        btn("Left",   {"bg": "#313244", "hover": "#45475a", "r": 6, "px": 14, "py": 6, "size": 12}),
+                        btn("Center", {"bg": "#313244", "hover": "#45475a", "r": 6, "px": 14, "py": 6, "size": 12}),
+                        btn("Right",  {"bg": "#313244", "hover": "#45475a", "r": 6, "px": 14, "py": 6, "size": 12})
+                    ], {"gap": 0, "justify": "space-between",
+                        "bg": "#181825", "r": 6, "border": 1, "border_color": "#313244",
+                        "p": 8}),
+
+                    # Icon buttons (Button with children)
+                    label("icon_btn() and btn() with children:", {}),
+                    row([
+                        icon_btn("-",   {"bg": "#1e1e2e", "hover": "#313244", "color": "#cdd6f4", "size": 14, "px": 14, "py": 7}),
+                        icon_btn("[ ]", {"bg": "#1e1e2e", "hover": "#313244", "color": "#cdd6f4", "size": 14, "px": 12, "py": 7}),
+                        icon_btn("X",   {"bg": "#1e1e2e", "hover": "#c42b1c", "color": "#cdd6f4", "size": 14, "px": 14, "py": 7})
+                    ], {"gap": 0, "bg": "#11111b", "r": 6,
+                        "border": 1, "border_color": "#313244"})
+
+                ], {"bg": "#1e1e2e", "r": 10, "border": 1,
+                    "border_color": "#313244", "p": 20, "gap": 14})
+
+            ], {"bg": "#181825", "p": 16, "gap": 14})
+
+        ], {"gap": 0}),
+
+        divider({}),
+
+        # ── Status bar ──────────────────────────────────────────────────────
+        row([
+            status_log,
+            spacer({}),
+            label("Nova GUI v2  |  declarative  |  zero boilerplate", {})
+        ], {"bg": "#1e1e2e", "px": 16, "py": 8,
+            "align": "center", "gap": 12})
+
+    ], {"bg": "#181825", "gap": 0}),
+    {"background-color": "#181825"}
+)

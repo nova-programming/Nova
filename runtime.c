@@ -34,6 +34,7 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <process.h>
 #include <stdint.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -146,7 +147,7 @@ SYSCALL void *STR_PFX(memcpy)(void *d, const void *s, unsigned int n) {
 static HANDLE _nova_heap = 0;
 SYSCALL void *STR_PFX(malloc)(unsigned int s) {
     if (!_nova_heap) _nova_heap = GetProcessHeap();
-    return HeapAlloc(_nova_heap, 0, s);
+    return HeapAlloc(_nova_heap, HEAP_ZERO_MEMORY, s);
 }
 SYSCALL void STR_PFX(free)(void *p) {
     if (p) { if (!_nova_heap) _nova_heap = GetProcessHeap(); HeapFree(_nova_heap, 0, p); }
@@ -298,6 +299,22 @@ SYSCALL void STR_PFX(out_of_bounds)(void) {
 /* ============== Nova sys_* runtime (_c suffix to match Nova codegen naming) ============== */
 SYSCALL long long _sys_open_c(const char *path, const char *mode) { return STR_PFX(fopen)(path, mode); }
 SYSCALL void _sys_close_c(long long s) { STR_PFX(fclose)(s); }
+SYSCALL int _sys_mkdir_c(const char *path) {
+    if (!path) return 0;
+    return CreateDirectoryA(path, NULL) ? 1 : 0;
+}
+SYSCALL int _sys_delete_c(const char *path) {
+    if (!path) return 0;
+    return DeleteFileA(path) ? 1 : 0;
+}
+SYSCALL int _sys_copy_c(const char *source, const char *destination) {
+    if (!source || !destination || STR_PFX(strcmp)(source, destination) == 0) return 0;
+    return CopyFileA(source, destination, TRUE) ? 1 : 0;
+}
+SYSCALL int _sys_move_c(const char *source, const char *destination) {
+    if (!source || !destination) return 0;
+    return MoveFileExA(source, destination, MOVEFILE_REPLACE_EXISTING) ? 1 : 0;
+}
 SYSCALL char *_sys_read_c(long long s) {
     long len;
     char *buf;
@@ -329,10 +346,53 @@ SYSCALL int _sys_write_raw_c(int s, void *arr) {
 SYSCALL void *_sys_alloc_c(int sz) { return STR_PFX(malloc)(sz); }
 SYSCALL void _sys_free_c(void *p) { STR_PFX(free)(p); }
 SYSCALL void _sys_exit_c(int c) { STR_PFX(exit)(c); }
-SYSCALL int _system_c(const char *c) { return STR_PFX(system)(c); }
+SYSCALL int _system_c(const char *c) {
+    if (!c) return -1;
+    if (strchr(c, '"')) {
+        size_t len = strlen(c);
+        char *wrapped = (char*)malloc(len + 3);
+        if (wrapped) {
+            wrapped[0] = '"';
+            memcpy(wrapped + 1, c, len);
+            wrapped[len + 1] = '"';
+            wrapped[len + 2] = '\0';
+            int ret = STR_PFX(system)(wrapped);
+            free(wrapped);
+            return ret;
+        }
+    }
+    return STR_PFX(system)(c);
+}
 SYSCALL int _sys_flush_c(int s) { return STR_PFX(fflush)(s); }
 SYSCALL const char *_sys_platform_c(void) { return "windows"; }
 SYSCALL int _sys_get_tick_count_c(void) { return (int)GetTickCount(); }
+SYSCALL const char *_sys_env_get_c(const char *name) {
+    const char *value = getenv(name);
+    return value ? value : "";
+}
+SYSCALL int _sys_env_set_c(const char *name, const char *value) {
+    return _putenv_s(name, value) == 0 ? 1 : 0;
+}
+SYSCALL int _sys_process_run_c(void *args) {
+    int count;
+    intptr_t *values;
+    char **argv;
+    int i;
+    if (!args) return -1;
+    count = *(int*)args;
+    values = (intptr_t*)(*(intptr_t*)((char*)args + 8));
+    if (count <= 0) return -1;
+    argv = (char**)malloc((size_t)(count + 1) * sizeof(char*));
+    if (!argv) return -1;
+    for (i = 0; i < count; i++) {
+        argv[i] = (char*)values[i];
+        if (!argv[i]) { free(argv); return -1; }
+    }
+    argv[count] = NULL;
+    i = _spawnvp(_P_WAIT, argv[0], (const char *const *)argv);
+    free(argv);
+    return i < 0 ? -1 : i;
+}
 
 /* ============== Entry point bridge for Windows x64 ============== */
 /* MinGW x64 CRT expects main() (no _ prefix). Nova codegen emits _main (with _ prefix
@@ -929,12 +989,108 @@ SYSCALL void *memset(void *, int, size_t);
 /* ==================== Automatic Reference Counting (ARC) Engine ==================== */
 #define NOVA_ARC_MAGIC 0x4E4F5641 /* "NOVA" */
 
+/* Stable value-kind IDs used by the future shared VM/native value ABI.
+ * Existing ARC tags are kept numerically compatible: lists, dictionaries,
+ * and strings already use these IDs in allocations emitted by codegen. */
+typedef enum {
+    NOVA_VALUE_NONE   = 0,
+    NOVA_VALUE_LIST   = 1,
+    NOVA_VALUE_DICT   = 2,
+    NOVA_VALUE_STRING = 3,
+    NOVA_VALUE_BOOL   = 4,
+    NOVA_VALUE_INT    = 5,
+    NOVA_VALUE_FLOAT  = 6
+} NovaValueKind;
+
 typedef struct {
     uint32_t magic;      /* Magic identifier 0x4E4F5641 */
     int32_t  ref_count;  /* Active reference count */
-    uint32_t type_tag;   /* 1=LIST, 2=DICT, 3=STRING, 0=GENERIC */
+    uint32_t type_tag;   /* NovaValueKind for heap-backed values */
     uint32_t pad;        /* 16-byte alignment pad */
 } NovaARCHeader;
+
+SYSCALL void *_nova_arc_alloc(unsigned int size, uint32_t type_tag);
+SYSCALL void *_nova_value_retain(void *ptr);
+SYSCALL void _nova_dec_ref(void *ptr);
+
+/* Internal ABI probe. It is intentionally limited to heap-backed values:
+ * immediate integers and booleans do not carry a pointer header yet. */
+SYSCALL int _nova_value_kind(void *ptr) {
+    NovaARCHeader *hdr;
+    if (!ptr) return NOVA_VALUE_NONE;
+    /* Immediate Nova scalars are passed through pointer-shaped ABI slots. */
+    if ((uintptr_t)ptr < 4096u) return NOVA_VALUE_NONE;
+    hdr = ((NovaARCHeader*)ptr) - 1;
+    if (hdr->magic != NOVA_ARC_MAGIC) return NOVA_VALUE_NONE;
+    return (int)hdr->type_tag;
+}
+
+static void *_nova_box_alloc(uint32_t kind, size_t size) {
+    return _nova_arc_alloc((unsigned int)size, kind);
+}
+
+SYSCALL void *_value_box_none(void) {
+    return _nova_box_alloc(NOVA_VALUE_NONE, sizeof(intptr_t));
+}
+
+SYSCALL void *_value_box_string(const char *value) {
+    size_t length;
+    char *boxed;
+    if (!value) value = "";
+    length = strlen(value) + 1;
+    boxed = (char*)_nova_box_alloc(NOVA_VALUE_STRING, length);
+    if (boxed) strcpy(boxed, value);
+    return boxed;
+}
+
+SYSCALL void *_value_box_list(void *value) {
+    if (_nova_value_kind(value) != NOVA_VALUE_LIST) return 0;
+    return _nova_value_retain(value);
+}
+
+SYSCALL void *_value_box_dict(void *value) {
+    if (_nova_value_kind(value) != NOVA_VALUE_DICT) return 0;
+    return _nova_value_retain(value);
+}
+
+SYSCALL void *_value_box_bool(int value) {
+    intptr_t *boxed = (intptr_t*)_nova_box_alloc(NOVA_VALUE_BOOL, sizeof(intptr_t));
+    if (boxed) *boxed = value ? 1 : 0;
+    return boxed;
+}
+
+SYSCALL void *_value_box_int(long long value) {
+    intptr_t *boxed = (intptr_t*)_nova_box_alloc(NOVA_VALUE_INT, sizeof(intptr_t));
+    if (boxed) *boxed = (intptr_t)value;
+    return boxed;
+}
+
+SYSCALL void *_value_box_float(double value) {
+    double *boxed = (double*)_nova_box_alloc(NOVA_VALUE_FLOAT, sizeof(double));
+    if (boxed) *boxed = value;
+    return boxed;
+}
+
+SYSCALL int _value_unbox_bool(void *ptr) {
+    if (_nova_value_kind(ptr) != NOVA_VALUE_BOOL) return 0;
+    return *(intptr_t*)ptr ? 1 : 0;
+}
+
+SYSCALL long long _value_unbox_int(void *ptr) {
+    if (_nova_value_kind(ptr) != NOVA_VALUE_INT) return 0;
+    return (long long)*(intptr_t*)ptr;
+}
+
+SYSCALL double _value_unbox_float(void *ptr) {
+    if (_nova_value_kind(ptr) != NOVA_VALUE_FLOAT) return 0.0;
+    return *(double*)ptr;
+}
+
+SYSCALL const char *_value_unbox_string(void *ptr) {
+    if (_nova_value_kind(ptr) != NOVA_VALUE_STRING) return "";
+    return (const char*)ptr;
+}
+
 
 SYSCALL void *_nova_arc_alloc(unsigned int size, uint32_t type_tag) {
     unsigned int total_size = size + (unsigned int)sizeof(NovaARCHeader);
@@ -1261,10 +1417,10 @@ SYSCALL void *dict_items(void *d) {
     int cap = *(int*)((char*)d + 4);
     DictEntry *entries = _dict_entries(d);
     int n = _dc(d);
-    void *list = malloc(16);
+    void *list = _nova_arc_alloc(16, NOVA_VALUE_LIST);
     if (!list) return 0;
     void *data = malloc((size_t)(n ? n : 1) * 2 * sizeof(intptr_t));
-    if (!data) { free(list); return 0; }
+    if (!data) { _nova_dec_ref(list); return 0; }
     *(int*)list = n * 2;
     *(int*)((char*)list + 4) = n * 2;
     *(intptr_t*)((char*)list + 8) = (intptr_t)data;
@@ -1292,6 +1448,178 @@ SYSCALL void _dict_remove(void *d, const char *k) { dict_remove(d, k); }
 SYSCALL void *_dict_keys(void *d) { return dict_keys(d); }
 SYSCALL void *_dict_values(void *d) { return dict_values(d); }
 SYSCALL void *_dict_items(void *d) { return dict_items(d); }
+
+typedef struct {
+    char *data;
+    size_t length;
+    size_t capacity;
+} NovaJsonBuffer;
+
+static int _json_put(NovaJsonBuffer *out, const char *text) {
+    size_t size = strlen(text);
+    if (out->length + size + 1 > out->capacity) {
+        size_t capacity = out->capacity ? out->capacity : 32;
+        while (capacity < out->length + size + 1) capacity *= 2;
+        char *replacement = (char*)DICT_MALLOC(capacity);
+        if (!replacement) return 0;
+        if (out->data) {
+            strcpy(replacement, out->data);
+            DICT_FREE(out->data);
+        } else {
+            replacement[0] = '\0';
+        }
+        out->data = replacement;
+        out->capacity = capacity;
+    }
+    strcpy(out->data + out->length, text);
+    out->length += size;
+    return 1;
+}
+
+static int _json_put_int(NovaJsonBuffer *out, intptr_t value) {
+    char digits[32];
+    int end = 31;
+    int negative = value < 0;
+    uint64_t magnitude = negative ? (uint64_t)(-(value + 1)) + 1 : (uint64_t)value;
+    digits[end] = '\0';
+    do {
+        digits[--end] = (char)('0' + (magnitude % 10));
+        magnitude /= 10;
+    } while (magnitude);
+    if (negative) digits[--end] = '-';
+    return _json_put(out, digits + end);
+}
+
+static int _json_put_string(NovaJsonBuffer *out, const char *value) {
+    const unsigned char *p = (const unsigned char*)(value ? value : "");
+    if (!_json_put(out, "\"")) return 0;
+    while (*p) {
+        if (*p == '"' || *p == '\\') {
+            char escaped[2] = {'\\', (char)*p};
+            escaped[1] = '\0';
+            if (!_json_put(out, escaped)) return 0;
+        } else if (*p == '\n') {
+            if (!_json_put(out, "\\n")) return 0;
+        } else if (*p == '\r') {
+            if (!_json_put(out, "\\r")) return 0;
+        } else if (*p == '\t') {
+            if (!_json_put(out, "\\t")) return 0;
+        } else {
+            char one[2] = {(char)*p, '\0'};
+            if (!_json_put(out, one)) return 0;
+        }
+        p++;
+    }
+    return _json_put(out, "\"");
+}
+
+static int _nova_json_emit(void *value, NovaJsonBuffer *out) {
+    int kind = _nova_value_kind(value);
+    if (kind == NOVA_VALUE_NONE) {
+        if ((uintptr_t)value >= 4096u &&
+            ((NovaARCHeader*)value - 1)->magic == NOVA_ARC_MAGIC) {
+            return _json_put(out, "null");
+        }
+        if ((uintptr_t)value < 4096u) return _json_put_int(out, (intptr_t)value);
+        return _json_put_string(out, (const char*)value);
+    }
+    if (kind == NOVA_VALUE_STRING) return _json_put_string(out, (const char*)value);
+    if (kind == NOVA_VALUE_BOOL) return _json_put(out, *(intptr_t*)value ? "true" : "false");
+    if (kind == NOVA_VALUE_INT) return _json_put_int(out, *(intptr_t*)value);
+    if (kind == NOVA_VALUE_LIST) {
+        int count = *(int*)value;
+        intptr_t *data = (intptr_t*)(*(intptr_t*)((char*)value + 8));
+        if (!_json_put(out, "[")) return 0;
+        for (int i = 0; i < count; i++) {
+            if (i && !_json_put(out, ",")) return 0;
+            if (!_nova_json_emit((void*)data[i], out)) return 0;
+        }
+        return _json_put(out, "]");
+    }
+    if (kind == NOVA_VALUE_DICT) {
+        int cap = *(int*)((char*)value + 4);
+        DictEntry *entries = _dict_entries(value);
+        int emitted = 0;
+        if (!_json_put(out, "{")) return 0;
+        for (int i = 0; i < cap; i++) {
+            if (IS_OCCUPIED(&entries[i])) {
+                if (emitted++ && !_json_put(out, ",")) return 0;
+                if (!_json_put_string(out, entries[i].key) ||
+                    !_json_put(out, ":") ||
+                    !_nova_json_emit((void*)entries[i].value, out)) return 0;
+            }
+        }
+        return _json_put(out, "}");
+    }
+    return _json_put(out, "null");
+}
+
+SYSCALL char *_nova_json_stringify(void *value) {
+    NovaJsonBuffer out = {0, 0, 0};
+    if (!_nova_json_emit(value, &out)) {
+        if (out.data) DICT_FREE(out.data);
+        return 0;
+    }
+    return out.data;
+}
+
+SYSCALL int _nova_value_list_count(void *list) {
+    if (_nova_value_kind(list) != NOVA_VALUE_LIST) return 0;
+    return *(int*)list;
+}
+
+SYSCALL intptr_t _nova_value_list_item(void *list, int index) {
+    int count;
+    intptr_t *data;
+    if (_nova_value_kind(list) != NOVA_VALUE_LIST) return 0;
+    count = *(int*)list;
+    if (index < 0 || index >= count) return 0;
+    data = (intptr_t*)(*(intptr_t*)((char*)list + 8));
+    return data ? data[index] : 0;
+}
+
+SYSCALL int _nova_value_dict_count(void *dict) {
+    if (_nova_value_kind(dict) != NOVA_VALUE_DICT) return 0;
+    return _dc(dict);
+}
+
+SYSCALL void *_nova_value_retain(void *ptr) {
+    if (!ptr || _nova_value_kind(ptr) == NOVA_VALUE_NONE) return 0;
+    _nova_inc_ref(ptr);
+    return ptr;
+}
+
+SYSCALL void _nova_value_release(void *ptr) {
+    if (!ptr || _nova_value_kind(ptr) == NOVA_VALUE_NONE) return;
+    _nova_dec_ref(ptr);
+}
+
+SYSCALL int _nova_value_is_list(void *ptr) {
+    return _nova_value_kind(ptr) == NOVA_VALUE_LIST ? 1 : 0;
+}
+
+SYSCALL int _nova_value_is_dict(void *ptr) {
+    return _nova_value_kind(ptr) == NOVA_VALUE_DICT ? 1 : 0;
+}
+
+SYSCALL int _nova_value_is_string(void *ptr) {
+    return _nova_value_kind(ptr) == NOVA_VALUE_STRING ? 1 : 0;
+}
+
+SYSCALL void *_nova_value_dict_keys(void *dict) {
+    if (_nova_value_kind(dict) != NOVA_VALUE_DICT) return 0;
+    return dict_keys(dict);
+}
+
+SYSCALL void *_nova_value_dict_values(void *dict) {
+    if (_nova_value_kind(dict) != NOVA_VALUE_DICT) return 0;
+    return dict_values(dict);
+}
+
+SYSCALL void *_nova_value_dict_items(void *dict) {
+    if (_nova_value_kind(dict) != NOVA_VALUE_DICT) return 0;
+    return dict_items(dict);
+}
 
 /* ===== Pointer/alloc bridge helpers ===== */
 SYSCALL void *_list_wrap(void *ptr, intptr_t count) {
@@ -1372,10 +1700,48 @@ SYSCALL void *_sys_get_args_c(void) {
 }
 #endif
 
+#if defined(LINUX_WRAP) || defined(MACOS)
+SYSCALL const char *_sys_env_get_c(const char *name) {
+    const char *value = getenv(name);
+    return value ? value : "";
+}
+SYSCALL int _sys_env_set_c(const char *name, const char *value) {
+    return setenv(name, value, 1) == 0 ? 1 : 0;
+}
+SYSCALL int _sys_process_run_c(void *args) {
+    int count;
+    intptr_t *values;
+    char **argv;
+    pid_t child;
+    int status;
+    int i;
+    if (!args) return -1;
+    count = *(int*)args;
+    values = (intptr_t*)(*(intptr_t*)((char*)args + 8));
+    if (count <= 0) return -1;
+    argv = (char**)malloc((size_t)(count + 1) * sizeof(char*));
+    if (!argv) return -1;
+    for (i = 0; i < count; i++) argv[i] = (char*)values[i];
+    argv[count] = NULL;
+    child = fork();
+    if (child < 0) { free(argv); return -1; }
+    if (child == 0) {
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+    if (waitpid(child, &status, 0) < 0) { free(argv); return -1; }
+    free(argv);
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return -1;
+}
+#endif
+
 /* ==================== File read + get_args for Linux/macOS (no Win32 API) ==================== */
 #if defined(LINUX_WRAP) || defined(MACOS)
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/wait.h>
 #include <sys/mman.h>
 
 SYSCALL char *_nova_read_file(int fd) {
@@ -1409,6 +1775,43 @@ SYSCALL long long _sys_open_c(const char *path, const char *mode) {
     }
     if (fd < 0) return 0;
     return fd;
+}
+
+SYSCALL int _sys_mkdir_c(const char *path) {
+    if (!path) return 0;
+    return mkdir(path, 0777) == 0 ? 1 : 0;
+}
+SYSCALL int _sys_delete_c(const char *path) {
+    if (!path) return 0;
+    return remove(path) == 0 ? 1 : 0;
+}
+SYSCALL int _sys_copy_c(const char *source, const char *destination) {
+    FILE *input;
+    FILE *output;
+    char buffer[8192];
+    size_t count;
+    if (!source || !destination || strcmp(source, destination) == 0) return 0;
+    input = fopen(source, "rb");
+    if (!input) return 0;
+    output = fopen(destination, "wb");
+    if (!output) { fclose(input); return 0; }
+    while ((count = fread(buffer, 1, sizeof(buffer), input)) > 0) {
+        if (fwrite(buffer, 1, count, output) != count) {
+            fclose(input);
+            fclose(output);
+            remove(destination);
+            return 0;
+        }
+    }
+    if (ferror(input) || fclose(input) != 0 || fclose(output) != 0) {
+        remove(destination);
+        return 0;
+    }
+    return 1;
+}
+SYSCALL int _sys_move_c(const char *source, const char *destination) {
+    if (!source || !destination) return 0;
+    return rename(source, destination) == 0 ? 1 : 0;
 }
 
 SYSCALL void _sys_close_c(long long fd) {
@@ -1708,3 +2111,429 @@ SYSCALL long long _call(const char *name, long long *args, long long num_args) {
     (void)name; (void)args; (void)num_args;
     return 0;
 }
+
+/* ========================================================================= */
+/* Native GUI & 2D Canvas Engine (Win32 GDI Double-Buffered)                 */
+/* ========================================================================= */
+#if defined(_WIN32)
+
+/* DPI-aware rendering support */
+#ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+#define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((HANDLE)-4)
+#endif
+typedef BOOL (WINAPI *PFN_SetProcessDpiAwarenessContext)(HANDLE);
+typedef UINT (WINAPI *PFN_GetDpiForWindow)(HWND);
+
+static HWND   g_gui_hwnd          = NULL;
+static HDC    g_gui_mem_dc        = NULL;
+static HBITMAP g_gui_mem_bm       = NULL;
+static HBITMAP g_gui_old_bm       = NULL;
+static int    g_gui_win_w         = 0;  /* logical width  (Nova coordinate space) */
+static int    g_gui_win_h         = 0;  /* logical height (Nova coordinate space) */
+static int    g_gui_phys_w        = 0;  /* physical backbuffer width  (DPI-scaled) */
+static int    g_gui_phys_h        = 0;  /* physical backbuffer height (DPI-scaled) */
+static float  g_gui_dpi_scale     = 1.0f; /* physical / logical pixel ratio        */
+static int    g_gui_mouse_x       = 0;
+static int    g_gui_mouse_y       = 0;
+static int    g_gui_mouse_down    = 0;
+static int    g_gui_mouse_clicked = 0;
+static int    g_gui_is_closed     = 0;
+
+static void _gui_update_mouse_position(HWND hwnd) {
+    POINT point;
+    if (!GetCursorPos(&point) || !ScreenToClient(hwnd, &point)) return;
+    g_gui_mouse_x = (int)(point.x / g_gui_dpi_scale);
+    g_gui_mouse_y = (int)(point.y / g_gui_dpi_scale);
+}
+
+/* Rebuild the off-screen DC at the current physical pixel size */
+static void _gui_rebuild_backbuffer(int phys_w, int phys_h) {
+    if (phys_w <= 0 || phys_h <= 0) return;
+    HDC screen_dc = GetDC(g_gui_hwnd);
+    HBITMAP new_bm = CreateCompatibleBitmap(screen_dc, phys_w, phys_h);
+    ReleaseDC(g_gui_hwnd, screen_dc);
+    if (!new_bm) return;
+    if (g_gui_mem_dc) {
+        HBITMAP previous = (HBITMAP)SelectObject(g_gui_mem_dc, new_bm);
+        if (!g_gui_old_bm) g_gui_old_bm = previous;
+    }
+    if (g_gui_mem_bm) DeleteObject(g_gui_mem_bm);
+    g_gui_mem_bm  = new_bm;
+    g_gui_phys_w  = phys_w;
+    g_gui_phys_h  = phys_h;
+    /* Enable GDI font smoothing on this DC */
+    SetStretchBltMode(g_gui_mem_dc, HALFTONE);
+}
+
+/* Auto-incrementing click ID — lets Nova's new btn() API avoid manual integer IDs */
+static int g_gui_next_click_id = 0;
+SYSCALL int STR_PFX(gui_next_click_id)(void) {
+    g_gui_next_click_id += 1;
+    return g_gui_next_click_id;
+}
+
+static LRESULT CALLBACK _NovaWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+        case WM_MOUSEMOVE:
+            /* lParam is in physical pixels when DPI-aware; convert to logical so
+               Nova's hit-test (which uses logical widget bounds) stays in sync. */
+            g_gui_mouse_x = (int)((short)LOWORD(lParam) / g_gui_dpi_scale);
+            g_gui_mouse_y = (int)((short)HIWORD(lParam) / g_gui_dpi_scale);
+            return 0;
+        case WM_LBUTTONDOWN:
+            _gui_update_mouse_position(hwnd);
+            g_gui_mouse_down = 1;
+            return 0;
+        case WM_LBUTTONUP:
+            _gui_update_mouse_position(hwnd);
+            g_gui_mouse_down = 0;
+            g_gui_mouse_clicked = 1;
+            return 0;
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+            if (g_gui_mem_dc && g_gui_phys_w > 0) {
+                /* Blit the full-resolution backbuffer directly — no stretch needed
+                   because the window client area is already the physical pixel size. */
+                BitBlt(hdc, 0, 0, g_gui_phys_w, g_gui_phys_h,
+                       g_gui_mem_dc, 0, 0, SRCCOPY);
+            }
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+        case WM_SIZE: {
+            /* lParam carries physical pixel size when DPI-aware */
+            int new_phys_w = LOWORD(lParam);
+            int new_phys_h = HIWORD(lParam);
+            if (new_phys_w > 0 && new_phys_h > 0) {
+                g_gui_win_w = (int)(new_phys_w / g_gui_dpi_scale);
+                g_gui_win_h = (int)(new_phys_h / g_gui_dpi_scale);
+                if (g_gui_mem_dc)
+                    _gui_rebuild_backbuffer(new_phys_w, new_phys_h);
+            }
+            return 0;
+        }
+        case WM_DPICHANGED: {
+            /* Monitor DPI changed (user moved window / display settings changed) */
+            UINT new_dpi = HIWORD(wParam);
+            g_gui_dpi_scale = new_dpi / 96.0f;
+            RECT *r = (RECT *)lParam;
+            SetWindowPos(hwnd, NULL,
+                r->left, r->top,
+                r->right - r->left, r->bottom - r->top,
+                SWP_NOZORDER | SWP_NOACTIVATE);
+            return 0;
+        }
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_DESTROY:
+            g_gui_is_closed = 1;
+            PostQuitMessage(0);
+            return 0;
+    }
+    return DefWindowProcA(hwnd, msg, wParam, lParam);
+}
+
+static COLORREF _hex_to_rgb(int hex) {
+    int r = (hex >> 16) & 0xFF;
+    int g = (hex >> 8) & 0xFF;
+    int b = hex & 0xFF;
+    return RGB(r, g, b);
+}
+
+SYSCALL int STR_PFX(gui_init_window)(const char *title, int width, int height) {
+    /* --- Step 1: Enable Per-Monitor DPI Awareness v2 (Windows 10 1703+) ---
+       This must happen before any HWND or metric query. We load dynamically
+       so the binary still runs on older Windows without a hard import error. */
+    {
+        HMODULE hUser = GetModuleHandleA("user32.dll");
+        if (hUser) {
+            PFN_SetProcessDpiAwarenessContext fn =
+                (PFN_SetProcessDpiAwarenessContext)
+                GetProcAddress(hUser, "SetProcessDpiAwarenessContext");
+            if (fn) fn(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        }
+    }
+
+    HINSTANCE hInstance = GetModuleHandleA(NULL);
+    WNDCLASSEXA wc;
+    memset(&wc, 0, sizeof(wc));
+    wc.cbSize        = sizeof(WNDCLASSEXA);
+    wc.style         = CS_HREDRAW | CS_VREDRAW;
+    wc.lpfnWndProc   = _NovaWndProc;
+    wc.hInstance     = hInstance;
+    wc.hCursor       = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
+    wc.lpszClassName = "NovaWindowClass";
+    RegisterClassExA(&wc);
+
+    /* --- Step 2: Detect DPI of the primary monitor --- */
+    HDC ref_dc = GetDC(NULL);
+    int raw_dpi = GetDeviceCaps(ref_dc, LOGPIXELSX);
+    ReleaseDC(NULL, ref_dc);
+    if (raw_dpi < 96) raw_dpi = 96;
+    g_gui_dpi_scale = raw_dpi / 96.0f;
+
+    /* --- Step 3: Compute physical pixel dimensions --- */
+    int phys_w = (int)(width  * g_gui_dpi_scale);
+    int phys_h = (int)(height * g_gui_dpi_scale);
+
+    g_gui_win_w         = width;   /* logical */
+    g_gui_win_h         = height;  /* logical */
+    g_gui_is_closed     = 0;
+    g_gui_mouse_clicked = 0;
+    g_gui_mouse_down    = 0;
+    g_gui_old_bm        = NULL;
+
+    /* --- Step 4: Size the OS window at physical pixels --- */
+    RECT rc = {0, 0, phys_w, phys_h};
+    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+    int frame_w = rc.right  - rc.left;
+    int frame_h = rc.bottom - rc.top;
+
+    int screen_w = GetSystemMetrics(SM_CXSCREEN);
+    int screen_h = GetSystemMetrics(SM_CYSCREEN);
+    int posX = (screen_w - frame_w) / 2;
+    int posY = (screen_h - frame_h) / 2;
+    if (posX < 0) posX = 0;
+    if (posY < 0) posY = 0;
+
+    g_gui_hwnd = CreateWindowExA(
+        0,
+        "NovaWindowClass",
+        title ? title : "Nova Application",
+        WS_OVERLAPPEDWINDOW,
+        posX, posY, frame_w, frame_h,
+        NULL, NULL, hInstance, NULL
+    );
+    if (!g_gui_hwnd) return 0;
+
+    /* --- Step 5: Create off-screen DC at the physical resolution --- */
+    g_gui_mem_dc  = CreateCompatibleDC(NULL);
+    if (!g_gui_mem_dc) {
+        DestroyWindow(g_gui_hwnd);
+        g_gui_hwnd = NULL;
+        return 0;
+    }
+    _gui_rebuild_backbuffer(phys_w, phys_h);
+    if (!g_gui_mem_bm) {
+        DeleteDC(g_gui_mem_dc);
+        g_gui_mem_dc = NULL;
+        DestroyWindow(g_gui_hwnd);
+        g_gui_hwnd = NULL;
+        return 0;
+    }
+
+    /* Enable ClearType-quality text on the memory DC */
+    UINT ct_flags = FE_FONTSMOOTHINGCLEARTYPE;
+    SystemParametersInfoA(SPI_SETFONTSMOOTHING,    TRUE,  NULL, 0);
+    SystemParametersInfoA(SPI_SETFONTSMOOTHINGTYPE, 0, (PVOID)(ULONG_PTR)ct_flags, 0);
+
+    ShowWindow(g_gui_hwnd, SW_SHOW);
+    UpdateWindow(g_gui_hwnd);
+    return 1;
+}
+
+SYSCALL int STR_PFX(gui_poll_events)(void) {
+    if (g_gui_is_closed || !g_gui_hwnd) return -1;
+    g_gui_mouse_clicked = 0;
+
+    MSG msg;
+    while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
+        if (msg.message == WM_QUIT) {
+            g_gui_is_closed = 1;
+            return -1;
+        }
+        TranslateMessage(&msg);
+        DispatchMessageA(&msg);
+    }
+    if (g_gui_is_closed) return -1;
+    return g_gui_mouse_clicked ? 2 : 1;
+}
+
+SYSCALL int STR_PFX(gui_get_mouse_x)(void) { return g_gui_mouse_x; }
+SYSCALL int STR_PFX(gui_get_mouse_y)(void) { return g_gui_mouse_y; }
+SYSCALL int STR_PFX(gui_get_mouse_down)(void) { return g_gui_mouse_down; }
+SYSCALL int STR_PFX(gui_get_mouse_clicked)(void) { return g_gui_mouse_clicked; }
+
+SYSCALL void STR_PFX(gui_clear)(int color_hex) {
+    if (!g_gui_mem_dc) return;
+    /* Clear at physical resolution */
+    RECT r = {0, 0, g_gui_phys_w, g_gui_phys_h};
+    HBRUSH br = CreateSolidBrush(_hex_to_rgb(color_hex));
+    FillRect(g_gui_mem_dc, &r, br);
+    DeleteObject(br);
+}
+
+SYSCALL void STR_PFX(gui_draw_rect)(int x, int y, int w, int h, int color_hex, int radius) {
+    if (!g_gui_mem_dc) return;
+    /* Scale logical coords → physical pixels */
+    int px = (int)(x * g_gui_dpi_scale);
+    int py = (int)(y * g_gui_dpi_scale);
+    int pw = (int)(w * g_gui_dpi_scale);
+    int ph = (int)(h * g_gui_dpi_scale);
+    int pr = (int)(radius * g_gui_dpi_scale);
+    if (pw <= 0 || ph <= 0) return;
+    if (pr <= 0) {
+        RECT r = {px, py, px + pw, py + ph};
+        HBRUSH br = CreateSolidBrush(_hex_to_rgb(color_hex));
+        FillRect(g_gui_mem_dc, &r, br);
+        DeleteObject(br);
+    } else {
+        HBRUSH br  = CreateSolidBrush(_hex_to_rgb(color_hex));
+        HPEN   pen = CreatePen(PS_NULL, 0, 0);
+        HGDIOBJ old_br  = SelectObject(g_gui_mem_dc, br);
+        HGDIOBJ old_pen = SelectObject(g_gui_mem_dc, pen);
+        RoundRect(g_gui_mem_dc, px, py, px + pw, py + ph, pr * 2, pr * 2);
+        SelectObject(g_gui_mem_dc, old_br);
+        SelectObject(g_gui_mem_dc, old_pen);
+        DeleteObject(br);
+        DeleteObject(pen);
+    }
+}
+
+SYSCALL void STR_PFX(gui_draw_border)(int x, int y, int w, int h, int border_w, int color_hex) {
+    if (!g_gui_mem_dc) return;
+    int px = (int)(x * g_gui_dpi_scale);
+    int py = (int)(y * g_gui_dpi_scale);
+    int pw = (int)(w * g_gui_dpi_scale);
+    int ph = (int)(h * g_gui_dpi_scale);
+    int pbw = (int)(border_w * g_gui_dpi_scale); if (pbw < 1) pbw = 1;
+    HPEN    pen    = CreatePen(PS_SOLID, pbw, _hex_to_rgb(color_hex));
+    HGDIOBJ old_pen = SelectObject(g_gui_mem_dc, pen);
+    HGDIOBJ old_br  = SelectObject(g_gui_mem_dc, GetStockObject(NULL_BRUSH));
+    Rectangle(g_gui_mem_dc, px, py, px + pw, py + ph);
+    SelectObject(g_gui_mem_dc, old_pen);
+    SelectObject(g_gui_mem_dc, old_br);
+    DeleteObject(pen);
+}
+
+SYSCALL void STR_PFX(gui_draw_text)(const char *text, int x, int y, int font_size, int color_hex, int font_weight) {
+    if (!g_gui_mem_dc || !text) return;
+    /* Scale logical → physical */
+    int px        = (int)(x         * g_gui_dpi_scale);
+    int py        = (int)(y         * g_gui_dpi_scale);
+    int phys_size = (int)(font_size * g_gui_dpi_scale);
+    if (phys_size < 1) phys_size = 1;
+
+    SetBkMode(g_gui_mem_dc, TRANSPARENT);
+    SetTextColor(g_gui_mem_dc, _hex_to_rgb(color_hex));
+
+    int weight = (font_weight > 0) ? FW_BOLD : FW_NORMAL;
+    HFONT font = CreateFontA(
+        -phys_size, 0, 0, 0,
+        weight, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_TT_PRECIS,
+        CLIP_DEFAULT_PRECIS, CLEARTYPE_NATURAL_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE,
+        "Segoe UI"
+    );
+
+    HGDIOBJ old_font = SelectObject(g_gui_mem_dc, font);
+    RECT rc = {px, py, g_gui_phys_w, g_gui_phys_h};
+    DrawTextA(g_gui_mem_dc, text, -1, &rc, DT_LEFT | DT_TOP | DT_NOCLIP);
+    SelectObject(g_gui_mem_dc, old_font);
+    DeleteObject(font);
+}
+
+SYSCALL void STR_PFX(gui_present)(void) {
+    if (!g_gui_hwnd || !g_gui_mem_dc || g_gui_phys_w <= 0) return;
+    HDC screen_dc = GetDC(g_gui_hwnd);
+    /* Direct 1:1 copy — no scaling, we drew at native resolution */
+    BitBlt(screen_dc, 0, 0, g_gui_phys_w, g_gui_phys_h,
+           g_gui_mem_dc, 0, 0, SRCCOPY);
+    ReleaseDC(g_gui_hwnd, screen_dc);
+}
+
+SYSCALL void STR_PFX(gui_sleep)(int ms) {
+    Sleep(ms);
+}
+
+SYSCALL int STR_PFX(gui_save_screenshot)(const char *path) {
+    if (!g_gui_mem_dc || !g_gui_mem_bm || !path) return 0;
+    int w = g_gui_win_w;
+    int h = g_gui_win_h;
+
+    BITMAPINFO bi;
+    memset(&bi, 0, sizeof(bi));
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = -h;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+
+    int data_size = w * 4 * h;
+    void *pixels = STR_PFX(malloc)(data_size);
+    if (!pixels) return 0;
+
+    GetDIBits(g_gui_mem_dc, g_gui_mem_bm, 0, h, pixels, &bi, DIB_RGB_COLORS);
+
+    BITMAPFILEHEADER bfh;
+    memset(&bfh, 0, sizeof(bfh));
+    bfh.bfType = 0x4D42;
+    bfh.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+    bfh.bfSize = bfh.bfOffBits + data_size;
+
+    HANDLE hFile = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) {
+        STR_PFX(free)(pixels);
+        return 0;
+    }
+
+    DWORD written = 0;
+    WriteFile(hFile, &bfh, sizeof(bfh), &written, NULL);
+    WriteFile(hFile, &bi.bmiHeader, sizeof(BITMAPINFOHEADER), &written, NULL);
+    WriteFile(hFile, pixels, data_size, &written, NULL);
+    CloseHandle(hFile);
+
+    STR_PFX(free)(pixels);
+    return 1;
+}
+
+SYSCALL int STR_PFX(gui_get_window_w)(void) {
+    return g_gui_win_w;
+}
+
+SYSCALL int STR_PFX(gui_get_window_h)(void) {
+    return g_gui_win_h;
+}
+
+SYSCALL void STR_PFX(gui_close)(void) {
+    if (g_gui_mem_dc && g_gui_old_bm) {
+        SelectObject(g_gui_mem_dc, g_gui_old_bm);
+    }
+    if (g_gui_mem_bm) {
+        DeleteObject(g_gui_mem_bm);
+        g_gui_mem_bm = NULL;
+    }
+    if (g_gui_mem_dc) {
+        DeleteDC(g_gui_mem_dc);
+        g_gui_mem_dc = NULL;
+    }
+    if (g_gui_hwnd) {
+        DestroyWindow(g_gui_hwnd);
+        g_gui_hwnd = NULL;
+    }
+    g_gui_old_bm = NULL;
+    g_gui_is_closed = 1;
+}
+
+#else
+/* Non-Windows stubs */
+SYSCALL int STR_PFX(gui_init_window)(const char *title, int width, int height) { (void)title; (void)width; (void)height; return 0; }
+SYSCALL int STR_PFX(gui_poll_events)(void) { return -1; }
+SYSCALL int STR_PFX(gui_get_mouse_x)(void) { return 0; }
+SYSCALL int STR_PFX(gui_get_mouse_y)(void) { return 0; }
+SYSCALL int STR_PFX(gui_get_mouse_down)(void) { return 0; }
+SYSCALL int STR_PFX(gui_get_mouse_clicked)(void) { return 0; }
+SYSCALL int STR_PFX(gui_get_window_w)(void) { return 0; }
+SYSCALL int STR_PFX(gui_get_window_h)(void) { return 0; }
+SYSCALL void STR_PFX(gui_clear)(int color_hex) { (void)color_hex; }
+SYSCALL void STR_PFX(gui_draw_rect)(int x, int y, int w, int h, int color_hex, int radius) { (void)x; (void)y; (void)w; (void)h; (void)color_hex; (void)radius; }
+SYSCALL void STR_PFX(gui_draw_border)(int x, int y, int w, int h, int border_w, int color_hex) { (void)x; (void)y; (void)w; (void)h; (void)border_w; (void)color_hex; }
+SYSCALL void STR_PFX(gui_draw_text)(const char *text, int x, int y, int font_size, int color_hex, int font_weight) { (void)text; (void)x; (void)y; (void)font_size; (void)color_hex; (void)font_weight; }
+SYSCALL void STR_PFX(gui_present)(void) {}
+SYSCALL void STR_PFX(gui_sleep)(int ms) { (void)ms; }
+SYSCALL int STR_PFX(gui_save_screenshot)(const char *path) { (void)path; return 0; }
+SYSCALL void STR_PFX(gui_close)(void) {}
+#endif

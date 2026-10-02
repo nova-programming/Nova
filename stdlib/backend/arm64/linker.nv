@@ -706,7 +706,7 @@ def link(sections: list) -> list {
     return image
 }
 
-def link_bare(sections: list, load_addr: int) -> list {
+def link_bare(sections: list, load_addr: int, entry_name: string) -> list {
     code = sections[0]
     data_sec = sections[1]
     labels = sections[2]
@@ -720,6 +720,27 @@ def link_bare(sections: list, load_addr: int) -> list {
             sys_exit(1)
         }
         i = i + 1
+    }
+
+    if entry_name != "" {
+        found = 0
+        i = 0
+        while i < len(labels) {
+            if labels[i].name == entry_name {
+                found = 1
+                if labels[i].offset != 0 {
+                    print("ERROR: Bare-metal entry symbol must be at offset zero: " + entry_name)
+                    sys_flush()
+                    sys_exit(1)
+                }
+            }
+            i = i + 1
+        }
+        if found == 0 {
+            print("ERROR: Entry symbol not found in bare-metal mode: " + entry_name)
+            sys_flush()
+            sys_exit(1)
+        }
     }
 
     # Normalize data label offsets to be section-relative

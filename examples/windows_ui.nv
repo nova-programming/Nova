@@ -1,0 +1,410 @@
+import gui
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Windows 11 File Explorer — Nova GUI Demo
+#  Pure .nv  •  zero external assets  •  full hover & click feedback
+#
+#  Color palette (Win11 dark):
+#    #1C1C1C  title-bar          #202020  main bg
+#    #272727  toolbar/status     #2B2B2B  sidebar
+#    #2D2D2D  input fields       #3A3A3A  border / divider
+#    #0078D4  accent blue        #C42B1C  close-btn danger
+#    #FFFFFF  primary text       #9D9D9D  muted text
+#    #2F2F2F  row hover          #383838  row press
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SECTION 1 · TITLE BAR
+# ─────────────────────────────────────────────────────────────────────────────
+
+logo_badge = Container([
+    Text("E", properties={
+        "color": "#FFFFFF",
+        "font-size": 12,
+        "font-weight": "bold"
+    })
+], properties={
+    "background-color": "#0078D4",
+    "border-radius": 3,
+    "padding-left": 7,
+    "padding-right": 7,
+    "padding-top": 3,
+    "padding-bottom": 3
+})
+
+win_title_text = Text("File Explorer", properties={
+    "color": "#DDDDDD",
+    "font-size": 12
+})
+
+# Spacer — no explicit width so it absorbs remaining flex space,
+# pushing the window controls to the far right of the Row.
+_sp = Container([], properties={})
+
+btn_min = Button("-", 1, properties={
+    "background-color": "#1C1C1C",
+    "hover-background-color": "#3D3D3D",
+    "pressed-background-color": "#505050",
+    "color": "#FFFFFF",
+    "font-size": 12,
+    "border-radius": 0,
+    "padding-left": 18,
+    "padding-right": 18,
+    "padding-top": 9,
+    "padding-bottom": 9
+})
+
+btn_max = Button("[ ]", 2, properties={
+    "background-color": "#1C1C1C",
+    "hover-background-color": "#3D3D3D",
+    "pressed-background-color": "#505050",
+    "color": "#FFFFFF",
+    "font-size": 12,
+    "border-radius": 0,
+    "padding-left": 14,
+    "padding-right": 14,
+    "padding-top": 9,
+    "padding-bottom": 9
+})
+
+btn_close = Button("X", 3, properties={
+    "background-color": "#1C1C1C",
+    "hover-background-color": "#C42B1C",
+    "pressed-background-color": "#B22318",
+    "color": "#FFFFFF",
+    "font-size": 12,
+    "border-radius": 0,
+    "padding-left": 18,
+    "padding-right": 18,
+    "padding-top": 9,
+    "padding-bottom": 9
+})
+
+# Fixed width makes win_ctrl a "fixed" child so the flex spacer
+# pushes it flush to the right edge.
+win_ctrl = Row([btn_min, btn_max, btn_close], properties={
+    "gap": 0,
+    "width": 154
+})
+
+title_bar = Row([logo_badge, win_title_text, _sp, win_ctrl], properties={
+    "background-color": "#1C1C1C",
+    "align-items": "center",
+    "padding-left": 12,
+    "padding-right": 0,
+    "padding-top": 4,
+    "padding-bottom": 4,
+    "gap": 10
+})
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SECTION 2 · RIBBON COMMAND BAR
+# ─────────────────────────────────────────────────────────────────────────────
+
+btn_new    = Button("+ New",   4, properties={"background-color": "#272727", "hover-background-color": "#3C3C3C", "pressed-background-color": "#484848", "color": "#FFFFFF", "font-size": 12, "border-radius": 4, "padding-left": 14, "padding-right": 14, "padding-top": 5, "padding-bottom": 5})
+btn_cut    = Button("Cut",     5, properties={"background-color": "#272727", "hover-background-color": "#3C3C3C", "pressed-background-color": "#484848", "color": "#FFFFFF", "font-size": 12, "border-radius": 4, "padding-left": 10, "padding-right": 10, "padding-top": 5, "padding-bottom": 5})
+btn_copy   = Button("Copy",    6, properties={"background-color": "#272727", "hover-background-color": "#3C3C3C", "pressed-background-color": "#484848", "color": "#FFFFFF", "font-size": 12, "border-radius": 4, "padding-left": 10, "padding-right": 10, "padding-top": 5, "padding-bottom": 5})
+btn_paste  = Button("Paste",   7, properties={"background-color": "#272727", "hover-background-color": "#3C3C3C", "pressed-background-color": "#484848", "color": "#FFFFFF", "font-size": 12, "border-radius": 4, "padding-left": 10, "padding-right": 10, "padding-top": 5, "padding-bottom": 5})
+btn_rename = Button("Rename",  8, properties={"background-color": "#272727", "hover-background-color": "#3C3C3C", "pressed-background-color": "#484848", "color": "#FFFFFF", "font-size": 12, "border-radius": 4, "padding-left": 10, "padding-right": 10, "padding-top": 5, "padding-bottom": 5})
+btn_delete = Button("Delete",  9, properties={"background-color": "#272727", "hover-background-color": "#3C2020", "pressed-background-color": "#4A1818", "color": "#FF9580", "font-size": 12, "border-radius": 4, "padding-left": 10, "padding-right": 10, "padding-top": 5, "padding-bottom": 5})
+btn_sort   = Button("Sort",   10, properties={"background-color": "#272727", "hover-background-color": "#3C3C3C", "pressed-background-color": "#484848", "color": "#FFFFFF", "font-size": 12, "border-radius": 4, "padding-left": 10, "padding-right": 10, "padding-top": 5, "padding-bottom": 5})
+
+cmd_bar = Row([btn_new, btn_cut, btn_copy, btn_paste, btn_rename, btn_delete, btn_sort], properties={
+    "background-color": "#272727",
+    "padding-left": 10,
+    "padding-right": 10,
+    "padding-top": 6,
+    "padding-bottom": 6,
+    "gap": 3,
+    "border-width": 1,
+    "border-color": "#3A3A3A"
+})
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SECTION 3 · NAVIGATION BAR  (back / forward / up + address + search)
+# ─────────────────────────────────────────────────────────────────────────────
+
+btn_back = Button("<",  11, properties={"background-color": "#202020", "hover-background-color": "#333333", "pressed-background-color": "#3D3D3D", "color": "#FFFFFF",  "font-size": 13, "border-radius": 4, "padding-left": 11, "padding-right": 11, "padding-top": 5, "padding-bottom": 5})
+btn_fwd  = Button(">",  12, properties={"background-color": "#202020", "hover-background-color": "#333333", "pressed-background-color": "#3D3D3D", "color": "#505050",  "font-size": 13, "border-radius": 4, "padding-left": 11, "padding-right": 11, "padding-top": 5, "padding-bottom": 5})
+btn_up   = Button("^",  13, properties={"background-color": "#202020", "hover-background-color": "#333333", "pressed-background-color": "#3D3D3D", "color": "#FFFFFF",  "font-size": 13, "border-radius": 4, "padding-left": 11, "padding-right": 11, "padding-top": 5, "padding-bottom": 5})
+
+nav_cluster = Row([btn_back, btn_fwd, btn_up], properties={"gap": 2})
+
+# Address bar — clicking it would eventually focus an editable field;
+# for now it's a read-only styled container.
+path_label = Text("This PC  >  Documents", properties={"color": "#FFFFFF", "font-size": 12})
+addr_bar = Container([path_label], properties={
+    "background-color": "#2D2D2D",
+    "border-radius": 4,
+    "border-width": 1,
+    "border-color": "#3A3A3A",
+    "padding-left": 14,
+    "padding-right": 14,
+    "padding-top": 6,
+    "padding-bottom": 6
+})
+
+search_box = Container([
+    Text("Search Documents", properties={"color": "#6A6A6A", "font-size": 12})
+], properties={
+    "background-color": "#2D2D2D",
+    "border-radius": 4,
+    "border-width": 1,
+    "border-color": "#3A3A3A",
+    "padding-left": 14,
+    "padding-right": 14,
+    "padding-top": 6,
+    "padding-bottom": 6,
+    "width": 200
+})
+
+nav_bar = Row([nav_cluster, addr_bar, search_box], properties={
+    "background-color": "#202020",
+    "align-items": "center",
+    "padding-left": 10,
+    "padding-right": 10,
+    "padding-top": 7,
+    "padding-bottom": 7,
+    "gap": 8
+})
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SECTION 4 · SIDEBAR
+# ─────────────────────────────────────────────────────────────────────────────
+
+qa_hdr = Text("Quick access", properties={"color": "#9D9D9D", "font-size": 11, "font-weight": "bold"})
+
+# Sidebar items — regular Buttons styled to look like nav items
+# Desktop is "selected" (accent background)
+sb_desktop   = Button("  Desktop",        14, properties={"background-color": "#0078D4", "hover-background-color": "#1884D8", "pressed-background-color": "#006EC0", "color": "#FFFFFF",  "font-size": 12, "border-radius": 4, "padding-left": 10, "padding-right": 10, "padding-top": 5, "padding-bottom": 5})
+sb_downloads = Button("  Downloads",      15, properties={"background-color": "#2B2B2B", "hover-background-color": "#333333", "pressed-background-color": "#3D3D3D", "color": "#DDDDDD",  "font-size": 12, "border-radius": 4, "padding-left": 10, "padding-right": 10, "padding-top": 5, "padding-bottom": 5})
+sb_docs      = Button("  Documents",      16, properties={"background-color": "#2B2B2B", "hover-background-color": "#333333", "pressed-background-color": "#3D3D3D", "color": "#DDDDDD",  "font-size": 12, "border-radius": 4, "padding-left": 10, "padding-right": 10, "padding-top": 5, "padding-bottom": 5})
+sb_pics      = Button("  Pictures",       17, properties={"background-color": "#2B2B2B", "hover-background-color": "#333333", "pressed-background-color": "#3D3D3D", "color": "#DDDDDD",  "font-size": 12, "border-radius": 4, "padding-left": 10, "padding-right": 10, "padding-top": 5, "padding-bottom": 5})
+sb_music     = Button("  Music",          18, properties={"background-color": "#2B2B2B", "hover-background-color": "#333333", "pressed-background-color": "#3D3D3D", "color": "#DDDDDD",  "font-size": 12, "border-radius": 4, "padding-left": 10, "padding-right": 10, "padding-top": 5, "padding-bottom": 5})
+sb_videos    = Button("  Videos",         19, properties={"background-color": "#2B2B2B", "hover-background-color": "#333333", "pressed-background-color": "#3D3D3D", "color": "#DDDDDD",  "font-size": 12, "border-radius": 4, "padding-left": 10, "padding-right": 10, "padding-top": 5, "padding-bottom": 5})
+
+thispc_hdr = Text("This PC", properties={"color": "#9D9D9D", "font-size": 11, "font-weight": "bold"})
+
+sb_pc        = Button("  This PC",        20, properties={"background-color": "#2B2B2B", "hover-background-color": "#333333", "pressed-background-color": "#3D3D3D", "color": "#DDDDDD",  "font-size": 12, "border-radius": 4, "padding-left": 10, "padding-right": 10, "padding-top": 5, "padding-bottom": 5})
+sb_cdrive    = Button("  Local Disk (C:)", 21, properties={"background-color": "#2B2B2B", "hover-background-color": "#333333", "pressed-background-color": "#3D3D3D", "color": "#DDDDDD",  "font-size": 12, "border-radius": 4, "padding-left": 10, "padding-right": 10, "padding-top": 5, "padding-bottom": 5})
+sb_ddrive    = Button("  New Volume (D:)", 22, properties={"background-color": "#2B2B2B", "hover-background-color": "#333333", "pressed-background-color": "#3D3D3D", "color": "#DDDDDD",  "font-size": 12, "border-radius": 4, "padding-left": 10, "padding-right": 10, "padding-top": 5, "padding-bottom": 5})
+
+network_hdr = Text("Network", properties={"color": "#9D9D9D", "font-size": 11, "font-weight": "bold"})
+
+sb_network = Button("  DESKTOP-NOVA",    23, properties={"background-color": "#2B2B2B", "hover-background-color": "#333333", "pressed-background-color": "#3D3D3D", "color": "#DDDDDD",  "font-size": 12, "border-radius": 4, "padding-left": 10, "padding-right": 10, "padding-top": 5, "padding-bottom": 5})
+
+sidebar = Container([
+    qa_hdr,
+    sb_desktop, sb_downloads, sb_docs, sb_pics, sb_music, sb_videos,
+    thispc_hdr,
+    sb_pc, sb_cdrive, sb_ddrive,
+    network_hdr,
+    sb_network
+], properties={
+    "background-color": "#2B2B2B",
+    "padding": 8,
+    "gap": 3,
+    "width": 198,
+    "border-width": 1,
+    "border-color": "#3A3A3A"
+})
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SECTION 5 · CONTENT PANEL — Column headers + file/folder rows
+#  Each row is a Container (with hover) containing a Row of fixed-width cells.
+#  Cell widths: name=260  date=150  type=130  size=80
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Column header row
+col_name = Container([Text("Name",          properties={"color": "#9D9D9D", "font-size": 11, "font-weight": "bold"})], properties={"width": 260, "padding-left": 10})
+col_date = Container([Text("Date modified", properties={"color": "#9D9D9D", "font-size": 11, "font-weight": "bold"})], properties={"width": 150})
+col_type = Container([Text("Type",          properties={"color": "#9D9D9D", "font-size": 11, "font-weight": "bold"})], properties={"width": 130})
+col_size = Container([Text("Size",          properties={"color": "#9D9D9D", "font-size": 11, "font-weight": "bold"})], properties={"width": 80})
+
+col_header_row = Row([col_name, col_date, col_type, col_size], properties={
+    "background-color": "#202020",
+    "padding-left": 6,
+    "padding-right": 6,
+    "padding-top": 5,
+    "padding-bottom": 5,
+    "gap": 0,
+    "border-width": 1,
+    "border-color": "#3A3A3A"
+})
+
+# ── File row helper macro (inlined for each row) ─────────────────────────────
+# Row format:  icon_label  |  date  |  type  |  size
+# Container with hover-background-color gives file-select highlight.
+
+row1 = Container([
+    Row([
+        Container([Text("[ ]  Desktop",        properties={"color": "#FFFFFF", "font-size": 12})], properties={"width": 260, "padding-left": 10}),
+        Container([Text("Today, 10:32 AM",      properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 150}),
+        Container([Text("File folder",          properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 130}),
+        Container([Text("—",                    properties={"color": "#666666", "font-size": 12})], properties={"width": 80})
+    ], properties={"gap": 0, "align-items": "center"})
+], properties={"background-color": "#202020", "hover-background-color": "#2F2F2F", "pressed-background-color": "#383838", "padding-top": 5, "padding-bottom": 5})
+
+row2 = Container([
+    Row([
+        Container([Text("[ ]  Documents",       properties={"color": "#FFFFFF", "font-size": 12})], properties={"width": 260, "padding-left": 10}),
+        Container([Text("Yesterday, 3:14 PM",   properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 150}),
+        Container([Text("File folder",          properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 130}),
+        Container([Text("—",                    properties={"color": "#666666", "font-size": 12})], properties={"width": 80})
+    ], properties={"gap": 0, "align-items": "center"})
+], properties={"background-color": "#252525", "hover-background-color": "#2F2F2F", "pressed-background-color": "#383838", "padding-top": 5, "padding-bottom": 5})
+
+row3 = Container([
+    Row([
+        Container([Text("[ ]  Downloads",       properties={"color": "#FFFFFF", "font-size": 12})], properties={"width": 260, "padding-left": 10}),
+        Container([Text("Oct 1, 2026, 11:00",   properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 150}),
+        Container([Text("File folder",          properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 130}),
+        Container([Text("—",                    properties={"color": "#666666", "font-size": 12})], properties={"width": 80})
+    ], properties={"gap": 0, "align-items": "center"})
+], properties={"background-color": "#202020", "hover-background-color": "#2F2F2F", "pressed-background-color": "#383838", "padding-top": 5, "padding-bottom": 5})
+
+row4 = Container([
+    Row([
+        Container([Text("[ ]  Music",           properties={"color": "#FFFFFF", "font-size": 12})], properties={"width": 260, "padding-left": 10}),
+        Container([Text("Sep 28, 2026",         properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 150}),
+        Container([Text("File folder",          properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 130}),
+        Container([Text("—",                    properties={"color": "#666666", "font-size": 12})], properties={"width": 80})
+    ], properties={"gap": 0, "align-items": "center"})
+], properties={"background-color": "#252525", "hover-background-color": "#2F2F2F", "pressed-background-color": "#383838", "padding-top": 5, "padding-bottom": 5})
+
+row5 = Container([
+    Row([
+        Container([Text("[ ]  Pictures",        properties={"color": "#FFFFFF", "font-size": 12})], properties={"width": 260, "padding-left": 10}),
+        Container([Text("Sep 15, 2026",         properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 150}),
+        Container([Text("File folder",          properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 130}),
+        Container([Text("—",                    properties={"color": "#666666", "font-size": 12})], properties={"width": 80})
+    ], properties={"gap": 0, "align-items": "center"})
+], properties={"background-color": "#202020", "hover-background-color": "#2F2F2F", "pressed-background-color": "#383838", "padding-top": 5, "padding-bottom": 5})
+
+row6 = Container([
+    Row([
+        Container([Text("[ ]  Videos",          properties={"color": "#FFFFFF", "font-size": 12})], properties={"width": 260, "padding-left": 10}),
+        Container([Text("Aug 20, 2026",         properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 150}),
+        Container([Text("File folder",          properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 130}),
+        Container([Text("—",                    properties={"color": "#666666", "font-size": 12})], properties={"width": 80})
+    ], properties={"gap": 0, "align-items": "center"})
+], properties={"background-color": "#252525", "hover-background-color": "#2F2F2F", "pressed-background-color": "#383838", "padding-top": 5, "padding-bottom": 5})
+
+row7 = Container([
+    Row([
+        Container([Text("[W] report.docx",      properties={"color": "#89b4fa", "font-size": 12})], properties={"width": 260, "padding-left": 10}),
+        Container([Text("Oct 1, 2026",          properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 150}),
+        Container([Text("DOCX Document",        properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 130}),
+        Container([Text("128 KB",               properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 80})
+    ], properties={"gap": 0, "align-items": "center"})
+], properties={"background-color": "#202020", "hover-background-color": "#2F2F2F", "pressed-background-color": "#383838", "padding-top": 5, "padding-bottom": 5})
+
+row8 = Container([
+    Row([
+        Container([Text("[X] budget.xlsx",      properties={"color": "#a6e3a1", "font-size": 12})], properties={"width": 260, "padding-left": 10}),
+        Container([Text("Sep 30, 2026",         properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 150}),
+        Container([Text("XLSX Worksheet",       properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 130}),
+        Container([Text("84 KB",                properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 80})
+    ], properties={"gap": 0, "align-items": "center"})
+], properties={"background-color": "#252525", "hover-background-color": "#2F2F2F", "pressed-background-color": "#383838", "padding-top": 5, "padding-bottom": 5})
+
+row9 = Container([
+    Row([
+        Container([Text("[~] wallpaper.jpg",    properties={"color": "#f9e2af", "font-size": 12})], properties={"width": 260, "padding-left": 10}),
+        Container([Text("Sep 15, 2026",         properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 150}),
+        Container([Text("JPEG Image",           properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 130}),
+        Container([Text("4.1 MB",               properties={"color": "#BBBBBB", "font-size": 12})], properties={"width": 80})
+    ], properties={"gap": 0, "align-items": "center"})
+], properties={"background-color": "#202020", "hover-background-color": "#2F2F2F", "pressed-background-color": "#383838", "padding-top": 5, "padding-bottom": 5})
+
+content_area = Container([
+    col_header_row,
+    row1, row2, row3, row4, row5, row6, row7, row8, row9
+], properties={
+    "background-color": "#202020",
+    "gap": 0
+})
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SECTION 6 · MAIN AREA  (sidebar left + content right)
+# ─────────────────────────────────────────────────────────────────────────────
+
+main_area = Row([sidebar, content_area], properties={
+    "background-color": "#202020",
+    "gap": 0
+})
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SECTION 7 · STATUS BAR
+# ─────────────────────────────────────────────────────────────────────────────
+
+status_label = Text("9 items", properties={
+    "color": "#9D9D9D",
+    "font-size": 11
+})
+
+_st_spacer = Container([], properties={})
+
+# View-mode toggle — clicking cycles between Details and Grid view label
+view_mode_text = Text("Details", properties={"color": "#9D9D9D", "font-size": 11})
+
+btn_view_list = Button("=", 24, properties={
+    "background-color": "#0078D4",
+    "hover-background-color": "#1884D8",
+    "pressed-background-color": "#006EC0",
+    "color": "#FFFFFF",
+    "font-size": 12,
+    "border-radius": 3,
+    "padding-left": 8,
+    "padding-right": 8,
+    "padding-top": 3,
+    "padding-bottom": 3,
+    "action": "toggle",
+    "target": view_mode_text,
+    "state1": "Details",
+    "state2": "Large Icons"
+})
+
+btn_view_grid = Button("#", 25, properties={
+    "background-color": "#272727",
+    "hover-background-color": "#3C3C3C",
+    "pressed-background-color": "#484848",
+    "color": "#FFFFFF",
+    "font-size": 12,
+    "border-radius": 3,
+    "padding-left": 8,
+    "padding-right": 8,
+    "padding-top": 3,
+    "padding-bottom": 3
+})
+
+status_bar = Row([status_label, _st_spacer, view_mode_text, btn_view_list, btn_view_grid], properties={
+    "background-color": "#272727",
+    "align-items": "center",
+    "padding-left": 14,
+    "padding-right": 10,
+    "padding-top": 5,
+    "padding-bottom": 5,
+    "gap": 8,
+    "border-width": 1,
+    "border-color": "#3A3A3A"
+})
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SECTION 8 · ROOT + LAUNCH
+# ─────────────────────────────────────────────────────────────────────────────
+
+root = Container([
+    title_bar,
+    cmd_bar,
+    nav_bar,
+    main_area,
+    status_bar
+], properties={
+    "background-color": "#202020",
+    "gap": 0
+})
+
+gui("File Explorer", 920, 640, root, properties={
+    "background-color": "#202020"
+})

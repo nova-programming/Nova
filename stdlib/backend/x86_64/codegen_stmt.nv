@@ -397,11 +397,21 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         state.defer_nodes.append(node)
     }
     if node.kind == "Return" {
-        if node.left != 0 { compile_expr(state, node.left) }
-        emit(state, "    pop %a")
-        emit(state, "    push %a")
+        has_val = 0
+        if node.left != 0 and node.left.kind != "None" {
+            compile_expr(state, node.left)
+            emit(state, "    pop %a")
+            has_val = 1
+        } else {
+            emit(state, "    xor %a, %a")
+        }
+        if has_val == 1 {
+            emit(state, "    push %a")
+        }
         defer_emit_down_to(state, 0, debug_mode)
-        emit(state, "    pop %a")
+        if has_val == 1 {
+            emit(state, "    pop %a")
+        }
         r = len(state.used_regs) - 1
         while r >= 0 {
             emit(state, "    pop " + state.used_regs[r])

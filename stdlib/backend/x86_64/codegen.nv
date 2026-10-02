@@ -318,6 +318,17 @@ def get_prop_offset(state: CodegenState, struct_name: string, field_name: string
         off = lookup_preferred_field(state, field_name)
         if off != -1 { return off }
         if field_name == "kind" { return 0 }
+        si = 0
+        while si < len(state.struct_names) {
+            fi = 0
+            while fi < len(state.struct_fields[si]) {
+                if state.struct_fields[si][fi] == field_name {
+                    return struct_field_offset(state, fi)
+                }
+                fi = fi + 1
+            }
+            si = si + 1
+        }
         i = 0
         while i < len(state.global_field_names) {
             if state.global_field_names[i] == field_name {
@@ -358,6 +369,7 @@ def get_prop_offset(state: CodegenState, struct_name: string, field_name: string
 # --- String expression detection ---
 
 def is_string_expr(state: CodegenState, node: AstNode) -> int {
+    if node == 0 { return 0 }
     if node.kind == "String" {
         return 1
     }
@@ -383,6 +395,8 @@ def is_string_expr(state: CodegenState, node: AstNode) -> int {
         if node.val_str == "val_str" { return 1 }
         if node.val_str == "name" { return 1 }
         if node.val_str == "op" { return 1 }
+        if node.val_str == "text" { return 1 }
+        if node.val_str == "tag" { return 1 }
         return 0
     }
 
@@ -758,7 +772,11 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     while i < len(ast) {
         node = ast[i]
         if node.kind == "Function" {
-            functions.append(node)
+            if node.val_int == 2 {
+                emit(state, ".extern _" + node.val_str)
+            } else {
+                functions.append(node)
+            }
         } else {
             if node.kind == "Data" {
                 state.struct_names.append(node.val_str)

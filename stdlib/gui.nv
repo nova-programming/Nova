@@ -1,0 +1,1095 @@
+# =============================================================================
+# Nova GUI & NSS Styling Engine (stdlib/gui.nv)
+# Pure native windowing, 2D double-buffered canvas, and declarative UI
+# =============================================================================
+import system
+import nss
+
+# --- Native GDI & Win32 Runtime FFI Bindings ---
+extern def gui_init_window(title: string, width: int, height: int) -> int
+extern def gui_poll_events() -> int
+extern def gui_get_mouse_x() -> int
+extern def gui_get_mouse_y() -> int
+extern def gui_get_mouse_down() -> int
+extern def gui_get_mouse_clicked() -> int
+extern def gui_clear(color_hex: int)
+extern def gui_draw_rect(x: int, y: int, w: int, h: int, color_hex: int, radius: int)
+extern def gui_draw_border(x: int, y: int, w: int, h: int, border_w: int, color_hex: int)
+extern def gui_draw_text(text: string, x: int, y: int, font_size: int, color_hex: int, font_weight: int)
+extern def gui_present()
+extern def gui_sleep(ms: int)
+extern def gui_get_window_w() -> int
+extern def gui_get_window_h() -> int
+extern def gui_save_screenshot(path: string) -> int
+extern def gui_close()
+extern def gui_next_click_id() -> int
+
+# --- Clean CamelCase Public Primitives ---
+def getWindowWidth() -> int {
+    return gui_get_window_w()
+}
+
+def getWindowHeight() -> int {
+    return gui_get_window_h()
+}
+
+def get_window_width() -> int {
+    return gui_get_window_w()
+}
+
+def get_window_height() -> int {
+    return gui_get_window_h()
+}
+
+def saveScreenshot(path: string) -> int {
+    return gui_save_screenshot(path)
+}
+
+def get_mouseCord() -> list {
+    return [gui_get_mouse_x(), gui_get_mouse_y()]
+}
+
+def getMouseCord() -> list {
+    return get_mouseCord()
+}
+
+def drawRect(x: int, y: int, w: int, h: int, colorHex: int, radius: int) {
+    gui_draw_rect(x, y, w, h, colorHex, radius)
+}
+
+def drawBorder(x: int, y: int, w: int, h: int, borderW: int, colorHex: int) {
+    gui_draw_border(x, y, w, h, borderW, colorHex)
+}
+
+def drawText(text: string, x: int, y: int, fontSize: int, colorHex: int, isBold: int) {
+    gui_draw_text(text, x, y, fontSize, colorHex, isBold)
+}
+
+def initWindow(title: string, width: int, height: int) -> int {
+    return gui_init_window(title, width, height)
+}
+
+def pollEvents() -> int {
+    return gui_poll_events()
+}
+
+def closeWindow() {
+    gui_close()
+}
+
+def strLen(s: string) -> int {
+    return len(s)
+}
+
+# --- Color Conversion Helper ---
+def hexCharToVal(ch: string) -> int {
+    if ch == "0" { return 0 }
+    if ch == "1" { return 1 }
+    if ch == "2" { return 2 }
+    if ch == "3" { return 3 }
+    if ch == "4" { return 4 }
+    if ch == "5" { return 5 }
+    if ch == "6" { return 6 }
+    if ch == "7" { return 7 }
+    if ch == "8" { return 8 }
+    if ch == "9" { return 9 }
+    if ch == "a" or ch == "A" { return 10 }
+    if ch == "b" or ch == "B" { return 11 }
+    if ch == "c" or ch == "C" { return 12 }
+    if ch == "d" or ch == "D" { return 13 }
+    if ch == "e" or ch == "E" { return 14 }
+    if ch == "f" or ch == "F" { return 15 }
+    return 0
+}
+
+def parseColor(c: string) -> int {
+    if len(c) == 0 { return 0 }
+    start = 0
+    if c[0] == "#" { start = 1 }
+    res = 0
+    k = start
+    while k < len(c) {
+        val = hexCharToVal(c[k])
+        res = res * 16 + val
+        k = k + 1
+    }
+    return res
+}
+
+def parse_color(c: string) -> int {
+    return parseColor(c)
+}
+
+# --- Widget Data Structure ---
+data Widget {
+    tag: string
+    text: string
+    props: dict
+    children: list
+    on_click_id: int
+    pos_x: int
+    pos_y: int
+    width: int
+    height: int
+    is_hovered: int
+    is_pressed: int
+}
+
+# --- Widget Factory Functions ---
+def Text(content: string, properties: dict) -> Widget {
+    w = Widget()
+    w.tag = "text"
+    w.text = content
+    w.props = properties
+    w.children = []
+    w.on_click_id = 0
+    w.pos_x = 0
+    w.pos_y = 0
+    w.width = 0
+    w.height = 0
+    w.is_hovered = 0
+    w.is_pressed = 0
+    return w
+}
+
+def Button(label: string, click_id: int, properties: dict) -> Widget {
+    w = Widget()
+    w.tag = "button"
+    w.text = label
+    w.props = properties
+    w.children = []
+    w.on_click_id = click_id
+    w.pos_x = 0
+    w.pos_y = 0
+    w.width = 0
+    w.height = 0
+    w.is_hovered = 0
+    w.is_pressed = 0
+    return w
+}
+
+def Container(child_list: list, properties: dict) -> Widget {
+    w = Widget()
+    w.tag = "container"
+    w.text = ""
+    w.props = properties
+    w.children = child_list
+    w.on_click_id = 0
+    w.pos_x = 0
+    w.pos_y = 0
+    w.width = 0
+    w.height = 0
+    w.is_hovered = 0
+    w.is_pressed = 0
+    return w
+}
+
+def Row(child_list: list, properties: dict) -> Widget {
+    if properties.has("flex-direction") == 0 {
+        properties["flex-direction"] = "row"
+    }
+    return Container(child_list, properties)
+}
+
+def Col(child_list: list, properties: dict) -> Widget {
+    if properties.has("flex-direction") == 0 {
+        properties["flex-direction"] = "column"
+    }
+    return Container(child_list, properties)
+}
+
+
+
+# --- Window & App State ---
+data WindowApp {
+    title: string
+    width: int
+    height: int
+    props: dict
+    root: Widget
+}
+
+def window(title: string, width: int, height: int, root: Widget, properties: dict) -> WindowApp {
+    app = WindowApp()
+    app.title = title
+    app.width = width
+    app.height = height
+    app.props = properties
+    app.root = root
+    return app
+}
+
+def createWindow(title: string, width: int, height: int, properties: dict) -> WindowApp {
+    app = WindowApp()
+    app.title = title
+    app.width = width
+    app.height = height
+    app.props = properties
+    app.root = Container([], properties)
+    return app
+}
+
+def create_window(title: string, width: int, height: int, properties: dict) -> WindowApp {
+    return createWindow(title, width, height, properties)
+}
+
+# --- Layout Engine ---
+def layoutWidgetInternal(w: Widget, availX: int, availY: int, availW: int, availH: int, is_root: int) {
+    p = w.props
+
+    pad = 0
+    if p.has("padding") == 1 { pad = p.get("padding") }
+    pad_left = pad
+    pad_top = pad
+    pad_right = pad
+    pad_bottom = pad
+    if p.has("padding-left") == 1 { pad_left = p.get("padding-left") }
+    if p.has("padding-top") == 1 { pad_top = p.get("padding-top") }
+    if p.has("padding-right") == 1 { pad_right = p.get("padding-right") }
+    if p.has("padding-bottom") == 1 { pad_bottom = p.get("padding-bottom") }
+
+    gap = 0
+    if p.has("gap") == 1 { gap = p.get("gap") }
+
+    width_req = 0
+    if p.has("width") == 1 { width_req = p.get("width") }
+    height_req = 0
+    if p.has("height") == 1 { height_req = p.get("height") }
+
+    w.pos_x = availX
+    w.pos_y = availY
+
+    if w.tag == "text" {
+        fs = 16
+        if p.has("font-size") == 1 { fs = p.get("font-size") }
+        text_len = strLen(w.text)
+        w.width = text_len * (fs / 2 + 1) + pad_left + pad_right
+        w.height = fs + 6 + pad_top + pad_bottom
+        if width_req > 0 { w.width = width_req }
+        if height_req > 0 { w.height = height_req }
+        return
+    }
+
+    if w.tag == "button" {
+        # If a button has children, size it like a container (children win over text label)
+        if len(w.children) > 0 {
+            # Fall through to container layout below — just mark direction as row by default
+            if p.has("flex-direction") == 0 {
+                p.set("flex-direction", "row")
+                w.props = p
+            }
+        } else {
+            fs = 16
+            if p.has("font-size") == 1 { fs = p.get("font-size") }
+            text_len = strLen(w.text)
+            def_w = text_len * (fs / 2 + 1) + 32 + pad_left + pad_right
+            def_h = fs + 20 + pad_top + pad_bottom
+            w.width = def_w
+            w.height = def_h
+            if width_req > 0 { w.width = width_req }
+            if height_req > 0 { w.height = height_req }
+            return
+        }
+    }
+
+    # Container / Row / Col
+    if is_root == 1 {
+        w.width = availW
+        w.height = availH
+    } else {
+        w.width = availW
+        w.height = 0
+    }
+    if width_req > 0 { w.width = width_req }
+    if height_req > 0 { w.height = height_req }
+
+    dir = "column"
+    if p.has("flex-direction") == 1 { dir = p.get("flex-direction") }
+
+    align_center = 0
+    if p.has("align-items") == 1 and p.get("align-items") == "center" {
+        align_center = 1
+    }
+
+    inner_x = w.pos_x + pad_left
+    inner_y = w.pos_y + pad_top
+    inner_w = w.width - pad_left - pad_right
+    inner_h = availH - pad_top - pad_bottom
+
+    curr_x = inner_x
+    curr_y = inner_y
+
+    # Backend Responsive Pass: Pre-calculate flexible units for row containers
+    flex_count = 0
+    fixed_w = 0
+    num_gaps = 0
+    if len(w.children) > 1 {
+        num_gaps = len(w.children) - 1
+    }
+    total_gaps = num_gaps * gap
+
+    if dir == "row" {
+        ci = 0
+        while ci < len(w.children) {
+            child = w.children[ci]
+            cp = child.props
+            if cp.has("width") == 1 {
+                fixed_w = fixed_w + cp.get("width")
+            } elif cp.has("flex") == 1 {
+                flex_count = flex_count + cp.get("flex")
+            } elif child.tag == "container" and (len(child.children) > 1 or cp.has("flex-direction") == 1) {
+                # Multi-item container card in a row automatically flexes
+                flex_count = flex_count + 1
+            } else {
+                # Content-sized element (button, text, single-child badge)
+                fs = 16
+                if cp.has("font-size") == 1 { fs = cp.get("font-size") }
+                cpad = 0
+                if cp.has("padding") == 1 { cpad = cp.get("padding") }
+                cpad_l = cpad
+                cpad_r = cpad
+                if cp.has("padding-left") == 1 { cpad_l = cp.get("padding-left") }
+                if cp.has("padding-right") == 1 { cpad_r = cp.get("padding-right") }
+                tlen = strLen(child.text)
+                extra = 0
+                if child.tag == "button" { extra = 32 }
+                if child.tag == "container" and len(child.children) == 1 {
+                    c0 = child.children[0]
+                    tlen = strLen(c0.text)
+                    if c0.props.has("font-size") == 1 { fs = c0.props.get("font-size") }
+                }
+                cw = tlen * (fs / 2 + 1) + extra + cpad_l + cpad_r
+                fixed_w = fixed_w + cw
+            }
+            ci = ci + 1
+        }
+    }
+
+    flex_unit_w = 0
+    if flex_count > 0 and dir == "row" {
+        avail_for_flex = inner_w - total_gaps - fixed_w
+        if avail_for_flex > 0 {
+            flex_unit_w = avail_for_flex / flex_count
+        }
+    }
+
+    ci = 0
+    max_child_w = 0
+    max_child_h = 0
+    while ci < len(w.children) {
+        child = w.children[ci]
+        child_avail_w = inner_w
+        if dir == "row" {
+            cp = child.props
+            if cp.has("width") == 1 {
+                child_avail_w = cp.get("width")
+            } elif cp.has("flex") == 1 {
+                child_avail_w = flex_unit_w * cp.get("flex")
+            } elif child.tag == "container" and (len(child.children) > 1 or cp.has("flex-direction") == 1) and flex_count > 0 {
+                child_avail_w = flex_unit_w
+            }
+        }
+
+        layoutWidgetInternal(child, curr_x, curr_y, child_avail_w, inner_h, 0)
+
+        if child.width > max_child_w { max_child_w = child.width }
+        if child.height > max_child_h { max_child_h = child.height }
+
+        if dir == "column" {
+            curr_y = curr_y + child.height + gap
+        } else {
+            curr_x = curr_x + child.width + gap
+        }
+        ci = ci + 1
+    }
+
+    # Compute responsive dimension if not explicitly set and not root
+    if is_root == 0 {
+        if width_req <= 0 {
+            if dir == "row" {
+                content_w = curr_x - inner_x
+                if len(w.children) > 0 and gap > 0 { content_w = content_w - gap }
+                w.width = content_w + pad_left + pad_right
+            } else {
+                # Column container:
+                # If single-child badge or fit-content is requested, shrink-to-fit
+                if p.has("fit-content") == 1 or (len(w.children) <= 1 and p.has("flex") == 0) {
+                    w.width = max_child_w + pad_left + pad_right
+                } else {
+                    w.width = availW
+                }
+            }
+        }
+        if height_req <= 0 {
+            if dir == "column" {
+                content_h = curr_y - inner_y
+                if len(w.children) > 0 and gap > 0 { content_h = content_h - gap }
+                w.height = content_h + pad_top + pad_bottom
+            } else {
+                w.height = max_child_h + pad_top + pad_bottom
+            }
+        }
+    }
+
+    # Second pass: cross-axis centering (align-items: center)
+    if align_center == 1 {
+        ci = 0
+        inner_avail_w = w.width - pad_left - pad_right
+        inner_avail_h = w.height - pad_top - pad_bottom
+        while ci < len(w.children) {
+            child = w.children[ci]
+            if dir == "column" {
+                child.pos_x = inner_x + (inner_avail_w - child.width) / 2
+            } else {
+                child.pos_y = inner_y + (inner_avail_h - child.height) / 2
+            }
+            ci = ci + 1
+        }
+    }
+
+    # Third pass: main-axis justify (justify-content)
+    if p.has("justify-content") == 1 and len(w.children) > 0 {
+        jc = p.get("justify-content")
+        if dir == "row" {
+            # Measure total children width
+            total_child_w = 0
+            ci = 0
+            while ci < len(w.children) {
+                total_child_w = total_child_w + w.children[ci].width
+                ci = ci + 1
+            }
+            if len(w.children) > 1 {
+                total_child_w = total_child_w + gap * (len(w.children) - 1)
+            }
+            inner_avail_w = w.width - pad_left - pad_right
+            extra = inner_avail_w - total_child_w
+
+            if jc == "flex-end" {
+                # Shift all children right by `extra`
+                ci = 0
+                while ci < len(w.children) {
+                    w.children[ci].pos_x = w.children[ci].pos_x + extra
+                    ci = ci + 1
+                }
+            } elif jc == "center" {
+                offset = extra / 2
+                ci = 0
+                while ci < len(w.children) {
+                    w.children[ci].pos_x = w.children[ci].pos_x + offset
+                    ci = ci + 1
+                }
+            } elif jc == "space-between" {
+                if len(w.children) > 1 {
+                    spacing = extra / (len(w.children) - 1)
+                    ci = 0
+                    while ci < len(w.children) {
+                        w.children[ci].pos_x = w.children[ci].pos_x + spacing * ci
+                        ci = ci + 1
+                    }
+                }
+            }
+        } elif dir == "column" {
+            total_child_h = 0
+            ci = 0
+            while ci < len(w.children) {
+                total_child_h = total_child_h + w.children[ci].height
+                ci = ci + 1
+            }
+            if len(w.children) > 1 {
+                total_child_h = total_child_h + gap * (len(w.children) - 1)
+            }
+            inner_avail_h = w.height - pad_top - pad_bottom
+            extra_h = inner_avail_h - total_child_h
+
+            if jc == "flex-end" {
+                ci = 0
+                while ci < len(w.children) {
+                    w.children[ci].pos_y = w.children[ci].pos_y + extra_h
+                    ci = ci + 1
+                }
+            } elif jc == "center" {
+                offset_h = extra_h / 2
+                ci = 0
+                while ci < len(w.children) {
+                    w.children[ci].pos_y = w.children[ci].pos_y + offset_h
+                    ci = ci + 1
+                }
+            } elif jc == "space-between" {
+                if len(w.children) > 1 {
+                    spacing_h = extra_h / (len(w.children) - 1)
+                    ci = 0
+                    while ci < len(w.children) {
+                        w.children[ci].pos_y = w.children[ci].pos_y + spacing_h * ci
+                        ci = ci + 1
+                    }
+                }
+            }
+        }
+    }
+}
+
+def layoutWidget(w: Widget, availX: int, availY: int, availW: int, availH: int) {
+    layoutWidgetInternal(w, availX, availY, availW, availH, 1)
+}
+
+def layout_widget(w: Widget, avail_x: int, avail_y: int, avail_w: int, avail_h: int) {
+    layoutWidget(w, avail_x, avail_y, avail_w, avail_h)
+}
+
+# --- Renderer ---
+def renderWidget(w: Widget) {
+    p = w.props
+
+    bg_color = -1
+    if p.has("background-color") == 1 {
+        bg_color = parseColor(p.get("background-color"))
+    }
+
+    # On hover / press styling — applies to buttons AND any container/row
+    # that declares hover-background-color (enables hover on file rows, sidebar items, etc.)
+    has_hover_style = p.has("hover-background-color")
+    if w.tag == "button" or has_hover_style == 1 {
+        if w.is_pressed == 1 {
+            if p.has("pressed-background-color") == 1 {
+                bg_color = parseColor(p.get("pressed-background-color"))
+            } elif bg_color >= 0 {
+                bg_color = bg_color - 1579032
+                if bg_color < 0 { bg_color = 0 }
+            }
+        } elif w.is_hovered == 1 {
+            if p.has("hover-background-color") == 1 {
+                bg_color = parseColor(p.get("hover-background-color"))
+            } elif bg_color >= 0 {
+                bg_color = bg_color + 1381653
+            }
+        }
+    }
+
+    radius = 0
+    if p.has("border-radius") == 1 { radius = p.get("border-radius") }
+
+    if bg_color >= 0 {
+        drawRect(w.pos_x, w.pos_y, w.width, w.height, bg_color, radius)
+    }
+
+    if p.has("border-width") == 1 and p.has("border-color") == 1 {
+        bw = p.get("border-width")
+        bc = parseColor(p.get("border-color"))
+        drawBorder(w.pos_x, w.pos_y, w.width, w.height, bw, bc)
+    }
+
+    if w.tag == "text" {
+        fg_color = 0xffffff
+        if p.has("color") == 1 { fg_color = parseColor(p.get("color")) }
+        fs = 16
+        if p.has("font-size") == 1 { fs = p.get("font-size") }
+        fw = 0
+        if p.has("font-weight") == 1 and p.get("font-weight") == "bold" { fw = 1 }
+        text_y = w.pos_y
+        if p.has("padding-top") == 1 { text_y = text_y + p.get("padding-top") }
+        drawText(w.text, w.pos_x, text_y, fs, fg_color, fw)
+    } elif w.tag == "button" {
+        # If button has children, they are rendered by the children loop below
+        if len(w.children) == 0 {
+            fg_color = 0x11111b
+            if p.has("color") == 1 { fg_color = parseColor(p.get("color")) }
+            fs = 16
+            if p.has("font-size") == 1 { fs = p.get("font-size") }
+            fw = 1
+            if p.has("font-weight") == 1 and p.get("font-weight") == "normal" { fw = 0 }
+            text_len = strLen(w.text)
+            text_w = text_len * (fs / 2 + 1)
+            text_x = w.pos_x + (w.width - text_w) / 2
+            text_y = w.pos_y + (w.height - fs) / 2 - 2
+            if w.is_pressed == 1 { text_y = text_y + 1 }
+            drawText(w.text, text_x, text_y, fs, fg_color, fw)
+        }
+    } elif w.tag == "input" {
+        # Text input field — renders placeholder or value text with cursor indicator
+        fg_color = 0x9d9d9d
+        if p.has("color") == 1 { fg_color = parseColor(p.get("color")) }
+        if w.text != "" { fg_color = 0xffffff }
+        fs = 13
+        if p.has("font-size") == 1 { fs = p.get("font-size") }
+        pad_l = 12
+        if p.has("padding-left") == 1 { pad_l = p.get("padding-left") }
+        tx = w.pos_x + pad_l
+        ty = w.pos_y + (w.height - fs) / 2 - 1
+        display = w.text
+        if display == "" { display = w.props.get("placeholder") }
+        drawText(display, tx, ty, fs, fg_color, 0)
+    }
+
+    # Render children
+    ci = 0
+    while ci < len(w.children) {
+        child = w.children[ci]
+        renderWidget(child)
+        ci = ci + 1
+    }
+}
+
+def render_widget(w: Widget) {
+    renderWidget(w)
+}
+
+# --- Hit Testing ---
+def hitTestEx(w: Widget, mx: int, my: int, isClick: int, isMouseDown: int) -> int {
+    clicked_id = 0
+    if mx >= w.pos_x and mx <= (w.pos_x + w.width) and my >= w.pos_y and my <= (w.pos_y + w.height) {
+        w.is_hovered = 1
+        if isMouseDown == 1 {
+            w.is_pressed = 1
+        } else {
+            w.is_pressed = 0
+        }
+        if isClick == 1 and w.on_click_id > 0 {
+            clicked_id = w.on_click_id
+        }
+    } else {
+        w.is_hovered = 0
+        w.is_pressed = 0
+    }
+
+    ci = 0
+    while ci < len(w.children) {
+        child = w.children[ci]
+        child_res = hitTestEx(child, mx, my, isClick, isMouseDown)
+        if child_res > 0 {
+            clicked_id = child_res
+        }
+        ci = ci + 1
+    }
+    return clicked_id
+}
+
+def hitTest(w: Widget, mx: int, my: int, isClick: int) -> int {
+    return hitTestEx(w, mx, my, isClick, gui_get_mouse_down())
+}
+
+def hit_test_and_dispatch(w: Widget, mx: int, my: int, is_click: int) -> int {
+    return hitTest(w, mx, my, is_click)
+}
+
+# --- Action Dispatcher ---
+def dispatchAction(w: Widget, clickedId: int) {
+    if w.on_click_id == clickedId {
+        p = w.props
+        clicks = 0
+        if p.has("clicks") == 1 { clicks = p.get("clicks") }
+        clicks = clicks + 1
+        p.set("clicks", clicks)
+
+        # User-defined callback: on_click = "my_handler"
+        if p.has("on_click") == 1 {
+            fn_name = p.get("on_click")
+            call(fn_name, [])
+        }
+
+        # Built-in named actions (kept for convenience)
+        if p.has("action") == 1 {
+            act = p.get("action")
+            if act == "increment" {
+                if p.has("target") == 1 {
+                    tgt = p.get("target")
+                    target_count = 0
+                    if tgt.props.has("action-count") == 1 {
+                        target_count = tgt.props.get("action-count")
+                    }
+                    target_count = target_count + 1
+                    tgt.props.set("action-count", target_count)
+                    pfx = ""
+                    sfx = ""
+                    if p.has("prefix") == 1 { pfx = p.get("prefix") }
+                    if p.has("suffix") == 1 { sfx = p.get("suffix") }
+                    tgt.text = pfx + str(target_count) + sfx
+                }
+            } elif act == "reset" {
+                if p.has("target") == 1 {
+                    tgt = p.get("target")
+                    p.set("clicks", 0)
+                    tgt.props.set("action-count", 0)
+                    if p.has("linked-button") == 1 {
+                        lbtn = p.get("linked-button")
+                        lbtn_p = lbtn.props
+                        lbtn_p.set("clicks", 0)
+                    }
+                    pfx = ""
+                    sfx = ""
+                    if p.has("prefix") == 1 { pfx = p.get("prefix") }
+                    if p.has("suffix") == 1 { sfx = p.get("suffix") }
+                    tgt.text = pfx + "0" + sfx
+                }
+            } elif act == "toggle" {
+                if p.has("target") == 1 {
+                    tgt = p.get("target")
+                    t1 = p.get("state1")
+                    t2 = p.get("state2")
+                    if tgt.text == t1 {
+                        tgt.text = t2
+                    } else {
+                        tgt.text = t1
+                    }
+                }
+            }
+        }
+        if p.has("log-target") == 1 {
+            log_w = p.get("log-target")
+            log_w.text = "  [ACTION] " + w.text + " clicked! Total: " + str(clicks)
+        }
+    }
+
+    ci = 0
+    while ci < len(w.children) {
+        child = w.children[ci]
+        dispatchAction(child, clickedId)
+        ci = ci + 1
+    }
+}
+
+# --- Interactive App Step ---
+def runAppStep(app: WindowApp, mx: int, my: int, isClick: int) -> int {
+    win_w = gui_get_window_w()
+    win_h = gui_get_window_h()
+    if win_w > 0 and win_h > 0 {
+        app.width = win_w
+        app.height = win_h
+    }
+
+    # Layout must precede hit testing so every widget has current bounds.
+    layoutWidget(app.root, 0, 0, app.width, app.height)
+
+    is_down = gui_get_mouse_down()
+    clicked = hitTestEx(app.root, mx, my, isClick, is_down)
+
+    if clicked > 0 {
+        dispatchAction(app.root, clicked)
+    }
+
+    # Clear window background
+    bg = 0x1e1e2e
+    if app.props.has("background-color") == 1 {
+        bg = parseColor(app.props.get("background-color"))
+    }
+    gui_clear(bg)
+
+    # Render widget tree
+    renderWidget(app.root)
+
+    # Present backbuffer
+    gui_present()
+    return clicked
+}
+
+def run_app_step(app: WindowApp, mx: int, my: int, is_click: int) -> int {
+    return runAppStep(app, mx, my, is_click)
+}
+
+# --- Automatic Lifecycle GUI Entry Point ---
+def gui(title: string, width: int, height: int, root: Widget, properties: dict) {
+    # Apply NSS styling if style or nss path is provided in properties
+    if properties.has("style") == 1 or properties.has("nss") == 1 {
+        style_path = ""
+        if properties.has("style") == 1 { style_path = properties.get("style") }
+        else { style_path = properties.get("nss") }
+        st = nss.nss_load(style_path)
+        if st.has("ID__window") == 1 {
+            nss._merge_props(properties, st.get("ID__window"))
+        } elif st.has("CLS__window") == 1 {
+            nss._merge_props(properties, st.get("CLS__window"))
+        } elif st.has("TAG__window") == 1 {
+            nss._merge_props(properties, st.get("TAG__window"))
+        }
+        nss.nss_apply(root, st)
+    }
+
+    ok = initWindow(title, width, height)
+    if ok != 1 {
+        print("ERROR: gui_init_window failed (returned " + str(ok) + "). Window could not be created.")
+        return
+    }
+
+    app = window(title, width, height, root, properties)
+
+    # Check for --test and --screenshot modes
+    args = system.get_args()
+    max_frames = 0
+    screenshot_path = ""
+    ai = 1
+    while ai < len(args) {
+        if args[ai] == "--test" {
+            max_frames = 30
+        }
+        if args[ai] == "--screenshot" and (ai + 1) < len(args) {
+            screenshot_path = args[ai + 1]
+            max_frames = 5
+        }
+        ai = ai + 1
+    }
+
+    frame = 0
+    running = 1
+    while running == 1 {
+        ev = pollEvents()
+        if ev == -1 {
+            running = 0
+            break
+        }
+
+        cords = get_mouseCord()
+        mx = cords[0]
+        my = cords[1]
+        clicked = gui_get_mouse_clicked()
+
+        runAppStep(app, mx, my, clicked)
+
+        if len(screenshot_path) > 0 and frame == 2 {
+            saveScreenshot(screenshot_path)
+        }
+
+        gui_sleep(16)
+        frame = frame + 1
+        if max_frames > 0 and frame >= max_frames {
+            running = 0
+            break
+        }
+    }
+    closeWindow()
+    print("Demo completed successfully!")
+}
+
+# =============================================================================
+# NEW DECLARATIVE API  -  Nova GUI v2
+# =============================================================================
+# Shorthand props:  bg, hover, press, color, size, bold, r (radius),
+#                   p/px/py/pl/pr/pt/pb, gap, w, h,
+#                   border, border_color, align, justify,
+#                   action/on_click, target, prefix, suffix,
+#                   placeholder, id, flex, log, state1, state2
+#
+# Constructors: div, row, col, btn, h1, h2, h3, txt, label, badge,
+#               spacer, gap_w, divider, input_field, icon_btn, nav_item, card
+# =============================================================================
+
+def _expand_props(p: dict) -> dict {
+    out = {}
+    if p.has("bg") == 1            { out.set("background-color",        p.get("bg")) }
+    if p.has("hover") == 1         { out.set("hover-background-color",   p.get("hover")) }
+    if p.has("press") == 1         { out.set("pressed-background-color", p.get("press")) }
+    if p.has("color") == 1         { out.set("color",                    p.get("color")) }
+    if p.has("size") == 1          { out.set("font-size",                p.get("size")) }
+    if p.has("bold") == 1 and p.get("bold") == 1 { out.set("font-weight", "bold") }
+    if p.has("r") == 1             { out.set("border-radius",            p.get("r")) }
+    if p.has("border") == 1        { out.set("border-width",             p.get("border")) }
+    if p.has("border_color") == 1  { out.set("border-color",             p.get("border_color")) }
+    if p.has("gap") == 1           { out.set("gap",                      p.get("gap")) }
+    if p.has("w") == 1             { out.set("width",                    p.get("w")) }
+    if p.has("h") == 1             { out.set("height",                   p.get("h")) }
+    if p.has("align") == 1         { out.set("align-items",              p.get("align")) }
+    if p.has("justify") == 1       { out.set("justify-content",          p.get("justify")) }
+    if p.has("action") == 1        { out.set("action",                   p.get("action")) }
+    if p.has("on_click") == 1      { out.set("on_click",                  p.get("on_click")) }
+    if p.has("target") == 1        { out.set("target",                   p.get("target")) }
+    if p.has("prefix") == 1        { out.set("prefix",                   p.get("prefix")) }
+    if p.has("suffix") == 1        { out.set("suffix",                   p.get("suffix")) }
+    if p.has("placeholder") == 1   { out.set("placeholder",              p.get("placeholder")) }
+    if p.has("id") == 1            { out.set("id",                       p.get("id")) }
+    if p.has("class") == 1         { out.set("class",                    p.get("class")) }
+    if p.has("flex") == 1          { out.set("flex",                     p.get("flex")) }
+    if p.has("log") == 1           { out.set("log-target",               p.get("log")) }
+    if p.has("state1") == 1        { out.set("state1",                   p.get("state1")) }
+    if p.has("state2") == 1        { out.set("state2",                   p.get("state2")) }
+    if p.has("p") == 1  { out.set("padding", p.get("p")) }
+    if p.has("px") == 1 { out.set("padding-left", p.get("px"))  out.set("padding-right",  p.get("px")) }
+    if p.has("py") == 1 { out.set("padding-top",  p.get("py"))  out.set("padding-bottom", p.get("py")) }
+    if p.has("pl") == 1 { out.set("padding-left",   p.get("pl")) }
+    if p.has("pr") == 1 { out.set("padding-right",  p.get("pr")) }
+    if p.has("pt") == 1 { out.set("padding-top",    p.get("pt")) }
+    if p.has("pb") == 1 { out.set("padding-bottom", p.get("pb")) }
+    if p.has("background-color") == 1         { out.set("background-color",         p.get("background-color")) }
+    if p.has("hover-background-color") == 1   { out.set("hover-background-color",   p.get("hover-background-color")) }
+    if p.has("pressed-background-color") == 1 { out.set("pressed-background-color", p.get("pressed-background-color")) }
+    if p.has("font-size") == 1                { out.set("font-size",                p.get("font-size")) }
+    if p.has("font-weight") == 1              { out.set("font-weight",              p.get("font-weight")) }
+    if p.has("border-radius") == 1            { out.set("border-radius",            p.get("border-radius")) }
+    if p.has("border-width") == 1             { out.set("border-width",             p.get("border-width")) }
+    if p.has("border-color") == 1             { out.set("border-color",             p.get("border-color")) }
+    if p.has("width") == 1                    { out.set("width",                    p.get("width")) }
+    if p.has("height") == 1                   { out.set("height",                   p.get("height")) }
+    if p.has("padding") == 1                  { out.set("padding",                  p.get("padding")) }
+    if p.has("padding-left") == 1             { out.set("padding-left",             p.get("padding-left")) }
+    if p.has("padding-right") == 1            { out.set("padding-right",            p.get("padding-right")) }
+    if p.has("padding-top") == 1              { out.set("padding-top",              p.get("padding-top")) }
+    if p.has("padding-bottom") == 1           { out.set("padding-bottom",           p.get("padding-bottom")) }
+    if p.has("align-items") == 1              { out.set("align-items",              p.get("align-items")) }
+    if p.has("justify-content") == 1          { out.set("justify-content",          p.get("justify-content")) }
+    if p.has("flex-direction") == 1           { out.set("flex-direction",           p.get("flex-direction")) }
+    if p.has("fit-content") == 1              { out.set("fit-content",              p.get("fit-content")) }
+    if p.has("log-target") == 1               { out.set("log-target",               p.get("log-target")) }
+    return out
+}
+
+def div(children: list, props: dict) -> Widget {
+    return Container(children, _expand_props(props))
+}
+
+def row(children: list, props: dict) -> Widget {
+    p = _expand_props(props)
+    if p.has("flex-direction") == 0 { p.set("flex-direction", "row") }
+    return Container(children, p)
+}
+
+def col(children: list, props: dict) -> Widget {
+    p = _expand_props(props)
+    if p.has("flex-direction") == 0 { p.set("flex-direction", "column") }
+    return Container(children, p)
+}
+
+def btn(text: string, props: dict) -> Widget {
+    return Button(text, gui_next_click_id(), _expand_props(props))
+}
+
+def h1(text: string, props: dict) -> Widget {
+    p = _expand_props(props)
+    if p.has("font-size")   == 0 { p.set("font-size",   26) }
+    if p.has("font-weight") == 0 { p.set("font-weight", "bold") }
+    if p.has("color")       == 0 { p.set("color",       "#FFFFFF") }
+    return Text(text, p)
+}
+
+def h2(text: string, props: dict) -> Widget {
+    p = _expand_props(props)
+    if p.has("font-size")   == 0 { p.set("font-size",   20) }
+    if p.has("font-weight") == 0 { p.set("font-weight", "bold") }
+    if p.has("color")       == 0 { p.set("color",       "#FFFFFF") }
+    return Text(text, p)
+}
+
+def h3(text: string, props: dict) -> Widget {
+    p = _expand_props(props)
+    if p.has("font-size")   == 0 { p.set("font-size",   15) }
+    if p.has("font-weight") == 0 { p.set("font-weight", "bold") }
+    if p.has("color")       == 0 { p.set("color",       "#FFFFFF") }
+    return Text(text, p)
+}
+
+def txt(text: string, props: dict) -> Widget {
+    p = _expand_props(props)
+    if p.has("font-size") == 0 { p.set("font-size", 13) }
+    if p.has("color")     == 0 { p.set("color",     "#CCCCCC") }
+    return Text(text, p)
+}
+
+def label(text: string, props: dict) -> Widget {
+    p = _expand_props(props)
+    if p.has("font-size") == 0 { p.set("font-size", 11) }
+    if p.has("color")     == 0 { p.set("color",     "#9D9D9D") }
+    return Text(text, p)
+}
+
+def badge(text: string, props: dict) -> Widget {
+    p = _expand_props(props)
+    ic = "#FFFFFF"
+    isz = 11
+    if p.has("color")     == 1 { ic  = p.get("color") }
+    if p.has("font-size") == 1 { isz = p.get("font-size") }
+    inner = Text(text, {"color": ic, "font-size": isz, "font-weight": "bold"})
+    cp = {}
+    if p.has("background-color") == 1 { cp.set("background-color", p.get("background-color")) }
+    if p.has("border-radius")    == 1 { cp.set("border-radius",    p.get("border-radius")) }
+    if p.has("border-width")     == 1 { cp.set("border-width",     p.get("border-width")) }
+    if p.has("border-color")     == 1 { cp.set("border-color",     p.get("border-color")) }
+    if cp.has("border-radius")   == 0 { cp.set("border-radius",    10) }
+    cp.set("padding-left", 8)  cp.set("padding-right", 8)
+    cp.set("padding-top",  3)  cp.set("padding-bottom", 3)
+    return Container([inner], cp)
+}
+
+def spacer(props: dict) -> Widget {
+    return Container([], _expand_props(props))
+}
+
+def gap_w(size: int) -> Widget {
+    return Container([], {"width": size, "height": size})
+}
+
+def divider(props: dict) -> Widget {
+    p = _expand_props(props)
+    if p.has("background-color") == 0 { p.set("background-color", "#3A3A3A") }
+    if p.has("height")           == 0 { p.set("height", 1) }
+    return Container([], p)
+}
+
+def input_field(placeholder: string, props: dict) -> Widget {
+    p = _expand_props(props)
+    if p.has("background-color")       == 0 { p.set("background-color",       "#2D2D2D") }
+    if p.has("border-radius")          == 0 { p.set("border-radius",          4) }
+    if p.has("border-width")           == 0 { p.set("border-width",           1) }
+    if p.has("border-color")           == 0 { p.set("border-color",           "#3A3A3A") }
+    if p.has("padding-left")           == 0 { p.set("padding-left",           12) }
+    if p.has("padding-right")          == 0 { p.set("padding-right",          12) }
+    if p.has("padding-top")            == 0 { p.set("padding-top",            8) }
+    if p.has("padding-bottom")         == 0 { p.set("padding-bottom",         8) }
+    if p.has("hover-background-color") == 0 { p.set("hover-background-color", "#383838") }
+    p.set("placeholder", placeholder)
+    w = Widget()
+    w.tag = "input"
+    w.text = ""
+    w.props = p
+    w.children = []
+    w.on_click_id = 0
+    w.pos_x = 0  w.pos_y = 0  w.width = 0  w.height = 0
+    w.is_hovered = 0  w.is_pressed = 0
+    return w
+}
+
+def icon_btn(icon: string, props: dict) -> Widget {
+    p = _expand_props(props)
+    if p.has("border-radius") == 0 { p.set("border-radius", 4) }
+    return Button(icon, gui_next_click_id(), p)
+}
+
+def nav_item(text: string, props: dict) -> Widget {
+    p = _expand_props(props)
+    if p.has("hover-background-color")   == 0 { p.set("hover-background-color",   "#333333") }
+    if p.has("pressed-background-color") == 0 { p.set("pressed-background-color", "#3D3D3D") }
+    if p.has("color")         == 0 { p.set("color",         "#DDDDDD") }
+    if p.has("font-size")     == 0 { p.set("font-size",     12) }
+    if p.has("border-radius") == 0 { p.set("border-radius", 4) }
+    if p.has("padding-left")  == 0 { p.set("padding-left",  10) }
+    if p.has("padding-right") == 0 { p.set("padding-right", 10) }
+    if p.has("padding-top")   == 0 { p.set("padding-top",   5) }
+    if p.has("padding-bottom")== 0 { p.set("padding-bottom",5) }
+    return Button(text, gui_next_click_id(), p)
+}
+
+def card(children: list, props: dict) -> Widget {
+    p = _expand_props(props)
+    if p.has("background-color") == 0 { p.set("background-color", "#1E1E2E") }
+    if p.has("border-radius")    == 0 { p.set("border-radius",    8) }
+    if p.has("border-width")     == 0 { p.set("border-width",     1) }
+    if p.has("border-color")     == 0 { p.set("border-color",     "#313244") }
+    if p.has("padding")          == 0 { p.set("padding",          16) }
+    if p.has("gap")              == 0 { p.set("gap",              10) }
+    return Container(children, p)
+}
+
+# =============================================================================
+# NSS Helper — Convenience wrappers for pure class-based (NSS) styling
+# Use these when you want 100% visual styling in .nss files.
+# Pass class names as a space-separated string in the "class" prop.
+#
+# Example:
+#   btn("Save", {class: "btn-primary", on_click: "on_save"})
+#   div([...], {class: "card"})
+# =============================================================================
+
+# cls() — builds a minimal props dict with just a class name
+def cls(class_name: string) -> dict {
+    return {"class": class_name}
+}
+
+# cls_id() — builds a props dict with class + id for NSS targeting
+def cls_id(class_name: string, id_name: string) -> dict {
+    return {"class": class_name, "id": id_name}
+}

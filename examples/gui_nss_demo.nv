@@ -1,0 +1,93 @@
+import gui
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Nova GUI — NSS Showcase
+#  All visual styling lives in examples/styles/app.nss
+#  Behavior uses native action properties so compiled executables can dispatch it.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# --- Shared state widgets ---
+counter_val = txt("0 clicks", {"class": "counter-display"})
+status_log  = txt("Ready — click a button below.", {"class": "status-text"})
+
+# --- UI Structure ---
+app_ui = div([
+
+    # ── Header bar ──────────────────────────────────────────────────────────
+    row([
+        badge("NV",              {"class": "brand-badge"}),
+        h2("Nova GUI",           {"class": "app-title"}),
+        spacer({"class": "spacer"}),
+        badge("v2.0  NSS Styled",{"class": "badge-secondary"})
+    ], {"class": "header"}),
+
+    divider({"class": "divider"}),
+
+    # ── Main content area ───────────────────────────────────────────────────
+    row([
+
+        # Left panel — navigation sidebar
+        col([
+            label("SECTIONS",        {"class": "nav-label"}),
+            nav_item("  Overview",   {"class": "nav-item-active"}),
+            nav_item("  Counter",    {"class": "nav-item"}),
+            nav_item("  Components", {"class": "nav-item"}),
+            nav_item("  Settings",   {"class": "nav-item"}),
+            divider({"class": "divider"}),
+            label("RESOURCES",       {"class": "nav-label"}),
+            nav_item("  Documentation", {"class": "nav-item"}),
+            nav_item("  Examples",      {"class": "nav-item"}),
+            nav_item("  Galaxy Pkgs",   {"class": "nav-item"})
+        ], {"class": "nav-sidebar"}),
+
+        # Right panel — content area
+        col([
+
+            # Search bar
+            input_field("Search components or actions...", {"class": "search-input"}),
+
+            # Counter card
+            card([
+                label("INTERACTIVE EVENT COUNTER", {"class": "card-subtitle"}),
+                row([
+                    counter_val,
+                    spacer({"class": "spacer"}),
+                    col([
+                        label("clicks",   {"class": "card-subtitle"}),
+                        label("recorded", {"class": "card-subtitle"})
+                    ], {"class": "counter-meta"})
+                ], {"class": "counter-row"}),
+
+                # Native action dispatch keeps this demo compatible with
+                # compiled executables. Dynamic call("name", args) is VM-only.
+                row([
+                    btn("+ Increment", {"class": "btn-primary",  "action": "increment",
+                        "target": counter_val, "suffix": " clicks", "log": status_log}),
+                    btn("Reset",       {"class": "btn-secondary", "action": "reset",
+                        "target": counter_val, "suffix": " clicks", "log": status_log})
+                ], {"class": "button-row"})
+            ], {"class": "card"}),
+
+            # Widget gallery card
+            card([
+                h3("Widget Gallery", {"class": "card-title"}),
+                txt("Clean HTML+CSS separation — zero inline styling in .nv source:", {"class": "card-subtitle"}),
+                row([
+                    badge("btn()",        {"class": "pill-blue"}),
+                    badge("div()",        {"class": "pill-green"}),
+                    badge("row()",        {"class": "pill-yellow"}),
+                    badge("card()",       {"class": "pill-purple"}),
+                    badge("input_field()",{"class": "pill-pink"})
+                ], {"class": "badge-row"})
+            ], {"class": "card"}),
+
+            # Status bar
+            status_log
+
+        ], {"class": "content-area"})
+
+    ], {"class": "main-content"})
+
+], {"class": "root-window"})
+
+gui("Nova GUI — NSS Demo", 740, 580, app_ui, {"style": "examples/styles/app.nss"})
