@@ -44,6 +44,15 @@ Nova bridges high-level Pythonic simplicity with low-level C-like control. This 
 * **`defer`**: Deterministic scope cleanup. Executes statements in LIFO (reverse) order right before function or scope exit (`return`, `break`, or block closing `}`). Supports both single-line (`defer sys_close(f)`) and block form (`defer { free(p); sys_close(f) }`).
 * **`extern def`**: Direct zero-boilerplate C FFI. Declares external C functions (`extern def puts(s: string) -> int`) with automatic argument register placement (SysV / Win64) and null-terminated string pointer unwrapping.
 
+### Standard modules (dotted calls)
+`import fs` then `fs.read(p)` calls the flat function `fs_read(p)` (a parse-time rewrite: no runtime cost).
+Public modules: `fs`, `path`, `env`, `process`, `time`, `json`, `text`. Unknown members are errors with a
+did-you-mean hint. Module-qualified names are the preferred API; flat names remain accepted.
+
+### Soft keywords
+`read`, `write`, `close`, `api`, `openf` are keywords only when called (`read(fd)`), and `data` only in
+`data Name { ... }`; elsewhere they are ordinary identifiers (variables, fields, your own functions).
+
 ### Heap Allocation & Raw Memory
 * **`data`**: Declares C-style structs with statically typed fields. Offsets are resolved during codegen based on field order (4 bytes per field).
   * *Syntax*:

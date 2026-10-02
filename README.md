@@ -37,25 +37,45 @@ nova dev hello.nv        # Run in VM mode (no GCC needed)
 
 ## Portable standard library
 
-The standard library provides small, readable modules for common operations:
+The standard library is a set of small modules. `import` one, then call its
+functions with a dot: `fs.read(p)`, `path.join("a", "b")`, `text.trim(s)`.
+Each call compiles to a plain function call, so there is no runtime cost, and
+the older flat spellings (`fs_read`, `path_join2`, ...) keep working.
 
 ```nova
 import path
 import fs
+import text
 import time
 
-file_name = path_basename(path_join(["tmp", "notes.txt"]))
-simple_file = path_join2("data", "notes.txt")
-if fs_exists("notes.txt") {
-    print(fs_read("notes.txt"))
+name = path.base(path.join("tmp", "notes.txt"))
+if fs.exists("notes.txt") {
+    print(text.trim(fs.read("notes.txt")))
 }
-fs_mkdir("data")
-fs_write("data/notes.txt", "Nova is simple and fast.\n")
-fs_copy("data/notes.txt", "data/notes.backup.txt")
-print(time_ticks_ms())
+fs.makeDir("data")
+fs.write("data/notes.txt", "Nova is simple and fast.
+")
+fs.copy("data/notes.txt", "data/notes.backup.txt")
+print(time.ticks())
 ```
 
-`path`, `fs`, `env`, `process`, and `time` are backed by the existing
+| Module | Functions |
+|---|---|
+| `fs` | `exists size kind makeDir delete copy move read write` |
+| `path` | `join` (any number of parts, or one list), `base dir ext` |
+| `env` | `get set args platform` |
+| `process` | `run shell exit` |
+| `time` | `now ticks` |
+| `json` | `stringify` |
+| `text` | `toInt trim startsWith endsWith indexOf contains replace split join repeat upper lower` |
+
+Members use camelCase (`makeDir`, `startsWith`, `.asList`, `.valueByte`).
+`nova lint` flags old spellings (`STYLE003`) and
+`nova fmt --write --modernize file.nv` rewrites them for you.
+`read`, `write`, `close`, `api`, `openf` and `data` are only keywords where
+they are used as built-ins or declarations, so they are fine as variable names.
+
+These modules are backed by the existing
 cross-platform runtime boundary. Filesystem helpers return simple status/value
 results instead of hiding operational failures. `process_shell` is explicitly
 named because it invokes a shell. `json_stringify(value)` is available from

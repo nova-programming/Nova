@@ -182,3 +182,61 @@ def test_build_fingerprint_tracks_siblings_and_stdlib(tmp_path):
     assert mod._build_fingerprint(str(main)) == first
     helper.write_text("def f() { return 2 }\n")
     assert mod._build_fingerprint(str(main)) != first
+
+
+# ---- migration tooling ---------------------------------------------------------
+
+OLD_STYLE = (
+    "import fs\n"
+    '# fs_read is mentioned in a comment and "fs_write(" in a string\n'
+    'p = path_join2("a", "b")\n'
+    "print(path_basename(p))\n"
+    'fs_write("x.txt", "fs_read(")\n'
+    "q = alloc[int](3)\n"
+    "l = q.as_list(count=3)\n"
+    "def fs_read2() { return 1 }\n"
+)
+
+
+def test_modernize_rewrites_code_but_not_strings_comments_or_own_defs():
+    import api_tools
+    new = api_tools.modernize_source(OLD_STYLE)
+    assert 'p = path.join("a", "b")' in new
+    assert "print(path.base(p))" in new
+    assert 'fs.write("x.txt", "fs_read(")' in new          # string literal untouched
+    assert '# fs_read is mentioned in a comment and "fs_write(" in a string' in new
+    assert "q.asList(count=3)" in new
+    assert "def fs_read2()" in new                          # own definition untouched
+    assert new.splitlines()[:2] == ["import fs", "import path"]  # needed import added
+    assert api_tools.modernize_source(new) == new           # idempotent
+
+
+def test_modernized_program_behaves_like_the_original(tmp_path):
+    import api_tools
+    old = ('import fs\nimport path\nfs_write("{p}", "same")\nprint(fs_read("{p}"))\n'
+           'print(path_basename("a/b.txt"))\nfs_delete("{p}")\n')
+    old = old.replace("{p}", str(tmp_path / "m.txt").replace("\\", "/"))
+    assert _vm_output(api_tools.modernize_source(old)) == _vm_output(old)
+
+
+def test_lint_reports_old_spellings_and_accepts_camel_case(tmp_path):
+    f = tmp_path / "lint.nv"
+    f.write_text('import fs\nx = fs_read("a")\ndef readAll() { return 1 }\ndef BadName() { return 2 }\n')
+    r = subprocess.run([sys.executable, MAIN_PY, "lint", str(f)], capture_output=True, text=True, cwd=ROOT)
+    assert "STYLE003" in r.stdout and "fs.read" in r.stdout
+    assert "'readAll'" not in r.stdout                      # camelCase is allowed
+    assert "STYLE002" in r.stdout and "BadName" in r.stdout
+    strict = subprocess.run([sys.executable, MAIN_PY, "lint", "--strict", str(f)],
+                            capture_output=True, text=True, cwd=ROOT)
+    assert strict.returncode != 0
+
+
+def test_fmt_modernize_only_writes_with_write_flag(tmp_path):
+    f = tmp_path / "m.nv"
+    f.write_text('x = path_basename("a/b")\n')
+    check = subprocess.run([sys.executable, MAIN_PY, "fmt", "--modernize", str(f)],
+                           capture_output=True, text=True, cwd=ROOT)
+    assert check.returncode != 0 and f.read_text() == 'x = path_basename("a/b")\n'
+    subprocess.run([sys.executable, MAIN_PY, "fmt", "--write", "--modernize", str(f)],
+                   capture_output=True, text=True, cwd=ROOT)
+    assert f.read_text() == 'import path\nx = path.base("a/b")\n'

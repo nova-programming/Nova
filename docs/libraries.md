@@ -328,6 +328,14 @@ helpers when a JSON scalar's type must be preserved across native boundaries.
 `json_parse` remains pending until the recursive native conversion
 contract is complete.
 
+Preferred spelling: import the module and use a dotted call, e.g. `fs.read(p)`,
+`path.join("a", "b", "c")`, `env.get("HOME")`, `process.run([...])`, `time.ticks()`,
+`json.stringify(v)`, `text.trim(s)`. The compiler rewrites these to the flat
+functions below at parse time (`fs.makeDir` -> `fs_mkdir`, `time.ticks` ->
+`time_ticks_ms`), so the flat names remain valid. The table lives in
+`stdlib/names.nv` and `bootstrap/names.py`. Run `nova fmt --write --modernize`
+to migrate existing code.
+
 Function calls accept camelCase aliases for canonical snake_case names
 (for example, `jsonStringify` and `valueBoxBool`). The compiler resolves
 these aliases to the canonical implementation, so they do not create

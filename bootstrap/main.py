@@ -268,15 +268,23 @@ def _format_source(source):
     return result + ("\n" if result or source.endswith(("\n", "\r")) else "")
 
 
-def format_source(file_path, check_only=False):
-    """Format whitespace only; writing requires the explicit --write flag."""
+def format_source(file_path, check_only=False, modernize=False):
+    """Format whitespace only; writing requires the explicit --write flag.
+
+    With modernize=True, old API spellings are also rewritten (see api_tools.modernize_source).
+    """
     try:
         with open(file_path, "r", encoding="utf-8", newline="") as f:
             source = f.read()
     except OSError as e:
         emit_diagnostic(str(e), "IO001", file_path=file_path)
         return 1
-    formatted = _format_source(source)
+    if modernize:
+        import api_tools
+        source_for_format = api_tools.modernize_source(source)
+    else:
+        source_for_format = source
+    formatted = _format_source(source_for_format)
     if formatted == source:
         print(f"Formatted {os.path.basename(file_path)} successfully.")
         return 0
@@ -480,7 +488,9 @@ def lint_source(file_path, strict=False, json_output=False):
         emit_diagnostic(str(e), "IO001", file_path=file_path, json_output=json_output)
         return 1
 
+    import api_tools
     diagnostics = []
+    defined_here = api_tools.defined_functions(chr(10).join(lines))
     function_pattern = re.compile(r"^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
     for line_number, line in enumerate(lines, 1):
         if line.rstrip(" \t") != line:
@@ -488,9 +498,13 @@ def lint_source(file_path, strict=False, json_output=False):
         if "\t" in line[:len(line) - len(line.lstrip())]:
             diagnostics.append((line_number, "STYLE001", "tabs used for indentation; use spaces"))
         match = function_pattern.match(line)
-        if match and not re.fullmatch(r"[a-z][a-z0-9_]*", match.group(1)):
+        if match and not re.fullmatch(r"[a-z][a-z0-9_]*|[a-z][a-zA-Z0-9]*", match.group(1)):
             diagnostics.append((line_number, "STYLE002",
-                                f"function '{match.group(1)}' should use snake_case"))
+                                f"function '{match.group(1)}' should use camelCase (or snake_case)"))
+        for old_name, new_name in api_tools.old_spellings(line, defined_here):
+            diagnostics.append((line_number, "STYLE003",
+                                f"'{old_name}' is the old spelling; use '{new_name}' "
+                                "(nova fmt --write --modernize rewrites it)"))
         if re.search(r"\b(?:alloc|free)\s*\(", line):
             diagnostics.append((line_number, "UNSAFE001",
                                 "raw allocation requires explicit ownership review"))
@@ -874,6 +888,7 @@ def print_usage():
     print("  nova check <file.nv>     Parse and type-check without building")
     print("  nova lint <file.nv>      Show advisory style warnings (use --strict to fail)")
     print("  nova fmt <file.nv>       Check formatting; use --write to modify")
+    print("                           (--modernize also rewrites old API names, e.g. fs_read -> fs.read)")
     print("  nova build <file.nv>     Compile to native executable")
     print("  nova run <file.nv>       Build native + execute (maximum speed)")
     print("  nova repl                Interactive REPL shell")
@@ -1053,6 +1068,7 @@ def main():
     strict_lint = False
     json_output = False
     fmt_write = False
+    fmt_modernize = False
     i = 2
     while i < len(sys.argv):
         arg = sys.argv[i]
@@ -1087,6 +1103,8 @@ def main():
             json_output = True
         elif arg == "--write":
             fmt_write = True
+        elif arg == "--modernize":
+            fmt_modernize = True
         else:
             file_path = arg
         i += 1
@@ -1105,7 +1123,7 @@ def main():
     elif command == "lint":
         raise SystemExit(lint_source(file_path, strict=strict_lint, json_output=json_output))
     elif command == "fmt":
-        raise SystemExit(format_source(os.path.abspath(file_path), check_only=not fmt_write))
+        raise SystemExit(format_source(os.path.abspath(file_path), check_only=not fmt_write, modernize=fmt_modernize))
     elif command in ("dev",):
         run_source(file_path)
     elif command == "run":
