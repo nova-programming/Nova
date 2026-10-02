@@ -224,6 +224,11 @@ nova/
 - **Capacity-based list allocation** — `append` doubles capacity exponentially, no realloc on every insertion
 - **Float literals + x87 runtime** — `x = 3.14; print(x)` uses IEEE 754 single precision, x87 FPU for arithmetic
 - **For-in loops `for i in items { ... }`** — iterate over list elements directly
+- **`for i in range(n)` / `range(a, b)` / `range(a, b, step)`** — Python-style counting loops (end excluded, step is a literal); compiled to the same counted loop as `for i = a to b step s`, so bounds-check elimination still applies
+- **Data constructors** — `Point(1, 2)` or `Point(x=1, y=2)` build a `data` value (missing fields are zero); `Point()` and field assignment still work
+- **Dictionary shortcuts** — `d["k"]`, `d["k"] = v`, `"k" in d`, `"k" not in d` (`in` is for dictionaries; use `text.contains` for strings)
+- **Return types are inferred** — `def label(n) { return "n=" + str(n) }` prints as a string without a `-> string` annotation when every known return is a string
+- **`json.parse(text)`** — parse JSON into a typed tree (`json.get`, `json.at`, `json.asInt`, `json.asString`, ...); see `stdlib/json.nv`
 - **Boolean short-circuit** — `and`/`or` skip right operand evaluation when left determines the result
 - **Debug prints (`printd`)** — `printd(x)` outputs `debug - [line N]: <value>` with automatic line number, enabled via `--debug` flag
 - **Smart error messages** — compiler errors include error category, line number, and fix suggestions

@@ -23,7 +23,12 @@ MODULE_FUNCS = {
     "env": {"get": "env_get", "set": "env_set", "args": "env_args", "platform": "env_platform"},
     "process": {"run": "process_run", "shell": "process_shell", "exit": "process_exit"},
     "time": {"now": "time_now", "ticks": "time_ticks_ms"},
-    "json": {"stringify": "json_stringify"},
+    "json": {
+        "stringify": "json_stringify", "parse": "json_parse", "kind": "json_kind",
+        "asInt": "json_as_int", "asString": "json_as_string", "asBool": "json_as_bool",
+        "size": "json_size", "at": "json_at", "get": "json_get", "has": "json_has",
+        "keyAt": "json_key_at",
+    },
     "text": {
         "toInt": "text_to_int", "trim": "text_trim", "startsWith": "text_starts_with",
         "endsWith": "text_ends_with", "indexOf": "text_index_of", "contains": "text_contains",

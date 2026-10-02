@@ -44,9 +44,15 @@ Nova bridges high-level Pythonic simplicity with low-level C-like control. This 
 * **`defer`**: Deterministic scope cleanup. Executes statements in LIFO (reverse) order right before function or scope exit (`return`, `break`, or block closing `}`). Supports both single-line (`defer sys_close(f)`) and block form (`defer { free(p); sys_close(f) }`).
 * **`extern def`**: Direct zero-boilerplate C FFI. Declares external C functions (`extern def puts(s: string) -> int`) with automatic argument register placement (SysV / Win64) and null-terminated string pointer unwrapping.
 
+### Counting loops, constructors and dictionaries
+* `for i in range(n)`, `range(a, b)`, `range(a, b, step)`: the end is excluded like Python and the step must be an integer literal (negative counts down). Lowers to the counted `for i = a to b step s` loop.
+* `Point(1, 2)` / `Point(x=1, y=2)`: build a `data` value in field order (missing fields are zero). The compiler generates a hidden `__new_Point` function only for types built this way. Applies to types declared earlier in the same file.
+* `d["k"]`, `d["k"] = v`, `"k" in d`, `"k" not in d` on dictionaries.
+* Functions without a `-> type` that only return strings are treated as returning `string`.
+
 ### Standard modules (dotted calls)
 `import fs` then `fs.read(p)` calls the flat function `fs_read(p)` (a parse-time rewrite: no runtime cost).
-Public modules: `fs`, `path`, `env`, `process`, `time`, `json`, `text`. Unknown members are errors with a
+Public modules: `fs`, `path`, `env`, `process`, `time`, `json` (`stringify`, `parse`, `kind`, `asInt`, `asString`, `asBool`, `size`, `at`, `get`, `has`, `keyAt`), `text`. Unknown members are errors with a
 did-you-mean hint. Module-qualified names are the preferred API; flat names remain accepted.
 
 ### Soft keywords

@@ -1,3 +1,337 @@
+# Portable JSON (use as `import json`, then json.stringify(v) / json.parse(text)).
+#
+# json.parse returns a typed tree (`Json`) written in plain Nova, so it behaves the same in the
+# VM and in native builds and needs no runtime support:
+#   json.kind(v)      0 null, 1 bool, 2 number, 3 string, 4 array, 5 object, -1 parse error
+#   json.asInt(v)     integer value (numbers are truncated to int; bools are 0/1)
+#   json.asString(v)  string value (for numbers: the literal text; for errors: the message)
+#   json.asBool(v)    1 or 0
+#   json.size(v)      element count of an array or object
+#   json.at(v, i)     array element (a null Json when out of range)
+#   json.get(v, key)  object member (a null Json when missing); json.has(v, key) tests presence
+#   json.keyAt(v, i)  i-th key of an object, in document order
+# Limits: fractions and exponents are parsed but truncated; \uXXXX escapes above "z" (ASCII 122) become "?".
+
 def json_stringify(value) -> string {
     return nova_json_stringify(value)
+}
+
+data Json {
+    jtype: int
+    jnum: int
+    jstr: string
+    jitems: list
+    jkeys: list
+}
+
+data JsonCursor {
+    src: string
+    pos: int
+    size: int
+    failed: int
+}
+
+# Typed accessor so indexing the source treats it as a string (not a list) in every backend.
+def json_src(c: JsonCursor) -> string {
+    return c.src
+}
+
+def json_make(jtype: int) -> Json {
+    v = Json()
+    v.jtype = jtype
+    v.jnum = 0
+    v.jstr = ""
+    v.jitems = []
+    v.jkeys = []
+    return v
+}
+
+def json_same(a: string, b: string) -> int {
+    if a == b { return 1 }
+    return 0
+}
+
+def json_fail(c: JsonCursor, message: string) -> Json {
+    c.failed = 1
+    v = json_make(-1)
+    v.jstr = message
+    return v
+}
+
+def json_skip_space(c: JsonCursor) {
+    src = json_src(c)
+    while c.pos < c.size {
+        ch = src[c.pos]
+        if ch == " " or ch == "\t" or ch == "\n" or ch == "\r" {
+            c.pos = c.pos + 1
+        } else {
+            break
+        }
+    }
+}
+
+def json_hex_value(ch: string) -> int {
+    if ch >= "0" and ch <= "9" { return char_code(ch, 0) - char_code("0", 0) }
+    if ch >= "a" and ch <= "f" { return char_code(ch, 0) - char_code("a", 0) + 10 }
+    if ch >= "A" and ch <= "F" { return char_code(ch, 0) - char_code("A", 0) + 10 }
+    return -1
+}
+
+def json_ascii(code: int) -> string {
+    table = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz"
+    if code >= 32 and code <= 122 { return str_sub(table, code - 32, code - 31) }
+    if code == 10 { return "\n" }
+    if code == 9 { return "\t" }
+    if code == 13 { return "\r" }
+    return "?"
+}
+
+def json_parse_string(c: JsonCursor) -> string {
+    src = json_src(c)
+    c.pos = c.pos + 1
+    result = ""
+    while c.pos < c.size {
+        ch = src[c.pos]
+        if ch == "\"" {
+            c.pos = c.pos + 1
+            return result
+        }
+        if ch == "\\" {
+            c.pos = c.pos + 1
+            if c.pos >= c.size { break }
+            esc = src[c.pos]
+            if esc == "n" { result = result + "\n" }
+            elif esc == "t" { result = result + "\t" }
+            elif esc == "r" { result = result + "\r" }
+            elif esc == "b" { result = result + "\b" }
+            elif esc == "f" { result = result + "\f" }
+            elif esc == "u" {
+                code = 0
+                k = 0
+                while k < 4 and c.pos + 1 < c.size {
+                    c.pos = c.pos + 1
+                    digit = json_hex_value(src[c.pos])
+                    if digit < 0 {
+                        c.failed = 1
+                        return result
+                    }
+                    code = code * 16 + digit
+                    k = k + 1
+                }
+                result = result + json_ascii(code)
+            } else {
+                result = result + esc
+            }
+            c.pos = c.pos + 1
+        } else {
+            result = result + ch
+            c.pos = c.pos + 1
+        }
+    }
+    c.failed = 1
+    return result
+}
+
+def json_parse_word(c: JsonCursor, word: string, jtype: int, jnum: int) -> Json {
+    n = len(word)
+    if c.pos + n <= c.size {
+        if str_sub(c.src, c.pos, c.pos + n) == word {
+            c.pos = c.pos + n
+            v = json_make(jtype)
+            v.jnum = jnum
+            return v
+        }
+    }
+    return json_fail(c, "invalid literal at position " + str(c.pos))
+}
+
+def json_parse_number(c: JsonCursor) -> Json {
+    src = json_src(c)
+    start = c.pos
+    negative = 0
+    if src[c.pos] == "-" {
+        negative = 1
+        c.pos = c.pos + 1
+    }
+    value = 0
+    digits = 0
+    zero = char_code("0", 0)
+    while c.pos < c.size {
+        ch = src[c.pos]
+        if ch >= "0" and ch <= "9" {
+            value = value * 10 + (char_code(ch, 0) - zero)
+            digits = digits + 1
+            c.pos = c.pos + 1
+        } else {
+            break
+        }
+    }
+    if digits == 0 { return json_fail(c, "invalid number at position " + str(start)) }
+    if c.pos < c.size and src[c.pos] == "." {
+        c.pos = c.pos + 1
+        while c.pos < c.size and src[c.pos] >= "0" and src[c.pos] <= "9" { c.pos = c.pos + 1 }
+    }
+    if c.pos < c.size and (src[c.pos] == "e" or src[c.pos] == "E") {
+        c.pos = c.pos + 1
+        if c.pos < c.size and (src[c.pos] == "+" or src[c.pos] == "-") { c.pos = c.pos + 1 }
+        while c.pos < c.size and src[c.pos] >= "0" and src[c.pos] <= "9" { c.pos = c.pos + 1 }
+    }
+    v = json_make(2)
+    if negative == 1 { value = 0 - value }
+    v.jnum = value
+    v.jstr = str_sub(src, start, c.pos)
+    return v
+}
+
+def json_parse_array(c: JsonCursor) -> Json {
+    src = json_src(c)
+    v = json_make(4)
+    c.pos = c.pos + 1
+    json_skip_space(c)
+    if c.pos < c.size and src[c.pos] == "]" {
+        c.pos = c.pos + 1
+        return v
+    }
+    while c.pos < c.size {
+        item = json_parse_value(c)
+        if c.failed == 1 { return item }
+        v.jitems.append(item)
+        json_skip_space(c)
+        if c.pos >= c.size { break }
+        ch = src[c.pos]
+        if ch == "," {
+            c.pos = c.pos + 1
+        } elif ch == "]" {
+            c.pos = c.pos + 1
+            return v
+        } else {
+            return json_fail(c, "expected , or ] at position " + str(c.pos))
+        }
+    }
+    return json_fail(c, "unterminated array")
+}
+
+def json_parse_object(c: JsonCursor) -> Json {
+    src = json_src(c)
+    v = json_make(5)
+    c.pos = c.pos + 1
+    json_skip_space(c)
+    if c.pos < c.size and src[c.pos] == "}" {
+        c.pos = c.pos + 1
+        return v
+    }
+    while c.pos < c.size {
+        json_skip_space(c)
+        if c.pos >= c.size or src[c.pos] != "\"" {
+            return json_fail(c, "expected object key at position " + str(c.pos))
+        }
+        key = json_parse_string(c)
+        if c.failed == 1 { return json_fail(c, "bad object key") }
+        json_skip_space(c)
+        if c.pos >= c.size or src[c.pos] != ":" {
+            return json_fail(c, "expected : at position " + str(c.pos))
+        }
+        c.pos = c.pos + 1
+        item = json_parse_value(c)
+        if c.failed == 1 { return item }
+        v.jkeys.append(key)
+        v.jitems.append(item)
+        json_skip_space(c)
+        if c.pos >= c.size { break }
+        ch = src[c.pos]
+        if ch == "," {
+            c.pos = c.pos + 1
+        } elif ch == "}" {
+            c.pos = c.pos + 1
+            return v
+        } else {
+            return json_fail(c, "expected , or } at position " + str(c.pos))
+        }
+    }
+    return json_fail(c, "unterminated object")
+}
+
+def json_parse_value(c: JsonCursor) -> Json {
+    json_skip_space(c)
+    if c.pos >= c.size { return json_fail(c, "unexpected end of input") }
+    src = json_src(c)
+    ch = src[c.pos]
+    if ch == "{" { return json_parse_object(c) }
+    if ch == "[" { return json_parse_array(c) }
+    if ch == "\"" {
+        s = json_parse_string(c)
+        if c.failed == 1 { return json_fail(c, "unterminated string") }
+        v = json_make(3)
+        v.jstr = s
+        return v
+    }
+    if ch == "t" { return json_parse_word(c, "true", 1, 1) }
+    if ch == "f" { return json_parse_word(c, "false", 1, 0) }
+    if ch == "n" { return json_parse_word(c, "null", 0, 0) }
+    if ch == "-" or (ch >= "0" and ch <= "9") { return json_parse_number(c) }
+    return json_fail(c, "unexpected character at position " + str(c.pos))
+}
+
+def json_parse(text: string) -> Json {
+    c = JsonCursor()
+    c.src = text
+    c.pos = 0
+    c.size = len(text)
+    c.failed = 0
+    v = json_parse_value(c)
+    if c.failed == 1 { return v }
+    json_skip_space(c)
+    if c.pos < c.size { return json_fail(c, "unexpected trailing data at position " + str(c.pos)) }
+    return v
+}
+
+def json_kind(v: Json) -> int {
+    return v.jtype
+}
+
+def json_as_int(v: Json) -> int {
+    return v.jnum
+}
+
+def json_as_string(v: Json) -> string {
+    return v.jstr
+}
+
+def json_as_bool(v: Json) -> int {
+    if v.jnum != 0 { return 1 }
+    return 0
+}
+
+def json_size(v: Json) -> int {
+    return len(v.jitems)
+}
+
+def json_at(v: Json, i: int) -> Json {
+    if i < 0 or i >= len(v.jitems) { return json_make(0) }
+    return v.jitems[i]
+}
+
+def json_key_at(v: Json, i: int) -> string {
+    if i < 0 or i >= len(v.jkeys) { return "" }
+    return v.jkeys[i]
+}
+
+def json_find(v: Json, key: string) -> int {
+    i = 0
+    while i < len(v.jkeys) {
+        if json_same(v.jkeys[i], key) == 1 { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+def json_has(v: Json, key: string) -> int {
+    if json_find(v, key) >= 0 { return 1 }
+    return 0
+}
+
+def json_get(v: Json, key: string) -> Json {
+    i = json_find(v, key)
+    if i < 0 { return json_make(0) }
+    return v.jitems[i]
 }
