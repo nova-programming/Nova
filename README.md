@@ -97,7 +97,10 @@ galaxy --version         # Check Galaxy version
 galaxy init my-lib       # Create a library
 galaxy install pkg       # Install a package
 galaxy verify            # Check installed packages against galaxy.lock (content hashes)
+galaxy keygen            # (maintainers) create an Ed25519 key to sign registry metadata
 ```
+
+Registry metadata can be signed (Ed25519): `packages/*.json.sig` is checked against the keys in `REGISTRY_PUBLIC_KEYS` (`_galaxy.py`) or `GALAXY_REGISTRY_KEYS`. With keys configured, missing or invalid signatures stop the install; `GALAXY_ALLOW_UNSIGNED=1` overrides and `GALAXY_REQUIRE_SIGNATURE=1` enforces even without configured keys. Installed packages are also pinned by content hash in `galaxy.lock` (`galaxy verify`).
 
 **To use `nova` and `galaxy` immediately without restarting your terminal:**
 

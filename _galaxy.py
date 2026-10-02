@@ -7,6 +7,7 @@ Also: python -m galaxy, python -m tools.galaxy, nova galaxy <cmd>
 import sys
 import os
 import json
+import base64
 import hashlib
 import subprocess
 import urllib.request
@@ -33,6 +34,162 @@ MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
 PACKAGE_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*(/[A-Za-z0-9][A-Za-z0-9_.-]*)?$")
 
 
+# ---------------------------------------------------------------------------
+# Signed registry metadata (Ed25519, RFC 8032)
+#
+# The registry publishes <file>.sig next to packages/index.json and every packages/<name>.json:
+# the base64 Ed25519 signature of the exact file bytes. Galaxy verifies it before trusting the
+# metadata, so a compromised web host cannot swap package hashes or download URLs.
+# Only verification (plus signing for `galaxy keygen`/tests) is implemented here, in pure Python.
+# ---------------------------------------------------------------------------
+
+# Hex-encoded 32-byte Ed25519 public keys allowed to sign registry metadata (any listed key may
+# sign, which allows rotation). While this list is empty (and GALAXY_REQUIRE_SIGNATURE is unset)
+# verification is dormant. Generate a keypair with `galaxy keygen`.
+REGISTRY_PUBLIC_KEYS = []
+
+_ED_P = 2 ** 255 - 19
+_ED_Q = 2 ** 252 + 27742317777372353535851937790883648493
+_ED_D = -121665 * pow(121666, _ED_P - 2, _ED_P) % _ED_P
+_ED_I = pow(2, (_ED_P - 1) // 4, _ED_P)
+
+
+def _ed_recover_x(y, sign):
+    if y >= _ED_P:
+        return None
+    x2 = (y * y - 1) * pow(_ED_D * y * y + 1, _ED_P - 2, _ED_P) % _ED_P
+    if x2 == 0:
+        return None if sign else 0
+    x = pow(x2, (_ED_P + 3) // 8, _ED_P)
+    if (x * x - x2) % _ED_P != 0:
+        x = x * _ED_I % _ED_P
+    if (x * x - x2) % _ED_P != 0:
+        return None
+    if (x & 1) != sign:
+        x = _ED_P - x
+    return x
+
+
+_ED_GY = 4 * pow(5, _ED_P - 2, _ED_P) % _ED_P
+_ED_GX = _ed_recover_x(_ED_GY, 0)
+_ED_G = (_ED_GX, _ED_GY, 1, _ED_GX * _ED_GY % _ED_P)
+_ED_ZERO = (0, 1, 1, 0)
+
+
+def _ed_add(a, b):
+    p = _ED_P
+    t1 = (a[1] - a[0]) * (b[1] - b[0]) % p
+    t2 = (a[1] + a[0]) * (b[1] + b[0]) % p
+    t3 = 2 * a[3] * b[3] * _ED_D % p
+    t4 = 2 * a[2] * b[2] % p
+    e, f, g, h = t2 - t1, t4 - t3, t4 + t3, t2 + t1
+    return (e * f % p, g * h % p, f * g % p, e * h % p)
+
+
+def _ed_mul(scalar, point):
+    result = _ED_ZERO
+    while scalar > 0:
+        if scalar & 1:
+            result = _ed_add(result, point)
+        point = _ed_add(point, point)
+        scalar >>= 1
+    return result
+
+
+def _ed_equal(a, b):
+    return (a[0] * b[2] - b[0] * a[2]) % _ED_P == 0 and (a[1] * b[2] - b[1] * a[2]) % _ED_P == 0
+
+
+def _ed_compress(point):
+    zinv = pow(point[2], _ED_P - 2, _ED_P)
+    x = point[0] * zinv % _ED_P
+    y = point[1] * zinv % _ED_P
+    return int.to_bytes(y | ((x & 1) << 255), 32, "little")
+
+
+def _ed_decompress(data):
+    if len(data) != 32:
+        return None
+    y = int.from_bytes(data, "little")
+    sign = y >> 255
+    y &= (1 << 255) - 1
+    x = _ed_recover_x(y, sign)
+    if x is None:
+        return None
+    return (x, y, 1, x * y % _ED_P)
+
+
+def _ed_secret_expand(seed):
+    h = hashlib.sha512(seed).digest()
+    a = int.from_bytes(h[:32], "little")
+    a &= (1 << 254) - 8
+    a |= 1 << 254
+    return a, h[32:]
+
+
+def ed25519_public_key(seed):
+    """32-byte public key for a 32-byte seed."""
+    a, _ = _ed_secret_expand(seed)
+    return _ed_compress(_ed_mul(a, _ED_G))
+
+
+def ed25519_sign(seed, message):
+    """64-byte signature of message (used by `galaxy keygen` self-test and the tests)."""
+    a, prefix = _ed_secret_expand(seed)
+    public = _ed_compress(_ed_mul(a, _ED_G))
+    r = int.from_bytes(hashlib.sha512(prefix + message).digest(), "little") % _ED_Q
+    big_r = _ed_compress(_ed_mul(r, _ED_G))
+    h = int.from_bytes(hashlib.sha512(big_r + public + message).digest(), "little") % _ED_Q
+    return big_r + int.to_bytes((r + h * a) % _ED_Q, 32, "little")
+
+
+def ed25519_verify(public, message, signature):
+    """True if signature is a valid Ed25519 signature of message under the 32-byte public key."""
+    if len(public) != 32 or len(signature) != 64:
+        return False
+    a_point = _ed_decompress(public)
+    r_point = _ed_decompress(signature[:32])
+    if a_point is None or r_point is None:
+        return False
+    s_int = int.from_bytes(signature[32:], "little")
+    if s_int >= _ED_Q:
+        return False
+    h = int.from_bytes(hashlib.sha512(signature[:32] + public + message).digest(), "little") % _ED_Q
+    return _ed_equal(_ed_mul(s_int, _ED_G), _ed_add(r_point, _ed_mul(h, a_point)))
+
+
+def _registry_keys():
+    keys = list(REGISTRY_PUBLIC_KEYS)
+    extra = os.environ.get("GALAXY_REGISTRY_KEYS", "")
+    keys += [k.strip() for k in extra.split(",") if k.strip()]
+    return keys
+
+
+def verify_registry_signature(path, raw, sig_text):
+    """Check the base64 signature text for registry file bytes against the configured keys."""
+    try:
+        signature = base64.b64decode(sig_text.strip(), validate=True)
+    except Exception:
+        return False
+    for key_hex in _registry_keys():
+        try:
+            public = bytes.fromhex(key_hex)
+        except ValueError:
+            continue
+        if ed25519_verify(public, raw, signature):
+            return True
+    return False
+
+
+def cmd_keygen(args):
+    """Create a registry signing keypair. Keep the seed secret; publish the public key."""
+    seed = os.urandom(32)
+    public = ed25519_public_key(seed)
+    print("Galaxy registry signing key (Ed25519)")
+    print(f"  public key (add to REGISTRY_PUBLIC_KEYS in _galaxy.py): {public.hex()}")
+    print(f"  private seed (store as the GALAXY_SIGNING_KEY secret, never commit): {seed.hex()}")
+
+
 def main():
     if len(sys.argv) < 2:
         print_usage()
@@ -50,6 +207,7 @@ def main():
         "install":   cmd_install,
         "list":      cmd_list,
         "verify":    cmd_verify,
+        "keygen":    cmd_keygen,
         "test":      cmd_test,
         "search":    cmd_search,
         "info":      cmd_info,
@@ -105,6 +263,7 @@ def print_usage():
     print("  galaxy install <pkg>         Install a package")
     print("  galaxy list                  List installed packages")
     print("  galaxy verify                Check installed packages against galaxy.lock")
+    print("  galaxy keygen                Create a registry signing keypair (maintainers)")
     print("  galaxy search <query>        Search the registry")
     print("  galaxy info <pkg>            Show package details")
     print("  galaxy test [--vm] [name]    Run library tests (--vm for faster VM mode)")
@@ -259,12 +418,32 @@ def validate_manifest(manifest):
         sys.exit(1)
 
 
+def _signature_checks_enabled():
+    if os.environ.get("GALAXY_ALLOW_UNSIGNED") == "1":
+        return False
+    return bool(_registry_keys()) or os.environ.get("GALAXY_REQUIRE_SIGNATURE") == "1"
+
+
+def _fetch_bytes(url):
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return r.read()
+
+
 def registry_fetch(path):
     url = f"{REGISTRY_URL}/{path}"
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            return json.loads(r.read().decode("utf-8"))
+        raw = _fetch_bytes(url)
+        if path.startswith("packages/") and _signature_checks_enabled():
+            try:
+                sig_text = _fetch_bytes(url + ".sig").decode("ascii", "replace")
+            except urllib.error.HTTPError:
+                sig_text = ""
+            if not verify_registry_signature(path, raw, sig_text):
+                print(f"Error: registry metadata '{path}' has a missing or invalid signature; refusing to use it.")
+                print("       Set GALAXY_ALLOW_UNSIGNED=1 only if you trust this network and registry.")
+                sys.exit(1)
+        return json.loads(raw.decode("utf-8"))
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return None
