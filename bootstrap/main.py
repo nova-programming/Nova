@@ -597,6 +597,9 @@ def compile_native(file_path, debug_mode=0, target_arch="x86_64", target_os=None
               "Call a statically named function instead.")
         sys.exit(1)
 
+    import infer
+    infer.infer_return_types(ast)
+
     try:
         TypeInferer().infer(ast)
     except StaticTypeError as e:

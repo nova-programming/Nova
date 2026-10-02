@@ -3,6 +3,7 @@ import lexer
 import parser
 import types
 import type_checker
+import infer
 import codegen
 import assembler
 import linker
@@ -157,6 +158,7 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     ast = resolve_imports(ast, visited, target_arch, target_os)
     print("[3/5] done: " + str(len(ast)) + " nodes after imports")
 
+    infer_return_types(ast)
     print("[4/5] Type checking")
     tc = TypeChecker()
     tc_init(tc)

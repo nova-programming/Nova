@@ -1,0 +1,187 @@
+# ============================================================
+# Nova return-type inference (stdlib/infer.nv)
+# ============================================================
+# Backends print and concatenate by the *declared* return type, so
+# `def f() { return "x" }` used to print a pointer. This pass fills in a missing
+# `-> string` from the function's own `return` expressions.
+# It only adds an annotation, never changes an explicit one, and only when the
+# evidence is unambiguous: every return with a known type agrees, and at least
+# one is string/float. Unknown returns (parameters, recursive calls) do not vote.
+# Mirrors bootstrap/infer.py.
+# ============================================================
+
+# Typed helper: string-typed parameter makes len() measure characters, not list items.
+def infer_has_text(s: string) -> int {
+    if len(s) > 0 { return 1 }
+    return 0
+}
+
+def infer_same(a: string, b: string) -> int {
+    if a == b { return 1 }
+    return 0
+}
+
+def infer_is_builtin_string(name: string) -> int {
+    if name == "str_sub" { return 1 }
+    if name == "sys_platform" { return 1 }
+    if name == "sys_read" { return 1 }
+    if name == "sys_read_c" { return 1 }
+    return 0
+}
+
+def infer_kind(node: AstNode, env: dict, returns: dict) -> string {
+    if node == 0 { return "" }
+    k = node.kind
+    if k == "String" or k == "StrConvert" { return "string" }
+    if k == "Number" {
+        if node.is_float == 1 { return "float" }
+        return "int"
+    }
+    if k == "Len" or k == "Boolean" or k == "Compare" { return "int" }
+    if k == "Variable" {
+        if env.has(node.val_str) { return env.get(node.val_str) }
+        return ""
+    }
+    if k == "UnaryOp" {
+        if node.val_str == "not" { return "" }
+        return infer_kind(node.left, env, returns)
+    }
+    if k == "BinOp" {
+        lk = infer_kind(node.left, env, returns)
+        rk = infer_kind(node.right, env, returns)
+        l_str = infer_same(lk, "string")
+        r_str = infer_same(rk, "string")
+        if node.val_str == "+" and (l_str == 1 or r_str == 1) { return "string" }
+        if l_str == 1 or r_str == 1 { return "" }
+        op = node.val_str
+        if op == "+" or op == "-" or op == "*" or op == "/" or op == "%" {
+            if infer_same(lk, "float") == 1 or infer_same(rk, "float") == 1 { return "float" }
+            if infer_same(lk, "int") == 1 and infer_same(rk, "int") == 1 { return "int" }
+        }
+        return ""
+    }
+    if k == "Call" {
+        if infer_is_builtin_string(node.val_str) == 1 { return "string" }
+        if returns.has(node.val_str) { return returns.get(node.val_str) }
+        return ""
+    }
+    if k == "ArrayIndex" or k == "Slice" {
+        if infer_same(infer_kind(node.left, env, returns), "string") == 1 { return "string" }
+        return ""
+    }
+    return ""
+}
+
+# Walk one function body (not nested functions), recording local variable kinds and return kinds.
+def infer_walk(node: AstNode, env: dict, returns: dict, kinds: list, collect_returns: int) {
+    if node == 0 { return }
+    k = node.kind
+    if k == "Function" or k == "Class" { return }
+    if k == "Assignment" {
+        if node.left != 0 {
+            if env.has(node.val_str) == 0 {
+                ak = infer_kind(node.left, env, returns)
+                if len(ak) > 0 { env.set(node.val_str, ak) }
+            }
+        }
+    }
+    if k == "Return" {
+        if collect_returns == 1 {
+            if node.left != 0 {
+                rk = infer_kind(node.left, env, returns)
+                if len(rk) > 0 { kinds.append(rk) }
+            }
+        }
+    }
+    infer_walk(node.left, env, returns, kinds, collect_returns)
+    infer_walk(node.right, env, returns, kinds, collect_returns)
+    infer_walk(node.cond, env, returns, kinds, collect_returns)
+    i = 0
+    if node.body != 0 {
+        while i < len(node.body) {
+            infer_walk(node.body[i], env, returns, kinds, collect_returns)
+            i = i + 1
+        }
+    }
+    i = 0
+    if node.else_body != 0 {
+        while i < len(node.else_body) {
+            infer_walk(node.else_body[i], env, returns, kinds, collect_returns)
+            i = i + 1
+        }
+    }
+}
+
+def infer_function(fn: AstNode, returns: dict) -> string {
+    env = {}
+    p = 0
+    while p < len(fn.params) {
+        if p < len(fn.param_types) {
+            pt = fn.param_types[p]
+            if infer_same(pt, "string") == 1 or infer_same(pt, "float") == 1 or infer_same(pt, "int") == 1 {
+                env.set(fn.params[p], pt)
+            }
+        }
+        p = p + 1
+    }
+    kinds = []
+    sweep = 0
+    while sweep < 2 {
+        s = 0
+        while s < len(fn.body) {
+            infer_walk(fn.body[s], env, returns, kinds, 0)
+            s = s + 1
+        }
+        sweep = sweep + 1
+    }
+    s = 0
+    while s < len(fn.body) {
+        infer_walk(fn.body[s], env, returns, kinds, 1)
+        s = s + 1
+    }
+    n_string = 0
+    n_float = 0
+    n_int = 0
+    i = 0
+    while i < len(kinds) {
+        if infer_same(kinds[i], "string") == 1 { n_string = n_string + 1 }
+        if infer_same(kinds[i], "float") == 1 { n_float = n_float + 1 }
+        if infer_same(kinds[i], "int") == 1 { n_int = n_int + 1 }
+        i = i + 1
+    }
+    if n_string > 0 and n_float == 0 and n_int == 0 { return "string" }
+    return ""
+}
+
+def infer_return_types(ast: list) {
+    returns = {}
+    funcs = []
+    i = 0
+    while i < len(ast) {
+        n = ast[i]
+        if n.kind == "Function" and n.val_int != 2 {
+            funcs.append(n)
+            if infer_has_text(n.return_type) == 1 { returns.set(n.val_str, n.return_type) }
+        }
+        i = i + 1
+    }
+    pass_no = 0
+    while pass_no < 6 {
+        changed = 0
+        j = 0
+        while j < len(funcs) {
+            fn = funcs[j]
+            if infer_has_text(fn.return_type) == 0 {
+                result = infer_function(fn, returns)
+                if len(result) > 0 {
+                    fn.return_type = result
+                    returns.set(fn.val_str, result)
+                    changed = 1
+                }
+            }
+            j = j + 1
+        }
+        if changed == 0 { break }
+        pass_no = pass_no + 1
+    }
+}
