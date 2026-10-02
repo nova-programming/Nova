@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "nova-lang"
@@ -10,13 +10,16 @@ readme = "README.md"
 license = {text = "CC-BY-NC-4.0"}
 requires-python = ">=3.10"
 
+# Supported for development (`pip install -e .`): the compiler locates stdlib/ and
+# runtime.c relative to the source tree. End users should use install.py/.sh/.ps1.
 [project.scripts]
 nova = "bootstrap.main:main"
 galaxy = "_galaxy:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["bootstrap*", "galaxy*", "tools*", "nova_ast*", "compiler*", "parser*", "lexer*", "vm*", "modules*"]
+include = ["bootstrap*", "galaxy*", "tools*"]
+namespaces = true
 
 [tool.setuptools]
 py-modules = ["_galaxy"]

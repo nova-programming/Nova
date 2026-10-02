@@ -53,3 +53,8 @@ ci-tmp/
 *.dll
 *.bmp
 
+
+# Packaging
+*.egg-info/
+build/
+dist/

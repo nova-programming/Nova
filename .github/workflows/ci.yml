@@ -24,19 +24,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Run Galaxy tests
-        run: python -m unittest tests.test_galaxy -v
+      - name: Install test dependencies
+        run: python -m pip install pytest
 
-      - name: Run Installer tests
-        run: python -m unittest tests.test_installers -v
-
-      - name: Run x86_64 codegen tests
-        run: python -m unittest tests.test_codegen_x86_64 -v
-        if: runner.os != 'macOS'
-
-      - name: Run ARM64 codegen tests
-        run: python -m unittest tests.test_codegen_arm64 -v
-        if: runner.os == 'macOS'
+      # pytest collects both unittest- and pytest-style tests; `unittest discover`
+      # silently skipped the pytest-style modules.
+      - name: Run test suite
+        run: python -m pytest -q -rs
 
       - name: Nova smoke test — version
         run: python bootstrap/main.py --version
@@ -47,88 +41,46 @@ jobs:
           printf 'print("Hello from Nova CI")\n' > ./ci-tmp/hello.nv
           python bootstrap/main.py dev ./ci-tmp/hello.nv
 
-      - name: Native compilation — generate assembly, compile runtime, assemble + link
-        if: runner.os != 'Windows'
+      - name: Native compilation (Windows) — compile, link, run
+        if: runner.os == 'Windows'
         run: |
-          set +e
-          mkdir -p ./ci-tmp
           printf 'print("Hello from Nova CI")\n' > ./ci-tmp/test_cc.nv
-          python bootstrap/main.py build ./ci-tmp/test_cc.nv; rc=$?
-          echo "=== build exit code: $rc ==="
-          echo "=== Generated assembly ==="
-          cat ./ci-tmp/test_cc.s 2>&1 || echo "(no assembly)"
-          if [ -f ./ci-tmp/test_cc ]; then
-            echo "=== nm linked binary ==="
-            nm ./ci-tmp/test_cc 2>&1 || true
-            echo "=== otool -tv _main ==="
-            otool -tV ./ci-tmp/test_cc 2>&1 | head -40 || true
-            echo "=== DATA section hex dump ==="
-            otool -s __DATA __data ./ci-tmp/test_cc 2>&1 | head -60 || true
-            echo "=== run ==="
-            ./ci-tmp/test_cc
-          fi
-          exit $rc
+          python bootstrap/main.py build ./ci-tmp/test_cc.nv
+          ./ci-tmp/test_cc.exe
 
-      - name: Self-hosted bootstrap — Build stage1 compiler
+      - name: Native compilation (Unix) — generate assembly, compile runtime, assemble + link
         if: runner.os != 'Windows'
         run: |
-          set +e
-          python bootstrap/main.py build nova.nv; rc=$?
-          echo "=== stage1 build exit code: $rc ==="
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            echo "=== nova.s (first 100 lines) ==="
-            head -100 ./nova.s 2>&1 || echo "(no nova.s)"
-          fi
-          exit $rc
+          printf 'print("Hello from Nova CI")\n' > ./ci-tmp/test_cc.nv
+          python bootstrap/main.py build ./ci-tmp/test_cc.nv
+          ./ci-tmp/test_cc
 
-      - name: Self-hosted bootstrap — Setup
+      - name: Diagnostics on native build failure (macOS)
+        if: failure() && runner.os == 'macOS'
+        run: |
+          cat ./ci-tmp/test_cc.s 2>&1 | head -100 || true
+          nm ./ci-tmp/test_cc 2>&1 | head -30 || true
+          otool -tV ./ci-tmp/test_cc 2>&1 | head -40 || true
+
+      - name: Self-hosted bootstrap — build stage1 compiler
         if: runner.os != 'Windows'
         run: |
+          python bootstrap/main.py build nova.nv
           mv ./nova ./nova-stage1
-          mkdir -p ./ci-tmp
           printf 'print("Self-hosted Nova OK")\n' > ./ci-tmp/selfhost.nv
 
-      - name: "Self-hosted bootstrap — Debug: Does stage1 even start?"
+      - name: Self-hosted bootstrap — stage1 compiles and runs a program
         if: runner.os != 'Windows'
         run: |
-          set +e
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            echo "=== nm stage1 (first 30 lines) ==="
-            nm ./nova-stage1 2>&1 | head -30
-            echo "=== otool -tv _main (first 30 lines) ==="
-            otool -tV ./nova-stage1 2>&1 | head -30
-            echo "=== otool -tV _parse (first 80 lines) ==="
-            otool -tV ./nova-stage1 2>&1 | grep -A 80 "_parse:" || echo "(no _parse section)"
-            echo "=== otool -tV _current_tok (first 40 lines) ==="
-            otool -tV ./nova-stage1 2>&1 | grep -A 40 "_current_tok:" || echo "(no _current_tok section)"
-            echo "=== otool -tV _str_sub (first 30 lines) ==="
-            otool -tV ./nova-stage1 2>&1 | grep -A 30 "_str_sub:" || echo "(no _str_sub section)"
-          fi
-          ./nova-stage1 --version; echo "version exit=$?"
-          ./nova-stage1 2>&1; echo "plain exit=$?"
+          ./nova-stage1 --version
+          ./nova-stage1 build ./ci-tmp/selfhost.nv
+          ./ci-tmp/selfhost
 
-      - name: Self-hosted bootstrap — Stage1 compiles a test program
-        if: runner.os != 'Windows'
+      - name: Self-hosted diagnostics on failure
+        if: failure() && runner.os == 'macOS'
         run: |
-          set +e
-          ./nova-stage1 build ./ci-tmp/selfhost.nv 2>&1; rc=$?
-          echo "## Stage1 build exit code: $rc" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            echo "=== nova_diag.txt ==="
-            cat ./nova_diag.txt 2>&1 || echo "(no nova_diag.txt)"
-          fi
-          if [ "${{ runner.os }}" = "macOS" ] && [ -f ./ci-tmp/selfhost.nv.s ]; then
-            echo "=== selfhost.nv.s (first 60 lines) ==="
-            head -60 ./ci-tmp/selfhost.nv.s
-          fi
-          exit $rc
-
-      - name: Self-hosted bootstrap — Run compiled output
-        if: runner.os != 'Windows'
-        run: |
-          ./ci-tmp/selfhost 2>&1; rc=$?
-          echo "## Selfhost exit code: $rc" >> $GITHUB_STEP_SUMMARY
-          exit $rc
+          cat ./nova_diag.txt 2>&1 || true
+          head -60 ./ci-tmp/selfhost.nv.s 2>&1 || true
 
       - name: Verify install.py imports cleanly
         run: python -c "import install; print('install.py OK')"

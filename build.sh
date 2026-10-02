@@ -1,8 +1,11 @@
 #!/bin/bash
+# Build to a temp output first so a broken build never overwrites the working compiler.
 echo "Building nova using self-hosted compiler..."
-./nova build nova.nv -o nova
-if [ $? -eq 0 ]; then
+if ./nova build nova.nv -o nova.new; then
+    mv -f nova.new nova
     echo "Build successful!"
 else
-    echo "Build failed!"
+    rm -f nova.new
+    echo "Build failed! Existing ./nova left untouched."
+    exit 1
 fi
