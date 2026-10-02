@@ -80,6 +80,10 @@ class Parser:
         
         if self.current() and self.current()[0] == "IN":
             self.eat("IN")
+            nxt = self.tokens[self.pos + 1] if self.pos + 1 < len(self.tokens) else None
+            if (self.current()[0] == "IDENT" and self.current()[1] == "range"
+                    and nxt and nxt[0] == "LPAREN"):
+                return self._parse_range_loop(var_name, line)
             collection = self.parse_expr()
             body = self.parse_block()
             from nova_ast.nodes import ForIn
@@ -114,6 +118,44 @@ class Parser:
             step = Number(1, line=line)
         
         return ForLoop(var_name, start, end, step, body, is_downto, line=line)
+
+    def _parse_range_loop(self, var_name, line):
+        """for i in range(n) / range(a, b) / range(a, b, step) -> counted ForLoop.
+
+        range() excludes its end like Python; ForLoop's `to` includes it, so the end
+        becomes b - 1 (or b + 1 counting down). The step must be a number literal.
+        """
+        self.eat("IDENT")
+        self.eat("LPAREN")
+        args = [self.parse_expr()]
+        while self.current() and self.current()[0] == "COMMA":
+            self.eat("COMMA")
+            args.append(self.parse_expr())
+        self.eat("RPAREN")
+        if len(args) > 3:
+            self._syntax_error("range() takes 1 to 3 arguments")
+        if len(args) == 1:
+            start, stop, step_val = Number(0, line=line), args[0], 1
+        else:
+            start, stop, step_val = args[0], args[1], 1
+        if len(args) == 3:
+            step = args[2]
+            if isinstance(step, UnaryOp) and step.op == "-" and isinstance(step.value, Number):
+                step_val = -step.value.value
+            elif isinstance(step, Number) and isinstance(step.value, int):
+                step_val = step.value
+            else:
+                self._syntax_error("range() step must be an integer literal")
+            if step_val == 0:
+                self._syntax_error("range() step must not be zero")
+        is_downto = step_val < 0
+        offset = 1 if is_downto else -1
+        if isinstance(stop, Number) and isinstance(stop.value, int):
+            end = Number(stop.value + offset, line=line)
+        else:
+            end = BinOp(stop, "+" if is_downto else "-", Number(1, line=line), line=line)
+        body = self.parse_block()
+        return ForLoop(var_name, start, end, Number(abs(step_val), line=line), body, is_downto, line=line)
 
     def current(self):
         if self.pos < len(self.tokens):

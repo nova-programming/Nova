@@ -962,11 +962,12 @@ class Arm64Codegen:
             self.assembly.append(f"{continue_label}:")
             self.compile_expr(step_val)
             self.assembly.append("    ldr x1, [sp], #16")
+            step_op = "sub" if node.is_downto else "add"
             if isinstance(offset, str):
-                self.assembly.append(f"    add {offset}, {offset}, x1")
+                self.assembly.append(f"    {step_op} {offset}, {offset}, x1")
             else:
                 self._emit_fp_access(self.assembly, "ldr", "x0", -offset)
-                self.assembly.append("    add x0, x0, x1")
+                self.assembly.append(f"    {step_op} x0, x0, x1")
                 self._emit_fp_access(self.assembly, "str", "x0", -offset)
             self.assembly.append(f"    b {loop_label}")
             self.assembly.append(f"{end_label}:")

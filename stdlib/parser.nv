@@ -730,6 +730,90 @@ def parse_primary(state: ParserState) -> AstNode {
     return node
 }
 
+def make_number_node(value: int, line: int, col: int) -> AstNode {
+    n = AstNode()
+    n.kind = "Number"
+    n.val_int = value
+    n.line = line
+    n.col = col
+    return n
+}
+
+# for i in range(n) / range(a, b) / range(a, b, step) -> counted ForLoop.
+# range() excludes its end like Python; ForLoop's `to` includes it, so the end
+# becomes b - 1 (or b + 1 when counting down). The step must be an integer literal.
+def parse_range_loop(state: ParserState, var_name: string, line: int, col: int) -> AstNode {
+    eat_tok(state, "IDENT")
+    eat_tok(state, "LPAREN")
+    range_args = [parse_expr(state)]
+    check = current_tok(state)
+    while check.kind == "COMMA" {
+        eat_tok(state, "COMMA")
+        range_args.append(parse_expr(state))
+        check = current_tok(state)
+    }
+    eat_tok(state, "RPAREN")
+    if len(range_args) > 3 {
+        errors.err("Syntax", state.filename, line, "range() takes 1 to 3 arguments", "use range(stop), range(start, stop) or range(start, stop, step)", col)
+    }
+    start_expr = make_number_node(0, line, col)
+    stop_expr = range_args[0]
+    if len(range_args) >= 2 {
+        start_expr = range_args[0]
+        stop_expr = range_args[1]
+    }
+    step_val = 1
+    if len(range_args) == 3 {
+        step_node = range_args[2]
+        if step_node.kind == "Number" and step_node.is_float == 0 {
+            step_val = step_node.val_int
+        } elif step_node.kind == "UnaryOp" and step_node.val_str == "-" and step_node.left.kind == "Number" {
+            step_val = 0 - step_node.left.val_int
+        } else {
+            errors.err("Syntax", state.filename, line, "range() step must be an integer literal", "write the step as a number, e.g. range(0, 10, 2) or range(10, 0, -1)", col)
+        }
+        if step_val == 0 {
+            errors.err("Syntax", state.filename, line, "range() step must not be zero", "use a positive or negative step", col)
+            step_val = 1
+        }
+    }
+    is_down = 0
+    offset = 0 - 1
+    if step_val < 0 {
+        is_down = 1
+        offset = 1
+    }
+    end_expr = AstNode()
+    if stop_expr.kind == "Number" and stop_expr.is_float == 0 {
+        end_expr = make_number_node(stop_expr.val_int + offset, line, col)
+    } else {
+        end_expr.kind = "BinOp"
+        end_expr.line = line
+        end_expr.col = col
+        end_expr.left = stop_expr
+        end_expr.right = make_number_node(1, line, col)
+        if is_down == 1 {
+            end_expr.val_str = "+"
+        } else {
+            end_expr.val_str = "-"
+        }
+    }
+    abs_step = step_val
+    if abs_step < 0 { abs_step = 0 - abs_step }
+    body = parse_block(state)
+    node = AstNode()
+    node.line = line
+    node.col = col
+    node.kind = "ForLoop"
+    node.val_str = var_name
+    node.val_int = is_down
+    node.left = start_expr
+    node.right = end_expr
+    node.cond = make_number_node(abs_step, line, col)
+    node.body = body
+    return node
+}
+
 def parse_unary(state: ParserState) -> AstNode {
     tok = current_tok(state)
     if tok.kind == "MINUS" or tok.kind == "NOT" or tok.kind == "TILDE" {
@@ -1109,6 +1193,11 @@ def parse_statement(state: ParserState) -> AstNode {
         next_tok = current_tok(state)
         if next_tok.kind == "IN" {
             eat_tok(state, "IN")
+            range_tok = current_tok(state)
+            range_next = peek_tok(state, 1)
+            if range_tok.kind == "IDENT" and range_tok.val == "range" and range_next.kind == "LPAREN" {
+                return parse_range_loop(state, var_name, stmt_line, stmt_col)
+            }
             collection = parse_expr(state)
             body = parse_block(state)
             node = AstNode()

@@ -850,10 +850,11 @@ class X86_64Codegen:
             self.assembly.append(f"{continue_label}:")
             self.compile_expr(step_val)
             self.assembly.append("    pop rax")
+            step_op = "sub" if node.is_downto else "add"
             if isinstance(offset, str):
-                self.assembly.append(f"    add {offset}, rax")
+                self.assembly.append(f"    {step_op} {offset}, rax")
             else:
-                self.assembly.append(f"    add qword ptr [rbp - {offset}], rax")
+                self.assembly.append(f"    {step_op} qword ptr [rbp - {offset}], rax")
             self.assembly.append(f"    jmp {loop_label}")
             self.assembly.append(f"{end_label}:")
             self.loop_labels.pop()
