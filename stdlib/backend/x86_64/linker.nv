@@ -33,6 +33,11 @@ def append_u32(bytes_out: list, value: int) {
     }
 }
 
+def append_u64(bytes_out: list, value: int) {
+    append_u32(bytes_out, value & 4294967295)
+    append_u32(bytes_out, (value >> 32) & 4294967295)
+}
+
 def append_bytes(dest: list, src: list) {
     i = 0
     while i < len(src) {

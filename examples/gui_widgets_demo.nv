@@ -1,0 +1,117 @@
+import gui
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Nova GUI — Rich Widgets & NSS Pseudo-Classes Showcase
+#  Featuring checkboxes, toggle switches, numeric sliders, dropdowns,
+#  canvas graphics, and NSS :hover / :active styling.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# --- State Targets ---
+slider_val_txt = txt("75%", {"class": "value-display"})
+status_bar_txt = txt("Ready — interact with any control above.", {"class": "status-text"})
+
+app_ui = div([
+
+    # ── Header bar ──────────────────────────────────────────────────────────
+    row([
+        badge("NV",               {"class": "brand-badge"}),
+        h2("Nova Widgets",        {"class": "app-title"}),
+        spacer({"class": "spacer"}),
+        badge("NSS :hover / :active", {"class": "badge-secondary"})
+    ], {"class": "header"}),
+
+    divider({"class": "divider"}),
+
+    # ── Main Content Grid ───────────────────────────────────────────────────
+    row([
+
+        # Left Column: Interactive Inputs & Toggles
+        col([
+            card([
+                label("SELECTION CONTROLS", {"class": "card-subtitle"}),
+                h3("Options and Preferences", {"class": "card-title"}),
+                checkbox("Enable Hardware Acceleration", 1, {"color": "#cdd6f4"}),
+                checkbox("High-DPI Scaling", 0, {"color": "#cdd6f4"}),
+                checkbox("Verbose Diagnostics", 1, {"color": "#cdd6f4"}),
+                divider({"class": "divider"}),
+                row([
+                    label("Dark Mode Theme", {"class": "card-subtitle"}),
+                    spacer({}),
+                    toggle(1, {"active-color": "#a6e3a1"})
+                ], {"align": "center"}),
+                row([
+                    label("Auto-Sync Packages", {"class": "card-subtitle"}),
+                    spacer({}),
+                    toggle(0, {"active-color": "#89b4fa"})
+                ], {"align": "center"})
+            ], {"class": "card"}),
+
+            card([
+                label("NUMERIC CONTROLS", {"class": "card-subtitle"}),
+                row([
+                    h3("Thread Pool Capacity", {"class": "card-title"}),
+                    spacer({}),
+                    slider_val_txt
+                ], {"align": "center"}),
+                slider(75, 0, 100, {
+                    "target": slider_val_txt,
+                    "suffix": "%",
+                    "fill-color": "#89b4fa"
+                })
+            ], {"class": "card"})
+        ], {"class": "col-panel"}),
+
+        # Right Column: Dropdowns, Canvas & Action Buttons
+        col([
+            card([
+                label("DROPDOWN SELECTOR", {"class": "card-subtitle"}),
+                h3("Execution Profile", {"class": "card-title"}),
+                dropdown([
+                    "Performance (JIT/Native)",
+                    "Balanced (Bytecode VM)",
+                    "Low Memory (Embedded)"
+                ], 0, {"w": 280})
+            ], {"class": "card"}),
+
+            card([
+                label("CANVAS GRAPHIC", {"class": "card-subtitle"}),
+                canvas([
+                    row([
+                        col([spacer({"h": 50}), div([], {"w": 26, "h": 50, "bg": "#89b4fa", "r": 3})], {"align": "center"}),
+                        col([spacer({"h": 25}), div([], {"w": 26, "h": 75, "bg": "#a6e3a1", "r": 3})], {"align": "center"}),
+                        col([spacer({"h": 5}),  div([], {"w": 26, "h": 95, "bg": "#f9e2af", "r": 3})], {"align": "center"}),
+                        col([spacer({"h": 35}), div([], {"w": 26, "h": 65, "bg": "#cba6f7", "r": 3})], {"align": "center"}),
+                        col([spacer({"h": 15}), div([], {"w": 26, "h": 85, "bg": "#f38ba8", "r": 3})], {"align": "center"}),
+                        col([spacer({"h": 40}), div([], {"w": 26, "h": 60, "bg": "#94e2d5", "r": 3})], {"align": "center"})
+                    ], {"gap": 14, "align": "flex-end", "h": 115, "p": 10})
+                ], {
+                    "w": 280,
+                    "h": 125,
+                    "background-color": "#11111b",
+                    "border-color": "#313244",
+                    "border-width": 1,
+                    "border-radius": 6
+                })
+            ], {"class": "card"}),
+
+            row([
+                btn("btn-primary", "", "", "Apply Changes", {"log": status_bar_txt}),
+                btn("btn-secondary", "", "", "Reset Defaults", {"log": status_bar_txt})
+            ], {"gap": 10})
+        ], {"class": "col-panel"})
+
+    ], {"class": "main-content"}),
+
+    divider({"class": "divider"}),
+
+    # ── Status Bar ──────────────────────────────────────────────────────────
+    row([
+        status_bar_txt
+    ], {"class": "status-bar"})
+
+], {"class": "window-container", "gap": 0})
+
+# ── Launch Application ──────────────────────────────────────────────────────
+gui("Nova GUI Widgets & NSS Showcase", 720, 560, app_ui, {
+    "style": "examples/styles/widgets.nss"
+})

@@ -1,0 +1,67 @@
+# ============================================================
+# Nova Standard Library: Dynamic C FFI (stdlib/ffi.nv)
+# ============================================================
+# Dynamic Foreign Function Interface for loading shared libraries
+# (.dll / .so / .dylib) and invoking C symbols dynamically.
+
+data Library {
+    handle: int
+    name: string
+}
+
+# Open a shared library by filename or system name
+def load(name: string) -> Library {
+    lib = Library()
+    lib.name = name
+    lib.handle = ffi_open(name)
+    return lib
+}
+
+# Look up an exported function symbol address
+def symbol(lib: Library, sym_name: string) -> int {
+    if lib.handle == 0 { return 0 }
+    return ffi_sym(lib.handle, sym_name)
+}
+
+# Unload / release the shared library handle
+def unload(lib: Library) -> int {
+    if lib.handle == 0 { return 0 }
+    res = ffi_close(lib.handle)
+    lib.handle = 0
+    return res
+}
+
+# Invoke a C function pointer with 0 arguments
+def call0(fn: int) -> int {
+    return ffi_call0(fn)
+}
+
+# Invoke a C function pointer with 1 argument
+def call1(fn: int, a1: int) -> int {
+    return ffi_call1(fn, a1)
+}
+
+# Invoke a C function pointer with 2 arguments
+def call2(fn: int, a1: int, a2: int) -> int {
+    return ffi_call2(fn, a1, a2)
+}
+
+# Invoke a C function pointer with 3 arguments
+def call3(fn: int, a1: int, a2: int, a3: int) -> int {
+    return ffi_call3(fn, a1, a2, a3)
+}
+
+# Invoke a C function pointer with 4 arguments
+def call4(fn: int, a1: int, a2: int, a3: int, a4: int) -> int {
+    return ffi_call4(fn, a1, a2, a3, a4)
+}
+
+# Invoke a C function pointer with 5 arguments
+def call5(fn: int, a1: int, a2: int, a3: int, a4: int, a5: int) -> int {
+    return ffi_call5(fn, a1, a2, a3, a4, a5)
+}
+
+# Invoke a C function pointer with 6 arguments
+def call6(fn: int, a1: int, a2: int, a3: int, a4: int, a5: int, a6: int) -> int {
+    return ffi_call6(fn, a1, a2, a3, a4, a5, a6)
+}

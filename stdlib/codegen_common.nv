@@ -11,7 +11,12 @@ def get_externs() -> list {
             "_try_catch_sp", "_catch_ip", "_exception_val",
             "_oob_file_ptr", "_oob_line",
             "_out_of_bounds",
-            "arena_init", "arena_alloc", "arena_reset", "arena_free"]
+            "arena_init", "arena_alloc", "arena_reset", "arena_free",
+            "_slice_cmp", "_slice_eq", "_slice_find", "_slice_to_str",
+            "_slice_from_str", "_slice_from_list_data", "_slice_byte_at",
+            "_ffi_open", "_ffi_sym", "_ffi_close",
+            "_ffi_call0", "_ffi_call1", "_ffi_call2", "_ffi_call3",
+            "_ffi_call4", "_ffi_call5", "_ffi_call6"]
 }
 
 def get_data_strings() -> list {

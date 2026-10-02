@@ -973,6 +973,25 @@ __asm__(".globl _out_of_bounds\n.set _out_of_bounds, __out_of_bounds");
 __asm__(".globl _nova_arc_alloc\n.set _nova_arc_alloc, __nova_arc_alloc");
 __asm__(".globl _nova_inc_ref\n.set _nova_inc_ref, __nova_inc_ref");
 __asm__(".globl _nova_dec_ref\n.set _nova_dec_ref, __nova_dec_ref");
+__asm__(".globl _slice_cmp\n.set _slice_cmp, __slice_cmp");
+__asm__(".globl _slice_eq\n.set _slice_eq, __slice_eq");
+__asm__(".globl _slice_find\n.set _slice_find, __slice_find");
+__asm__(".globl _slice_to_str\n.set _slice_to_str, __slice_to_str");
+__asm__(".globl _slice_from_str\n.set _slice_from_str, __slice_from_str");
+__asm__(".globl _slice_from_list_data\n.set _slice_from_list_data, __slice_from_list_data");
+__asm__(".globl _slice_byte_at\n.set _slice_byte_at, __slice_byte_at");
+__asm__(".globl _ffi_open\n.set _ffi_open, __ffi_open");
+__asm__(".globl _ffi_sym\n.set _ffi_sym, __ffi_sym");
+__asm__(".globl _ffi_close\n.set _ffi_close, __ffi_close");
+__asm__(".globl _ffi_call0\n.set _ffi_call0, __ffi_call0");
+__asm__(".globl _ffi_call1\n.set _ffi_call1, __ffi_call1");
+__asm__(".globl _ffi_call2\n.set _ffi_call2, __ffi_call2");
+__asm__(".globl _ffi_call3\n.set _ffi_call3, __ffi_call3");
+__asm__(".globl _ffi_call4\n.set _ffi_call4, __ffi_call4");
+__asm__(".globl _ffi_call5\n.set _ffi_call5, __ffi_call5");
+__asm__(".globl _ffi_call6\n.set _ffi_call6, __ffi_call6");
+__asm__(".globl _gui_poll_char\n.set _gui_poll_char, __gui_poll_char");
+__asm__(".globl _gui_char_to_str\n.set _gui_char_to_str, __gui_char_to_str");
 #endif
 
 /* ==================== Dict & ARC runtime functions (all platforms) ==================== */
@@ -1743,6 +1762,7 @@ SYSCALL int _sys_process_run_c(void *args) {
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/mman.h>
+#include <dlfcn.h>
 
 SYSCALL char *_nova_read_file(int fd) {
     off_t len = lseek(fd, 0, SEEK_END);
@@ -1937,6 +1957,154 @@ SYSCALL void *_slice_list(void *list, int start, int end) {
         dst[i] = src[start + i];
     }
     return result;
+}
+
+/* ==================== Zero-copy Slice Helpers ==================== */
+SYSCALL intptr_t _slice_from_str(const char *s) {
+    return (intptr_t)s;
+}
+
+SYSCALL intptr_t _slice_from_list_data(void *list) {
+    if (!list) return 0;
+    return *(intptr_t*)((char*)list + 8);
+}
+
+SYSCALL int _slice_byte_at(const char *ptr, int len, int idx) {
+    if (!ptr || idx < 0 || idx >= len) return -1;
+    return (unsigned char)ptr[idx];
+}
+
+SYSCALL int _slice_eq(const char *p1, int l1, const char *p2, int l2) {
+    if (l1 != l2) return 0;
+    if (l1 == 0) return 1;
+    if (p1 == p2) return 1;
+    if (!p1 || !p2) return 0;
+    for (int i = 0; i < l1; i++) {
+        if (p1[i] != p2[i]) return 0;
+    }
+    return 1;
+}
+
+SYSCALL int _slice_cmp(const char *p1, int l1, const char *p2, int l2) {
+    if (!p1 && !p2) return 0;
+    if (!p1) return -1;
+    if (!p2) return 1;
+    int min_len = (l1 < l2) ? l1 : l2;
+    for (int i = 0; i < min_len; i++) {
+        unsigned char c1 = (unsigned char)p1[i];
+        unsigned char c2 = (unsigned char)p2[i];
+        if (c1 < c2) return -1;
+        if (c1 > c2) return 1;
+    }
+    if (l1 < l2) return -1;
+    if (l1 > l2) return 1;
+    return 0;
+}
+
+SYSCALL int _slice_find(const char *haystack, int hlen, const char *needle, int nlen) {
+    if (!haystack || !needle || nlen <= 0) return -1;
+    if (nlen > hlen) return -1;
+    int max_i = hlen - nlen;
+    for (int i = 0; i <= max_i; i++) {
+        int match = 1;
+        for (int j = 0; j < nlen; j++) {
+            if (haystack[i + j] != needle[j]) {
+                match = 0;
+                break;
+            }
+        }
+        if (match) return i;
+    }
+    return -1;
+}
+
+SYSCALL char *_slice_to_str(const char *ptr, int len) {
+    if (!ptr || len <= 0) return _str_empty;
+#if defined(_WIN32)
+    char *res = (char*)STR_PFX(malloc)(len + 1);
+#else
+    char *res = (char*)malloc(len + 1);
+#endif
+    if (!res) return 0;
+    for (int i = 0; i < len; i++) {
+        res[i] = ptr[i];
+    }
+    res[len] = '\0';
+    return res;
+}
+
+/* ==================== Advanced C FFI Helpers ==================== */
+SYSCALL intptr_t _ffi_open(const char *name) {
+    if (!name || !*name) return 0;
+#if defined(_WIN32)
+    HMODULE h = LoadLibraryA(name);
+    return (intptr_t)h;
+#else
+    void *h = dlopen(name, RTLD_LAZY | RTLD_GLOBAL);
+    return (intptr_t)h;
+#endif
+}
+
+SYSCALL intptr_t _ffi_sym(intptr_t handle, const char *name) {
+    if (!handle || !name) return 0;
+#if defined(_WIN32)
+    FARPROC p = GetProcAddress((HMODULE)handle, name);
+    return (intptr_t)p;
+#else
+    void *p = dlsym((void*)handle, name);
+    return (intptr_t)p;
+#endif
+}
+
+SYSCALL int _ffi_close(intptr_t handle) {
+    if (!handle) return 0;
+#if defined(_WIN32)
+    return FreeLibrary((HMODULE)handle) ? 1 : 0;
+#else
+    return dlclose((void*)handle) == 0 ? 1 : 0;
+#endif
+}
+
+SYSCALL intptr_t _ffi_call0(intptr_t fn) {
+    if (!fn) return 0;
+    typedef intptr_t (*c_fn0)(void);
+    return ((c_fn0)fn)();
+}
+
+SYSCALL intptr_t _ffi_call1(intptr_t fn, intptr_t a1) {
+    if (!fn) return 0;
+    typedef intptr_t (*c_fn1)(intptr_t);
+    return ((c_fn1)fn)(a1);
+}
+
+SYSCALL intptr_t _ffi_call2(intptr_t fn, intptr_t a1, intptr_t a2) {
+    if (!fn) return 0;
+    typedef intptr_t (*c_fn2)(intptr_t, intptr_t);
+    return ((c_fn2)fn)(a1, a2);
+}
+
+SYSCALL intptr_t _ffi_call3(intptr_t fn, intptr_t a1, intptr_t a2, intptr_t a3) {
+    if (!fn) return 0;
+    typedef intptr_t (*c_fn3)(intptr_t, intptr_t, intptr_t);
+    return ((c_fn3)fn)(a1, a2, a3);
+}
+
+SYSCALL intptr_t _ffi_call4(intptr_t fn, intptr_t a1, intptr_t a2, intptr_t a3, intptr_t a4) {
+    if (!fn) return 0;
+    typedef intptr_t (*c_fn4)(intptr_t, intptr_t, intptr_t, intptr_t);
+    return ((c_fn4)fn)(a1, a2, a3, a4);
+}
+
+SYSCALL intptr_t _ffi_call5(intptr_t fn, intptr_t a1, intptr_t a2, intptr_t a3, intptr_t a4, intptr_t a5) {
+    if (!fn) return 0;
+    typedef intptr_t (*c_fn5)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t);
+    return ((c_fn5)fn)(a1, a2, a3, a4, a5);
+}
+
+SYSCALL intptr_t _ffi_call6(intptr_t fn, intptr_t a1, intptr_t a2, intptr_t a3, intptr_t a4, intptr_t a5, intptr_t a6) {
+    if (!fn) return 0;
+    typedef intptr_t (*c_fn6)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t);
+    return ((c_fn6)fn)(a1, a2, a3, a4, a5, a6);
 }
 
 /* ==================== List helpers ==================== */
@@ -2172,6 +2340,40 @@ SYSCALL int STR_PFX(gui_next_click_id)(void) {
     return g_gui_next_click_id;
 }
 
+/* Keyboard FIFO Queue */
+#define GUI_KEY_QUEUE_SIZE 64
+static int g_gui_key_queue[GUI_KEY_QUEUE_SIZE];
+static int g_gui_key_head = 0;
+static int g_gui_key_tail = 0;
+
+static void _gui_push_key(int key) {
+    int next = (g_gui_key_head + 1) % GUI_KEY_QUEUE_SIZE;
+    if (next != g_gui_key_tail) {
+        g_gui_key_queue[g_gui_key_head] = key;
+        g_gui_key_head = next;
+    }
+}
+
+SYSCALL int STR_PFX(gui_poll_char)(void) {
+    if (g_gui_key_head == g_gui_key_tail) return 0;
+    int k = g_gui_key_queue[g_gui_key_tail];
+    g_gui_key_tail = (g_gui_key_tail + 1) % GUI_KEY_QUEUE_SIZE;
+    return k;
+}
+
+SYSCALL const char *STR_PFX(gui_char_to_str)(int c) {
+    if (c <= 0) return _str_empty;
+#if defined(_WIN32)
+    char *res = (char*)STR_PFX(malloc)(2);
+#else
+    char *res = (char*)malloc(2);
+#endif
+    if (!res) return _str_empty;
+    res[0] = (char)c;
+    res[1] = '\0';
+    return res;
+}
+
 static LRESULT CALLBACK _NovaWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_MOUSEMOVE:
@@ -2189,6 +2391,24 @@ static LRESULT CALLBACK _NovaWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             g_gui_mouse_down = 0;
             g_gui_mouse_clicked = 1;
             return 0;
+        case WM_CHAR: {
+            int ch = (int)wParam;
+            if (ch > 0) {
+                _gui_push_key(ch);
+            }
+            return 0;
+        }
+        case WM_KEYDOWN: {
+            int vk = (int)wParam;
+            if (vk == VK_DELETE) {
+                _gui_push_key(127);
+            } else if (vk == VK_LEFT) {
+                _gui_push_key(1001);
+            } else if (vk == VK_RIGHT) {
+                _gui_push_key(1002);
+            }
+            break;
+        }
         case WM_PAINT: {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
@@ -2430,7 +2650,7 @@ SYSCALL void STR_PFX(gui_draw_text)(const char *text, int x, int y, int font_siz
 
     HGDIOBJ old_font = SelectObject(g_gui_mem_dc, font);
     RECT rc = {px, py, g_gui_phys_w, g_gui_phys_h};
-    DrawTextA(g_gui_mem_dc, text, -1, &rc, DT_LEFT | DT_TOP | DT_NOCLIP);
+    DrawTextA(g_gui_mem_dc, text, -1, &rc, DT_LEFT | DT_TOP | DT_NOCLIP | DT_NOPREFIX);
     SelectObject(g_gui_mem_dc, old_font);
     DeleteObject(font);
 }
@@ -2536,4 +2756,6 @@ SYSCALL void STR_PFX(gui_present)(void) {}
 SYSCALL void STR_PFX(gui_sleep)(int ms) { (void)ms; }
 SYSCALL int STR_PFX(gui_save_screenshot)(const char *path) { (void)path; return 0; }
 SYSCALL void STR_PFX(gui_close)(void) {}
+SYSCALL int STR_PFX(gui_poll_char)(void) { return 0; }
+SYSCALL const char *STR_PFX(gui_char_to_str)(int c) { (void)c; return ""; }
 #endif

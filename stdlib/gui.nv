@@ -23,6 +23,8 @@ extern def gui_get_window_h() -> int
 extern def gui_save_screenshot(path: string) -> int
 extern def gui_close()
 extern def gui_next_click_id() -> int
+extern def gui_poll_char() -> int
+extern def gui_char_to_str(c: int) -> string
 
 # --- Clean CamelCase Public Primitives ---
 def getWindowWidth() -> int {
@@ -79,6 +81,26 @@ def closeWindow() {
 
 def strLen(s: string) -> int {
     return len(s)
+}
+
+def pollChar() -> int {
+    return gui_poll_char()
+}
+
+def charToStr(c: int) -> string {
+    return gui_char_to_str(c)
+}
+
+def _str_delete_last(s: string) -> string {
+    if len(s) <= 1 { return "" }
+    out = ""
+    i = 0
+    limit = len(s) - 1
+    while i < limit {
+        out = out + s[i]
+        i = i + 1
+    }
+    return out
 }
 
 # --- Color Conversion Helper ---
@@ -290,6 +312,73 @@ def layoutWidgetInternal(w: Widget, availX: int, availY: int, availW: int, avail
             if height_req > 0 { w.height = height_req }
             return
         }
+    }
+
+    if w.tag == "checkbox" {
+        fs = 14
+        if p.has("font-size") == 1 { fs = p.get("font-size") }
+        box_sz = 18
+        if p.has("box-size") == 1 { box_sz = p.get("box-size") }
+        text_len = strLen(w.text)
+        w.width = box_sz + 8 + text_len * (fs / 2 + 1) + pad_left + pad_right
+        h_cand = fs + 6
+        if box_sz > h_cand { h_cand = box_sz }
+        w.height = h_cand + pad_top + pad_bottom
+        if width_req > 0 { w.width = width_req }
+        if height_req > 0 { w.height = height_req }
+        return
+    }
+
+    if w.tag == "toggle" {
+        w.width = 44 + pad_left + pad_right
+        w.height = 24 + pad_top + pad_bottom
+        if width_req > 0 { w.width = width_req }
+        if height_req > 0 { w.height = height_req }
+        return
+    }
+
+    if w.tag == "slider" {
+        w.width = 160 + pad_left + pad_right
+        w.height = 24 + pad_top + pad_bottom
+        if width_req > 0 { w.width = width_req }
+        if height_req > 0 { w.height = height_req }
+        return
+    }
+
+    if w.tag == "dropdown" {
+        w.width = 160 + pad_left + pad_right
+        w.height = 32 + pad_top + pad_bottom
+        if width_req > 0 { w.width = width_req }
+        if height_req > 0 { w.height = height_req }
+        return
+    }
+
+    if w.tag == "canvas" {
+        w.width = 200 + pad_left + pad_right
+        w.height = 150 + pad_top + pad_bottom
+        if width_req > 0 { w.width = width_req }
+        if height_req > 0 { w.height = height_req }
+        if len(w.children) == 0 {
+            return
+        }
+    }
+
+    if w.tag == "input" {
+        fs = 14
+        if p.has("font-size") == 1 { fs = p.get("font-size") }
+        pad_l = 12
+        if p.has("padding-left") == 1 { pad_l = p.get("padding-left") }
+        pad_r = 12
+        if p.has("padding-right") == 1 { pad_r = p.get("padding-right") }
+        pad_t = 8
+        if p.has("padding-top") == 1 { pad_t = p.get("padding-top") }
+        pad_b = 8
+        if p.has("padding-bottom") == 1 { pad_b = p.get("padding-bottom") }
+        w.width = 240 + pad_l + pad_r
+        w.height = fs + 14 + pad_t + pad_b
+        if width_req > 0 { w.width = width_req }
+        if height_req > 0 { w.height = height_req }
+        return
     }
 
     # Container / Row / Col
@@ -548,20 +637,18 @@ def renderWidget(w: Widget) {
     # On hover / press styling — applies to buttons AND any container/row
     # that declares hover-background-color (enables hover on file rows, sidebar items, etc.)
     has_hover_style = p.has("hover-background-color")
-    if w.tag == "button" or has_hover_style == 1 {
-        if w.is_pressed == 1 {
-            if p.has("pressed-background-color") == 1 {
-                bg_color = parseColor(p.get("pressed-background-color"))
-            } elif bg_color >= 0 {
-                bg_color = bg_color - 1579032
-                if bg_color < 0 { bg_color = 0 }
-            }
-        } elif w.is_hovered == 1 {
-            if p.has("hover-background-color") == 1 {
-                bg_color = parseColor(p.get("hover-background-color"))
-            } elif bg_color >= 0 {
-                bg_color = bg_color + 1381653
-            }
+    if w.is_pressed == 1 {
+        if p.has("pressed-background-color") == 1 {
+            bg_color = parseColor(p.get("pressed-background-color"))
+        } elif w.tag == "button" and bg_color >= 0 {
+            bg_color = bg_color - 1579032
+            if bg_color < 0 { bg_color = 0 }
+        }
+    } elif w.is_hovered == 1 {
+        if p.has("hover-background-color") == 1 {
+            bg_color = parseColor(p.get("hover-background-color"))
+        } elif w.tag == "button" and bg_color >= 0 {
+            bg_color = bg_color + 1381653
         }
     }
 
@@ -572,15 +659,35 @@ def renderWidget(w: Widget) {
         drawRect(w.pos_x, w.pos_y, w.width, w.height, bg_color, radius)
     }
 
-    if p.has("border-width") == 1 and p.has("border-color") == 1 {
-        bw = p.get("border-width")
-        bc = parseColor(p.get("border-color"))
-        drawBorder(w.pos_x, w.pos_y, w.width, w.height, bw, bc)
+    bw = 0
+    if p.has("border-width") == 1 { bw = p.get("border-width") }
+    if w.is_pressed == 1 and p.has("pressed-border-width") == 1 {
+        bw = p.get("pressed-border-width")
+    } elif w.is_hovered == 1 and p.has("hover-border-width") == 1 {
+        bw = p.get("hover-border-width")
+    }
+
+    if bw > 0 {
+        bc = -1
+        if p.has("border-color") == 1 { bc = parseColor(p.get("border-color")) }
+        if w.is_pressed == 1 and p.has("pressed-border-color") == 1 {
+            bc = parseColor(p.get("pressed-border-color"))
+        } elif w.is_hovered == 1 and p.has("hover-border-color") == 1 {
+            bc = parseColor(p.get("hover-border-color"))
+        }
+        if bc >= 0 {
+            drawBorder(w.pos_x, w.pos_y, w.width, w.height, bw, bc)
+        }
     }
 
     if w.tag == "text" {
         fg_color = 0xffffff
         if p.has("color") == 1 { fg_color = parseColor(p.get("color")) }
+        if w.is_pressed == 1 and p.has("pressed-color") == 1 {
+            fg_color = parseColor(p.get("pressed-color"))
+        } elif w.is_hovered == 1 and p.has("hover-color") == 1 {
+            fg_color = parseColor(p.get("hover-color"))
+        }
         fs = 16
         if p.has("font-size") == 1 { fs = p.get("font-size") }
         fw = 0
@@ -593,6 +700,11 @@ def renderWidget(w: Widget) {
         if len(w.children) == 0 {
             fg_color = 0x11111b
             if p.has("color") == 1 { fg_color = parseColor(p.get("color")) }
+            if w.is_pressed == 1 and p.has("pressed-color") == 1 {
+                fg_color = parseColor(p.get("pressed-color"))
+            } elif w.is_hovered == 1 and p.has("hover-color") == 1 {
+                fg_color = parseColor(p.get("hover-color"))
+            }
             fs = 16
             if p.has("font-size") == 1 { fs = p.get("font-size") }
             fw = 1
@@ -604,11 +716,185 @@ def renderWidget(w: Widget) {
             if w.is_pressed == 1 { text_y = text_y + 1 }
             drawText(w.text, text_x, text_y, fs, fg_color, fw)
         }
+    } elif w.tag == "checkbox" {
+        pad_l = 0
+        if p.has("padding-left") == 1 { pad_l = p.get("padding-left") }
+        pad_t = 0
+        if p.has("padding-top") == 1 { pad_t = p.get("padding-top") }
+
+        box_sz = 18
+        if p.has("box-size") == 1 { box_sz = p.get("box-size") }
+        box_x = w.pos_x + pad_l
+        box_y = w.pos_y + pad_t + (w.height - pad_t - box_sz) / 2
+
+        chk_bg = 0x1e1e2e
+        if p.has("background-color") == 1 { chk_bg = parseColor(p.get("background-color")) }
+        if w.is_hovered == 1 and p.has("hover-background-color") == 1 { chk_bg = parseColor(p.get("hover-background-color")) }
+
+        chk_border = 0x45475a
+        if p.has("border-color") == 1 { chk_border = parseColor(p.get("border-color")) }
+        if w.is_hovered == 1 and p.has("hover-border-color") == 1 { chk_border = parseColor(p.get("hover-border-color")) }
+
+        is_chk = 0
+        if p.has("checked") == 1 { is_chk = p.get("checked") }
+
+        drawRect(box_x, box_y, box_sz, box_sz, chk_bg, 4)
+        drawBorder(box_x, box_y, box_sz, box_sz, 1, chk_border)
+
+        if is_chk == 1 {
+            accent_col = 0x89b4fa
+            if p.has("active-color") == 1 { accent_col = parseColor(p.get("active-color")) }
+            drawRect(box_x + 3, box_y + 3, box_sz - 6, box_sz - 6, accent_col, 2)
+        }
+
+        if len(w.text) > 0 {
+            fs = 14
+            if p.has("font-size") == 1 { fs = p.get("font-size") }
+            lbl_col = 0xcdd6f4
+            if p.has("color") == 1 { lbl_col = parseColor(p.get("color")) }
+            if w.is_hovered == 1 and p.has("hover-color") == 1 { lbl_col = parseColor(p.get("hover-color")) }
+            lbl_x = box_x + box_sz + 8
+            lbl_y = w.pos_y + pad_t + (w.height - pad_t - fs) / 2 - 1
+            drawText(w.text, lbl_x, lbl_y, fs, lbl_col, 0)
+        }
+    } elif w.tag == "toggle" {
+        pad_l = 0
+        if p.has("padding-left") == 1 { pad_l = p.get("padding-left") }
+        pad_t = 0
+        if p.has("padding-top") == 1 { pad_t = p.get("padding-top") }
+
+        is_on = 0
+        if p.has("is_on") == 1 { is_on = p.get("is_on") }
+        elif p.has("checked") == 1 { is_on = p.get("checked") }
+
+        track_w = 44
+        track_h = 24
+        track_x = w.pos_x + pad_l
+        track_y = w.pos_y + pad_t + (w.height - pad_t - track_h) / 2
+
+        track_col = 0x313244
+        if is_on == 1 {
+            track_col = 0xa6e3a1
+            if p.has("active-color") == 1 { track_col = parseColor(p.get("active-color")) }
+        } else {
+            if p.has("inactive-color") == 1 { track_col = parseColor(p.get("inactive-color")) }
+        }
+
+        drawRect(track_x, track_y, track_w, track_h, track_col, track_h / 2)
+
+        thumb_sz = track_h - 4
+        thumb_col = 0xffffff
+        if is_on == 1 {
+            thumb_col = 0x11111b
+            if p.has("thumb-color") == 1 { thumb_col = parseColor(p.get("thumb-color")) }
+            thumb_x = track_x + track_w - thumb_sz - 2
+        } else {
+            if p.has("thumb-color") == 1 { thumb_col = parseColor(p.get("thumb-color")) }
+            thumb_x = track_x + 2
+        }
+        thumb_y = track_y + 2
+        drawRect(thumb_x, thumb_y, thumb_sz, thumb_sz, thumb_col, thumb_sz / 2)
+    } elif w.tag == "slider" {
+        pad_l = 0
+        if p.has("padding-left") == 1 { pad_l = p.get("padding-left") }
+        pad_t = 0
+        if p.has("padding-top") == 1 { pad_t = p.get("padding-top") }
+
+        val = 0
+        if p.has("value") == 1 { val = p.get("value") }
+        min_v = 0
+        if p.has("min") == 1 { min_v = p.get("min") }
+        max_v = 100
+        if p.has("max") == 1 { max_v = p.get("max") }
+        if max_v <= min_v { max_v = min_v + 1 }
+
+        if val < min_v { val = min_v }
+        if val > max_v { val = max_v }
+
+        track_h = 6
+        track_y = w.pos_y + pad_t + (w.height - pad_t - track_h) / 2
+        track_x = w.pos_x + pad_l
+        track_w = w.width - pad_l
+        if p.has("padding-right") == 1 { track_w = track_w - p.get("padding-right") }
+        if track_w < 20 { track_w = 20 }
+
+        track_bg = 0x313244
+        if p.has("track-bg") == 1 { track_bg = parseColor(p.get("track-bg")) }
+        drawRect(track_x, track_y, track_w, track_h, track_bg, 3)
+
+        fill_col = 0x89b4fa
+        if p.has("fill-color") == 1 { fill_col = parseColor(p.get("fill-color")) }
+        range_span = max_v - min_v
+        fill_w = ((val - min_v) * track_w) / range_span
+        if fill_w > 0 {
+            drawRect(track_x, track_y, fill_w, track_h, fill_col, 3)
+        }
+
+        thumb_sz = 16
+        thumb_x = track_x + fill_w - (thumb_sz / 2)
+        if thumb_x < track_x { thumb_x = track_x }
+        if thumb_x > (track_x + track_w - thumb_sz) { thumb_x = track_x + track_w - thumb_sz }
+        thumb_y = track_y + (track_h - thumb_sz) / 2
+        thumb_col = 0xcdd6f4
+        if w.is_hovered == 1 or w.is_pressed == 1 { thumb_col = 0xffffff }
+        if p.has("thumb-color") == 1 { thumb_col = parseColor(p.get("thumb-color")) }
+        drawRect(thumb_x, thumb_y, thumb_sz, thumb_sz, thumb_col, thumb_sz / 2)
+    } elif w.tag == "dropdown" {
+        pad_l = 8
+        if p.has("padding-left") == 1 { pad_l = p.get("padding-left") }
+
+        dd_bg = 0x2d2d3d
+        if p.has("background-color") == 1 { dd_bg = parseColor(p.get("background-color")) }
+        if w.is_hovered == 1 and p.has("hover-background-color") == 1 { dd_bg = parseColor(p.get("hover-background-color")) }
+
+        dd_border = 0x45475a
+        if p.has("border-color") == 1 { dd_border = parseColor(p.get("border-color")) }
+        if w.is_hovered == 1 and p.has("hover-border-color") == 1 { dd_border = parseColor(p.get("hover-border-color")) }
+
+        drawRect(w.pos_x, w.pos_y, w.width, w.height, dd_bg, 4)
+        drawBorder(w.pos_x, w.pos_y, w.width, w.height, 1, dd_border)
+
+        sel_idx = 0
+        if p.has("selected") == 1 { sel_idx = p.get("selected") }
+        opts = []
+        if p.has("options") == 1 { opts = p.get("options") }
+
+        sel_text = "Select..."
+        if sel_idx >= 0 and sel_idx < len(opts) {
+            sel_text = opts[sel_idx]
+        }
+
+        fs = 13
+        if p.has("font-size") == 1 { fs = p.get("font-size") }
+        fg = 0xcdd6f4
+        if p.has("color") == 1 { fg = parseColor(p.get("color")) }
+        ty = w.pos_y + (w.height - fs) / 2 - 1
+        drawText(sel_text, w.pos_x + pad_l, ty, fs, fg, 0)
+
+        arr_x = w.pos_x + w.width - 20
+        drawText("v", arr_x, ty, fs - 2, 0x6c7086, 1)
+    } elif w.tag == "canvas" {
+        cv_bg = -1
+        if p.has("background-color") == 1 { cv_bg = parseColor(p.get("background-color")) }
+        if cv_bg >= 0 {
+            drawRect(w.pos_x, w.pos_y, w.width, w.height, cv_bg, 4)
+        }
+        if p.has("border-color") == 1 {
+            drawBorder(w.pos_x, w.pos_y, w.width, w.height, 1, parseColor(p.get("border-color")))
+        }
     } elif w.tag == "input" {
         # Text input field — renders placeholder or value text with cursor indicator
+        is_focused = 0
+        if p.has("is_focused") == 1 { is_focused = p.get("is_focused") }
+
+        if is_focused == 1 {
+            focus_border = 0x89b4fa
+            if p.has("focus-border-color") == 1 { focus_border = parseColor(p.get("focus-border-color")) }
+            drawBorder(w.pos_x, w.pos_y, w.width, w.height, 2, focus_border)
+        }
+
         fg_color = 0x9d9d9d
         if p.has("color") == 1 { fg_color = parseColor(p.get("color")) }
-        if w.text != "" { fg_color = 0xffffff }
         fs = 13
         if p.has("font-size") == 1 { fs = p.get("font-size") }
         pad_l = 12
@@ -616,7 +902,20 @@ def renderWidget(w: Widget) {
         tx = w.pos_x + pad_l
         ty = w.pos_y + (w.height - fs) / 2 - 1
         display = w.text
-        if display == "" { display = w.props.get("placeholder") }
+        if display == "" {
+            if is_focused == 1 {
+                display = "|"
+                fg_color = 0x89b4fa
+            } else {
+                display = w.props.get("placeholder")
+            }
+        } else {
+            fg_color = 0xffffff
+            if p.has("text-color") == 1 { fg_color = parseColor(p.get("text-color")) }
+            if is_focused == 1 {
+                display = display + "|"
+            }
+        }
         drawText(display, tx, ty, fs, fg_color, 0)
     }
 
@@ -646,9 +945,46 @@ def hitTestEx(w: Widget, mx: int, my: int, isClick: int, isMouseDown: int) -> in
         if isClick == 1 and w.on_click_id > 0 {
             clicked_id = w.on_click_id
         }
+        if isClick == 1 and w.tag == "input" {
+            w.props.set("is_focused", 1)
+        }
+
+        # Slider interaction on click or mouse drag
+        if w.tag == "slider" and (isClick == 1 or isMouseDown == 1) {
+            p = w.props
+            min_v = 0
+            if p.has("min") == 1 { min_v = p.get("min") }
+            max_v = 100
+            if p.has("max") == 1 { max_v = p.get("max") }
+            if max_v <= min_v { max_v = min_v + 1 }
+            pad_l = 0
+            if p.has("padding-left") == 1 { pad_l = p.get("padding-left") }
+            track_w = w.width - pad_l
+            if p.has("padding-right") == 1 { track_w = track_w - p.get("padding-right") }
+            if track_w < 10 { track_w = 10 }
+            rel_x = mx - (w.pos_x + pad_l)
+            if rel_x < 0 { rel_x = 0 }
+            if rel_x > track_w { rel_x = track_w }
+            calc_val = min_v + (rel_x * (max_v - min_v)) / track_w
+            p.set("value", calc_val)
+            if p.has("target") == 1 {
+                tgt = p.get("target")
+                pfx = ""
+                sfx = ""
+                if p.has("prefix") == 1 { pfx = p.get("prefix") }
+                if p.has("suffix") == 1 { sfx = p.get("suffix") }
+                tgt.text = pfx + str(calc_val) + sfx
+            }
+            if p.has("on_change") == 1 {
+                call(p.get("on_change"), [calc_val])
+            }
+        }
     } else {
         w.is_hovered = 0
         w.is_pressed = 0
+        if isClick == 1 and w.tag == "input" {
+            w.props.set("is_focused", 0)
+        }
     }
 
     ci = 0
@@ -680,10 +1016,62 @@ def dispatchAction(w: Widget, clickedId: int) {
         clicks = clicks + 1
         p.set("clicks", clicks)
 
-        # User-defined callback: on_click = "my_handler"
-        if p.has("on_click") == 1 {
-            fn_name = p.get("on_click")
-            call(fn_name, [])
+        # Checkbox toggle
+        if w.tag == "checkbox" {
+            chk = 0
+            if p.has("checked") == 1 { chk = p.get("checked") }
+            chk = 1 - chk
+            p.set("checked", chk)
+            if p.has("on_toggle") == 1 {
+                call(p.get("on_toggle"), [chk])
+            }
+        }
+
+        # Toggle switch toggle
+        if w.tag == "toggle" {
+            cur_on = 0
+            if p.has("is_on") == 1 { cur_on = p.get("is_on") }
+            elif p.has("checked") == 1 { cur_on = p.get("checked") }
+            cur_on = 1 - cur_on
+            p.set("is_on", cur_on)
+            p.set("checked", cur_on)
+            if p.has("on_toggle") == 1 {
+                call(p.get("on_toggle"), [cur_on])
+            }
+        }
+
+        # Dropdown selection advance
+        if w.tag == "dropdown" {
+            sel = 0
+            if p.has("selected") == 1 { sel = p.get("selected") }
+            opts = []
+            if p.has("options") == 1 { opts = p.get("options") }
+            if len(opts) > 0 {
+                sel = (sel + 1) % len(opts)
+                p.set("selected", sel)
+                if p.has("on_change") == 1 {
+                    call(p.get("on_change"), [sel])
+                }
+            }
+        }
+
+        # User-defined callback or action via onClick / on_click
+        click_handler = ""
+        has_click_handler = 0
+        if p.has("onClick") == 1 {
+            click_handler = p.get("onClick")
+            has_click_handler = 1
+        } elif p.has("on_click") == 1 {
+            click_handler = p.get("on_click")
+            has_click_handler = 1
+        }
+
+        if has_click_handler == 1 {
+            if click_handler == "submit" or click_handler == "copy_text" or click_handler == "clear" or click_handler == "increment" or click_handler == "reset" or click_handler == "toggle" {
+                if p.has("action") == 0 {
+                    p.set("action", click_handler)
+                }
+            }
         }
 
         # Built-in named actions (kept for convenience)
@@ -731,6 +1119,28 @@ def dispatchAction(w: Widget, clickedId: int) {
                         tgt.text = t1
                     }
                 }
+            } elif act == "submit" or act == "copy_text" {
+                src_text = ""
+                if p.has("source") == 1 {
+                    src_w = p.get("source")
+                    src_text = src_w.text
+                }
+                pfx = ""
+                sfx = ""
+                if p.has("prefix") == 1 { pfx = p.get("prefix") }
+                if p.has("suffix") == 1 { sfx = p.get("suffix") }
+                out_val = pfx + src_text + sfx
+                if p.has("target") == 1 {
+                    tgt_w = p.get("target")
+                    tgt_w.text = out_val
+                } else {
+                    w.text = out_val
+                }
+            } elif act == "clear" {
+                if p.has("target") == 1 {
+                    tgt_w = p.get("target")
+                    tgt_w.text = ""
+                }
             }
         }
         if p.has("log-target") == 1 {
@@ -747,6 +1157,36 @@ def dispatchAction(w: Widget, clickedId: int) {
     }
 }
 
+# --- Keyboard Event Dispatcher ---
+def _dispatch_key_event(w: Widget, key: int) {
+    if w.tag == "input" {
+        p = w.props
+        if p.has("is_focused") == 1 and p.get("is_focused") == 1 {
+            if key == 8 {
+                # Backspace
+                w.text = _str_delete_last(w.text)
+            } elif key == 127 {
+                # Delete: clear text
+                w.text = ""
+            } elif key == 13 {
+                # Enter / Return
+                if p.has("on_submit") == 1 {
+                    call(p.get("on_submit"), [w.text])
+                }
+            } elif key >= 32 and key <= 126 {
+                ch_str = gui_char_to_str(key)
+                w.text = w.text + ch_str
+            }
+        }
+    }
+
+    ci = 0
+    while ci < len(w.children) {
+        _dispatch_key_event(w.children[ci], key)
+        ci = ci + 1
+    }
+}
+
 # --- Interactive App Step ---
 def runAppStep(app: WindowApp, mx: int, my: int, isClick: int) -> int {
     win_w = gui_get_window_w()
@@ -758,6 +1198,13 @@ def runAppStep(app: WindowApp, mx: int, my: int, isClick: int) -> int {
 
     # Layout must precede hit testing so every widget has current bounds.
     layoutWidget(app.root, 0, 0, app.width, app.height)
+
+    # Poll keyboard events and route to focused inputs
+    k = gui_poll_char()
+    while k > 0 {
+        _dispatch_key_event(app.root, k)
+        k = gui_poll_char()
+    }
 
     is_down = gui_get_mouse_down()
     clicked = hitTestEx(app.root, mx, my, isClick, is_down)
@@ -847,7 +1294,7 @@ def gui(title: string, width: int, height: int, root: Widget, properties: dict) 
             saveScreenshot(screenshot_path)
         }
 
-        gui_sleep(16)
+        gui_sleep(4)
         frame = frame + 1
         if max_frames > 0 and frame >= max_frames {
             running = 0
@@ -888,7 +1335,10 @@ def _expand_props(p: dict) -> dict {
     if p.has("align") == 1         { out.set("align-items",              p.get("align")) }
     if p.has("justify") == 1       { out.set("justify-content",          p.get("justify")) }
     if p.has("action") == 1        { out.set("action",                   p.get("action")) }
-    if p.has("on_click") == 1      { out.set("on_click",                  p.get("on_click")) }
+    if p.has("onClick") == 1       { out.set("on_click",                 p.get("onClick"))  out.set("onClick", p.get("onClick")) }
+    if p.has("onclick") == 1       { out.set("on_click",                 p.get("onclick"))  out.set("onClick", p.get("onclick")) }
+    if p.has("on_click") == 1      { out.set("on_click",                 p.get("on_click")) out.set("onClick", p.get("on_click")) }
+    if p.has("source") == 1        { out.set("source",                   p.get("source")) }
     if p.has("target") == 1        { out.set("target",                   p.get("target")) }
     if p.has("prefix") == 1        { out.set("prefix",                   p.get("prefix")) }
     if p.has("suffix") == 1        { out.set("suffix",                   p.get("suffix")) }
@@ -926,7 +1376,109 @@ def _expand_props(p: dict) -> dict {
     if p.has("flex-direction") == 1           { out.set("flex-direction",           p.get("flex-direction")) }
     if p.has("fit-content") == 1              { out.set("fit-content",              p.get("fit-content")) }
     if p.has("log-target") == 1               { out.set("log-target",               p.get("log-target")) }
+    if p.has("hover_color") == 1              { out.set("hover-color",              p.get("hover_color")) }
+    if p.has("hover-color") == 1              { out.set("hover-color",              p.get("hover-color")) }
+    if p.has("pressed_color") == 1            { out.set("pressed-color",            p.get("pressed_color")) }
+    if p.has("pressed-color") == 1            { out.set("pressed-color",            p.get("pressed-color")) }
+    if p.has("active_color") == 1             { out.set("pressed-color",            p.get("active_color")) }
+    if p.has("active-color") == 1             { out.set("active-color",             p.get("active-color")) }
+    if p.has("inactive-color") == 1           { out.set("inactive-color",           p.get("inactive-color")) }
+    if p.has("thumb-color") == 1              { out.set("thumb-color",              p.get("thumb-color")) }
+    if p.has("track-bg") == 1                 { out.set("track-bg",                 p.get("track-bg")) }
+    if p.has("fill-color") == 1               { out.set("fill-color",               p.get("fill-color")) }
+    if p.has("hover_border_color") == 1       { out.set("hover-border-color",       p.get("hover_border_color")) }
+    if p.has("hover-border-color") == 1       { out.set("hover-border-color",       p.get("hover-border-color")) }
+    if p.has("pressed_border_color") == 1     { out.set("pressed-border-color",     p.get("pressed_border_color")) }
+    if p.has("pressed-border-color") == 1     { out.set("pressed-border-color",     p.get("pressed-border-color")) }
+    if p.has("on_toggle") == 1                { out.set("on_toggle",                p.get("on_toggle")) }
+    if p.has("on_change") == 1                { out.set("on_change",                p.get("on_change")) }
+    if p.has("on_draw") == 1                  { out.set("on_draw",                  p.get("on_draw")) }
+    if p.has("checked") == 1                  { out.set("checked",                  p.get("checked")) }
+    if p.has("is_on") == 1                    { out.set("is_on",                    p.get("is_on")) }
+    if p.has("value") == 1                    { out.set("value",                    p.get("value")) }
+    if p.has("min") == 1                      { out.set("min",                      p.get("min")) }
+    if p.has("max") == 1                      { out.set("max",                      p.get("max")) }
+    if p.has("options") == 1                  { out.set("options",                  p.get("options")) }
+    if p.has("selected") == 1                 { out.set("selected",                 p.get("selected")) }
+
+    # Pass through any other properties directly
+    all_k = p.keys()
+    aki = 0
+    while aki < len(all_k) {
+        k = all_k[aki]
+        if out.has(k) == 0 {
+            out.set(k, p.get(k))
+        }
+        aki = aki + 1
+    }
     return out
+}
+
+def checkbox(text: string, is_checked: int, props: dict) -> Widget {
+    p = _expand_props(props)
+    p.set("checked", is_checked)
+    w = Widget()
+    w.tag = "checkbox"
+    w.text = text
+    w.props = p
+    w.children = []
+    w.on_click_id = gui_next_click_id()
+    w.pos_x = 0  w.pos_y = 0  w.width = 0  w.height = 0
+    w.is_hovered = 0  w.is_pressed = 0
+    return w
+}
+
+def toggle(is_on: int, props: dict) -> Widget {
+    p = _expand_props(props)
+    p.set("is_on", is_on)
+    p.set("checked", is_on)
+    w = Widget()
+    w.tag = "toggle"
+    w.text = ""
+    w.props = p
+    w.children = []
+    w.on_click_id = gui_next_click_id()
+    w.pos_x = 0  w.pos_y = 0  w.width = 0  w.height = 0
+    w.is_hovered = 0  w.is_pressed = 0
+    return w
+}
+
+def slider(value: int, min_val: int, max_val: int, props: dict) -> Widget {
+    p = _expand_props(props)
+    p.set("value", value)
+    p.set("min", min_val)
+    p.set("max", max_val)
+    w = Widget()
+    w.tag = "slider"
+    w.text = ""
+    w.props = p
+    w.children = []
+    w.on_click_id = gui_next_click_id()
+    w.pos_x = 0  w.pos_y = 0  w.width = 0  w.height = 0
+    w.is_hovered = 0  w.is_pressed = 0
+    return w
+}
+
+def dropdown(options: list, selected_index: int, props: dict) -> Widget {
+    p = _expand_props(props)
+    p.set("options", options)
+    p.set("selected", selected_index)
+    w = Widget()
+    w.tag = "dropdown"
+    w.text = ""
+    w.props = p
+    w.children = []
+    w.on_click_id = gui_next_click_id()
+    w.pos_x = 0  w.pos_y = 0  w.width = 0  w.height = 0
+    w.is_hovered = 0  w.is_pressed = 0
+    return w
+}
+
+def canvas(children: list, props: dict) -> Widget {
+    p = _expand_props(props)
+    w = Container(children, p)
+    w.tag = "canvas"
+    return w
 }
 
 def div(children: list, props: dict) -> Widget {
@@ -945,8 +1497,16 @@ def col(children: list, props: dict) -> Widget {
     return Container(children, p)
 }
 
-def btn(text: string, props: dict) -> Widget {
-    return Button(text, gui_next_click_id(), _expand_props(props))
+def btn(class: string, id: string, onClick: string, text: string, props: dict) -> Widget {
+    p = _expand_props(props)
+    if len(class) > 0 { p.set("class", class) }
+    if len(id) > 0 { p.set("id", id) }
+    if len(onClick) > 0 {
+        p.set("onClick", onClick)
+        p.set("on_click", onClick)
+        p.set("action", onClick)
+    }
+    return Button(text, gui_next_click_id(), p)
 }
 
 def h1(text: string, props: dict) -> Widget {

@@ -59,29 +59,27 @@ gui("Nova GUI v2 — Declarative Demo", 720, 560,
 
                     # Buttons row — fully inline, no IDs needed
                     row([
-                        btn("+ Increment", {
+                        btn("", "", "increment", "+ Increment", {
                             "bg":    "#89b4fa",
                             "hover": "#b4befe",
                             "press": "#74c7ec",
                             "color": "#11111b",
                             "r": 8, "px": 18, "py": 9, "size": 13,
-                            "action": "increment",
                             "target": counter_val,
                             "suffix": " clicks",
                             "log": status_log
                         }),
-                        btn("Reset", {
+                        btn("", "", "reset", "Reset", {
                             "bg":    "#313244",
                             "hover": "#45475a",
                             "press": "#181825",
                             "color": "#cdd6f4",
                             "r": 8, "px": 18, "py": 9, "size": 13,
-                            "action": "reset",
                             "target": counter_val,
                             "suffix": " clicks",
                             "log": status_log
                         })
-                    ], {"gap": 10})
+                    ], {"gap": 10}),
                 ], {"bg": "#1e1e2e", "r": 10, "border": 1,
                     "border_color": "#313244", "p": 20, "gap": 14}),
 
@@ -109,9 +107,9 @@ gui("Nova GUI v2 — Declarative Demo", 720, 560,
                     # justify-content demo
                     label("justify: space-between", {}),
                     row([
-                        btn("Left",   {"bg": "#313244", "hover": "#45475a", "r": 6, "px": 14, "py": 6, "size": 12}),
-                        btn("Center", {"bg": "#313244", "hover": "#45475a", "r": 6, "px": 14, "py": 6, "size": 12}),
-                        btn("Right",  {"bg": "#313244", "hover": "#45475a", "r": 6, "px": 14, "py": 6, "size": 12})
+                        btn("", "", "", "Left",   {"bg": "#313244", "hover": "#45475a", "r": 6, "px": 14, "py": 6, "size": 12}),
+                        btn("", "", "", "Center", {"bg": "#313244", "hover": "#45475a", "r": 6, "px": 14, "py": 6, "size": 12}),
+                        btn("", "", "", "Right",  {"bg": "#313244", "hover": "#45475a", "r": 6, "px": 14, "py": 6, "size": 12})
                     ], {"gap": 0, "justify": "space-between",
                         "bg": "#181825", "r": 6, "border": 1, "border_color": "#313244",
                         "p": 8}),

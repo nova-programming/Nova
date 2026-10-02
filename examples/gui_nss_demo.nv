@@ -61,9 +61,9 @@ app_ui = div([
                 # Native action dispatch keeps this demo compatible with
                 # compiled executables. Dynamic call("name", args) is VM-only.
                 row([
-                    btn("+ Increment", {"class": "btn-primary",  "action": "increment",
+                    btn("btn-primary", "", "increment", "+ Increment", {
                         "target": counter_val, "suffix": " clicks", "log": status_log}),
-                    btn("Reset",       {"class": "btn-secondary", "action": "reset",
+                    btn("btn-secondary", "", "reset", "Reset", {
                         "target": counter_val, "suffix": " clicks", "log": status_log})
                 ], {"class": "button-row"})
             ], {"class": "card"}),

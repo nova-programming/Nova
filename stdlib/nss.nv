@@ -346,36 +346,98 @@ def nss_parse(src: string) -> dict {
         block_props = result[0]
         i = result[1]
 
+        # Check for pseudo-class in selector (e.g. .btn:hover, button:active, #save:hover)
+        pseudo = ""
+        base_sel = selector
+        colon_pos = -1
+        ci = 0
+        while ci < len(selector) {
+            if selector[ci] == ":" {
+                colon_pos = ci
+                break
+            }
+            ci = ci + 1
+        }
+        if colon_pos >= 0 {
+            base_part = ""
+            k = 0
+            while k < colon_pos {
+                base_part = base_part + selector[k]
+                k = k + 1
+            }
+            pseudo_part = ""
+            k = colon_pos + 1
+            while k < len(selector) {
+                pseudo_part = pseudo_part + selector[k]
+                k = k + 1
+            }
+            base_sel = _trim(base_part)
+            pseudo = _trim(pseudo_part)
+        }
+
+        # Determine prefix and target props
+        target_props = block_props
+        prefix_tag = "TAG__"
+        prefix_cls = "CLS__"
+        prefix_id  = "ID__"
+
+        if pseudo == "hover" {
+            target_props = _prefix_props(block_props, "hover-")
+            prefix_tag = "TAG_HOVER__"
+            prefix_cls = "CLS_HOVER__"
+            prefix_id  = "ID_HOVER__"
+        } elif pseudo == "active" or pseudo == "press" or pseudo == "pressed" {
+            target_props = _prefix_props(block_props, "pressed-")
+            prefix_tag = "TAG_ACTIVE__"
+            prefix_cls = "CLS_ACTIVE__"
+            prefix_id  = "ID_ACTIVE__"
+        }
+
         # Store under the right key
-        if len(selector) > 0 {
-            first = selector[0]
+        if len(base_sel) > 0 {
+            first = base_sel[0]
             if first == "#" {
                 # ID selector
                 id_name = ""
                 k = 1
-                while k < len(selector) {
-                    if _is_ws(selector[k]) == 0 { id_name = id_name + selector[k] }
+                while k < len(base_sel) {
+                    if _is_ws(base_sel[k]) == 0 { id_name = id_name + base_sel[k] }
                     k = k + 1
                 }
-                styles.set("ID__" + id_name, block_props)
+                full_key = prefix_id + id_name
+                if styles.has(full_key) == 1 {
+                    styles.set(full_key, _merge_props(styles.get(full_key), target_props))
+                } else {
+                    styles.set(full_key, target_props)
+                }
             } elif first == "." {
                 # Class selector
                 cls_name = ""
                 k = 1
-                while k < len(selector) {
-                    if _is_ws(selector[k]) == 0 { cls_name = cls_name + selector[k] }
+                while k < len(base_sel) {
+                    if _is_ws(base_sel[k]) == 0 { cls_name = cls_name + base_sel[k] }
                     k = k + 1
                 }
-                styles.set("CLS__" + cls_name, block_props)
+                full_key = prefix_cls + cls_name
+                if styles.has(full_key) == 1 {
+                    styles.set(full_key, _merge_props(styles.get(full_key), target_props))
+                } else {
+                    styles.set(full_key, target_props)
+                }
             } else {
                 # Tag selector (clean selector of whitespace)
                 tag_name = ""
                 k = 0
-                while k < len(selector) {
-                    if _is_ws(selector[k]) == 0 { tag_name = tag_name + selector[k] }
+                while k < len(base_sel) {
+                    if _is_ws(base_sel[k]) == 0 { tag_name = tag_name + base_sel[k] }
                     k = k + 1
                 }
-                styles.set("TAG__" + tag_name, block_props)
+                full_key = prefix_tag + tag_name
+                if styles.has(full_key) == 1 {
+                    styles.set(full_key, _merge_props(styles.get(full_key), target_props))
+                } else {
+                    styles.set(full_key, target_props)
+                }
             }
         }
     }
@@ -388,6 +450,32 @@ def nss_load(path: string) -> dict {
     content = nss_read_file(path)
     if len(content) == 0 { return {} }
     return nss_parse(content)
+}
+
+# --- Prefix properties for pseudo-classes (e.g. hover-*, pressed-*) ---
+def _prefix_props(props: dict, prefix: string) -> dict {
+    out = {}
+    keys = props.keys()
+    ki = 0
+    while ki < len(keys) {
+        k = keys[ki]
+        val = props.get(k)
+        if k == "background-color" or k == "bg" {
+            out.set(prefix + "background-color", val)
+        } elif k == "color" {
+            out.set(prefix + "color", val)
+        } elif k == "border-color" {
+            out.set(prefix + "border-color", val)
+        } elif k == "border-width" {
+            out.set(prefix + "border-width", val)
+        } elif k == "border-radius" {
+            out.set(prefix + "border-radius", val)
+        } else {
+            out.set(prefix + k, val)
+        }
+        ki = ki + 1
+    }
+    return out
 }
 
 # --- Copy all props from src dict into dest dict ---
@@ -435,11 +523,19 @@ def _apply_widget_styles(w: any, styles: dict) {
     if p.has("class") == 1 { class_str = p.get("class") }
     if p.has("id") == 1    { id_str    = p.get("id") }
 
-    # 1. Tag styles
+    # 1. Tag styles (normal, hover, active)
     tag_key = "TAG__" + w.tag
     if styles.has(tag_key) == 1 {
         tag_props = styles.get(tag_key)
         p = _merge_props(p, tag_props)
+    }
+    tag_hov = "TAG_HOVER__" + w.tag
+    if styles.has(tag_hov) == 1 {
+        p = _merge_props(p, styles.get(tag_hov))
+    }
+    tag_act = "TAG_ACTIVE__" + w.tag
+    if styles.has(tag_act) == 1 {
+        p = _merge_props(p, styles.get(tag_act))
     }
 
     # 2. Class styles (space-separated, applied in order)
@@ -452,6 +548,14 @@ def _apply_widget_styles(w: any, styles: dict) {
                 cls_props = styles.get(cls_key)
                 p = _merge_props(p, cls_props)
             }
+            cls_hov = "CLS_HOVER__" + classes[ci]
+            if styles.has(cls_hov) == 1 {
+                p = _merge_props(p, styles.get(cls_hov))
+            }
+            cls_act = "CLS_ACTIVE__" + classes[ci]
+            if styles.has(cls_act) == 1 {
+                p = _merge_props(p, styles.get(cls_act))
+            }
             ci = ci + 1
         }
     }
@@ -462,6 +566,14 @@ def _apply_widget_styles(w: any, styles: dict) {
         if styles.has(id_key) == 1 {
             id_props = styles.get(id_key)
             p = _merge_props(p, id_props)
+        }
+        id_hov = "ID_HOVER__" + id_str
+        if styles.has(id_hov) == 1 {
+            p = _merge_props(p, styles.get(id_hov))
+        }
+        id_act = "ID_ACTIVE__" + id_str
+        if styles.has(id_act) == 1 {
+            p = _merge_props(p, styles.get(id_act))
         }
     }
 
