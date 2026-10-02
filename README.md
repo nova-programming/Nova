@@ -96,6 +96,7 @@ the child exit code, or `-1` when the process cannot be launched.
 galaxy --version         # Check Galaxy version
 galaxy init my-lib       # Create a library
 galaxy install pkg       # Install a package
+galaxy verify            # Check installed packages against galaxy.lock (content hashes)
 ```
 
 **To use `nova` and `galaxy` immediately without restarting your terminal:**

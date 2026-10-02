@@ -49,6 +49,7 @@ def main():
         "init":      cmd_init,
         "install":   cmd_install,
         "list":      cmd_list,
+        "verify":    cmd_verify,
         "test":      cmd_test,
         "search":    cmd_search,
         "info":      cmd_info,
@@ -68,6 +69,32 @@ def main():
         print_usage()
 
 
+def cmd_verify(args):
+    """Check installed packages against the content hashes recorded in galaxy.lock."""
+    lock = load_lock()
+    failures = 0
+    checked = 0
+    for name, entry in sorted(lock["packages"].items()):
+        expected = entry.get("tree_sha256") if isinstance(entry, dict) else None
+        path = os.path.join(GALAXY_MODULES_DIR, name.replace("/", "_"))
+        if not expected:
+            print(f"  [SKIP] {name}: no content hash recorded (reinstall to record one)")
+            continue
+        if not os.path.isdir(path):
+            print(f"  [MISSING] {name}: not installed in {GALAXY_MODULES_DIR}/")
+            failures += 1
+            continue
+        checked += 1
+        if compute_tree_hash(path) == expected:
+            print(f"  [OK]   {name}")
+        else:
+            print(f"  [FAIL] {name}: contents differ from {LOCK_FILE}")
+            failures += 1
+    print(f"Verified {checked} package(s); {failures} problem(s).")
+    if failures:
+        sys.exit(1)
+
+
 def print_usage():
     print("Galaxy Package Manager for Nova")
     print(f"Version: {GALAXY_VERSION}")
@@ -77,6 +104,7 @@ def print_usage():
     print("  galaxy init library <name>   Create a library package")
     print("  galaxy install <pkg>         Install a package")
     print("  galaxy list                  List installed packages")
+    print("  galaxy verify                Check installed packages against galaxy.lock")
     print("  galaxy search <query>        Search the registry")
     print("  galaxy info <pkg>            Show package details")
     print("  galaxy test [--vm] [name]    Run library tests (--vm for faster VM mode)")
@@ -178,7 +206,23 @@ def save_lock(lock, path="."):
     os.replace(temporary, lock_path)
 
 
-def _lock_package(pkg_name, data, version_entry):
+def compute_tree_hash(directory):
+    """Deterministic SHA-256 over every file (relative path + content hash) under directory."""
+    h = hashlib.sha256()
+    base = os.path.abspath(directory)
+    entries = []
+    for root, dirs, files in os.walk(base):
+        dirs.sort()
+        for name in files:
+            full = os.path.join(root, name)
+            rel = os.path.relpath(full, base).replace(os.sep, "/")
+            entries.append((rel, compute_sha256(full)))
+    for rel, digest in sorted(entries):
+        h.update(f"{rel}\0{digest}\n".encode("utf-8"))
+    return h.hexdigest()
+
+
+def _lock_package(pkg_name, data, version_entry, tree_hash=None):
     lock = load_lock()
     entry = {
         "version": data.get("version", "") if data else "",
@@ -186,6 +230,8 @@ def _lock_package(pkg_name, data, version_entry):
     }
     if version_entry and version_entry.get("sha256"):
         entry["sha256"] = version_entry["sha256"]
+    if tree_hash:
+        entry["tree_sha256"] = tree_hash
     lock["packages"][pkg_name] = entry
     save_lock(lock)
 
@@ -641,9 +687,19 @@ def _install_package(pkg_name, visited=None, force=False):
             if backup_dir and os.path.exists(backup_dir):
                 os.replace(backup_dir, dest_dir)
             return None
+        tree_hash = compute_tree_hash(dest_dir)
+        locked_tree = locked.get("tree_sha256") if locked else None
+        if locked_tree and not force and locked_tree != tree_hash:
+            print(f"  [FAIL] Contents of '{pkg_name}' differ from the hash recorded in {LOCK_FILE}.")
+            print("         The package changed after it was locked. Review it, then run")
+            print(f"         'galaxy upgrade {pkg_name}' (or reinstall with force) to accept the new contents.")
+            shutil.rmtree(dest_dir, ignore_errors=True)
+            if backup_dir and os.path.exists(backup_dir):
+                os.replace(backup_dir, dest_dir)
+            return None
         if backup_dir:
             shutil.rmtree(backup_dir, ignore_errors=True)
-        _lock_package(pkg_name, data, version_entry)
+        _lock_package(pkg_name, data, version_entry, tree_hash)
 
         # Transitive dependencies
         deps = data.get("dependencies", {}) if data else {}
