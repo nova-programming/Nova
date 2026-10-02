@@ -23,7 +23,7 @@ class ModuleResolver:
         self.base_dir = base_dir or os.getcwd()
         self.target_arch = target_arch
         self.target_os = target_os
-        self.imported = {}  # module_name -> parsed AST (cache)
+        self.imported = {}  # canonical resolved path -> parsed AST (cache)
 
     def resolve(self, module_name, importer_dir=None):
         """
@@ -39,13 +39,6 @@ class ModuleResolver:
         Raises:
             FileNotFoundError: If the module .nv file cannot be found.
         """
-        # Return cached result if already imported
-        if module_name in self.imported:
-            return self.imported[module_name]
-
-        # Mark as being imported (prevents circular imports)
-        self.imported[module_name] = []
-
         # Resolve the file path
         file_path = self._find_module(module_name, importer_dir)
         if file_path is None:
@@ -54,6 +47,9 @@ class ModuleResolver:
                 f"Searched for '{module_name}.nv' in: "
                 f"{importer_dir or self.base_dir}"
             )
+        file_path = os.path.realpath(file_path)
+        if file_path in self.imported:
+            return self.imported[file_path]
 
         # Read, tokenize, and parse the module
         with open(file_path, "r", encoding="utf-8") as f:
@@ -64,7 +60,7 @@ class ModuleResolver:
         ast = Parser(tokens).parse()
 
         # Cache the result
-        self.imported[module_name] = ast
+        self.imported[file_path] = ast
         return ast
 
     def _find_module(self, module_name, importer_dir=None):

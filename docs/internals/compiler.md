@@ -23,7 +23,7 @@ The compilation pipeline orchestrates tokenizer → parser → codegen → in-pr
 
 The `assemble_link_file(asm_path, output_path)` function reads an `.s` assembly file, splits it into lines, calls `assemble(asm_lines)` to generate raw x86 byte streams, and `link(assembled)` to produce a PE executable — all in-process without any external toolchain. The in-process assembler+linker works for **both** x86_64 and ARM64 (via `backend/arm64/linker.nv`).
 
-`main.py` auto-delegates non-self builds to `nova.exe assemble-link` when `nova.exe` is available, making the pipeline fully GCC-free for all programs compiled with the self-hosted compiler.
+`main.py` auto-delegates non-self builds to `nova.exe assemble-link` when `nova.exe` is available. This is GCC-free for targets supported by the internal linker; Unix targets currently use GCC for final linking.
 
 ## REPL
 
@@ -54,6 +54,6 @@ The compiler is split into modular `.nv` files:
 - `compiler.nv` — pipeline orchestration
 - `vm.nv` — Nova bytecode VM written in Nova (stack-based bytecode execution for 20+ opcodes via `exec_func`)
 - `os_win.nv` — Windows platform runtime facade
-- `os_linux.nv`, `os_macos.nv` — Linux/macOS platform stubs with same API
+- `os_linux.nv`, `os_macos.nv` — Linux/macOS platform facades sharing the common API; platform coverage is still narrower than Windows
 
 All compiler improvements can be written purely in Nova, maintaining a self-sustaining ecosystem.

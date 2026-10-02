@@ -186,13 +186,39 @@ if cmd == "build" {
     }
 
     run_cmd = out_file
-    if len(prog_args) > 0 {
-        run_cmd = run_cmd + " " + prog_args
-    }
     if plat == "windows" {
-        run_cmd = ".\\" + run_cmd
+        run_norm = ""
+        ri = 0
+        while ri < len(run_cmd) {
+            if run_cmd[ri] == "/" {
+                run_norm = run_norm + "\\"
+            } else {
+                run_norm = run_norm + run_cmd[ri]
+            }
+            ri = ri + 1
+        }
+        is_abs = 0
+        if len(run_norm) >= 2 and run_norm[1] == ":" { is_abs = 1 }
+        if len(run_norm) >= 2 and run_norm[0] == "\\" and run_norm[1] == "\\" { is_abs = 1 }
+        if is_abs == 1 {
+            run_cmd = "\"" + run_norm + "\""
+        } else {
+            run_cmd = "\".\\" + run_norm + "\""
+        }
+        if len(prog_args) > 0 {
+            run_cmd = run_cmd + " " + prog_args
+        }
     } else {
-        run_cmd = "./" + run_cmd
+        is_abs = 0
+        if len(run_cmd) > 0 and run_cmd[0] == "/" { is_abs = 1 }
+        if is_abs == 1 {
+            run_cmd = "\"" + run_cmd + "\""
+        } else {
+            run_cmd = "\"./" + run_cmd + "\""
+        }
+        if len(prog_args) > 0 {
+            run_cmd = run_cmd + " " + prog_args
+        }
     }
     system_exec(run_cmd)
 } elif cmd == "assemble-link" {

@@ -45,6 +45,19 @@ def current_tok(state: ParserState) -> Token {
     return t
 }
 
+def peek_tok(state: ParserState, offset: int) -> Token {
+    target = state.pos + offset
+    if target < len(state.tokens) {
+        return state.tokens[target]
+    }
+    t = Token()
+    t.kind = "EOF"
+    t.val = ""
+    t.line = 0
+    t.col = 0
+    return t
+}
+
 def eat_tok(state: ParserState, expected_kind: string) -> Token {
     tok = current_tok(state)
     if tok.kind == expected_kind {
@@ -281,13 +294,13 @@ def parse_primary(state: ParserState) -> AstNode {
         node.args = []
         check = current_tok(state)
         if check.kind != "RBRACE" {
-            node.args.append(parse_expr(state))
+            node.args.append(parse_dict_key(state))
             eat_tok(state, "COLON")
             node.args.append(parse_expr(state))
             check = current_tok(state)
             while check.kind == "COMMA" {
                 eat_tok(state, "COMMA")
-                node.args.append(parse_expr(state))
+                node.args.append(parse_dict_key(state))
                 eat_tok(state, "COLON")
                 node.args.append(parse_expr(state))
                 check = current_tok(state)
@@ -420,12 +433,25 @@ def parse_primary(state: ParserState) -> AstNode {
             node.args = []
             check = current_tok(state)
             if check.kind != "RPAREN" {
+                nt = peek_tok(state, 1)
+                if check.kind == "IDENT" and nt.kind == "EQUALS" {
+                    eat_tok(state, "IDENT")
+                    eat_tok(state, "EQUALS")
+                }
                 node.args.append(parse_expr(state))
                 check = current_tok(state)
                 while check.kind == "COMMA" {
                     eat_tok(state, "COMMA")
-                    node.args.append(parse_expr(state))
                     check = current_tok(state)
+                    if check.kind != "RPAREN" {
+                        nt = peek_tok(state, 1)
+                        if check.kind == "IDENT" and nt.kind == "EQUALS" {
+                            eat_tok(state, "IDENT")
+                            eat_tok(state, "EQUALS")
+                        }
+                        node.args.append(parse_expr(state))
+                        check = current_tok(state)
+                    }
                 }
             }
             eat_tok(state, "RPAREN")
@@ -829,6 +855,20 @@ def parse_logic(state: ParserState) -> AstNode {
     return left
 }
 
+def parse_dict_key(state: ParserState) -> AstNode {
+    tok = current_tok(state)
+    if tok.kind == "CLASS" {
+        eat_tok(state, "CLASS")
+        node = AstNode()
+        node.kind = "String"
+        node.val_str = "class"
+        node.line = tok.line
+        node.col = tok.col
+        return node
+    }
+    return parse_expr(state)
+}
+
 def parse_expr(state: ParserState) -> AstNode {
     return parse_logic(state)
 }
@@ -1160,6 +1200,8 @@ def parse_statement(state: ParserState) -> AstNode {
         return node
     }
 
+    is_entry = 0
+    is_extern = 0
     if tok.kind == "ENTRY" {
         eat_tok(state, "ENTRY")
         if current_tok(state).kind != "DEF" {
@@ -1172,8 +1214,18 @@ def parse_statement(state: ParserState) -> AstNode {
         }
         is_entry = 1
         tok = current_tok(state)
-    } else {
-        is_entry = 0
+    } elif tok.kind == "EXTERN" {
+        eat_tok(state, "EXTERN")
+        if current_tok(state).kind != "DEF" {
+            errors.err("Syntax", state.filename, stmt_line, "unexpected token: extern must precede def", "extern declarations must declare functions - write 'extern def name(...) -> type'", stmt_col)
+            node = AstNode()
+            node.line = stmt_line
+            node.col = stmt_col
+            node.kind = "NONE"
+            return node
+        }
+        is_extern = 1
+        tok = current_tok(state)
     }
 
     if tok.kind == "DEF" {
@@ -1213,12 +1265,16 @@ def parse_statement(state: ParserState) -> AstNode {
             return_type = parse_type_annotation(state)
         }
         
-        body = parse_block(state)
+        body = []
+        if is_extern == 0 {
+            body = parse_block(state)
+        }
         node = AstNode()
         node.line = stmt_line
         node.col = stmt_col
         node.kind = "Function"
         node.val_str = name
+        node.name = name
         node.params = param_names
         node.param_types = param_types
         node.return_type = return_type
@@ -1226,6 +1282,9 @@ def parse_statement(state: ParserState) -> AstNode {
         node.val_int = 0
         if is_entry == 1 {
             node.val_int = 1
+        }
+        if is_extern == 1 {
+            node.val_int = 2
         }
         return node
     }

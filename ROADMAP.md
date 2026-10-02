@@ -8,7 +8,7 @@ Develop a unified OS-layer interface (`system.nv`) that automatically swaps out 
 ### 2. Galaxy Package Manager (Implemented)
 Galaxy is a fully functional package manager with a Git-backed registry website, standalone CLI (`galaxy`), three trust tiers (Core/Verified/Community), template system (`galaxy init`), GitHub Issues-based publishing workflow, and GitHub Actions automation for validation/quarantine/promotion. See the [Galaxy Registry](https://galaxy-registry.vercel.app) for documentation.
 
-### 3. Small Function Inlining (Phase 4)
+### 3. Small Function Inlining (Implemented)
 Implement advanced compiler optimizations to inline extremely short, non-recursive functions, entirely eliminating call/ret overhead for utility methods.
 
 ### 4. Language Feature Roadmap (Specified — Sequenced Delivery)
@@ -18,6 +18,29 @@ Ten features specified with developer-vs-backend contracts. Delivered first: `no
 - **Tooling:** "Did you mean?" Levenshtein diagnostics, macOS ARM64 bootstrap, POSIX layer completion.
 - Full SSO (inline ≤15B string buffers) deferred: it changes the `char*` ABI at every codegen/VM boundary; shipped instead the ABI-preserving subset (empty-slice static, full-slice aliasing in `_str_sub`).
 - See `docs/features.md` for the full specification and status of each item.
+
+## Current Engineering Priorities
+
+The next work is correctness-first rather than another large syntax batch:
+
+1. Maintain VM/native semantic parity with differential tests.
+2. Define ownership and lifetime rules for `alloc`, `free`, raw pointers, `.ptr`,
+   `.as_list`, and `@raw` before expanding unsafe APIs.
+3. Keep VM-only features such as `call()` explicit and rejected by native builds.
+4. Add `nova check`, formatting, structured diagnostics, and reproducible
+   dependency/build metadata. `nova fmt` is deterministic and opt-in;
+   `nova check --json` and `nova lint --json` expose stable diagnostic codes.
+5. Expand portable filesystem, path, JSON, and subprocess libraries.
+
+The native test suite now includes a VM/native output comparison for control
+flow and collection operations. This is a seed suite, not a proof of complete
+parity; new language features should add cases to it.
+
+### Tooling control policy
+
+`nova fmt` only edits files with the explicit `--write` flag. `nova lint` is
+advisory unless `--strict` is selected. JSON diagnostics are one object per
+line and never alter build behavior, source files, or dependencies.
 
 ## Completed Milestones
 
@@ -58,7 +81,7 @@ Full implementation: lexer keywords (try, catch, throw), parser AST nodes (Try, 
 `nova repl` command with multi-line input, persistent state across lines. Integration with both VM and native modes.
 
 ### Cross-Compilation Infrastructure (June 2026)
-`target_os` field through CodegenState, platform-aware GCC command generation, OS-appropriate output extension (.exe on Windows). os_linux.nv and os_macos.nv platform stubs filled in.
+`target_os` field through CodegenState, platform-aware GCC command generation, OS-appropriate output extension (.exe on Windows). os_linux.nv and os_macos.nv provide the common facade, with narrower platform coverage than Windows.
 
 ### type() and call() Built-ins (June 2026)
 `type(val)` returns type name string at compile time (native) or runtime (VM). `call(name, args)` for dynamic function dispatch (VM). 17 tests.

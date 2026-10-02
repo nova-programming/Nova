@@ -3,13 +3,24 @@
 import struct
 import ctypes
 import os
+import json as _json
+import re
 from .opcodes import OpCode
 
 class Instance:
     def __init__(self, class_name):
         self.class_name = class_name
-        self.fields = {}
+        self.fields = {            "json_stringify": _builtin_nova_json_stringify,
+        }
         self.ref_count = 0
+
+class NovaBoxedValue:
+    def __init__(self, kind, value=0):
+        self.kind = kind
+        self.value = value
+
+def _camel_alias(name):
+    return re.sub(r"(?<!^)([A-Z])", r"_\1", name).lower()
 
 class Frame:
     def __init__(self, return_address, local_env, self_context=None, is_init=False, pending_action=None, handler_depth=0):
@@ -73,6 +84,8 @@ class VirtualMachine:
             handler(self, args)
             return True
         handler = _BUILTIN_HANDLERS.get(func_name)
+        if handler is None:
+            handler = _BUILTIN_HANDLERS.get(_camel_alias(func_name))
         if handler:
             handler(self, args)
             return True
@@ -173,7 +186,8 @@ def _op_div(vm, arg):
     b = vm.stack.pop()
     a = vm.stack.pop()
     if isinstance(a, int) and isinstance(b, int):
-        vm.stack.append(a // b)
+        # Native signed division truncates toward zero; Python's // floors.
+        vm.stack.append(abs(a) // abs(b) * (-1 if (a < 0) != (b < 0) else 1))
     else:
         vm.stack.append(a / b)
 
@@ -288,22 +302,38 @@ def _op_print(vm, arg):
 
 def _op_alloc(vm, arg):
     size = vm.stack.pop()
+    if not isinstance(size, int) or size < 0:
+        raise RuntimeError(f"alloc size must be a non-negative integer, got {size!r}")
     ptr = vm.heap_ptr
+    if ptr + size > len(vm.heap):
+        raise MemoryError(f"VM heap exhausted while allocating {size} bytes")
     vm.heap_ptr += size
     vm.allocations[ptr] = size
     vm.stack.append(ptr)
 
 def _op_free(vm, arg):
     ptr = vm.stack.pop()
-    if ptr in vm.allocations:
-        del vm.allocations[ptr]
+    if not isinstance(ptr, int) or ptr not in vm.allocations:
+        raise RuntimeError(f"invalid or double free at pointer {ptr!r}")
+    del vm.allocations[ptr]
+
+
+def _checked_pointer(vm, ptr, width):
+    if not isinstance(ptr, int):
+        raise RuntimeError(f"pointer must be an integer address, got {ptr!r}")
+    for base, size in vm.allocations.items():
+        if base <= ptr and ptr + width <= base + size:
+            return ptr
+    raise RuntimeError(f"out-of-bounds or freed pointer access at {ptr}")
 
 def _op_store_ptr(vm, arg):
     ptr = vm.stack.pop(); val = vm.stack.pop()
+    _checked_pointer(vm, ptr, 4)
     struct.pack_into("<i", vm.heap, ptr, val)
 
 def _op_load_ptr(vm, arg):
     ptr = vm.stack.pop()
+    _checked_pointer(vm, ptr, 4)
     val = struct.unpack_from("<i", vm.heap, ptr)[0]
     vm.stack.append(val)
 
@@ -313,6 +343,7 @@ def _op_load_ptr_byte(vm, arg):
     if isinstance(ptr, bytearray) and len(ptr) == 1:
         vm.stack.append(ptr[0])
     elif isinstance(ptr, int):
+        _checked_pointer(vm, ptr, 1)
         vm.stack.append(vm.heap[ptr])
     else:
         vm.stack.append(0)
@@ -323,6 +354,7 @@ def _op_load_ptr_word(vm, arg):
     if isinstance(ptr, bytearray) and len(ptr) >= 2:
         vm.stack.append(int.from_bytes(ptr[:2], "little"))
     elif isinstance(ptr, int):
+        _checked_pointer(vm, ptr, 2)
         vm.stack.append(struct.unpack_from("<H", vm.heap, ptr)[0])
     else:
         vm.stack.append(0)
@@ -1118,6 +1150,7 @@ def _builtin_max(m, args):
 
 def _builtin_now(m, args):
     import datetime
+    import json as _json
     m.stack.append(bytearray(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S").encode('utf-8')))
 
 def _builtin_call(m, args):
@@ -1182,6 +1215,275 @@ def _builtin_file_type(m, args):
         m.stack.append(bytearray(b"file"))
     else:
         m.stack.append(bytearray(b""))
+
+
+def _builtin_sys_open(m, args):
+    path = m._to_str(args[0])
+    mode = m._to_str(args[1])
+    try:
+        file_obj = open(path, mode)
+        fd = m.next_fd
+        m.next_fd += 1
+        m.open_files[fd] = file_obj
+        m.stack.append(fd)
+    except (OSError, ValueError):
+        m.stack.append(0)
+
+
+def _builtin_sys_read(m, args):
+    fd = args[0]
+    file_obj = m.open_files.get(fd)
+    if file_obj is None:
+        m.stack.append(bytearray(b""))
+        return
+    try:
+        m.stack.append(bytearray(file_obj.read().encode("utf-8")))
+    except (OSError, UnicodeError):
+        m.stack.append(bytearray(b""))
+
+
+def _builtin_sys_write(m, args):
+    fd = args[0]
+    file_obj = m.open_files.get(fd)
+    if file_obj is not None:
+        try:
+            file_obj.write(m._to_str(args[1]))
+            file_obj.flush()
+        except (OSError, UnicodeError):
+            pass
+    m.stack.append(0)
+
+
+def _builtin_sys_close(m, args):
+    file_obj = m.open_files.pop(args[0], None)
+    if file_obj is not None:
+        try:
+            file_obj.close()
+        except OSError:
+            pass
+    m.stack.append(0)
+
+
+def _builtin_sys_mkdir(m, args):
+    import os
+    try:
+        os.mkdir(m._to_str(args[0]))
+        m.stack.append(1)
+    except (OSError, ValueError):
+        m.stack.append(0)
+
+
+def _builtin_sys_delete(m, args):
+    import os
+    try:
+        os.remove(m._to_str(args[0]))
+        m.stack.append(1)
+    except (OSError, ValueError):
+        m.stack.append(0)
+
+
+def _builtin_sys_copy(m, args):
+    import shutil
+    try:
+        shutil.copyfile(m._to_str(args[0]), m._to_str(args[1]))
+        m.stack.append(1)
+    except (OSError, ValueError):
+        m.stack.append(0)
+
+
+def _builtin_sys_move(m, args):
+    import os
+    try:
+        os.replace(m._to_str(args[0]), m._to_str(args[1]))
+        m.stack.append(1)
+    except (OSError, ValueError):
+        m.stack.append(0)
+
+
+def _builtin_sys_platform(m, args):
+    import sys
+    value = "windows" if sys.platform == "win32" else ("macos" if sys.platform == "darwin" else "linux")
+    m.stack.append(bytearray(value.encode("utf-8")))
+
+
+def _builtin_sys_get_args(m, args):
+    import sys
+    m.stack.append([bytearray(arg.encode("utf-8")) for arg in sys.argv[1:]])
+
+
+def _builtin_sys_get_tick_count(m, args):
+    import time
+    m.stack.append(int(time.monotonic() * 1000))
+
+
+def _builtin_sys_env_get(m, args):
+    import os
+    value = os.environ.get(m._to_str(args[0]), "")
+    m.stack.append(bytearray(value.encode("utf-8")))
+
+
+def _builtin_sys_env_set(m, args):
+    import os
+    try:
+        os.environ[m._to_str(args[0])] = m._to_str(args[1])
+        m.stack.append(1)
+    except (OSError, TypeError, ValueError):
+        m.stack.append(0)
+
+def _builtin_value_box_none(m, args):
+    m.stack.append(NovaBoxedValue(0, None))
+
+def _builtin_value_box_bool(m, args):
+    m.stack.append(NovaBoxedValue(4, 1 if args[0] else 0))
+
+def _builtin_value_box_string(m, args):
+    m.stack.append(NovaBoxedValue(3, bytearray(m._to_str(args[0]).encode("utf-8"))))
+
+def _builtin_value_box_list(m, args):
+    value = args[0]
+    m.stack.append(value if isinstance(value, list) else 0)
+
+def _builtin_value_box_dict(m, args):
+    value = args[0]
+    m.stack.append(value if isinstance(value, dict) else 0)
+
+def _builtin_value_box_int(m, args):
+    m.stack.append(NovaBoxedValue(5, int(args[0])))
+
+def _builtin_value_box_float(m, args):
+    m.stack.append(NovaBoxedValue(6, float(args[0])))
+
+def _builtin_value_unbox_bool(m, args):
+    value = args[0]
+    m.stack.append(1 if isinstance(value, NovaBoxedValue) and value.kind == 4 and value.value else 0)
+
+def _builtin_value_unbox_int(m, args):
+    value = args[0]
+    m.stack.append(value.value if isinstance(value, NovaBoxedValue) and value.kind == 5 else 0)
+
+def _builtin_value_unbox_float(m, args):
+    value = args[0]
+    m.stack.append(value.value if isinstance(value, NovaBoxedValue) and value.kind == 6 else 0.0)
+
+def _builtin_value_unbox_string(m, args):
+    value = args[0]
+    m.stack.append(value.value if isinstance(value, NovaBoxedValue) and value.kind == 3 else bytearray())
+
+def _builtin_nova_value_kind(m, args):
+    value = args[0]
+    if isinstance(value, NovaBoxedValue):
+        m.stack.append(value.kind)
+    elif isinstance(value, (bytearray, str)):
+        m.stack.append(3)
+    elif isinstance(value, list):
+        m.stack.append(1)
+    elif isinstance(value, dict):
+        m.stack.append(2)
+    else:
+        m.stack.append(0)
+
+def _builtin_nova_value_list_count(m, args):
+    value = args[0]
+    m.stack.append(len(value) if isinstance(value, list) else 0)
+
+def _builtin_nova_value_list_item(m, args):
+    value = args[0]
+    index = int(args[1])
+    m.stack.append(value[index] if isinstance(value, list) and 0 <= index < len(value) else 0)
+
+def _builtin_nova_value_dict_count(m, args):
+    value = args[0]
+    m.stack.append(len(value) if isinstance(value, dict) else 0)
+
+def _builtin_nova_value_dict_keys(m, args):
+    value = args[0]
+    if not isinstance(value, dict):
+        m.stack.append([])
+        return
+    m.stack.append([bytearray(str(key).encode("utf-8")) for key in value.keys()])
+
+def _builtin_nova_value_dict_values(m, args):
+    value = args[0]
+    m.stack.append(list(value.values()) if isinstance(value, dict) else [])
+
+def _builtin_nova_value_dict_items(m, args):
+    value = args[0]
+    if not isinstance(value, dict):
+        m.stack.append([])
+        return
+    items = []
+    for key, item in value.items():
+        items.append(bytearray(str(key).encode("utf-8")))
+        items.append(item)
+    m.stack.append(items)
+
+def _builtin_nova_value_retain(m, args):
+    value = args[0]
+    m.stack.append(value)
+
+def _builtin_nova_value_release(m, args):
+    m.stack.append(0)
+
+def _json_value(value, m):
+    if isinstance(value, NovaBoxedValue):
+        if value.kind == 0:
+            return None
+        if value.kind == 4:
+            return bool(value.value)
+        if value.kind == 3:
+            return bytes(value.value).decode("utf-8")
+        return value.value
+    if isinstance(value, bytearray):
+        return bytes(value).decode("utf-8")
+    if isinstance(value, list):
+        return [_json_value(item, m) for item in value]
+    if isinstance(value, dict):
+        return {m._to_str(key): _json_value(item, m) for key, item in value.items()}
+    if value is True or value is False or value is None or isinstance(value, (int, float)):
+        return value
+    return None
+
+def _builtin_nova_json_stringify(m, args):
+    try:
+        m.stack.append(bytearray(_json.dumps(
+            _json_value(args[0], m), ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")))
+    except (TypeError, ValueError, OverflowError):
+        m.stack.append(bytearray())
+
+def _builtin_nova_value_is_list(m, args):
+    m.stack.append(1 if isinstance(args[0], list) else 0)
+
+def _builtin_nova_value_is_dict(m, args):
+    m.stack.append(1 if isinstance(args[0], dict) else 0)
+
+def _builtin_nova_value_is_string(m, args):
+    value = args[0]
+    m.stack.append(1 if (
+        isinstance(value, (bytearray, str))
+        or isinstance(value, NovaBoxedValue) and value.kind == 3
+    ) else 0)
+
+
+def _builtin_system_exit(m, args):
+    raise SystemExit(args[0])
+
+
+def _builtin_system_exec(m, args):
+    import subprocess
+    subprocess.call(m._to_str(args[0]), shell=True)
+    m.stack.append(0)
+
+def _builtin_system_process_run(m, args):
+    import subprocess
+    values = [m._to_str(value) for value in args[0]]
+    if not values:
+        m.stack.append(-1)
+        return
+    try:
+        m.stack.append(subprocess.run(values, shell=False).returncode)
+    except (OSError, ValueError):
+        m.stack.append(-1)
 
 def _builtin_square(m, args):
     m.stack.append(args[0] * args[0])
@@ -1444,6 +1746,62 @@ _BUILTIN_HANDLERS = {
     "file_exists": _builtin_file_exists,
     "file_size": _builtin_file_size,
     "file_type": _builtin_file_type,
+    "sys_open": _builtin_sys_open,
+    "sys_open_c": _builtin_sys_open,
+    "sys_read": _builtin_sys_read,
+    "sys_read_c": _builtin_sys_read,
+    "sys_write": _builtin_sys_write,
+    "sys_write_c": _builtin_sys_write,
+    "sys_close": _builtin_sys_close,
+    "sys_close_c": _builtin_sys_close,
+    "sys_mkdir": _builtin_sys_mkdir,
+    "sys_mkdir_c": _builtin_sys_mkdir,
+    "sys_delete": _builtin_sys_delete,
+    "sys_delete_c": _builtin_sys_delete,
+    "sys_copy": _builtin_sys_copy,
+    "sys_copy_c": _builtin_sys_copy,
+    "sys_move": _builtin_sys_move,
+    "sys_move_c": _builtin_sys_move,
+    "sys_platform": _builtin_sys_platform,
+    "sys_platform_c": _builtin_sys_platform,
+    "sys_get_args": _builtin_sys_get_args,
+    "sys_get_args_c": _builtin_sys_get_args,
+    "sys_get_tick_count": _builtin_sys_get_tick_count,
+    "sys_get_tick_count_c": _builtin_sys_get_tick_count,
+    "sys_env_get": _builtin_sys_env_get,
+    "sys_env_get_c": _builtin_sys_env_get,
+    "sys_env_set": _builtin_sys_env_set,
+    "sys_env_set_c": _builtin_sys_env_set,
+    "value_box_none": _builtin_value_box_none,
+    "value_box_bool": _builtin_value_box_bool,
+    "value_box_string": _builtin_value_box_string,
+    "value_box_list": _builtin_value_box_list,
+    "value_box_dict": _builtin_value_box_dict,
+    "value_box_int": _builtin_value_box_int,
+    "value_box_float": _builtin_value_box_float,
+    "value_unbox_bool": _builtin_value_unbox_bool,
+    "value_unbox_int": _builtin_value_unbox_int,
+    "value_unbox_float": _builtin_value_unbox_float,
+    "value_unbox_string": _builtin_value_unbox_string,
+    "nova_value_kind": _builtin_nova_value_kind,
+    "nova_value_list_count": _builtin_nova_value_list_count,
+    "nova_value_list_item": _builtin_nova_value_list_item,
+    "nova_value_dict_count": _builtin_nova_value_dict_count,
+    "nova_value_dict_keys": _builtin_nova_value_dict_keys,
+    "nova_value_dict_values": _builtin_nova_value_dict_values,
+    "nova_value_dict_items": _builtin_nova_value_dict_items,
+    "nova_value_retain": _builtin_nova_value_retain,
+    "nova_value_release": _builtin_nova_value_release,
+    "nova_json_stringify": _builtin_nova_json_stringify,
+    "nova_value_is_list": _builtin_nova_value_is_list,
+    "nova_value_is_dict": _builtin_nova_value_is_dict,
+    "nova_value_is_string": _builtin_nova_value_is_string,
+    "system_exit": _builtin_system_exit,
+    "system_exec": _builtin_system_exec,
+    "system_c": _builtin_system_exec,
+    "system_process_run": _builtin_system_process_run,
+    "sys_process_run": _builtin_system_process_run,
+    "sys_process_run_c": _builtin_system_process_run,
     # String library builtins (used by self-hosted stdlib)
     "str_sub": _builtin_str_sub,
     "str_eq": _builtin_str_eq,

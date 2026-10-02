@@ -3,6 +3,8 @@
 import os
 import sys
 import json
+import io
+import zipfile
 import tempfile
 import shutil
 import unittest
@@ -64,6 +66,18 @@ class TestGalaxyManifest(unittest.TestCase):
         m = {"version": "1.0.0"}
         with self.assertRaises(SystemExit):
             validate_manifest(m)
+
+    def test_lockfile_round_trip(self):
+        from _galaxy import load_lock, save_lock
+        lock = load_lock()
+        self.assertEqual(lock["lockfileVersion"], 1)
+        lock["packages"]["nova-math"] = {
+            "version": "0.9.5",
+            "source": "https://example.invalid/nova-math.zip",
+            "sha256": "abc",
+        }
+        save_lock(lock)
+        self.assertEqual(load_lock()["packages"]["nova-math"]["version"], "0.9.5")
 
 
 class TestGalaxyInit(unittest.TestCase):
@@ -232,6 +246,23 @@ class TestGalaxyUtilities(unittest.TestCase):
         files = find_nv_files(self.tmpdir)
         self.assertEqual(len(files), 1)
         self.assertTrue(files[0].endswith("main.nv"))
+
+    def test_invalid_package_reference_is_rejected(self):
+        from _galaxy import _validate_package_ref
+        self.assertTrue(_validate_package_ref("nova-http"))
+        self.assertTrue(_validate_package_ref("owner/repo"))
+        self.assertFalse(_validate_package_ref("../escape"))
+        self.assertFalse(_validate_package_ref("owner/../../escape"))
+
+    def test_archive_extraction_rejects_path_traversal(self):
+        from _galaxy import _extract_archive
+        destination = os.path.join(self.tmpdir, "package")
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("repo-main/../../escape.nv", "bad")
+        with self.assertRaises(ValueError):
+            _extract_archive(archive.getvalue(), destination)
+        self.assertFalse(os.path.exists(os.path.join(self.tmpdir, "escape.nv")))
 
     @patch("tools.galaxy.urllib.request.urlopen")
     def test_registry_fetch_pkg_missing(self, mock_urlopen):

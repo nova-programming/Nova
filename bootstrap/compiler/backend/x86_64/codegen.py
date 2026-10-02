@@ -222,7 +222,18 @@ class X86_64Codegen:
                         "_dict_remove", "_dict_keys", "_dict_values", "_dict_items", "_dict_free"]:
             self.assembly.append(f".extern {d_sym}")
 
-        for b_sym in ["_abs", "_min", "_max", "_file_exists", "_file_size", "_file_type", "_now", "_call"]:
+        for b_sym in ["_abs", "_min", "_max", "_file_exists", "_file_size", "_file_type", "_now", "_call",
+                      "_value_box_none", "_value_box_bool", "_value_box_int",
+                      "_value_box_float", "_value_box_string", "_value_box_list",
+                      "_value_box_dict", "_value_unbox_bool", "_value_unbox_int",
+                      "_value_unbox_float", "_value_unbox_string",
+                      "_nova_value_kind", "_nova_value_list_count",
+                      "_nova_value_list_item", "_nova_value_dict_count",
+                      "_nova_value_dict_keys", "_nova_value_dict_values",
+                      "_nova_value_dict_items",
+                      "_nova_json_stringify",
+                      "_nova_value_retain", "_nova_value_release", "_nova_value_is_list",
+                      "_nova_value_is_dict", "_nova_value_is_string"]:
             self.assembly.append(f".extern {b_sym}")
 
         self.assembly.append(".extern _slice_list")
@@ -753,9 +764,18 @@ class X86_64Codegen:
                 self.assembly.append("    call _fflush")
                 self.assembly.append("    add rsp, 32")
         elif isinstance(node, Return):
-            self.compile_expr(node.value)
-            self.assembly.append("    pop rax")
+            has_val = False
+            if node.value is not None:
+                self.compile_expr(node.value)
+                self.assembly.append("    pop rax")
+                has_val = True
+            else:
+                self.assembly.append("    xor rax, rax")
+            if has_val:
+                self.assembly.append("    push rax")
             self.emit_deferred()
+            if has_val:
+                self.assembly.append("    pop rax")
             for reg in reversed(getattr(self, 'used_regs', [])):
                 self.assembly.append(f"    pop {reg}")
             self.assembly.append("    mov rsp, rbp")
@@ -962,6 +982,9 @@ class X86_64Codegen:
                         self.assembly.append(f"    mov {offset}, rax")
                     else:
                         self.assembly.append(f"    mov [rbp - {abs(offset)}], rax")
+            for stmt in node.catch_body:
+                self.compile_stmt(stmt)
+            self.assembly.append(f"{after_label}:")
         elif isinstance(node, Defer):
             self.add_defer(node)
         elif isinstance(node, ExternDef):

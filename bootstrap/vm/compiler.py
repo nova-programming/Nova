@@ -45,7 +45,7 @@ class Compiler:
     def patch_jump(self, idx, target):
         self.code[idx][1] = target
 
-    def compile_import(self, node):
+    def compile_import(self, node, importer_dir=None):
         """Resolve and compile a .nv module import."""
         module_name = node.module
         if module_name in self.compiled_modules:
@@ -55,7 +55,7 @@ class Compiler:
         prev_mod = self._cur_module
         self._cur_module = module_name
         try:
-            imported_ast = self.resolver.resolve(module_name, self.base_dir)
+            imported_ast = self.resolver.resolve(module_name, importer_dir or self.base_dir)
         except FileNotFoundError as e:
             raise Exception(str(e))
 
@@ -83,7 +83,8 @@ class Compiler:
         # Recursively compile nested imports of the imported module
         for stmt in imported_ast:
             if isinstance(stmt, Import):
-                self.compile_import(stmt)
+                module_dir = self.resolver.get_module_dir(module_name, importer_dir or self.base_dir)
+                self.compile_import(stmt, module_dir)
 
         # Second pass: compile function/method bodies from the imported module
         for stmt in imported_ast:

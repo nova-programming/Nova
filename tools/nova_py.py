@@ -203,6 +203,7 @@ def load(filepath):
         
     if target_os == "windows":
         cmd.append("-Wl,--export-all-symbols")
+        cmd.extend(["-lkernel32", "-lgdi32", "-luser32"])
     elif target_os == "linux":
         cmd.append("-DLINUX_WRAP")
     elif target_os == "macos":

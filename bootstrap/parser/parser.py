@@ -46,12 +46,9 @@ class Parser:
             field_name = self.eat("IDENT")[1]
             self.eat("COLON")
             
-            # Handle type keywords
-            type_token = self.current()
-            if type_token[0] in ("TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING"):
-                type_name = self.eat(type_token[0])[1]
-            else:
-                type_name = self.eat("IDENT")[1]
+            type_name = self.parse_type_annotation()
+            if not type_name:
+                raise SyntaxError("Expected a type annotation for data field")
             
             fields.append((field_name, type_name))
             
@@ -163,6 +160,14 @@ class Parser:
     def parse_expr(self):
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
         return self.parse_logic()
+
+    def parse_dict_key(self):
+        """Parse dictionary keys, including reserved property names such as class."""
+        if self.current() and self.current()[0] == "CLASS":
+            line = self.current()[2]
+            self.eat("CLASS")
+            return String("class", line=line)
+        return self.parse_expr()
 
     def parse_logic(self):
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
@@ -371,13 +376,13 @@ class Parser:
             keys = []
             values = []
             if self.current() and self.current()[0] != "RBRACE":
-                keys.append(self.parse_expr())
+                keys.append(self.parse_dict_key())
                 self.eat("COLON")
                 values.append(self.parse_expr())
                 while self.current() and self.current()[0] == "COMMA":
                     self.eat("COMMA")
                     if self.current() and self.current()[0] != "RBRACE":
-                        keys.append(self.parse_expr())
+                        keys.append(self.parse_dict_key())
                         self.eat("COLON")
                         values.append(self.parse_expr())
             self.eat("RBRACE")
@@ -390,17 +395,37 @@ class Parser:
             if self.current() and self.current()[0] == "LPAREN":
                 self.eat("LPAREN")
                 args = []
+                kwargs = {}
                 if self.current() and self.current()[0] != "RPAREN":
-                    args.append(self.parse_expr())
+                    if (self.current()[0] == "IDENT" and
+                        self.pos + 1 < len(self.tokens) and
+                        self.tokens[self.pos + 1][0] == "EQUALS"):
+                        kw_name = self.eat("IDENT")[1]
+                        self.eat("EQUALS")
+                        val = self.parse_expr()
+                        args.append(val)
+                        kwargs[kw_name] = val
+                    else:
+                        args.append(self.parse_expr())
                     while self.current() and self.current()[0] == "COMMA":
                         self.eat("COMMA")
                         if self.current() and self.current()[0] != "RPAREN":
-                            args.append(self.parse_expr())
+                            if (self.current()[0] == "IDENT" and
+                                self.pos + 1 < len(self.tokens) and
+                                self.tokens[self.pos + 1][0] == "EQUALS"):
+                                kw_name = self.eat("IDENT")[1]
+                                self.eat("EQUALS")
+                                val = self.parse_expr()
+                                args.append(val)
+                                kwargs[kw_name] = val
+                            else:
+                                args.append(self.parse_expr())
                 self.eat("RPAREN")
                 # char_code accepts 1 or 2 args: char_code("s") means char_code("s", 0)
                 if name == "char_code" and len(args) == 1:
                     args.append(Number(0, line=line))
                 node = Call(name, args, line=line)
+                node.kwargs = kwargs
             else:
                 node = Variable(name, line=line)
         elif kind == "COMMA":
@@ -1023,6 +1048,9 @@ class Parser:
             self.skip_newlines()
             if not self.current():
                 break
+            if self.current()[0] == "SEMICOLON":
+                self.eat("SEMICOLON")
+                continue
             stmt = self.parse_statement()
             if stmt:
                 program.append(stmt)

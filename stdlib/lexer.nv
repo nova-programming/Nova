@@ -53,6 +53,7 @@ def match_keyword(word: string) -> string {
         case "enum" { return "ENUM" }
         case "class" { return "CLASS" }
         case "data" { return "DATA" }
+        case "extern" { return "EXTERN" }
         case "import" { return "IMPORT" }
         case "as" { return "AS" }
         case "export" { return "EXPORT" }

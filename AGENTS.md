@@ -1,5 +1,43 @@
 # Agent Session Summary
 
+## Latest Portable Standard-Library Work
+- Added `env_get(name)` and `env_set(name, value)` to `stdlib/env.nv`.
+- Added matching `system_env_get`/`system_env_set` wrappers, VM handlers, and
+  native Windows/Unix/macOS runtime ABI functions.
+- `env_get` returns an empty string when the variable is absent; `env_set`
+  returns `1` on success and `0` on failure.
+- Added type-check and VM/native parity coverage.
+- Validation: `python -m unittest discover tests -q` — 216 passed, 1 skipped.
+- Added `fs_delete`, `fs_copy`, and `fs_move` with VM/native implementations.
+  Copy overwrites its destination; move replaces it where supported; delete
+  targets files only. Each returns `1` on success and `0` on failure.
+- Added `process_run(args)` for no-shell argument-array execution. It returns
+  the child exit code or `-1` when launch fails, with VM/native parity on
+  Windows and Unix-like targets.
+- Started the shared JSON value ABI with stable `NovaValueKind` IDs and the
+  internal `_nova_value_kind` probe. Existing list/dict/string ARC tags remain
+  compatible; scalar boxing and JSON conversion remain pending.
+- Added internal boxed scalar constructors/accessors for `none`, `bool`, `int`,
+  and `float`, mirrored by VM handlers. Existing syntax remains unboxed.
+- Added internal boxed-string construction/access, so future JSON conversion
+  can use a tagged owned string representation instead of guessing from raw
+  string pointers.
+- Added checked list/dictionary traversal helpers for the shared ABI, mirrored
+  by VM handlers. These expose counts, list items, and dictionary keys/values
+  without changing existing collection syntax.
+- Added internal retain and kind-predicate helpers for managed collections and
+  strings, mirrored by VM handlers, to support safe recursive ABI traversal.
+- Added matching `_nova_value_release` lifetime primitive; native decrements
+  ARC and VM treats it as a no-op under Python object lifetime management.
+- Added collection boxing entry points for lists and dictionaries. They validate
+  the existing managed kind and retain the native object; VM preserves the
+  existing collection object.
+- Added ordered flattened dictionary item traversal through
+  `nova_value_dict_items`, preserving key/value pairing for recursive consumers.
+- Added the first public JSON milestone: compact VM/native `json_stringify`
+  for strings, integers, boxed booleans/none, lists, and dictionaries.
+  Recursive `json_parse` remains pending.
+
 ## Global Lock
 - None
 
@@ -13,6 +51,22 @@
 - **Compiler**: Stable, tree-shaking + variable-to-register promotion + loop bounds-check elimination (BCE) + AST constant folding/dead-code pruning + full self-hosted Stage 2 working (275 tests passed) + cross-platform GCC fallback + exceptions + list comprehensions + REPL + cross-compilation
 - **Installer**: Native `install.sh` (bash, uses only curl+tar) + `install.ps1` (PowerShell) + `install.py` (Python fallback) — no dependencies required
 - **Version**: v0.9.0. `nova --version` / `galaxy --version` + self-update via registry endpoints
+
+## Latest Maturity Work
+- Added deterministic `nova fmt <file.nv>` checking; `nova fmt --write` is the only
+  mode that edits source.
+- Added stable diagnostic codes and opt-in JSON output through `nova check --json`
+  and `nova lint --json`.
+- Expanded advisory linting with `UNSAFE001` for raw `alloc`/`free` review points.
+- Documented raw-memory ownership and borrowed-view rules without changing default
+  semantics.
+- Validation command: `python -m unittest discover tests -q` (216 passed, 1 skipped).
+- Added readable portable modules: `path`, `fs`, `env`, `process`, and `time`.
+  They reuse the existing runtime ABI and preserve low-level access.
+- `json.nv` is intentionally a placeholder until VM/native JSON values share a
+  documented representation; no false portability promise is made.
+- Added explicit `fs_mkdir(path)` with matching VM/native behavior. It does not
+  implicitly create parent directories during `fs_write`.
 
 ## What Was Accomplished
 
@@ -708,3 +762,62 @@ galaxy publish             # Publish to registry
   - Updated `galaxy-registry/reference.html`: Quick Reference syntax table + dedicated `defer` and `extern def` sections.
   - Updated `galaxy-registry/documentation.html`: CLI command table with `nova run` and language syntax guides.
 
+### Phase 27: Native Win32 GDI GUI & NSS Styling Engine (This Session — October 2026)
+- **Win32 GDI Double-Buffered Graphics Engine** (`runtime.c`):
+  - Added native Win32 window management and double-buffered graphics API: `_gui_init_window`, `_gui_poll_events`, `_gui_get_mouse_x`, `_gui_get_mouse_y`, `_gui_get_mouse_down`, `_gui_get_mouse_clicked`, `_gui_clear`, `_gui_draw_rect`, `_gui_draw_rounded_rect`, `_gui_draw_border`, `_gui_draw_text`, `_gui_present`, `_gui_sleep`, `_gui_close`.
+  - Zero web bloat: 100% native Win32 GDI off-screen bitmap double-buffering running at 60 FPS.
+- **Compiler & Linker Enhancements**:
+  - GCC Linker Flags: MinGW GCC linker flags `-lkernel32 -lgdi32 -luser32` appended strictly after object files in both `bootstrap/main.py` and `stdlib/compiler.nv`.
+  - Path Quoting & Normalization: Quoted all paths (`_quote(to_win_path(...))`) in GCC invocations and normalized executable paths in `nova.nv` to eliminate syntax errors on paths containing spaces (e.g. `panda panda`).
+  - Stack Invariant & Callee-Saved Register Fix: Fixed stack corruption bug in self-hosted `stdlib/backend/x86_64/codegen_stmt.nv` where bare `return` (or `return None`) popped an unpushed value into `%rax`, corrupting `r12..r15` upon returning to callers. Fixed by checking `node.left != 0 and node.left.kind != "None"` and emitting `xor %a, %a` for void/None returns.
+  - Dynamic Struct Field Offsets: Added full struct scanning in `get_prop_offset` when struct name is unannotated (`""` or `"any"`), ensuring dynamic widget field accesses resolve to exact memory offsets.
+- **High-Level Nova GUI & NSS Standard Library** (`stdlib/gui.nv`):
+  - Hex color parser: `parse_color("#181825") -> 0x181825`.
+  - Data structs: `Widget` (`tag`, `text`, `props`, `children`, `on_click_id`, `pos_x`, `pos_y`, `width`, `height`, `is_hovered`), `WindowApp`.
+  - Widget constructors: `Text`, `Button`, `Container`, `Row`, `Col`, `create_window`, and `window(title, width, height, properties={...})` adhering to user-requested inline syntax.
+  - Layout Engine (`layout_widget`): Flexbox layout supporting `padding`, `gap`, `flex-direction` (`"column"` / `"row"`), `align-items` (`"center"`), and custom `width`/`height`.
+  - 2D Renderer (`render_widget`): Renders rounded corners, borders, antialiased fonts, and hover highlight states.
+  - Hit testing and dispatch: `hit_test_and_dispatch` and `run_app_step` frame processing.
+- **Showcase Application & Tests**:
+  - `examples/gui_counter.nv`: Built showcase counter application featuring title, subtitle, engine badge, styled counter card, interactive increment button, and dynamic counter display. Supports `--test` automated mode.
+  - `tests/test_gui.py`: Added automated regression tests for raw GDI window presentation and high-level NSS counter application with `--test` flag.
+  - Pytest suite: **277 passed, 18 skipped, 13 subtests passed**. CI pipeline: 6 passed, 0 failed.
+
+### Phase 28: Clean CamelCase GUI API, Lifecycle Simplification & Heap Zero-Init (This Session — October 2026)
+- **CamelCase & Clean Naming Standard** (`stdlib/gui.nv`):
+  - Renamed public and internal functions to camelCase / capitalized second word format (eliminating snake_case with excessive underscores):
+    - `get_mouseCord() -> list` / `getMouseCord()` returning `[x, y]` mouse coordinates in a single call.
+    - `drawRect(x, y, w, h, colorHex, radius)`: Single unified primitive handling sharp (`radius <= 0`) and rounded (`radius > 0`) rectangles.
+    - `drawBorder(x, y, w, h, borderW, colorHex)`, `drawText(text, x, y, fontSize, colorHex, isBold)`.
+    - `layoutWidget(...)`, `renderWidget(...)`, `hitTest(...)`, `runAppStep(...)`, `createWindow(...)`.
+    - Backwards-compatibility aliases preserved for existing callers.
+- **One-Call Automated Lifecycle (`gui(...)`)**:
+  - Encapsulated initialization, event polling, mouse dispatch, rendering, and cleanup into a single `gui(title, width, height, root, properties)` call.
+  - Automatically equips the native Win32 window with the 3 standard navigation buttons (Minimize, Maximize, Close) via standard `WS_OVERLAPPEDWINDOW`.
+- **Heap Zero-Memory Guarantee** (`runtime.c`):
+  - Changed `HeapAlloc(_nova_heap, 0, s)` to `HeapAlloc(_nova_heap, HEAP_ZERO_MEMORY, s)` in `runtime.c`.
+  - Ensures all structs, AST nodes, and compiler objects are zero-initialized on allocation, eliminating uninitialized garbage reads (e.g. `0xbaadf00d` dereferenced in `_is_string_expr`).
+- **Layout Engine Content-Sizing & Shrink-to-Fit Fix** (`stdlib/gui.nv`):
+  - Fixed flex container sizing in `layoutWidgetInternal`: non-root containers without explicit `width` or `height` now shrink-wrap their children instead of expanding to the entire parent `availW`/`availH`.
+  - Added two-pass alignment for `align-items: center` in rows and columns.
+  - Eliminated container overlap bug where nested containers expanded to 100% of the window and pushed sibling widgets off screen.
+- **Validation**:
+  - `pytest tests/test_gui.py`: All 3 tests passed (`test_gui_raw_execution`, `test_gui_counter_showcase`, `test_gui_mouse_cords`).
+  - Full pytest test suite: **278 passed, 18 skipped** across 296 items.
+
+### Phase 29: NSS Styling Engine, Interactive Counter State & Clean Multi-Platform GUI (This Session — October 2026)
+- **NSS (Nova Style Sheets) Engine** (`stdlib/nss.nv`, `examples/styles/app.nss`):
+  - Added CSS-like declarative stylesheet parsing supporting classes (`.class`), IDs (`#id`), and widget tags.
+  - Property cascades for background, padding, margins, borders, fonts, colors, flex layout, hover, and active states.
+  - Complete separation between UI hierarchy in `.nv` files and presentation rules in `.nss` files.
+- **State Scoping & Event Dispatch Discovery** (`examples/gui_nss_demo.nv`):
+  - Solved callback variable scoping issue: in Nova, assigning module-level variables directly inside functions creates local scope bindings; callbacks requiring shared mutable state must use dictionary containers (`state = {"count": 0}`) or declarative action dispatch properties (`"action": "increment"`, `"action": "reset"`).
+  - Modernized `gui_nss_demo.nv` dashboard showcasing sidebar navigation, search, cards, badges, and real-time event counter.
+- **Build Artifact Hygiene & Linker Flags**:
+  - Excluded `.dll` and `.bmp` test artifacts in `.gitignore`.
+  - Verified Win32 GDI library linkage (`-lkernel32 -lgdi32 -luser32`) and path quoting across build targets.
+- **Verification**:
+  - `pytest tests/`: **290 passed, 28 skipped, 13 subtests passed** (100% green).
+  - `python -m unittest discover tests -q`: **216 passed, 1 skipped**.
+  - `python ci_test.py`: All 6 pipeline suites passed (pytest, galaxy, installer, x86_64, arm64, cross-target asm).
+  - Tested `gui_nss_demo.nv` both in headless `--test` mode (code 0) and interactive GDI window mode.

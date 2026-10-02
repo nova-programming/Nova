@@ -7,6 +7,6 @@ This directory contains internal documentation for the Nova compiler, organized 
 - `codegen.md` — Native code generation (x86_64 & ARM64 backends, frame pointer optimization, exceptions, cross-compilation)
 - `compiler.md` — Pipeline orchestration (REPL, VM self-hosting, cross-compilation)
 - `linker.md` — PE executable generation (x86_64 PE32+, ARM64 PE32+)
-- `os_win.md` — Windows OS runtime facade (cross-platform stubs for Linux/macOS)
+- `os_win.md` — Windows OS runtime facade and the corresponding Unix compatibility facades
 
 All compiler code is written in Nova under `stdlib/`. The Python bootstrap in `bootstrap/` is frozen.

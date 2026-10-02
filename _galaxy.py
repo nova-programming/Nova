@@ -16,6 +16,7 @@ import zipfile
 import io
 import webbrowser
 import shutil
+import re
 from pathlib import Path
 
 GALAXY_VERSION = "0.8.0"
@@ -23,9 +24,13 @@ REGISTRY_URL = "https://galaxy-registry.vercel.app"
 REGISTRY_REPO = "nova-programming/galaxy-registry"
 GALAXY_MODULES_DIR = "galaxy_modules"
 MANIFEST_FILE = "galaxy.json"
+LOCK_FILE = "galaxy.lock"
 NOVA_ZIP_URL = "https://github.com/nova-programming/Nova/archive/refs/heads/main.zip"
 ZIP_PREFIX = "Nova-main"
 GALAXY_RELEASE_BASE = "https://github.com/nova-programming/Nova/releases/download"
+USER_AGENT = f"Nova-Galaxy/{GALAXY_VERSION}"
+MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
+PACKAGE_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*(/[A-Za-z0-9][A-Za-z0-9_.-]*)?$")
 
 
 def main():
@@ -126,15 +131,63 @@ def load_manifest(path="."):
         print(f"Error: {MANIFEST_FILE} not found in {os.path.abspath(path)}")
         print("Run 'galaxy init' to create one.")
         sys.exit(1)
-    with open(mf, "r") as f:
-        return json.load(f)
+    try:
+        with open(mf, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Error: Could not read {mf}: {exc}")
+        sys.exit(1)
+    if not isinstance(manifest, dict):
+        print(f"Error: {mf} must contain a JSON object")
+        sys.exit(1)
+    return manifest
 
 
 def save_manifest(manifest, path="."):
     mf = os.path.join(path, MANIFEST_FILE)
-    with open(mf, "w") as f:
+    with open(mf, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
         f.write("\n")
+
+
+def load_lock(path="."):
+    lock_path = os.path.join(path, LOCK_FILE)
+    if not os.path.exists(lock_path):
+        return {"lockfileVersion": 1, "packages": {}}
+    try:
+        with open(lock_path, "r", encoding="utf-8") as f:
+            lock = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Error: Could not read {lock_path}: {exc}")
+        sys.exit(1)
+    if not isinstance(lock, dict) or lock.get("lockfileVersion") != 1:
+        print(f"Error: {lock_path} has an unsupported lockfile format")
+        sys.exit(1)
+    if not isinstance(lock.get("packages"), dict):
+        print(f"Error: {lock_path} must contain a packages object")
+        sys.exit(1)
+    return lock
+
+
+def save_lock(lock, path="."):
+    lock_path = os.path.join(path, LOCK_FILE)
+    temporary = lock_path + ".tmp"
+    with open(temporary, "w", encoding="utf-8") as f:
+        json.dump(lock, f, indent=2, sort_keys=True)
+        f.write("\n")
+    os.replace(temporary, lock_path)
+
+
+def _lock_package(pkg_name, data, version_entry):
+    lock = load_lock()
+    entry = {
+        "version": data.get("version", "") if data else "",
+        "source": data.get("download_url") or data.get("github_repo", "") if data else "",
+    }
+    if version_entry and version_entry.get("sha256"):
+        entry["sha256"] = version_entry["sha256"]
+    lock["packages"][pkg_name] = entry
+    save_lock(lock)
 
 
 def validate_manifest(manifest):
@@ -146,6 +199,14 @@ def validate_manifest(manifest):
                 errors.append(f"Missing required field: {field} ({spec['desc']})")
             elif not isinstance(val, spec["type"]):
                 errors.append(f"Field '{field}' must be {spec['type'].__name__}")
+    if isinstance(manifest.get("name"), str) and not PACKAGE_REF_RE.fullmatch(manifest["name"]):
+        errors.append("Field 'name' must contain only letters, numbers, '.', '_' or '-'")
+    if isinstance(manifest.get("keywords"), list) and not all(isinstance(k, str) for k in manifest["keywords"]):
+        errors.append("Field 'keywords' must contain only strings")
+    if isinstance(manifest.get("dependencies"), dict):
+        for dependency in manifest["dependencies"]:
+            if not isinstance(dependency, str) or not PACKAGE_REF_RE.fullmatch(dependency):
+                errors.append(f"Invalid dependency name: {dependency!r}")
     if errors:
         for e in errors:
             print(f"  - {e}")
@@ -154,7 +215,7 @@ def validate_manifest(manifest):
 
 def registry_fetch(path):
     url = f"{REGISTRY_URL}/{path}"
-    req = urllib.request.Request(url, headers={"User-Agent": "Nova-Galaxy/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
             return json.loads(r.read().decode("utf-8"))
@@ -419,7 +480,7 @@ def _verify_hashes(dest_dir, version_data, pkg_name):
     expected_files = version_data.get("files") if version_data else None
     if not expected_files:
         print(f"  [WARN] No file hashes in registry metadata for '{pkg_name}' — skipping verification")
-        return
+        return True
 
     ok = True
     for ef in expected_files:
@@ -427,7 +488,11 @@ def _verify_hashes(dest_dir, version_data, pkg_name):
         expected_hash = ef.get("sha256", "")
         if not path or not expected_hash:
             continue
-        full_path = os.path.join(dest_dir, path)
+        full_path = os.path.abspath(os.path.join(dest_dir, path))
+        if not full_path.startswith(os.path.abspath(dest_dir) + os.sep):
+            print(f"  [FAIL] Invalid hash path: {path}")
+            ok = False
+            continue
         if not os.path.exists(full_path):
             print(f"  [WARN] Missing file: {path}")
             ok = False
@@ -442,14 +507,72 @@ def _verify_hashes(dest_dir, version_data, pkg_name):
     if ok:
         print(f"  All file hashes verified for '{pkg_name}'")
     else:
-        print(f"  [WARN] Some files failed hash verification for '{pkg_name}'")
+        print(f"  [FAIL] Some files failed hash verification for '{pkg_name}'")
+    return ok
 
 
-def _install_package(pkg_name, visited=None):
+def _validate_package_ref(pkg_name):
+    return isinstance(pkg_name, str) and bool(PACKAGE_REF_RE.fullmatch(pkg_name))
+
+
+def _extract_archive(zip_data, dest_dir):
+    """Extract a GitHub archive without allowing path traversal or symlinks."""
+    if len(zip_data) > MAX_ARCHIVE_BYTES:
+        raise ValueError(f"archive exceeds {MAX_ARCHIVE_BYTES // (1024 * 1024)} MB limit")
+    staging_dir = dest_dir + ".tmp-" + str(os.getpid())
+    if os.path.exists(staging_dir):
+        shutil.rmtree(staging_dir)
+    os.makedirs(staging_dir, exist_ok=True)
+    backup_dir = None
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_data)) as archive:
+            if archive.testzip() is not None:
+                raise ValueError("archive contains corrupted data")
+            members = [m for m in archive.infolist() if m.filename]
+            if not members:
+                raise ValueError("archive is empty")
+            top_dir = members[0].filename.split("/", 1)[0]
+            for member in members:
+                parts = member.filename.replace("\\", "/").split("/")
+                if not parts or parts[0] != top_dir:
+                    raise ValueError("archive has unexpected layout")
+                rel_path = "/".join(parts[1:])
+                if not rel_path:
+                    continue
+                if any(part in ("", ".", "..") for part in rel_path.split("/")):
+                    raise ValueError(f"unsafe archive path: {member.filename}")
+                mode = (member.external_attr >> 16) & 0o170000
+                if mode == 0o120000:
+                    raise ValueError(f"archive contains symlink: {member.filename}")
+                target = os.path.abspath(os.path.join(staging_dir, *rel_path.split("/")))
+                if not target.startswith(os.path.abspath(staging_dir) + os.sep):
+                    raise ValueError(f"unsafe archive path: {member.filename}")
+                if member.is_dir():
+                    os.makedirs(target, exist_ok=True)
+                else:
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    with archive.open(member) as src, open(target, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+        if os.path.exists(dest_dir):
+            backup_dir = dest_dir + ".backup-" + str(os.getpid())
+            if os.path.exists(backup_dir):
+                shutil.rmtree(backup_dir)
+            os.replace(dest_dir, backup_dir)
+        os.replace(staging_dir, dest_dir)
+        return backup_dir
+    except Exception:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
+
+
+def _install_package(pkg_name, visited=None, force=False):
     """Internal install — supports transitive dependency resolution."""
     if visited is None:
         visited = set()
 
+    if not _validate_package_ref(pkg_name):
+        print(f"  Error: Invalid package reference '{pkg_name}'")
+        return None
     if pkg_name in visited:
         print(f"  (already visited '{pkg_name}' — skipping cycle)")
         return None
@@ -457,7 +580,7 @@ def _install_package(pkg_name, visited=None):
 
     pkg_dir_name = pkg_name.replace("/", "_")
     installed_path = os.path.join(GALAXY_MODULES_DIR, pkg_dir_name)
-    if os.path.exists(installed_path):
+    if os.path.exists(installed_path) and not force:
         print(f"  '{pkg_name}' already installed at {installed_path}")
         return None
 
@@ -469,42 +592,36 @@ def _install_package(pkg_name, visited=None):
         data = None
     else:
         data = registry_fetch_pkg(pkg_name)
-        if data:
-            github_repo = data.get("github_repo", pkg_name)
-            download_url = data.get("download_url") or github_download_url(github_repo)
-        else:
-            github_repo = pkg_name
-            download_url = github_download_url(github_repo)
-            data = None
+        if not data:
+            print(f"  Error: Package '{pkg_name}' was not found in the registry")
+            return None
+        github_repo = data.get("github_repo", pkg_name)
+        download_url = data.get("download_url") or github_download_url(github_repo)
 
     if not download_url:
         print(f"  Error: Could not resolve download URL for '{pkg_name}'")
         return None
+    lock = load_lock()
+    locked = lock["packages"].get(pkg_name)
+    if locked and data and not force:
+        locked_version = locked.get("version")
+        current_version = data.get("version")
+        if locked_version and current_version != locked_version:
+            print(
+                f"  Error: '{pkg_name}' is locked to v{locked_version}, "
+                f"but the registry currently resolves v{current_version}."
+            )
+            print("  Run 'galaxy upgrade' to intentionally update it.")
+            return None
 
     os.makedirs(GALAXY_MODULES_DIR, exist_ok=True)
     dest_dir = os.path.join(GALAXY_MODULES_DIR, pkg_dir_name)
 
     try:
-        req = urllib.request.Request(download_url, headers={"User-Agent": "Nova-Galaxy/1.0"})
+        req = urllib.request.Request(download_url, headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(req, timeout=30) as r:
             zip_data = r.read()
-
-        with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
-            members = z.infolist()
-            top_dir = os.path.commonprefix([m.filename for m in members]).split("/")[0]
-            for m in members:
-                rel_path = m.filename[len(top_dir)+1:]
-                if not rel_path:
-                    continue
-                target = os.path.abspath(os.path.join(dest_dir, rel_path))
-                if not target.startswith(os.path.abspath(dest_dir) + os.sep):
-                    continue
-                if m.is_dir():
-                    os.makedirs(target, exist_ok=True)
-                else:
-                    os.makedirs(os.path.dirname(target), exist_ok=True)
-                    with z.open(m) as src, open(target, "wb") as dst:
-                        dst.write(src.read())
+        backup_dir = _extract_archive(zip_data, dest_dir)
 
         # SHA-256 verification
         version_str = data.get("version", "") if data else ""
@@ -514,7 +631,14 @@ def _install_package(pkg_name, visited=None):
                 if v.get("version") == version_str:
                     version_entry = v
                     break
-        _verify_hashes(dest_dir, version_entry, pkg_name)
+        if not _verify_hashes(dest_dir, version_entry, pkg_name):
+            shutil.rmtree(dest_dir, ignore_errors=True)
+            if backup_dir and os.path.exists(backup_dir):
+                os.replace(backup_dir, dest_dir)
+            return None
+        if backup_dir:
+            shutil.rmtree(backup_dir, ignore_errors=True)
+        _lock_package(pkg_name, data, version_entry)
 
         # Transitive dependencies
         deps = data.get("dependencies", {}) if data else {}
@@ -539,6 +663,10 @@ def _install_package(pkg_name, visited=None):
             print(f"    Check that '{github_repo}' exists on GitHub")
         return None
     except Exception as e:
+        shutil.rmtree(dest_dir, ignore_errors=True)
+        backup_dir = locals().get("backup_dir")
+        if backup_dir and os.path.exists(backup_dir):
+            os.replace(backup_dir, dest_dir)
         print(f"  Error installing '{pkg_name}': {e}")
         return None
 
@@ -605,7 +733,7 @@ def cmd_search(args):
 
     url = f"{REGISTRY_URL}/api/search?q={urllib.parse.quote(query)}"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Nova-Galaxy/1.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(req, timeout=15) as r:
             data = json.loads(r.read().decode("utf-8"))
     except Exception as e:
@@ -963,7 +1091,7 @@ def cmd_update(args):
     except Exception as e:
         print(f"Download failed ({e}). Falling back to full repo zip...")
         try:
-            req = urllib.request.Request(NOVA_ZIP_URL, headers={"User-Agent": "Nova-Galaxy/1.0"})
+            req = urllib.request.Request(NOVA_ZIP_URL, headers={"User-Agent": USER_AGENT})
             with urllib.request.urlopen(req, timeout=120) as r:
                 zip_data = r.read()
         except Exception as e2:
@@ -1030,7 +1158,7 @@ def cmd_upgrade(args):
             answer = input(f"  Update to v{latest}? (y/N): ").strip().lower()
             if answer in ("y", "yes"):
                 print(f"  Reinstalling '{pkg}' v{latest}...")
-                _install_package(pkg)
+                _install_package(pkg, force=True)
             else:
                 print(f"  Skipped")
         else:
@@ -1044,19 +1172,16 @@ def cmd_remove(args):
         return
 
     pkg = args[0]
+    if not _validate_package_ref(pkg):
+        print(f"Invalid package reference '{pkg}'.")
+        return
     removed = False
 
-    pkg_dir = os.path.join(GALAXY_MODULES_DIR, pkg)
-    if os.path.exists(pkg_dir):
-        import shutil
+    pkg_dir = os.path.abspath(os.path.join(GALAXY_MODULES_DIR, pkg.replace("/", "_")))
+    modules_root = os.path.abspath(GALAXY_MODULES_DIR)
+    if pkg_dir.startswith(modules_root + os.sep) and os.path.exists(pkg_dir):
         shutil.rmtree(pkg_dir)
         print(f"Removed {pkg_dir}/")
-        removed = True
-
-    alt_dir = os.path.join(GALAXY_MODULES_DIR, pkg.replace("/", "_"))
-    if os.path.exists(alt_dir):
-        import shutil
-        shutil.rmtree(alt_dir)
         removed = True
 
     if os.path.exists(MANIFEST_FILE):
@@ -1068,6 +1193,12 @@ def cmd_remove(args):
             save_manifest(manifest)
             print(f"Removed from {MANIFEST_FILE}")
             removed = True
+    lock = load_lock()
+    if pkg in lock["packages"]:
+        del lock["packages"][pkg]
+        save_lock(lock)
+        print(f"Removed from {LOCK_FILE}")
+        removed = True
 
     if removed:
         print(f"Package '{pkg}' removed.")
@@ -1077,4 +1208,3 @@ def cmd_remove(args):
 
 if __name__ == "__main__":
     main()
-

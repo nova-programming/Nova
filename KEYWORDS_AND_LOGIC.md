@@ -56,6 +56,22 @@ Nova bridges high-level Pythonic simplicity with low-level C-like control. This 
 * **`alloc(size)` / `alloc[T](count)`**: Dynamically allocates memory on the heap. `alloc[T](count)` automatically scales the allocation by `sizeof(T)` at compile time.
 * **`free(ptr)`**: Deallocates memory pointed to by `ptr`. Calls `_free` (`HeapFree` on Windows) under the hood.
 
+### Unsafe memory ownership rules
+
+`alloc` returns memory owned by the caller. The owner must call `free` exactly
+once after the last access. Nova does not currently provide ownership
+inference, borrowing, or automatic lifetime extension for raw pointers.
+Pointers returned by `.ptr` are borrowed views into their source object and
+must not be freed directly. `.as_list(count)` is also a borrowed view: the
+caller must keep the source allocation alive and must not use the view after
+that allocation is freed or resized. `@raw`, FFI, and pointer dereference
+operations are explicitly unsafe and remain the user's responsibility.
+
+The compiler does not infer these lifetimes yet. `nova lint` reports
+`UNSAFE001` for `alloc` and `free` as an advisory review point; it does not
+reject or rewrite code. Use an explicit project policy before shipping native
+code that uses raw memory.
+
 ### File I/O Keywords
 * **`open(path, mode)`**: Opens the file at `path` using mode `mode` (`"r"` or `"w"`). Returns a 32-bit integer file descriptor.
 * **`read(fd)`**: Reads the entire contents of the file referenced by `fd` and returns it as a string.
@@ -157,7 +173,7 @@ These functions are available natively in all programs without requiring manual 
 
 ### type() and call() Built-ins
 * **`type(val)`**: Returns the type name of `val` as a string. Returns `"int"`, `"string"`, `"float"`, `"bool"`, `"list"`, `"dict"`, or `"unknown"`. In native codegen, resolved to a compile-time string constant.
-* **`call(name, args)`**: Dynamically dispatches to a function by name string. `args` is a `list[any]`. Currently works in VM mode.
+* **`call(name, args)`**: Dynamically dispatches to a function by name string in VM mode. Native builds reject this operation because native dynamic dispatch is not implemented; use a statically named function call for portable code.
 
 ### PRNG
 * **`random()`**: Returns a 32-bit pseudorandom integer. Uses a fast xorshift64 algorithm (not CSPRNG). Automatically seeded at startup via `sys_get_tick_count()`. `random(lo, hi)` returns a value in `[lo, hi]`.
@@ -190,7 +206,7 @@ The self-hosted compiler files located in `stdlib/` run as a sequential pipeline
 3. **`types.nv` & `type_checker.nv`**: Infers and validates static types across all AST nodes.
 4. **`codegen.nv` (+ `codegen_expr.nv`, `codegen_stmt.nv`)**: Generates assembly for the target architecture (x86_64 via `stdlib/backend/x86_64/`, ARM64 via `stdlib/backend/arm64/`). Injects list/array bounds checking code and maps local variables to CPU registers where possible. Emits try/catch/throw via setjmp/longjmp wrappers.
 5. **`assembler.nv` (+ submodules)**: Encodes x86 assembly lines to native machine code bytes.
-6. **`linker.nv`**: Manually packages machine code, imports, and resources into a valid Windows PE binary (GCC-free compilation).
+6. **`linker.nv`**: Manually packages supported Windows machine code, imports, and resources into a PE binary; Unix final linking currently uses GCC.
 7. **`vm.nv`**: Nova bytecode VM written in Nova. Supports 20+ opcodes and stack-based execution for `nova dev` and `nova repl` modes.
 
 ---
@@ -224,6 +240,71 @@ The compiler supports building for different target platforms via the `target_os
 | `nova.exe build-bare <file.nv> <org> <entry>` | Flat Binary | Compiles to a flat, headerless binary (ideal for bare-metal/bootloader use) |
 | `nova.exe dev <file.nv>` | Development | Runs in the Nova-written bytecode VM (stdlib/vm.nv) |
 | `nova.exe repl` | Interactive | Starts the interactive REPL with multi-line input and persistent state |
+
+---
+
+## 9. Native GUI & NSS Styling Engine (`gui`)
+
+Nova includes a native, lightweight GUI and NSS (Nova Style Sheets) layout engine designed with zero third-party web bloat (no Chromium, Electron, or WebView2). It leverages native Win32 double-buffered GDI rendering at a smooth 60 FPS.
+
+### Inline NSS Properties Syntax
+Styling is passed directly via the `properties={...}` dictionary parameter on UI components and windows:
+
+```nova
+import gui
+
+# Create Window with background styling
+app = window("Nova Studio", 520, 500, properties={
+    "background-color": "#181825"
+})
+
+# Button with hover effect, rounded corners, and padding
+btn = Button("Click Me (+1)", 1, properties={
+    "background-color": "#89b4fa",
+    "color": "#11111b",
+    "font-size": 16,
+    "border-radius": 10,
+    "padding-left": 28,
+    "padding-right": 28,
+    "padding-top": 12,
+    "padding-bottom": 12
+})
+
+# Flexbox container with alignment and spacing
+card = Container([
+    Text("Interactive Counter", properties={"color": "#bac2de", "font-size": 18, "font-weight": "bold"}),
+    btn
+], properties={
+    "background-color": "#1e1e2e",
+    "border-radius": 12,
+    "border-width": 1,
+    "border-color": "#313244",
+    "padding": 24,
+    "align-items": "center",
+    "gap": 16,
+    "width": 460
+})
+app.root = card
+```
+
+### Supported NSS Styling Properties
+| Property | Value Format | Description |
+|---|---|---|
+| `background-color` | `"#RRGGBB"` | Background fill color (hex format) |
+| `color` | `"#RRGGBB"` | Text / foreground font color |
+| `font-size` | `int` | Font size in points (e.g. 14, 16, 24) |
+| `font-weight` | `"normal"` / `"bold"` | Text font weight |
+| `border-radius` | `int` | Corner curvature radius in pixels |
+| `border-width` | `int` | Border thickness in pixels |
+| `border-color` | `"#RRGGBB"` | Border color |
+| `padding` | `int` | Uniform padding on all 4 edges |
+| `padding-left`, `-right`, `-top`, `-bottom` | `int` | Per-side padding in pixels |
+| `gap` | `int` | Spacing between flex children |
+| `flex-direction` | `"column"` / `"row"` | Flex layout direction |
+| `align-items` | `"center"` | Cross-axis alignment |
+| `width`, `height` | `int` | Fixed dimensions in pixels |
+
+---
 
 ### Galaxy Package Manager
 

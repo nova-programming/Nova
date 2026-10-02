@@ -112,6 +112,35 @@ def val_to_str_val(v: Value) -> Value {
     return make_str_val("<unknown>")
 }
 
+def exec_func(prog: Program, name: string, args: list, depth: int) -> Value {
+    fn = FuncMeta()
+    found = 0
+    i = 0
+    while i < len(prog.functions) {
+        candidate = prog.functions[i]
+        if candidate.name == name {
+            fn = candidate
+            found = 1
+            break
+        }
+        i = i + 1
+    }
+    if found == 0 {
+        return make_null_val()
+    }
+
+    ip = fn.ip
+    end_ip = fn.ip + fn.num_instrs
+    stack = []
+    local_env = {}
+    i = 0
+    while i < len(fn.params) {
+        if i < len(args) {
+            local_env[fn.params[i]] = args[i]
+        }
+        i = i + 1
+    }
+
     while ip < end_ip {
         instr = prog.code[ip]
 

@@ -50,4 +50,6 @@ ver_*.txt
 probe*.nv
 probe_*.nv
 ci-tmp/
+*.dll
+*.bmp
 
