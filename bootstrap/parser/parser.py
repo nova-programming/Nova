@@ -9,6 +9,8 @@ class Parser:
         self.in_raw = False
         self._comp_counter = 0
         self.imported_modules = {}  # local name -> public module (fs, path, ...)
+        self.data_fields = {}      # data type name -> field names (for Point(1, 2) constructors)
+        self.ctors_used = []
 
     def parse_type_annotation(self):
         token = self.current()
@@ -63,6 +65,7 @@ class Parser:
                 self.eat(self.current()[0])
         
         self.eat("RBRACE")
+        self.data_fields[name] = [f for f, _ in fields]
         return Data(name, fields, line=line)
 
     def parse_data_instance(self, data_name):
@@ -476,6 +479,8 @@ class Parser:
                 # char_code accepts 1 or 2 args: char_code("s") means char_code("s", 0)
                 if name == "char_code" and len(args) == 1:
                     args.append(Number(0, line=line))
+                if name in self.data_fields and args:
+                    name, args = self._data_constructor_call(name, args, kwargs, line)
                 node = Call(name, args, line=line)
                 node.kwargs = kwargs
             else:
@@ -963,6 +968,37 @@ class Parser:
             self.imported_modules[alias or module_name] = module_name
         return Import(module_name, alias=alias, line=line)
 
+    def _data_constructor_call(self, name, args, kwargs, line):
+        """Point(1, 2) / Point(x=1, y=2) -> __new_Point(...) with values in field order."""
+        fields = self.data_fields[name]
+        if kwargs:
+            if len(kwargs) != len(args):
+                self._syntax_error(f"{name}(...) cannot mix positional and keyword values")
+            for key in kwargs:
+                if key not in fields:
+                    self._syntax_error(f"'{name}' has no field '{key}' (fields: {', '.join(fields)})")
+            ordered = [kwargs.get(f, Number(0, line=line)) for f in fields]
+        else:
+            if len(args) > len(fields):
+                self._syntax_error(f"'{name}' has {len(fields)} field(s) but {len(args)} values were given")
+            ordered = list(args) + [Number(0, line=line)] * (len(fields) - len(args))
+        if name not in self.ctors_used:
+            self.ctors_used.append(name)
+        return f"__new_{name}", ordered
+
+    def _constructor_nodes(self):
+        """Hidden constructor functions for data types that were built with values."""
+        from lexer.tokenizer import tokenize
+        nodes = []
+        for name in self.ctors_used:
+            fields = self.data_fields[name]
+            params = ", ".join(f"a{i}" for i in range(len(fields)))
+            assigns = "".join(f"    __self.{f} = a{i}\n" for i, f in enumerate(fields))
+            src = (f"def __new_{name}({params}) -> {name} {{\n    __self = {name}()\n"
+                   f"{assigns}    return __self\n}}\n")
+            nodes.extend(Parser(tokenize(src)).parse())
+        return nodes
+
     def _module_call(self, module, local_name, member, args, line):
         """Rewrite ``fs.read(p)`` into the flat ``fs_read(p)`` call (zero cost)."""
         target = names.module_function(module, member)
@@ -1133,6 +1169,7 @@ class Parser:
             stmt = self.parse_statement()
             if stmt:
                 program.append(stmt)
+        program.extend(self._constructor_nodes())
         # Desugar enums into const assignments
         return _desugar_enums(program)
 

@@ -64,3 +64,37 @@ def test_downto_counts_down_in_native_builds(tmp_path, selfhost_run):
     src = "for i = 5 downto 1 step 2 { print(i) }\nfor j = 3 downto 1 { print(j) }\n"
     vm, native, selfhost, _ = all_pipelines(src, tmp_path, selfhost_run, "sugar_downto")
     assert vm == native == selfhost == ["5", "3", "1", "3", "2", "1"]
+
+
+# ---- data constructors -------------------------------------------------------------
+
+DATA_PROGRAM = (
+    "data Point {\n    x: int\n    y: int\n}\n"
+    "data Person {\n    name: string\n    age: int\n}\n"
+    "p = Point(1, 2)\nprint(p.x)\nprint(p.y)\n"
+    "q = Point(y=9, x=4)\nprint(q.x * 10 + q.y)\n"
+    "r = Point(7)\nprint(r.y)\n"
+    "z = Point()\nz.x = 5\nprint(z.x)\n"
+    'who = Person("Ada", 36)\nprint(who.name)\nprint(who.age)\n'
+)
+DATA_EXPECTED = ["1", "2", "49", "0", "5", "Ada", "36"]
+
+
+def test_data_constructors_all_pipelines(tmp_path, selfhost_run):
+    vm, native, selfhost, _ = all_pipelines(DATA_PROGRAM, tmp_path, selfhost_run, "sugar_data")
+    assert vm == native == selfhost == DATA_EXPECTED
+
+
+def test_data_literal_style_without_values_still_works():
+    out = _vm_output("data P {\n    x: int\n}\na = P()\na.x = 3\nprint(a.x)\n")
+    assert out.split() == ["3"]
+
+
+def test_data_constructor_errors():
+    from test_native_exec import _run_vm
+    too_many = _run_vm("data P {\n    x: int\n}\nq = P(1, 2)\n")
+    assert too_many.returncode != 0 and "1 field(s) but 2 values" in too_many.stdout + too_many.stderr
+    bad_kw = _run_vm("data P {\n    x: int\n}\nq = P(z=1)\n")
+    assert bad_kw.returncode != 0 and "no field 'z'" in bad_kw.stdout + bad_kw.stderr
+    mixed = _run_vm("data P {\n    x: int\n    y: int\n}\nq = P(1, y=2)\n")
+    assert mixed.returncode != 0 and "cannot mix" in mixed.stdout + mixed.stderr
