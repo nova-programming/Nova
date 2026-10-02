@@ -203,4 +203,33 @@ def tokenize(code):
         e.offset = col + 1
         raise e
 
+    return _free_soft_keywords(tokens)
+
+
+# Words that are built-in *functions*, not reserved syntax: they only act as keywords
+# when called (``read(fd)``). Everywhere else they are ordinary identifiers, so
+# ``write = 5``, ``def close()``, ``self.api`` and ``f.read()`` all work.
+SOFT_KEYWORDS = {"READ", "WRITE", "CLOSE", "API", "OPENF"}
+
+
+def _free_soft_keywords(tokens):
+    defined = set()
+    for i in range(len(tokens) - 1):
+        if tokens[i][0] == "DEF" and tokens[i + 1][0] in SOFT_KEYWORDS:
+            defined.add(tokens[i + 1][1])
+    for i, tok in enumerate(tokens):
+        if tok[0] == "DATA":
+            # `data Name {` declares a struct; anywhere else `data` is a plain identifier
+            is_decl = (i + 2 < len(tokens) and tokens[i + 1][0] == "IDENT"
+                       and tokens[i + 2][0] == "LBRACE")
+            if not is_decl:
+                tokens[i] = ("IDENT",) + tuple(tok[1:])
+            continue
+        if tok[0] not in SOFT_KEYWORDS:
+            continue
+        prev_kind = tokens[i - 1][0] if i > 0 else None
+        next_kind = tokens[i + 1][0] if i + 1 < len(tokens) else None
+        if (next_kind != "LPAREN" or prev_kind in ("DOT", "DEF", "EXTERN")
+                or tok[1] in defined):
+            tokens[i] = ("IDENT",) + tuple(tok[1:])
     return tokens

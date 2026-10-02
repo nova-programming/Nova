@@ -4,6 +4,7 @@
 
 import lexer
 import errors
+import names
 
 data AstNode {
     kind: string
@@ -32,6 +33,7 @@ data ParserState {
     pos: int
     filename: string
     comp_counter: int
+    imported_modules: dict
 }
 
 def current_tok(state: ParserState) -> Token {
@@ -493,6 +495,7 @@ def parse_primary(state: ParserState) -> AstNode {
         if next_tok.kind == "DOT" {
             eat_tok(state, "DOT")
             prop_tok = eat_prop_name(state)
+            prop_tok.val = names_canonical_member(prop_tok.val)
             next_after = current_tok(state)
             if next_after.kind == "LPAREN" {
                 # Method call: obj.method()
@@ -515,6 +518,29 @@ def parse_primary(state: ParserState) -> AstNode {
                     }
                 }
                 eat_tok(state, "RPAREN")
+                if method_node.left.kind == "Variable" and state.imported_modules.has(method_node.left.val_str) {
+                    module_name = state.imported_modules.get(method_node.left.val_str)
+                    target_fn = names_module_function(module_name, method_node.val_str)
+                    if len(target_fn) == 0 {
+                        errors.err("Name", state.filename, tok.line, "module '" + module_name + "' has no function '" + method_node.val_str + "'", "check the spelling; see the module's public functions in the docs", tok.col)
+                    } else {
+                        call_node = AstNode()
+                        call_node.line = method_node.line
+                        call_node.col = method_node.col
+                        call_node.kind = "Call"
+                        call_node.val_str = target_fn
+                        call_node.args = method_node.args
+                        if target_fn == "path_join" and len(method_node.args) != 1 {
+                            list_node = AstNode()
+                            list_node.line = tok.line
+                            list_node.col = tok.col
+                            list_node.kind = "ListLiteral"
+                            list_node.args = method_node.args
+                            call_node.args = [list_node]
+                        }
+                        method_node = call_node
+                    }
+                }
                 node = method_node
             } else {
                 is_ptr = 0
@@ -1473,9 +1499,14 @@ def parse_statement(state: ParserState) -> AstNode {
         } else {
             node.val_str = eat_tok(state, "IDENT").val
             check = current_tok(state)
+            local_mod = node.val_str
             if check.kind == "AS" {
                 eat_tok(state, "AS")
                 node.name = eat_tok(state, "IDENT").val
+                local_mod = node.name
+            }
+            if names_public_module(node.val_str) == 1 {
+                state.imported_modules.set(local_mod, node.val_str)
             }
         }
         return node
@@ -1674,6 +1705,7 @@ def parse(tokens: list, filename: string) -> list {
     state.pos = 0
     state.filename = filename
     state.comp_counter = 0
+    state.imported_modules = {}
     program = []
     
     loop = 1

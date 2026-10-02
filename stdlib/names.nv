@@ -1,0 +1,51 @@
+# ============================================================
+# Nova public API names (stdlib/names.nv)
+# ============================================================
+# Mirrors bootstrap/names.py (tests/test_names.py keeps them in sync).
+# `import fs` then `fs.read(p)` rewrites at parse time to the flat
+# function `fs_read(p)`; camelCase members map to their internal names.
+# Zero cost: nothing downstream (type checker, codegen, VM) changes.
+# ============================================================
+
+def names_public_module(name: string) -> int {
+    if name == "fs" { return 1 }
+    if name == "path" { return 1 }
+    if name == "env" { return 1 }
+    if name == "process" { return 1 }
+    if name == "time" { return 1 }
+    if name == "json" { return 1 }
+    if name == "text" { return 1 }
+    return 0
+}
+
+def names_module_function(module: string, member: string) -> string {
+    key = module + "." + member
+    table = {
+        "fs.exists": "fs_exists", "fs.size": "fs_size", "fs.kind": "fs_kind",
+        "fs.makeDir": "fs_mkdir", "fs.delete": "fs_delete", "fs.copy": "fs_copy",
+        "fs.move": "fs_move", "fs.read": "fs_read", "fs.write": "fs_write",
+        "path.join": "path_join", "path.base": "path_basename",
+        "path.dir": "path_dirname", "path.ext": "path_extension",
+        "env.get": "env_get", "env.set": "env_set", "env.args": "env_args",
+        "env.platform": "env_platform",
+        "process.run": "process_run", "process.shell": "process_shell",
+        "process.exit": "process_exit",
+        "time.now": "time_now", "time.ticks": "time_ticks_ms",
+        "json.stringify": "json_stringify",
+        "text.toInt": "text_to_int", "text.trim": "text_trim", "text.startsWith": "text_starts_with",
+        "text.endsWith": "text_ends_with", "text.indexOf": "text_index_of", "text.contains": "text_contains",
+        "text.replace": "text_replace", "text.split": "text_split", "text.join": "text_join",
+        "text.repeat": "text_repeat", "text.upper": "text_upper", "text.lower": "text_lower"
+    }
+    if table.has(key) { return table.get(key) }
+    return ""
+}
+
+def names_canonical_member(name: string) -> string {
+    if name == "asList" { return "as_list" }
+    if name == "valueByte" { return "value_byte" }
+    if name == "valueWord" { return "value_word" }
+    if name == "valueDword" { return "value_dword" }
+    if name == "valueQword" { return "value_qword" }
+    return name
+}

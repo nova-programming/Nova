@@ -540,5 +540,58 @@ def tokenize(src: string) -> list {
     tok.col = 0
     tokens.append(tok)
     
+    return free_soft_keywords(tokens)
+}
+
+# Built-in function names that are only keywords when called (read(fd)); everywhere
+# else (variables, fields, `def close()`, `f.read()`) they are ordinary identifiers.
+def is_soft_keyword(kind: string) -> int {
+    if kind == "READ" { return 1 }
+    if kind == "WRITE" { return 1 }
+    if kind == "CLOSE" { return 1 }
+    if kind == "API" { return 1 }
+    if kind == "OPENF" { return 1 }
+    return 0
+}
+
+def free_soft_keywords(tokens: list) -> list {
+    defined = []
+    i = 0
+    while i + 1 < len(tokens) {
+        if tokens[i].kind == "DEF" and is_soft_keyword(tokens[i + 1].kind) == 1 {
+            defined.append(tokens[i + 1].val)
+        }
+        i = i + 1
+    }
+    i = 0
+    while i < len(tokens) {
+        tk = tokens[i]
+        if tk.kind == "DATA" {
+            is_decl = 0
+            if i + 2 < len(tokens) {
+                if tokens[i + 1].kind == "IDENT" and tokens[i + 2].kind == "LBRACE" { is_decl = 1 }
+            }
+            if is_decl == 0 { tk.kind = "IDENT" }
+        }
+        if is_soft_keyword(tk.kind) == 1 {
+            make_ident = 0
+            if i + 1 >= len(tokens) {
+                make_ident = 1
+            } elif tokens[i + 1].kind != "LPAREN" {
+                make_ident = 1
+            }
+            if i > 0 {
+                pk = tokens[i - 1].kind
+                if pk == "DOT" or pk == "DEF" or pk == "EXTERN" { make_ident = 1 }
+            }
+            j = 0
+            while j < len(defined) {
+                if defined[j] == tk.val { make_ident = 1 }
+                j = j + 1
+            }
+            if make_ident == 1 { tk.kind = "IDENT" }
+        }
+        i = i + 1
+    }
     return tokens
 }

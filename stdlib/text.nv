@@ -1,0 +1,164 @@
+# Portable text helpers (use as `import text` then `text.trim(s)`).
+# Written in plain Nova so behavior is identical in the VM and in native builds;
+# unused functions are removed by tree-shaking, so importing costs nothing.
+
+def text_to_int(s: string) -> int {
+    n = len(s)
+    i = 0
+    while i < n and (s[i] == " " or s[i] == "\t" or s[i] == "\n" or s[i] == "\r") {
+        i = i + 1
+    }
+    negative = 0
+    if i < n and s[i] == "-" {
+        negative = 1
+        i = i + 1
+    } elif i < n and s[i] == "+" {
+        i = i + 1
+    }
+    result = 0
+    zero = char_code("0", 0)
+    while i < n {
+        ch = s[i]
+        if ch < "0" or ch > "9" { break }
+        result = result * 10 + (char_code(ch, 0) - zero)
+        i = i + 1
+    }
+    if negative == 1 { return 0 - result }
+    return result
+}
+
+def text_is_space(ch: string) -> int {
+    if ch == " " or ch == "\t" or ch == "\n" or ch == "\r" { return 1 }
+    return 0
+}
+
+def text_trim(s: string) -> string {
+    start = 0
+    end = len(s)
+    while start < end and text_is_space(s[start]) == 1 {
+        start = start + 1
+    }
+    while end > start and text_is_space(s[end - 1]) == 1 {
+        end = end - 1
+    }
+    return str_sub(s, start, end)
+}
+
+def text_starts_with(s: string, prefix: string) -> int {
+    n = len(prefix)
+    if n > len(s) { return 0 }
+    if str_sub(s, 0, n) == prefix { return 1 }
+    return 0
+}
+
+def text_ends_with(s: string, suffix: string) -> int {
+    n = len(suffix)
+    total = len(s)
+    if n > total { return 0 }
+    if str_sub(s, total - n, total) == suffix { return 1 }
+    return 0
+}
+
+# Index of the first occurrence of needle in s, or -1.
+def text_index_of(s: string, needle: string) -> int {
+    n = len(needle)
+    total = len(s)
+    if n == 0 { return 0 }
+    i = 0
+    while i + n <= total {
+        if str_sub(s, i, i + n) == needle { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+def text_contains(s: string, needle: string) -> int {
+    if text_index_of(s, needle) >= 0 { return 1 }
+    return 0
+}
+
+def text_replace(s: string, old: string, replacement: string) -> string {
+    n = len(old)
+    if n == 0 { return s }
+    total = len(s)
+    result = ""
+    i = 0
+    while i < total {
+        if i + n <= total and str_sub(s, i, i + n) == old {
+            result = result + replacement
+            i = i + n
+        } else {
+            result = result + s[i]
+            i = i + 1
+        }
+    }
+    return result
+}
+
+def text_split(s: string, sep: string) -> list[string] {
+    parts = []
+    n = len(sep)
+    total = len(s)
+    if n == 0 {
+        parts.append(s)
+        return parts
+    }
+    start = 0
+    i = 0
+    while i + n <= total {
+        if str_sub(s, i, i + n) == sep {
+            parts.append(str_sub(s, start, i))
+            i = i + n
+            start = i
+        } else {
+            i = i + 1
+        }
+    }
+    parts.append(str_sub(s, start, total))
+    return parts
+}
+
+def text_join(parts: list[string], sep: string) -> string {
+    result = ""
+    i = 0
+    while i < len(parts) {
+        if i > 0 { result = result + sep }
+        result = result + parts[i]
+        i = i + 1
+    }
+    return result
+}
+
+def text_repeat(s: string, count: int) -> string {
+    result = ""
+    i = 0
+    while i < count {
+        result = result + s
+        i = i + 1
+    }
+    return result
+}
+
+def text_swap_case(s: string, from_set: string, to_set: string) -> string {
+    result = ""
+    i = 0
+    while i < len(s) {
+        ch = s[i]
+        k = text_index_of(from_set, ch)
+        if k >= 0 {
+            result = result + str_sub(to_set, k, k + 1)
+        } else {
+            result = result + ch
+        }
+        i = i + 1
+    }
+    return result
+}
+
+def text_upper(s: string) -> string {
+    return text_swap_case(s, "abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+}
+
+def text_lower(s: string) -> string {
+    return text_swap_case(s, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+}

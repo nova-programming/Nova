@@ -1,4 +1,5 @@
 from nova_ast.nodes import *
+import names
 
 
 class Parser:
@@ -7,6 +8,7 @@ class Parser:
         self.pos = 0
         self.in_raw = False
         self._comp_counter = 0
+        self.imported_modules = {}  # local name -> public module (fs, path, ...)
 
     def parse_type_annotation(self):
         token = self.current()
@@ -466,6 +468,7 @@ class Parser:
                     prop = self.eat(tok[0])[1]
                 else:
                     prop = self.eat("IDENT")[1]  # will raise proper error
+                prop = names.canonical_member(prop)
                 
                 # Method call?
                 if self.current() and self.current()[0] == "LPAREN":
@@ -493,6 +496,9 @@ class Parser:
                                 else:
                                     args.append(self.parse_expr())
                     self.eat("RPAREN")
+                    if isinstance(node, Variable) and node.name in self.imported_modules:
+                        node = self._module_call(self.imported_modules[node.name], node.name, prop, args, line)
+                        continue
                     node = MethodCall(node, prop, args, line=line)
                     node.kwargs = kwargs
                     continue
@@ -911,7 +917,26 @@ class Parser:
         if self.current() and self.current()[0] == "AS":
             self.eat("AS")
             alias = self.eat("IDENT")[1]
+        if names.is_public_module(module_name):
+            self.imported_modules[alias or module_name] = module_name
         return Import(module_name, alias=alias, line=line)
+
+    def _module_call(self, module, local_name, member, args, line):
+        """Rewrite ``fs.read(p)`` into the flat ``fs_read(p)`` call (zero cost)."""
+        target = names.module_function(module, member)
+        if target is None:
+            hint = names.suggest(module, member)
+            msg = f"module '{module}' has no function '{member}'"
+            if hint:
+                msg += f" (did you mean '{local_name}.{hint}'?)"
+            self._syntax_error(msg)
+        if module == "path" and member == "join":
+            # path.join("a", "b", "c") collects its arguments; a single argument is a list
+            if len(args) != 1:
+                args = [ListLiteral(list(args), line=line)]
+        call = Call(target, args, line=line)
+        call.kwargs = {}
+        return call
 
     def parse_raw(self):
         line = self.current()[2] if self.current() and len(self.current()) > 2 else 0
