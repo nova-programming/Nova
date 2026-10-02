@@ -11,6 +11,13 @@ The older "25x on fib" figure was stale. Measured steady-state, best of 8:
 | fib(38) recursive | ~0.44-0.48s | ~0.32-0.35s | ~0.14-0.16s |
 | `tests/bench_heavy.nv` (fib 35 + sum 10M + primes 50k) | ~0.21s | ~0.155s | n/a |
 
+Compare-and-branch fusion (Oct 2026, same machine, loaded, interleaved best-of-8): fib(38)
+0.576s -> 0.505s while `gcc -O2` ran 0.27-0.29s, i.e. the gap went from about 2.1x to 1.8x.
+`if`/`while` conditions now compile to `cmp; jCC` instead of `cmp; setCC; movzx; cmp 0; jcc`
+(peephole, restricted to if/while exit labels because `and`/`or` reuse the boolean in rax).
+Leaf-function prologue elision was evaluated and deferred: it saves two instructions per call
+only for functions that make no calls, which is a small win next to the stack-machine traffic.
+
 Remaining fib gap is ~2.2-2.5x, dominated by the function prologue
 (`push rbp; mov rbp,rsp; and rsp,-16; sub rsp,N; push r12`) and the stack-machine
 expression evaluation. Done so far: Nova-to-Nova calls skip the C-interop frame

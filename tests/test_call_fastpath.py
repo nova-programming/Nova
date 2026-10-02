@@ -102,3 +102,37 @@ def test_peephole_cleans_generated_code(selfhost):
             assert not (a[9:] in regs and b[8:] in regs), f"unfused push/pop: {a.strip()} / {b.strip()}"
         if a == "    ret" or a.startswith("    jmp "):
             assert not (b.startswith("    ") and not b.startswith("    .")), f"dead code after {a.strip()}: {b.strip()}"
+
+
+def test_compare_and_branch_fusion(selfhost_run):
+    src = (
+        "def classify(n) {\n"
+        "    r = 0\n"
+        "    if n == 5 { r = r + 1 }\n"
+        "    if n != 5 { r = r + 2 }\n"
+        "    if n < 5 { r = r + 4 }\n"
+        "    if n <= 5 { r = r + 8 }\n"
+        "    if n > 5 { r = r + 16 }\n"
+        "    if n >= 5 { r = r + 32 }\n"
+        "    if n > 2 and n < 8 { r = r + 64 }\n"
+        "    if n < 2 or n > 8 { r = r + 128 }\n"
+        "    return r\n"
+        "}\n"
+        "def count_to(limit) {\n    i = 0\n    while i < limit { i = i + 1 }\n    return i\n}\n"
+        "for k in range(11) { print(classify(k)) }\n"
+        "print(count_to(1000))\n"
+    )
+
+    def expected(n):
+        return ((n == 5) * 1 + (n != 5) * 2 + (n < 5) * 4 + (n <= 5) * 8 + (n > 5) * 16 + (n >= 5) * 32
+                + (2 < n < 8) * 64 + (n < 2 or n > 8) * 128)
+
+    r, asm = selfhost_run(src, "fp_fusion")
+    assert r.returncode == 0
+    assert r.stdout.split() == [str(expected(k)) for k in range(11)] + ["1000"]
+    lines = [ln.strip() for ln in asm.splitlines()]
+    # statement-level conditions branch straight off the compare...
+    for i, ln in enumerate(lines):
+        if ln.startswith("set") and ln.endswith(" al") and i + 3 < len(lines):
+            # ...so a setCC/movzx/cmp 0/jcc test may only survive where the value is reused (and/or)
+            assert not lines[i + 3].split()[-1].startswith(("L_else_", "L_loop_end_")), lines[i:i + 4]
