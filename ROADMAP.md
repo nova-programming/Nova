@@ -49,7 +49,9 @@ line and never alter build behavior, source files, or dependencies.
 - `for i in range(...)`, data constructors `Point(1, 2)` / `Point(x=1, y=2)`, `key in d` / `key not in d`, `stdlib/text.nv`, `json.parse` (typed tree), and `-> string` inference for un-annotated functions.
 - Self-hosted backend: lightweight Nova-to-Nova calls, a safe peephole optimizer, and compare-and-branch fusion (fib(38) about 1.8x of `gcc -O2`).
 - Fixes found on the way: stale build caches, native `downto` loops, a parser rewrite that broke the self-built compiler, and `len(x[i])` miscompiled as strlen (every struct looked two fields wide in a self-built compiler). The test suite now builds and exercises a stage-2 compiler (built by the self-hosted compiler) to catch this class of bug.
-- Known gaps: float return types are not inferred (native float returns need work), `Point(...)` shorthand needs the `data` declaration earlier in the same file, the self-hosted driver's incremental build cache keys on file size only.
+- Also: `\{` / `\}` write literal braces in strings (inline JSON), and the self-hosted incremental build cache now keys on source content plus the compiler's identity (and is skipped when a local module is imported).
+- Known gaps: float return types are not inferred (native float returns need work); the `Point(...)` shorthand needs the `data` declaration earlier in the same file.
+- Known gap: the compiler built by itself writes line 0 into some bounds-check line records (`_oob_line`) where the Python-built compiler writes the real line. The old "fixed point" check was vacuous because the build cache skipped the second rebuild; with the content-aware cache it now really rebuilds and only these line values differ.
 
 ### Instant Execution — `nova run` (Oct 2026)
 `nova run <file.nv> [args...]` compiles, links, and immediately executes in one command (args forwarded to the program). Implemented as a CLI-level composition of `compile_to_exe` + `system_exec` in `nova.nv`; no codegen changes, works identically in Python and self-hosted compilers. Validated end-to-end including argument forwarding.

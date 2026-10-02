@@ -55,6 +55,9 @@ Nova bridges high-level Pythonic simplicity with low-level C-like control. This 
 Public modules: `fs`, `path`, `env`, `process`, `time`, `json` (`stringify`, `parse`, `kind`, `asInt`, `asString`, `asBool`, `size`, `at`, `get`, `has`, `keyAt`), `text`. Unknown members are errors with a
 did-you-mean hint. Module-qualified names are the preferred API; flat names remain accepted.
 
+### String literals
+`"x = {x}"` interpolates. Write `\{` and `\}` for literal braces (for example inline JSON: `"\{\"a\": 1\}"`); a doubled backslash followed by a brace still interpolates.
+
 ### Soft keywords
 `read`, `write`, `close`, `api`, `openf` are keywords only when called (`read(fd)`), and `data` only in
 `data Name { ... }`; elsewhere they are ordinary identifiers (variables, fields, your own functions).

@@ -120,14 +120,74 @@ def cache_key(cache_lines: list, path: string) -> string {
     return ""
 }
 
+# Rolling hash of a string (31 multiplier, modulo a prime that keeps every step inside 32 bits).
+def text_fingerprint(s: string) -> int {
+    h = 7
+    i = 0
+    n = len(s)
+    while i < n {
+        h = (h * 31 + char_code(s[i], 0)) % 2147483647
+        i = i + 1
+    }
+    return h
+}
+
+# Directory part of a path including the trailing slash ("" when there is none).
+def source_dir(path: string) -> string {
+    slash = -1
+    i = 0
+    while i < len(path) {
+        if path[i] == "/" or path[i] == "\\" { slash = i }
+        i = i + 1
+    }
+    if slash < 0 { return "" }
+    return str_sub(path, 0, slash + 1)
+}
+
+# True when the source imports a module that lives next to it (its edits are not part of the stamp).
+def imports_local_module(content: string, dir_prefix: string) -> int {
+    n = len(content)
+    i = 0
+    while i < n {
+        at_line_start = 0
+        if i == 0 { at_line_start = 1 }
+        elif content[i - 1] == "\n" { at_line_start = 1 }
+        if at_line_start == 1 and i + 7 < n and str_sub(content, i, i + 7) == "import " {
+            j = i + 7
+            while j < n and content[j] == " " { j = j + 1 }
+            k = j
+            while k < n and content[k] != "\n" and content[k] != " " and content[k] != "\r" { k = k + 1 }
+            name = str_sub(content, j, k)
+            if len(name) > 0 and name[0] != "\"" {
+                if file_exists(dir_prefix + name + ".nv") == 1 { return 1 }
+            }
+        }
+        i = i + 1
+    }
+    return 0
+}
+
+# Cache stamp: source length, content hash and the running compiler's own size, so editing a file
+# without changing its length, or rebuilding with a different compiler, never reuses a stale build.
+# Returns "" (never cached) when the source imports a local module.
+def build_stamp(path: string) -> string {
+    fd = sys_open(path, "r")
+    content = sys_read(fd)
+    sys_close(fd)
+    if imports_local_module(content, source_dir(path)) == 1 { return "" }
+    args = system.get_args()
+    compiler_id = file_size(args[0])
+    return str(len(content)) + ":" + str(text_fingerprint(content)) + ":" + str(compiler_id)
+}
+
 def compile_file(path: string, debug_mode: int, target_arch: string, target_os: string) -> list {
     cache_file = cache_path(path)
     cached_lines = load_cache(cache_file)
-    current_size = file_size(path)
+    current_stamp = build_stamp(path)
     cached_size_str = cache_key(cached_lines, path)
     cached_size = 0
     if cached_size_str != "" {
-        if cached_size_str == str(current_size) {
+        if len(current_stamp) > 0 and cached_size_str == current_stamp {
             print("[cached] " + path + " is up to date" + "\n")
             if target_os == "windows" {
                 ext = ".exe"
@@ -174,7 +234,7 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     # Update build cache
     new_cached_lines = cached_lines
     tmp_str = path + "="
-    tmp_sz = str(current_size)
+    tmp_sz = current_stamp
     new_entry = tmp_str + tmp_sz
     found = 0
     i = 0
