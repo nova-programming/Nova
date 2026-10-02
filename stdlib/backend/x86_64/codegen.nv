@@ -51,6 +51,7 @@ data CodegenState {
     defer_marks: list
     defer_loop_marks: list
     ptr_vars: dict
+    internal_fns: dict
 }
 
 def new_codegen(tgt: int, target_os: string) -> CodegenState {
@@ -85,6 +86,7 @@ def new_codegen(tgt: int, target_os: string) -> CodegenState {
     state.defer_marks = []
     state.defer_loop_marks = []
     state.ptr_vars = {}
+    state.internal_fns = {}
     if tgt == 0 {
         state.bp = "ebp"
         state.sp = "esp"
@@ -185,6 +187,19 @@ def push_data_label(state: CodegenState, label: string) {
 # Clean N pushed values from the stack (each value is ptr_size bytes)
 def clean_n(state: CodegenState, n: int) {
     emit(state, "    add %s, " + str(n * ptr_size(state)))
+}
+
+# Call a function defined in Nova. Nova functions align their own stack in the
+# prologue and never use the Win64 shadow space, so the C-interop frame setup in
+# emit_call (save rbp / align / reserve 32 bytes) is unnecessary here.
+def emit_internal_call(state: CodegenState, func_name: string, arg_count: int) {
+    if arg_count >= 1 { emit(state, "    pop rdi") }
+    if arg_count >= 2 { emit(state, "    pop rsi") }
+    if arg_count >= 3 { emit(state, "    pop rdx") }
+    if arg_count >= 4 { emit(state, "    pop rcx") }
+    if arg_count >= 5 { emit(state, "    pop r8") }
+    if arg_count >= 6 { emit(state, "    pop r9") }
+    emit(state, "    call " + func_name)
 }
 
 def emit_call(state: CodegenState, func_name: string, arg_count: int) {
@@ -776,6 +791,9 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
                 emit(state, ".extern _" + node.val_str)
             } else {
                 functions.append(node)
+                if len(node.params) <= 6 {
+                    state.internal_fns.set(node.val_str, 1)
+                }
             }
         } else {
             if node.kind == "Data" {

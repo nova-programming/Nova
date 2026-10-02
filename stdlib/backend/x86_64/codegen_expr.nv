@@ -1408,7 +1408,11 @@ def compile_expr(state: CodegenState, node: AstNode) {
                 compile_expr(state, node.args[idx_arg])
                 idx_arg = idx_arg - 1
             }
-            emit_call(state, "_" + node.val_str, arg_count)
+            if arg_count <= 6 and state.internal_fns.has(node.val_str) {
+                emit_internal_call(state, "_" + node.val_str, arg_count)
+            } else {
+                emit_call(state, "_" + node.val_str, arg_count)
+            }
             emit(state, "    push %a")
         }
     }
