@@ -25,3 +25,17 @@ On Windows a 32-bit `C:\MinGW` GCC on PATH cannot build `runtime.c`; use the 64-
 ## Where things are
 See README "Project Structure". Design docs: `docs/features.md`, `docs/internals/`, `docs/optimization_plan.md`,
 `ROADMAP.md`. Historical session notes: `docs/AGENT_LOG.md`.
+
+## GUI & Widget System (stdlib/gui.nv)
+- **Direct `class` and `id` Parameters**: All GUI widget constructors accept `class: string, id: string` directly as primary positional arguments:
+  - `btn(class: string, id: string, onClick: string, text: string, props: dict) -> Widget`
+  - `txt`, `h1`, `h2`, `h3`, `label`, `badge`: `(class: string, id: string, text: string, props: dict) -> Widget`
+  - `input_field(class: string, id: string, placeholder: string, props: dict) -> Widget`
+  - `div`, `row`, `col`, `card`: `(class: string, id: string, children: list, props: dict) -> Widget`
+  - `divider`, `spacer`: `(class: string, id: string, props: dict) -> Widget`
+  - `icon_btn(class: string, id: string, icon: string, props: dict) -> Widget`
+  - `nav_item(class: string, id: string, text: string, props: dict) -> Widget`
+- **Contextual `class` Identifier**: `bootstrap/parser/parser.py` and `stdlib/parser.nv` support `class` as a parameter name, primary expression variable, and call-site kwarg. Disambiguated from class definitions via lookahead (`peek_tok == "IDENT"` defines a class, otherwise treated as identifier).
+- **Styling Architecture**: Separated entirely into Nova Style Sheets (`.nss`). Inline style dictionaries are disallowed in UI examples.
+- **Syntax Rules**: Nova list literals `[...]` do not support trailing commas before `]`. Fixed arity is strictly enforced on all function calls.
+

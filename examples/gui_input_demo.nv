@@ -6,10 +6,10 @@ import gui
 # ═══════════════════════════════════════════════════════════════════════════
 
 # --- Output Display Target ---
-screen_display = txt("Waiting for input...", {"class": "monitor-text"})
+screen_display = txt("monitor-text", "screen_display", "Waiting for input...", {})
 
 # --- Live Input Field ---
-user_input = input_field("Type your message here...", {"class": "text-input"})
+user_input = input_field("text-input", "user_input", "Type your message here...", {})
 
 # --- Action Buttons with direct class, id, onClick parameters ---
 submit_btn = btn("btn-primary", "print_btn", "submit", "Print to Screen", {
@@ -23,47 +23,45 @@ clear_btn = btn("btn-secondary", "clear_btn", "clear", "Clear Screen", {
 })
 
 # --- Main Layout Tree ---
-app_ui = div([
+app_ui = div("app-root", "", [
 
     # Header bar
-    row([
-        badge("NV", {"class": "brand-badge"}),
-        h2("Nova Text Input", {"class": "app-title"}),
-        spacer({}),
-        badge("Live Typing", {"class": "badge-live"})
-    ], {"class": "header-row"}),
+    row("header-row", "", [
+        badge("brand-badge", "", "NV", {}),
+        h2("app-title", "", "Nova Text Input", {}),
+        spacer("", "", {}),
+        badge("badge-live", "", "Live Typing", {})
+    ], {}),
 
-    divider({"class": "divider"}),
+    divider("divider", "", {}),
 
     # Textbox input section card
-    card([
-        label("INTERACTIVE TEXTBOX", {"class": "section-label"}),
-        h3("Type Your Text Below", {"class": "section-title"}),
-        txt("Click the box to focus. Type any characters, or press Backspace to edit.", {
-            "class": "section-description"
-        }),
+    card("card-section", "", [
+        label("section-label", "", "INTERACTIVE TEXTBOX", {}),
+        h3("section-title", "", "Type Your Text Below", {}),
+        txt("section-description", "", "Click the box to focus. Type any characters, or press Backspace to edit.", {}),
         user_input,
-        row([
+        row("button-row", "", [
             submit_btn,
             clear_btn
-        ], {"class": "button-row"})
-    ], {"class": "card-section"}),
+        ], {})
+    ], {}),
 
     # UI Monitor / Screen Display Card
-    card([
-        row([
-            badge("MONITOR", {"class": "monitor-badge"}),
-            h3("UI Display Screen", {"class": "section-title"}),
-            spacer({}),
-            label("LIVE OUTPUT", {"class": "monitor-status"})
-        ], {"class": "header-row"}),
+    card("card-section", "", [
+        row("header-row", "", [
+            badge("monitor-badge", "", "MONITOR", {}),
+            h3("section-title", "", "UI Display Screen", {}),
+            spacer("", "", {}),
+            label("monitor-status", "", "LIVE OUTPUT", {})
+        ], {}),
 
-        card([
+        card("monitor-box", "", [
             screen_display
-        ], {"class": "monitor-box"})
-    ], {"class": "card-section"})
+        ], {})
+    ], {})
 
-], {"class": "app-root"})
+], {})
 
 # Launch GUI with NSS stylesheet
 gui("Nova Live Text Input Showcase", 520, 580, app_ui, {

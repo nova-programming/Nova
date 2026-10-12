@@ -119,8 +119,8 @@ def test_gui_input_click_action():
     with open(test_nv, "w", encoding="utf-8") as f:
         f.write('''import gui
 
-target = gui.txt("Initial", {})
-source = gui.input_field("Placeholder", {})
+target = gui.txt("", "target", "Initial", {})
+source = gui.input_field("", "source", "Placeholder", {})
 source.text = "Hello Nova Action"
 
 submit_b = gui.btn("btn-primary", "sub_id", "submit", "Submit", {

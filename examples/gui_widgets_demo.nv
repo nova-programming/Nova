@@ -7,50 +7,51 @@ import gui
 # ═══════════════════════════════════════════════════════════════════════════
 
 # --- State Targets ---
-slider_val_txt = txt("75%", {"class": "value-display"})
-status_bar_txt = txt("Ready — interact with any control above.", {"class": "status-text"})
+# --- State Targets ---
+slider_val_txt = txt("value-display", "slider_val_txt", "75%", {})
+status_bar_txt = txt("status-text", "status_bar_txt", "Ready — interact with any control above.", {})
 
-app_ui = div([
+app_ui = div("window-container", "", [
 
     # ── Header bar ──────────────────────────────────────────────────────────
-    row([
-        badge("NV",               {"class": "brand-badge"}),
-        h2("Nova Widgets",        {"class": "app-title"}),
-        spacer({"class": "spacer"}),
-        badge("NSS :hover / :active", {"class": "badge-secondary"})
-    ], {"class": "header"}),
+    row("header", "", [
+        badge("brand-badge", "", "NV", {}),
+        h2("app-title", "", "Nova Widgets", {}),
+        spacer("spacer", "", {}),
+        badge("badge-secondary", "", "NSS :hover / :active", {})
+    ], {}),
 
-    divider({"class": "divider"}),
+    divider("divider", "", {}),
 
     # ── Main Content Grid ───────────────────────────────────────────────────
-    row([
+    row("main-content", "", [
 
         # Left Column: Interactive Inputs & Toggles
-        col([
-            card([
-                label("SELECTION CONTROLS", {"class": "card-subtitle"}),
-                h3("Options and Preferences", {"class": "card-title"}),
+        col("col-panel", "", [
+            card("card", "", [
+                label("card-subtitle", "", "SELECTION CONTROLS", {}),
+                h3("card-title", "", "Options and Preferences", {}),
                 checkbox("Enable Hardware Acceleration", 1, {"color": "#cdd6f4"}),
                 checkbox("High-DPI Scaling", 0, {"color": "#cdd6f4"}),
                 checkbox("Verbose Diagnostics", 1, {"color": "#cdd6f4"}),
-                divider({"class": "divider"}),
-                row([
-                    label("Dark Mode Theme", {"class": "card-subtitle"}),
-                    spacer({}),
+                divider("divider", "", {}),
+                row("", "", [
+                    label("card-subtitle", "", "Dark Mode Theme", {}),
+                    spacer("", "", {}),
                     toggle(1, {"active-color": "#a6e3a1"})
                 ], {"align": "center"}),
-                row([
-                    label("Auto-Sync Packages", {"class": "card-subtitle"}),
-                    spacer({}),
+                row("", "", [
+                    label("card-subtitle", "", "Auto-Sync Packages", {}),
+                    spacer("", "", {}),
                     toggle(0, {"active-color": "#89b4fa"})
                 ], {"align": "center"})
-            ], {"class": "card"}),
+            ], {}),
 
-            card([
-                label("NUMERIC CONTROLS", {"class": "card-subtitle"}),
-                row([
-                    h3("Thread Pool Capacity", {"class": "card-title"}),
-                    spacer({}),
+            card("card", "", [
+                label("card-subtitle", "", "NUMERIC CONTROLS", {}),
+                row("", "", [
+                    h3("card-title", "", "Thread Pool Capacity", {}),
+                    spacer("", "", {}),
                     slider_val_txt
                 ], {"align": "center"}),
                 slider(75, 0, 100, {
@@ -58,31 +59,31 @@ app_ui = div([
                     "suffix": "%",
                     "fill-color": "#89b4fa"
                 })
-            ], {"class": "card"})
-        ], {"class": "col-panel"}),
+            ], {})
+        ], {}),
 
         # Right Column: Dropdowns, Canvas & Action Buttons
-        col([
-            card([
-                label("DROPDOWN SELECTOR", {"class": "card-subtitle"}),
-                h3("Execution Profile", {"class": "card-title"}),
+        col("col-panel", "", [
+            card("card", "", [
+                label("card-subtitle", "", "DROPDOWN SELECTOR", {}),
+                h3("card-title", "", "Execution Profile", {}),
                 dropdown([
                     "Performance (JIT/Native)",
                     "Balanced (Bytecode VM)",
                     "Low Memory (Embedded)"
                 ], 0, {"w": 280})
-            ], {"class": "card"}),
+            ], {}),
 
-            card([
-                label("CANVAS GRAPHIC", {"class": "card-subtitle"}),
+            card("card", "", [
+                label("card-subtitle", "", "CANVAS GRAPHIC", {}),
                 canvas([
-                    row([
-                        col([spacer({"h": 50}), div([], {"w": 26, "h": 50, "bg": "#89b4fa", "r": 3})], {"align": "center"}),
-                        col([spacer({"h": 25}), div([], {"w": 26, "h": 75, "bg": "#a6e3a1", "r": 3})], {"align": "center"}),
-                        col([spacer({"h": 5}),  div([], {"w": 26, "h": 95, "bg": "#f9e2af", "r": 3})], {"align": "center"}),
-                        col([spacer({"h": 35}), div([], {"w": 26, "h": 65, "bg": "#cba6f7", "r": 3})], {"align": "center"}),
-                        col([spacer({"h": 15}), div([], {"w": 26, "h": 85, "bg": "#f38ba8", "r": 3})], {"align": "center"}),
-                        col([spacer({"h": 40}), div([], {"w": 26, "h": 60, "bg": "#94e2d5", "r": 3})], {"align": "center"})
+                    row("", "", [
+                        col("", "", [spacer("", "", {"h": 50}), div("", "", [], {"w": 26, "h": 50, "bg": "#89b4fa", "r": 3})], {"align": "center"}),
+                        col("", "", [spacer("", "", {"h": 25}), div("", "", [], {"w": 26, "h": 75, "bg": "#a6e3a1", "r": 3})], {"align": "center"}),
+                        col("", "", [spacer("", "", {"h": 5}),  div("", "", [], {"w": 26, "h": 95, "bg": "#f9e2af", "r": 3})], {"align": "center"}),
+                        col("", "", [spacer("", "", {"h": 35}), div("", "", [], {"w": 26, "h": 65, "bg": "#cba6f7", "r": 3})], {"align": "center"}),
+                        col("", "", [spacer("", "", {"h": 15}), div("", "", [], {"w": 26, "h": 85, "bg": "#f38ba8", "r": 3})], {"align": "center"}),
+                        col("", "", [spacer("", "", {"h": 40}), div("", "", [], {"w": 26, "h": 60, "bg": "#94e2d5", "r": 3})], {"align": "center"})
                     ], {"gap": 14, "align": "flex-end", "h": 115, "p": 10})
                 ], {
                     "w": 280,
@@ -92,24 +93,24 @@ app_ui = div([
                     "border-width": 1,
                     "border-radius": 6
                 })
-            ], {"class": "card"}),
+            ], {}),
 
-            row([
+            row("", "", [
                 btn("btn-primary", "", "", "Apply Changes", {"log": status_bar_txt}),
                 btn("btn-secondary", "", "", "Reset Defaults", {"log": status_bar_txt})
             ], {"gap": 10})
-        ], {"class": "col-panel"})
+        ], {})
 
-    ], {"class": "main-content"}),
+    ], {}),
 
-    divider({"class": "divider"}),
+    divider("divider", "", {}),
 
     # ── Status Bar ──────────────────────────────────────────────────────────
-    row([
+    row("status-bar", "", [
         status_bar_txt
-    ], {"class": "status-bar"})
+    ], {})
 
-], {"class": "window-container", "gap": 0})
+], {"gap": 0})
 
 # ── Launch Application ──────────────────────────────────────────────────────
 gui("Nova GUI Widgets & NSS Showcase", 720, 560, app_ui, {
