@@ -1053,50 +1053,25 @@ def compile_expr(state: CodegenState, node: AstNode) {
         if right_str == 1 and node.left.kind == "Number" and node.left.val_int == 0 { is_str_cmp = 0 }
 
         if is_float_op == 1 {
-            emit(state, "    fld qword ptr [esp]")
-            emit(state, "    fld qword ptr [esp + 4]")
+            # SSE single-precision compare: values were pushed as 4-byte bit patterns in 8-byte
+            # slots (left deeper at [rsp+8], right on top at [rsp]) by compile_expr above.
+            # comiss sets ZF/PF/CF like an unsigned integer cmp, so plain setcc works directly
+            # (replaces an earlier x87 `fld qword ptr [esp]` path that read the two 4-byte
+            # singles as one 8-byte double and was never correct on x86_64).
+            emit(state, "    movss xmm0, dword ptr [rsp + 8]")
+            emit(state, "    movss xmm1, dword ptr [rsp]")
             clean_n(state, 2)
-            emit(state, "    fucomip st(0), st(1)")
-            emit(state, "    fstp st(0)")
-            emit(state, "    pushf")
-            emit(state, "    pop %a")
-            label_true = next_label(state, "L_cmp_true")
-            label_end = next_label(state, "L_cmp_end")
-            if node.val_str == "==" {
-                emit(state, "    and rax, 64")
-                emit(state, "    cmp rax, 0")
-                emit(state, "    jne " + label_true)
-            }
-            if node.val_str == "!=" {
-                emit(state, "    and rax, 64")
-                emit(state, "    cmp rax, 0")
-                emit(state, "    je " + label_true)
-            }
-            if node.val_str == "<" {
-                emit(state, "    and rax, 1")
-                emit(state, "    cmp rax, 1")
-                emit(state, "    je " + label_true)
-            }
-            if node.val_str == ">" {
-                emit(state, "    and rax, 65")
-                emit(state, "    cmp rax, 0")
-                emit(state, "    je " + label_true)
-            }
-            if node.val_str == "<=" {
-                emit(state, "    and rax, 65")
-                emit(state, "    cmp rax, 0")
-                emit(state, "    jne " + label_true)
-            }
-            if node.val_str == ">=" {
-                emit(state, "    and rax, 1")
-                emit(state, "    cmp rax, 0")
-                emit(state, "    je " + label_true)
-            }
-            emit(state, "    push 0")
-            emit(state, "    jmp " + label_end)
-            emit(state, label_true + ":")
-            emit(state, "    push 1")
-            emit(state, label_end + ":")
+            emit(state, "    comiss xmm0, xmm1")
+            setcc = "sete"
+            if node.val_str == "==" { setcc = "sete" }
+            if node.val_str == "!=" { setcc = "setne" }
+            if node.val_str == "<" { setcc = "setb" }
+            if node.val_str == "<=" { setcc = "setbe" }
+            if node.val_str == ">" { setcc = "seta" }
+            if node.val_str == ">=" { setcc = "setae" }
+            emit(state, "    " + setcc + " al")
+            emit(state, "    movzx rax, al")
+            emit(state, "    push %a")
         } else {
             if node.val_str == "has" {
                 is_dict = 0

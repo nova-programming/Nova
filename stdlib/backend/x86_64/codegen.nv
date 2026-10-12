@@ -30,6 +30,8 @@ data CodegenState {
     str_lit_labels: list
     string_vars: list
     string_var_map: dict
+    float_var_map: dict
+    func_ret_map: dict
     global_field_names: list
     next_global_offset: int
     prop_offset_map: dict
@@ -75,6 +77,8 @@ def new_codegen(tgt: int, target_os: string) -> CodegenState {
     state.struct_fields = []
     state.string_vars = []
     state.string_var_map = {}
+    state.float_var_map = {}
+    state.func_ret_map = {}
     state.str_lit_vals = []
     state.str_lit_labels = []
     state.global_field_names = []
@@ -488,6 +492,7 @@ def is_float_expr(state: CodegenState, node: AstNode) -> int {
         return 1
     }
     if node.kind == "Variable" {
+        if state.float_var_map.has(node.val_str) == 1 { return 1 }
         if node.inferred_type != 0 and node.inferred_type.kind == "scalar" and node.inferred_type.name == "float" {
             return 1
         }
@@ -501,6 +506,9 @@ def is_float_expr(state: CodegenState, node: AstNode) -> int {
         if is_float_expr(state, node.left) == 1 {
             return 1
         }
+    }
+    if node.kind == "Call" {
+        if state.func_ret_map.has(node.val_str) == 1 { return 1 }
     }
     return 0
 }
@@ -759,6 +767,7 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     old_offset = state.local_offset
     old_string_vars = state.string_vars
     old_string_map = state.string_var_map
+    old_float_map = state.float_var_map
     old_used_regs = state.used_regs
     old_bce_vars = state.bce_loop_vars
     old_bce_lists = state.bce_loop_lists
@@ -774,6 +783,7 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     state.local_offset = 0
     state.string_vars = []
     state.string_var_map = {}
+    state.float_var_map = {}
     state.used_regs = []
     state.bce_loop_vars = []
     state.bce_loop_lists = []
@@ -794,6 +804,9 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
             if node.param_types[p] == "string" {
                 state.string_vars.append(param_name)
                 state.string_var_map.set(param_name, 1)
+            }
+            if node.param_types[p] == "float" {
+                state.float_var_map.set(param_name, 1)
             }
         }
         p = p + 1
@@ -881,6 +894,7 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     state.local_offset = old_offset
     state.string_vars = old_string_vars
     state.string_var_map = old_string_map
+    state.float_var_map = old_float_map
     state.used_regs = old_used_regs
     state.bce_loop_vars = old_bce_vars
     state.bce_loop_lists = old_bce_lists
@@ -966,6 +980,15 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
             }
         }
         i = i + 1
+    }
+
+    i_f = 0
+    while i_f < len(functions) {
+        fn_decl = functions[i_f]
+        if fn_decl.return_type == "float" {
+            state.func_ret_map.set(fn_decl.val_str, "float")
+        }
+        i_f = i_f + 1
     }
 
     i_f = 0

@@ -249,6 +249,9 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
                 state.string_var_map.set(node.val_str, 1)
             }
         }
+        if is_float_expr(state, node.left) == 1 {
+            state.float_var_map.set(node.val_str, 1)
+        }
         compile_expr(state, node.left)
         emit(state, "    pop %a")
         reg_val = find_var_reg(state, node.val_str)
