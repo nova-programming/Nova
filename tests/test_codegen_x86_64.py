@@ -272,8 +272,10 @@ class TestX86_64CodegenOutput(unittest.TestCase):
         self.assertIn("push rax", asm)
 
     def test_float_compare(self):
+        # Single precision (comiss), not double (comisd): float literals are 32-bit IEEE-754
+        # bit patterns, and comisd read 8 bytes that were never a valid double.
         asm = compile_to_asm("if 1.5 > 2.5 { print(1) }")
-        self.assertIn("comisd xmm0, xmm1", asm)
+        self.assertIn("comiss xmm0, xmm1", asm)
         self.assertIn("seta al", asm)
 
     def test_printd_debug(self):

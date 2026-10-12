@@ -1160,23 +1160,27 @@ class X86_64Codegen:
             all_leaf = left_leaf and right_leaf
             is_float_op = self._is_float_expr(node.left) or self._is_float_expr(node.right)
             if is_float_op:
+                # Float literals/values are 32-bit IEEE-754 single-precision bit patterns
+                # (see compile_leaf_to_reg / the Number case below), so these must be the
+                # single-precision (ss) instructions, not double (sd) — sd read 8 bytes
+                # that were never a valid double and silently computed garbage.
                 self.compile_expr(node.left)
                 self.compile_expr(node.right)
-                self.assembly.append("    movsd xmm0, [rsp + 8]")
-                self.assembly.append("    movsd xmm1, [rsp]")
+                self.assembly.append("    movss xmm0, [rsp + 8]")
+                self.assembly.append("    movss xmm1, [rsp]")
                 if node.op == "+":
-                    self.assembly.append("    addsd xmm0, xmm1")
+                    self.assembly.append("    addss xmm0, xmm1")
                 elif node.op == "-":
-                    self.assembly.append("    subsd xmm0, xmm1")
+                    self.assembly.append("    subss xmm0, xmm1")
                 elif node.op == "*":
-                    self.assembly.append("    mulsd xmm0, xmm1")
+                    self.assembly.append("    mulss xmm0, xmm1")
                 elif node.op == "/":
-                    self.assembly.append("    divsd xmm0, xmm1")
+                    self.assembly.append("    divss xmm0, xmm1")
                 else:
-                    self.assembly.append("    addsd xmm0, xmm1")
+                    self.assembly.append("    addss xmm0, xmm1")
                 self.assembly.append("    add rsp, 16")
                 self.assembly.append("    sub rsp, 8")
-                self.assembly.append("    movsd [rsp], xmm0")
+                self.assembly.append("    movss [rsp], xmm0")
             elif all_leaf and node.op == "+" and (self._is_string_expr(node.left) or self._is_string_expr(node.right)):
                 self.compile_expr(node.left)
                 self.compile_expr(node.right)
@@ -1273,12 +1277,17 @@ class X86_64Codegen:
             is_float_cmp = self._is_float_expr(node.left) or self._is_float_expr(node.right)
 
             if is_float_cmp:
+                # Single precision, matching the 32-bit literal encoding (see the BinOp
+                # float case above). Also fixed here: operands were loaded reversed
+                # (xmm0 <- right, xmm1 <- left), so comisd computed compare(right, left)
+                # and every setb/seta below tested the wrong direction; dest must be
+                # left, src must be right for the setcc table below to mean what it says.
                 self.compile_expr(node.left)
                 self.compile_expr(node.right)
-                self.assembly.append("    movsd xmm0, [rsp]")
-                self.assembly.append("    movsd xmm1, [rsp + 8]")
+                self.assembly.append("    movss xmm0, [rsp + 8]")
+                self.assembly.append("    movss xmm1, [rsp]")
                 self.assembly.append("    add rsp, 16")
-                self.assembly.append("    comisd xmm0, xmm1")
+                self.assembly.append("    comiss xmm0, xmm1")
                 self.assembly.append("    pushf")
                 self.assembly.append("    pop rax")
             elif all_leaf:
