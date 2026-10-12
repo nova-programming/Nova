@@ -1522,7 +1522,12 @@ class X86_64Codegen:
             elif node.property == "value_byte":
                 self.assembly.append("    pop rdx")
                 self.assembly.append("    xor rax, rax")
-                self.assembly.append("    mov al, byte [rdx]")
+                # "byte [rdx]" (no "ptr") isn't a valid size override in GAS's Intel-syntax
+                # parser -- it silently assembled to something that always read 0 instead of
+                # erroring. This was the actual cause of the self-hosted compiler's own
+                # float_str_to_hex() always parsing "0" digits: it's nova.exe's own
+                # bootstrap-compiled code, and it reads each character via .value_byte.
+                self.assembly.append("    mov al, byte ptr [rdx]")
                 self.assembly.append("    push rax")
             elif node.property == "addr":
                 pass

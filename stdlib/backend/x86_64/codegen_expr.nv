@@ -1030,34 +1030,18 @@ def compile_expr(state: CodegenState, node: AstNode) {
         is_float_op = 0
         if is_float_expr(state, node.left) == 1 { is_float_op = 1 }
         if is_float_expr(state, node.right) == 1 { is_float_op = 1 }
-        
-        if is_float_op == 1 {
-            compile_expr(state, node.left)
-            compile_expr(state, node.right)
-        } else {
-            if all_leaf2 == 2 {
-                compile_leaf_to_reg(state, node.right, "%x")
-                compile_leaf_to_reg(state, node.left, "%a")
-            } else {
-                compile_expr(state, node.left)
-                compile_expr(state, node.right)
-                emit(state, "    pop %x")
-                emit(state, "    pop %a")
-            }
-            
-            is_str_cmp = 0
-        left_str = is_string_expr(state, node.left)
-        right_str = is_string_expr(state, node.right)
-        if left_str == 1 or right_str == 1 { is_str_cmp = 1 }
-        if left_str == 1 and node.right.kind == "Number" and node.right.val_int == 0 { is_str_cmp = 0 }
-        if right_str == 1 and node.left.kind == "Number" and node.left.val_int == 0 { is_str_cmp = 0 }
 
         if is_float_op == 1 {
-            # SSE single-precision compare: values were pushed as 4-byte bit patterns in 8-byte
-            # slots (left deeper at [rsp+8], right on top at [rsp]) by compile_expr above.
-            # comiss sets ZF/PF/CF like an unsigned integer cmp, so plain setcc works directly
-            # (replaces an earlier x87 `fld qword ptr [esp]` path that read the two 4-byte
-            # singles as one 8-byte double and was never correct on x86_64).
+            # SSE single-precision compare: values are pushed as 4-byte bit patterns in 8-byte
+            # slots (left deeper at [rsp+8], right on top at [rsp]). comiss sets ZF/PF/CF like
+            # an unsigned integer cmp, so plain setcc works directly (replaces an earlier x87
+            # `fld qword ptr [esp]` path that read the two 4-byte singles as one 8-byte double
+            # and was never correct on x86_64, and -- the actual bug -- used to live inside the
+            # `else` of the is_float_op==1 check above, so it never ran for floats at all: the
+            # two operands were pushed and then NO comparison ever executed, leaving whichever
+            # operand was last on the stack to stand in for the boolean result).
+            compile_expr(state, node.left)
+            compile_expr(state, node.right)
             emit(state, "    movss xmm0, dword ptr [rsp + 8]")
             emit(state, "    movss xmm1, dword ptr [rsp]")
             clean_n(state, 2)
@@ -1073,6 +1057,23 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    movzx rax, al")
             emit(state, "    push %a")
         } else {
+            if all_leaf2 == 2 {
+                compile_leaf_to_reg(state, node.right, "%x")
+                compile_leaf_to_reg(state, node.left, "%a")
+            } else {
+                compile_expr(state, node.left)
+                compile_expr(state, node.right)
+                emit(state, "    pop %x")
+                emit(state, "    pop %a")
+            }
+
+            is_str_cmp = 0
+            left_str = is_string_expr(state, node.left)
+            right_str = is_string_expr(state, node.right)
+            if left_str == 1 or right_str == 1 { is_str_cmp = 1 }
+            if left_str == 1 and node.right.kind == "Number" and node.right.val_int == 0 { is_str_cmp = 0 }
+            if right_str == 1 and node.left.kind == "Number" and node.left.val_int == 0 { is_str_cmp = 0 }
+
             if node.val_str == "has" {
                 is_dict = 0
                 if node.left.inferred_type != 0 and node.left.inferred_type.kind == "dict" {
@@ -1107,7 +1108,6 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    " + setcc + " al")
             emit(state, "    movzx rax, al")
             emit(state, "    push %a")
-        }
         }
     }
     if node.kind == "UnaryOp" {

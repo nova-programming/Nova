@@ -54,6 +54,29 @@ def test_stage1_and_stage2_agree(selfhost, stage2):
     assert _run((stage1, work1, env), "st1_prog", PROGRAM) == _run(stage2, "st2_prog_b", PROGRAM)
 
 
+FLOAT_PROGRAM = (
+    "a = 2.5\nb = 1.5\n"
+    "print(a)\nprint(a + b)\nprint(a - b)\nprint(a * b)\nprint(a / b)\n"
+    "if a < b { print(1) } else { print(0) }\n"
+    "if a > b { print(1) } else { print(0) }\n"
+    "if a <= a { print(1) } else { print(0) }\n"
+    "if a == a { print(1) } else { print(0) }\n"
+    "if b >= a { print(1) } else { print(0) }\n"
+    "def half() -> float { return 0.5 }\nprint(half())\n"
+)
+FLOAT_EXPECTED = ["2.500000", "4.000000", "1.000000", "3.750000", "1.666667",
+                  "0", "1", "1", "1", "0", "0.500000"]
+
+
+def test_stage2_float_arithmetic_and_compare(stage2):
+    """Regression: float Compare's SSE branch (comiss) used to live inside the `else` of its own
+    `is_float_op == 1` check, so it never ran -- the two operands were pushed and nothing compared
+    them, leaving whichever was last on the stack to stand in for the boolean. Separately,
+    float_str_to_hex() parsed every literal as 0 because `mov al, byte [rdx]` (missing `ptr`) isn't
+    a valid GAS Intel-syntax size override and silently read 0."""
+    assert _run(stage2, "st2_float", FLOAT_PROGRAM) == FLOAT_EXPECTED
+
+
 def test_comparison_and_call_is_not_rewritten_as_chained_comparison(tmp_path):
     src = (
         'd = {"a": 1}\nx = 1\nflag = true\nxs = [1, 2]\n'
