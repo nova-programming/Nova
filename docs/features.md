@@ -114,24 +114,28 @@ Delivery: `alloc[T](count)` syntax parsed with type parameter support.
 handler multiplies count by sizeof(T) before calling malloc. Both x86_64
 and ARM64 backends updated.
 
-## 7. Multiple Returns + `_` Discard — Shipped
+## 7. Multiple Returns + `_` Discard — Broken, Not Shipped (Correcting an Earlier Status Here)
 
-Developer experience (dead simple):
+The example this section used to show does not work in any pipeline, found while using it as
+a reference for an unrelated feature (`process_capture`, see `stdlib/process.nv`) and
+confirming every claim here against the actual code rather than taking "Shipped" on faith:
 
-```nova
-def get_user() -> (string, int, bool) {
-    return "Alice", 30, true
-}
-name, age, _ = get_user()
-```
-
-Complexity hidden in backend: values returned in registers (rax/rdx/r8);
-`_` emits zero instructions.
-
-Delivery: `MultiReturn` and `UnpackAssign` AST nodes. Parser handles
-comma-separated return values and assignment targets. Codegen returns
-values in rax/rbx/rcx (x86_64) or x0/x1/x2 (ARM64). `_` targets emit
-zero instructions. Both Python bootstrap backends updated.
+- `def get_user() -> (string, int, bool) { ... }` — the `->` return-type annotation does not
+  accept a parenthesized type list at all (`bootstrap/parser/parser.py`'s `parse_function`
+  calls `parse_type_annotation()`, which parses one type, not a tuple); this is a parse error
+  (`Expected LBRACE, got LPAREN`) in every pipeline.
+- Dropping the return-type annotation (`def get_user() { return "Alice", 30, true }` with
+  `name, age, _ = get_user()`) parses, but:
+  - **VM** (`nova dev`): `bootstrap/vm/machine.py` has no handling at all for `MultiReturn` or
+    `UnpackAssign` — the unpacked names resolve as unknown identifiers and silently read as
+    `0`/empty, with only a resolver warning, no error.
+  - **Python-bootstrap native** (`nova build`): `bootstrap/compiler/backend/x86_64/codegen.py`'s
+    `compile_stmt` crashes outright — `AttributeError: 'UnpackAssign' object has no attribute
+    'catch_body'` — so the feature was never reachable here either.
+- Not fixed this session; this needs a real pass across both bootstrap backends plus the VM,
+  not a touch-up. Tracked in `ROADMAP.md`. Until then, functions needing to return more than
+  one value should use a `data` struct or encode multiple values into one return (as
+  `process_capture` does) instead of `MultiReturn`/`UnpackAssign`.
 
 ## 8. Auto-Inlining — Shipped
 

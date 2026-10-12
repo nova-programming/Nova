@@ -15,13 +15,20 @@ Galaxy is a fully functional package manager with a Git-backed registry website,
 ### 3. Small Function Inlining (Implemented)
 Implement advanced compiler optimizations to inline extremely short, non-recursive functions, entirely eliminating call/ret overhead for utility methods.
 
-### 4. Language Feature Roadmap (All Ten Shipped)
+### 4. Language Feature Roadmap (Nine of Ten Shipped)
 Ten features were specified with developer-vs-backend contracts, sequenced by blast radius to
-protect self-hosting stability; all ten now show **Shipped** in `docs/features.md`: `nova run`,
-`defer`, `alloc[T]` typed pointers, `@entry` bare-metal annotations, "Did you mean?" Levenshtein
-diagnostics, C FFI `extern def`, zero-copy `{ptr,len}` slices, the `.ptr`/`.as_list` bridge,
-multiple returns with `_` discard, and auto-inlining with `@noinline`. Two items from that batch
-are still open and tracked separately below/elsewhere, not as part of this list: full SSO
+protect self-hosting stability. Nine work and show **Shipped** in `docs/features.md`: `nova
+run`, `defer`, `alloc[T]` typed pointers, `@entry` bare-metal annotations, "Did you mean?"
+Levenshtein diagnostics, C FFI `extern def`, zero-copy `{ptr,len}` slices, the `.ptr`/`.as_list`
+bridge, and auto-inlining with `@noinline`. **The tenth, multiple returns with `_` discard, is
+not actually shipped** despite the doc previously saying so — its documented syntax doesn't
+parse, and the form that does parse crashes the Python-bootstrap native backend outright and
+silently produces wrong values (`0`/empty) in the VM; see `docs/features.md` section 7 for the
+specifics, found while using it as a reference while adding `process_capture`
+(`stdlib/process.nv`). Needs a real pass across both bootstrap backends and the VM, not a
+touch-up — not attempted this session.
+
+Two further items are open and tracked separately, not part of this nine/ten count: full SSO
 (inline ≤15B string buffers) was deferred entirely — it changes the `char*` ABI at every
 codegen/VM boundary, so the ABI-preserving subset shipped instead (empty-slice static,
 full-slice aliasing in `_str_sub`) — and the macOS ARM64 **self-hosted** bootstrap still crashes

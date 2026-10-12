@@ -1493,6 +1493,20 @@ def _builtin_system_process_run(m, args):
     except (OSError, ValueError):
         m.stack.append(-1)
 
+def _builtin_system_process_capture(m, args):
+    # Matches runtime.c's _sys_process_capture_c contract exactly: one encoded
+    # "<exit_code>\n<captured stdout>" string, split apart by stdlib/process.nv's
+    # process_capture() -- so VM and native share the same Nova-level splitting logic
+    # instead of each having their own (and risking the two drifting apart).
+    import subprocess
+    command = m._to_str(args[0])
+    try:
+        r = subprocess.run(command, shell=True, capture_output=True, text=True)
+        result = f"{r.returncode}\n{r.stdout}"
+    except (OSError, ValueError):
+        result = "-1\n"
+    m.stack.append(bytearray(result.encode('utf-8')))
+
 def _builtin_square(m, args):
     m.stack.append(args[0] * args[0])
 
@@ -1810,6 +1824,9 @@ _BUILTIN_HANDLERS = {
     "system_process_run": _builtin_system_process_run,
     "sys_process_run": _builtin_system_process_run,
     "sys_process_run_c": _builtin_system_process_run,
+    "system_process_capture": _builtin_system_process_capture,
+    "sys_process_capture": _builtin_system_process_capture,
+    "sys_process_capture_c": _builtin_system_process_capture,
     # String library builtins (used by self-hosted stdlib)
     "str_sub": _builtin_str_sub,
     "str_eq": _builtin_str_eq,

@@ -86,3 +86,7 @@ def system_exec(cmd: string) {
 def system_process_run(args: list) -> int {
     return os_impl.sys_process_run(args)
 }
+
+def system_process_capture(command: string) -> string {
+    return os_impl.sys_process_capture(command)
+}

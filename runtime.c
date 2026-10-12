@@ -403,6 +403,50 @@ SYSCALL int _sys_process_run_c(void *args) {
     free(argv);
     return i < 0 ? -1 : i;
 }
+/* Runs `command` through the shell (same as process_shell/_system_c) and captures its
+ * stdout. Returns a malloc'd "<exit_code>\n<captured stdout>" string -- the Nova-level
+ * wrapper (stdlib/process.nv) splits on the first newline so this stays a single-value,
+ * no-ABI-changes runtime call rather than needing a struct return. */
+SYSCALL void *_sys_process_capture_c(const char *command) {
+    FILE *p;
+    size_t cap, len;
+    char *buf;
+    char *result;
+    char prefix[16];
+    int plen;
+    int exit_code;
+    if (!command) return 0;
+    p = _popen(command, "r");
+    if (!p) return 0;
+    cap = 4096;
+    len = 0;
+    buf = (char*)malloc(cap);
+    if (!buf) { _pclose(p); return 0; }
+    for (;;) {
+        size_t n;
+        if (len + 4096 + 1 > cap) {
+            size_t new_cap = cap * 2;
+            char *nb = (char*)realloc(buf, new_cap);
+            if (!nb) break;
+            buf = nb;
+            cap = new_cap;
+        }
+        n = fread(buf + len, 1, 4096, p);
+        if (n == 0) break;
+        len += n;
+    }
+    exit_code = _pclose(p);
+    buf[len] = 0;
+    plen = snprintf(prefix, sizeof(prefix), "%d\n", exit_code);
+    result = (char*)malloc((size_t)plen + len + 1);
+    if (result) {
+        memcpy(result, prefix, (size_t)plen);
+        memcpy(result + plen, buf, len);
+        result[(size_t)plen + len] = 0;
+    }
+    free(buf);
+    return result;
+}
 
 /* ============== Entry point bridge for Windows x64 ============== */
 /* MinGW x64 CRT expects main() (no _ prefix). Nova codegen emits _main (with _ prefix
@@ -1764,6 +1808,52 @@ SYSCALL int _sys_process_run_c(void *args) {
     if (WIFEXITED(status)) return WEXITSTATUS(status);
     if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
     return -1;
+}
+/* Same contract as the Windows version above: malloc'd "<exit_code>\n<captured stdout>",
+ * split by the Nova-level wrapper in stdlib/process.nv. */
+SYSCALL void *_sys_process_capture_c(const char *command) {
+    FILE *p;
+    size_t cap, len;
+    char *buf;
+    char *result;
+    char prefix[16];
+    int plen;
+    int status;
+    int exit_code;
+    if (!command) return 0;
+    p = popen(command, "r");
+    if (!p) return 0;
+    cap = 4096;
+    len = 0;
+    buf = (char*)malloc(cap);
+    if (!buf) { pclose(p); return 0; }
+    for (;;) {
+        size_t n;
+        if (len + 4096 + 1 > cap) {
+            size_t new_cap = cap * 2;
+            char *nb = (char*)realloc(buf, new_cap);
+            if (!nb) break;
+            buf = nb;
+            cap = new_cap;
+        }
+        n = fread(buf + len, 1, 4096, p);
+        if (n == 0) break;
+        len += n;
+    }
+    status = pclose(p);
+    if (WIFEXITED(status)) exit_code = WEXITSTATUS(status);
+    else if (WIFSIGNALED(status)) exit_code = 128 + WTERMSIG(status);
+    else exit_code = -1;
+    buf[len] = 0;
+    plen = snprintf(prefix, sizeof(prefix), "%d\n", exit_code);
+    result = (char*)malloc((size_t)plen + len + 1);
+    if (result) {
+        memcpy(result, prefix, (size_t)plen);
+        memcpy(result + plen, buf, len);
+        result[(size_t)plen + len] = 0;
+    }
+    free(buf);
+    return result;
 }
 #endif
 

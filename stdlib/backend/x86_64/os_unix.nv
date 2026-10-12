@@ -21,6 +21,7 @@
     "    .extern _sys_env_get_c"
     "    .extern _sys_env_set_c"
     "    .extern _sys_process_run_c"
+    "    .extern _sys_process_capture_c"
     "    .extern _system_c"
 }
 
@@ -98,6 +99,10 @@ def sys_env_set(name: string, value: string) -> int {
 
 def sys_process_run(args: list) -> int {
     return sys_process_run_c(args)
+}
+
+def sys_process_capture(command: string) -> string {
+    return sys_process_capture_c(command)
 }
 
 def sys_system(cmd: string) {

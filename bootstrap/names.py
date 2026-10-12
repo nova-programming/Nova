@@ -21,7 +21,7 @@ MODULE_FUNCS = {
         "dir": "path_dirname", "ext": "path_extension",
     },
     "env": {"get": "env_get", "set": "env_set", "args": "env_args", "platform": "env_platform"},
-    "process": {"run": "process_run", "shell": "process_shell", "exit": "process_exit"},
+    "process": {"run": "process_run", "shell": "process_shell", "exit": "process_exit", "capture": "process_capture"},
     "time": {"now": "time_now", "ticks": "time_ticks_ms"},
     "json": {
         "stringify": "json_stringify", "parse": "json_parse", "kind": "json_kind",

@@ -29,7 +29,7 @@ def names_module_function(module: string, member: string) -> string {
         "env.get": "env_get", "env.set": "env_set", "env.args": "env_args",
         "env.platform": "env_platform",
         "process.run": "process_run", "process.shell": "process_shell",
-        "process.exit": "process_exit",
+        "process.exit": "process_exit", "process.capture": "process_capture",
         "time.now": "time_now", "time.ticks": "time_ticks_ms",
         "json.stringify": "json_stringify", "json.parse": "json_parse", "json.kind": "json_kind",
         "json.asInt": "json_as_int", "json.asString": "json_as_string", "json.asBool": "json_as_bool",

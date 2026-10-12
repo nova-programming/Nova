@@ -134,6 +134,27 @@ class TestNativeExec:
             )
         _assert_vm_native_parity(source)
 
+    def test_vm_native_parity_for_process_capture(self):
+        """Regression: the VM builtin returned a plain Python str instead of the bytearray
+        the VM represents Nova strings as -- len() happened to work, but every char/str_sub
+        operation on the result silently read zeros (str_sub's isinstance(s, bytearray) check
+        failed, falling through to its 'not a string' branch)."""
+        if os.name == "nt":
+            source = (
+                'import process\n'
+                'raw = process_capture("cmd /c echo hi && exit 3")\n'
+                'print(process_capture_output(raw))'
+                'print(process_capture_code(raw))\n'
+            )
+        else:
+            source = (
+                'import process\n'
+                'raw = process_capture("echo hi && exit 3")\n'
+                'print(process_capture_output(raw))'
+                'print(process_capture_code(raw))\n'
+            )
+        _assert_vm_native_parity(source)
+
     def test_vm_native_parity_for_scalar_value_boxing(self):
         _assert_vm_native_parity(
             'boxed = value_box_int(42)\n'

@@ -1,5 +1,6 @@
 # Process boundary. `process_exit` is portable; shell execution is explicit.
 import system
+import text
 
 def process_exit(code: int) {
     system_exit(code)
@@ -11,4 +12,33 @@ def process_shell(command: string) {
 
 def process_run(args: list) -> int {
     return system_process_run(args)
+}
+
+# Runs `command` through the shell and captures its stdout, same as process_shell but
+# returning the output instead of running inherited to this process's own stdio.
+#
+# Returns the raw "<exit_code>\n<captured stdout>" the runtime encodes into one string
+# (stdlib/backend/*/os_*.nv, runtime.c's _sys_process_capture_c) rather than unpacking it
+# here: `multi_return`/`UnpackAssign` (docs/features.md's "Multiple Returns" feature) has
+# no VM implementation at all (bootstrap/vm/machine.py never handles those AST nodes), so
+# `-> (int, string)` plus `code, out = process_capture(...)` silently breaks under `nova
+# dev` despite the feature being marked Shipped -- see ROADMAP.md. Use
+# process_capture_code()/process_capture_output() on the result instead, which work
+# identically in the VM and both native backends and only run the command once.
+def process_capture(command: string) -> string {
+    return system_process_capture(command)
+}
+
+# The captured stdout from a process_capture() result.
+def process_capture_output(raw: string) -> string {
+    nl = text_index_of(raw, "\n")
+    if nl < 0 { return "" }
+    return str_sub(raw, nl + 1, len(raw))
+}
+
+# The exit code from a process_capture() result.
+def process_capture_code(raw: string) -> int {
+    nl = text_index_of(raw, "\n")
+    if nl < 0 { return -1 }
+    return text_to_int(str_sub(raw, 0, nl))
 }
