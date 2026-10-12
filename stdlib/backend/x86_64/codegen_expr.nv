@@ -507,7 +507,13 @@ def compile_value(state: CodegenState, node: AstNode) {
     if k == "UnaryOp" {
         compile_value(state, node.left)
         if node.val_str == "-" {
-            emit(state, "    neg rax")
+            if is_float_expr(state, node.left) == 1 {
+                # Flip the sign bit of the 32-bit single-precision value instead of negating
+                # it as a two's-complement integer (which corrupted the bit pattern entirely).
+                emit(state, "    xor eax, 2147483648")
+            } else {
+                emit(state, "    neg rax")
+            }
         }
         if node.val_str == "not" {
             emit(state, "    cmp rax, 0")
@@ -1113,7 +1119,11 @@ def compile_expr(state: CodegenState, node: AstNode) {
     if node.kind == "UnaryOp" {
         compile_value(state, node.left)
         if node.val_str == "-" {
-            emit(state, "    neg rax")
+            if is_float_expr(state, node.left) == 1 {
+                emit(state, "    xor eax, 2147483648")
+            } else {
+                emit(state, "    neg rax")
+            }
         }
         if node.val_str == "not" {
             emit(state, "    cmp rax, 0")

@@ -63,9 +63,10 @@ FLOAT_PROGRAM = (
     "if a == a { print(1) } else { print(0) }\n"
     "if b >= a { print(1) } else { print(0) }\n"
     "def half() -> float { return 0.5 }\nprint(half())\n"
+    "print(-a)\nprint(-half())\n"
 )
 FLOAT_EXPECTED = ["2.500000", "4.000000", "1.000000", "3.750000", "1.666667",
-                  "0", "1", "1", "1", "0", "0.500000"]
+                  "0", "1", "1", "1", "0", "0.500000", "-2.500000", "-0.500000"]
 
 
 def test_stage2_float_arithmetic_and_compare(stage2):
@@ -73,7 +74,9 @@ def test_stage2_float_arithmetic_and_compare(stage2):
     `is_float_op == 1` check, so it never ran -- the two operands were pushed and nothing compared
     them, leaving whichever was last on the stack to stand in for the boolean. Separately,
     float_str_to_hex() parsed every literal as 0 because `mov al, byte [rdx]` (missing `ptr`) isn't
-    a valid GAS Intel-syntax size override and silently read 0."""
+    a valid GAS Intel-syntax size override and silently read 0. Also: unary `-` on a float did
+    `neg rax` (two's-complement integer negation) on the IEEE-754 bit pattern instead of flipping
+    the sign bit, corrupting the value (2.5 negated came out as something like -2.9)."""
     assert _run(stage2, "st2_float", FLOAT_PROGRAM) == FLOAT_EXPECTED
 
 

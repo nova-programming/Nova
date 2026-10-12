@@ -1262,7 +1262,12 @@ class X86_64Codegen:
             self.compile_expr(node.value)
             self.assembly.append("    pop rax")
             if node.op == "-":
-                self.assembly.append("    neg rax")
+                if self._is_float_expr(node.value):
+                    # Flip the sign bit of the 32-bit single-precision value instead of
+                    # negating it as a two's-complement integer, which corrupted the bits.
+                    self.assembly.append("    xor eax, 2147483648")
+                else:
+                    self.assembly.append("    neg rax")
             elif node.op == "~":
                 self.assembly.append("    not rax")
             elif node.op == "not":
