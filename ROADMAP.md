@@ -33,8 +33,13 @@ during codegen (Python-bootstrap builds on macOS ARM64 work fine); see
 The next work is correctness-first rather than another large syntax batch:
 
 1. Maintain VM/native semantic parity with differential tests.
-2. Define ownership and lifetime rules for `alloc`, `free`, raw pointers, `.ptr`,
-   `.as_list`, and `@raw` before expanding unsafe APIs.
+2. ~~Define ownership and lifetime rules for `alloc`, `free`, raw pointers, `.ptr`,
+   `.as_list`, and `@raw` before expanding unsafe APIs.~~ Done — see
+   `docs/internals/ownership.md`. It documents the current contract (two parallel memory
+   systems, ARC-managed vs. manual, and exactly where `.ptr`/`.as_list` cross between them)
+   rather than proposing new runtime behavior; one concrete gap it surfaces and leaves open:
+   `.as_list()`'s wrapper has no ARC header, so passing its result anywhere that generically
+   retains/releases a value is a heap-buffer-underflow read, not a defined error.
 3. Keep VM-only features such as `call()` explicit and rejected by native builds.
 4. Add `nova check`, formatting, structured diagnostics, and reproducible
    dependency/build metadata. `nova fmt` is deterministic and opt-in;

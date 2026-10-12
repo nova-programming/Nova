@@ -12,6 +12,8 @@ control — without making the surface syntax less Pythonic.
 - Every fix ships with a regression test. VM-only features (e.g. `call()`) must be rejected by native builds.
 - Galaxy installs must verify SHA-256 hashes; `GALAXY_ALLOW_UNVERIFIED=1` is an explicit opt-out. Direct
   `owner/repo` installs are unverified by definition.
+- `alloc`/`free`/`.ptr`/`.as_list`/`@raw` cross between ARC-managed and manual memory. Read
+  `docs/internals/ownership.md` before touching any of them or adding a new unsafe API.
 
 ## Commands
 ```bash
