@@ -313,6 +313,376 @@ def compile_leaf_to_reg(state: CodegenState, node: AstNode, reg_name: string) {
     }
 }
 
+# ---- Value-in-register expressions -------------------------------------------------------
+# compile_value leaves an integer-class result in rax with no push/pop. Source operands that are immediates,
+# register variables or stack slots are folded straight into the instruction. Anything not handled natively
+# (strings, floats, lists, calls, `has`, ...) falls back to compile_expr + pop, so semantics are unchanged.
+
+def fits_imm32(v: int) -> int {
+    if v >= (0 - 2147483647) and v <= 2147483647 { return 1 }
+    return 0
+}
+
+def binop_id(name: string) -> int {
+    if name == "and" { return 1 }
+    if name == "or" { return 2 }
+    if name == "==" { return 3 }
+    if name == "!=" { return 4 }
+    if name == "<" { return 5 }
+    if name == "<=" { return 6 }
+    if name == ">" { return 7 }
+    if name == ">=" { return 8 }
+    if name == "has" { return 9 }
+    if name == "+" { return 10 }
+    if name == "-" { return 11 }
+    if name == "*" { return 12 }
+    if name == "/" { return 13 }
+    if name == "%" { return 14 }
+    if name == "&" { return 15 }
+    if name == ">>" { return 16 }
+    if name == "<<" { return 17 }
+    if name == "|" { return 18 }
+    if name == "^" { return 19 }
+    return 0
+}
+
+# Is `node` an integer-class compare that compile_value can do with a plain cmp (no strings/floats)?
+def int_compare_ok(state: CodegenState, left: AstNode, right: AstNode) -> int {
+    if is_float_expr(state, left) == 1 { return 0 }
+    if is_float_expr(state, right) == 1 { return 0 }
+    left_str = is_string_expr(state, left)
+    right_str = is_string_expr(state, right)
+    is_str_cmp = 0
+    if left_str == 1 or right_str == 1 { is_str_cmp = 1 }
+    if left_str == 1 and right.kind == "Number" and right.val_int == 0 { is_str_cmp = 0 }
+    if right_str == 1 and left.kind == "Number" and left.val_int == 0 { is_str_cmp = 0 }
+    if is_str_cmp == 1 { return 0 }
+    return 1
+}
+
+# Nodes compile_value implements itself (their compile_expr just wraps it).
+def value_native(state: CodegenState, node: AstNode) -> int {
+    k = node.kind
+    if k == "UnaryOp" { return 1 }
+    if k == "Compare" {
+        op = binop_id(node.val_str)
+        if op < 3 or op > 8 { return 0 }
+        return int_compare_ok(state, node.left, node.right)
+    }
+    if k == "BinOp" {
+        op = binop_id(node.val_str)
+        if op == 1 or op == 2 { return 1 }
+        if op >= 3 and op <= 8 { return int_compare_ok(state, node.left, node.right) }
+        if op == 9 or op == 0 { return 0 }
+        if is_float_expr(state, node.left) == 1 { return 0 }
+        if is_float_expr(state, node.right) == 1 { return 0 }
+        if op == 10 {
+            if is_string_expr(state, node.left) == 1 { return 0 }
+            if is_string_expr(state, node.right) == 1 { return 0 }
+        }
+        return 1
+    }
+    return 0
+}
+
+# Instruction source operand for a leaf: decimal immediate, register, or stack slot. "" when not a leaf.
+def leaf_operand(state: CodegenState, node: AstNode) -> string {
+    k = node.kind
+    if k == "Number" {
+        if node.is_float == 1 { return "" }
+        if fits_imm32(node.val_int) == 1 { return str(node.val_int) }
+        return ""
+    }
+    if k == "Boolean" { return str(node.val_int) }
+    if k == "Variable" {
+        reg = find_var_reg(state, node.val_str)
+        if reg != "" { return reg }
+        off = find_var_offset(state, node.val_str)
+        if off < 0 { return "[%b + " + str(0 - off) + "]" }
+        return "[%b - " + str(off) + "]"
+    }
+    return ""
+}
+
+def is_immediate_leaf(node: AstNode) -> int {
+    if node.kind == "Number" { return 1 }
+    if node.kind == "Boolean" { return 1 }
+    return 0
+}
+
+def power_of_two_exponent(v: int) -> int {
+    if v < 2 { return 0 }
+    k = 0
+    p = 1
+    while p < v {
+        p = p * 2
+        k = k + 1
+    }
+    if p == v { return k }
+    return 0
+}
+
+def setcc_suffix(op: int) -> string {
+    if op == 3 { return "e" }
+    if op == 4 { return "ne" }
+    if op == 5 { return "l" }
+    if op == 6 { return "le" }
+    if op == 7 { return "g" }
+    return "ge"
+}
+
+def inverse_jcc_suffix(op: int) -> string {
+    if op == 3 { return "ne" }
+    if op == 4 { return "e" }
+    if op == 5 { return "ge" }
+    if op == 6 { return "g" }
+    if op == 7 { return "le" }
+    return "l"
+}
+
+def jcc_suffix(op: int) -> string {
+    return setcc_suffix(op)
+}
+
+# rax <- value of a leaf (immediate, register or stack slot)
+def load_leaf_rax(state: CodegenState, node: AstNode) {
+    operand = leaf_operand(state, node)
+    if operand == "" {
+        compile_expr(state, node)
+        emit(state, "    pop %a")
+        return
+    }
+    emit(state, "    mov %a, " + operand)
+}
+
+# Evaluate left and right of a binary node so that rax = left and the returned string is the right operand
+# (immediate, register, stack slot, or "rbx" when it had to be computed).
+def compile_binary_operands(state: CodegenState, left: AstNode, right: AstNode) -> string {
+    right_operand = leaf_operand(state, right)
+    if right_operand != "" {
+        compile_value(state, left)
+        return right_operand
+    }
+    left_operand = leaf_operand(state, left)
+    if left_operand != "" {
+        compile_value(state, right)
+        emit(state, "    mov rbx, rax")
+        emit(state, "    mov %a, " + left_operand)
+        return "rbx"
+    }
+    compile_value(state, left)
+    emit(state, "    push %a")
+    compile_value(state, right)
+    emit(state, "    mov rbx, rax")
+    emit(state, "    pop %a")
+    return "rbx"
+}
+
+def operand_with_size(operand: string) -> string {
+    if len(operand) > 0 and operand[0] == "[" { return "qword ptr " + operand }
+    return operand
+}
+
+def compile_value(state: CodegenState, node: AstNode) {
+    k = node.kind
+    if k == "Number" {
+        if node.is_float == 0 {
+            emit(state, "    mov %a, " + str(node.val_int))
+            return
+        }
+    }
+    if k == "Boolean" {
+        emit(state, "    mov %a, " + str(node.val_int))
+        return
+    }
+    if k == "Variable" {
+        load_leaf_rax(state, node)
+        return
+    }
+    if value_native(state, node) == 0 {
+        compile_expr(state, node)
+        emit(state, "    pop %a")
+        return
+    }
+    if k == "UnaryOp" {
+        compile_value(state, node.left)
+        if node.val_str == "-" {
+            emit(state, "    neg rax")
+        }
+        if node.val_str == "not" {
+            emit(state, "    cmp rax, 0")
+            emit(state, "    sete al")
+            emit(state, "    movzx rax, al")
+        }
+        if node.val_str == "~" {
+            emit(state, "    not rax")
+        }
+        return
+    }
+    op = binop_id(node.val_str)
+    if op == 1 {
+        end_lbl = next_label(state, "L_and_end")
+        compile_value(state, node.left)
+        emit(state, "    cmp rax, 0")
+        emit(state, "    je " + end_lbl)
+        compile_value(state, node.right)
+        emit(state, end_lbl + ":")
+        return
+    }
+    if op == 2 {
+        end_lbl = next_label(state, "L_or_end")
+        compile_value(state, node.left)
+        emit(state, "    cmp rax, 0")
+        emit(state, "    jne " + end_lbl)
+        compile_value(state, node.right)
+        emit(state, end_lbl + ":")
+        return
+    }
+    right_imm = is_immediate_leaf(node.right)
+    rhs = compile_binary_operands(state, node.left, node.right)
+    if op >= 3 and op <= 8 {
+        emit(state, "    cmp rax, " + rhs)
+        emit(state, "    set" + setcc_suffix(op) + " al")
+        emit(state, "    movzx rax, al")
+        return
+    }
+    if op == 10 {
+        emit(state, "    add rax, " + rhs)
+        return
+    }
+    if op == 11 {
+        emit(state, "    sub rax, " + rhs)
+        return
+    }
+    if op == 12 {
+        shift = 0
+        if right_imm == 1 and node.right.kind == "Number" { shift = power_of_two_exponent(node.right.val_int) }
+        if shift > 0 {
+            emit(state, "    shl rax, " + str(shift))
+        } elif right_imm == 1 {
+            emit(state, "    imul rax, rax, " + rhs)
+        } else {
+            emit(state, "    imul rax, " + rhs)
+        }
+        return
+    }
+    if op == 13 or op == 14 {
+        shift = 0
+        if right_imm == 1 and node.right.kind == "Number" { shift = power_of_two_exponent(node.right.val_int) }
+        if shift > 0 {
+            # exact signed division / remainder by 2^shift (rounds toward zero like idiv)
+            emit(state, "    mov rdx, rax")
+            emit(state, "    sar rdx, 63")
+            emit(state, "    shr rdx, " + str(64 - shift))
+            emit(state, "    add rax, rdx")
+            if op == 13 {
+                emit(state, "    sar rax, " + str(shift))
+            } else {
+                emit(state, "    and rax, " + str(power_two_value(shift) - 1))
+                emit(state, "    sub rax, rdx")
+            }
+            return
+        }
+        divisor = rhs
+        if right_imm == 1 {
+            emit(state, "    mov rbx, " + rhs)
+            divisor = "rbx"
+        }
+        emit(state, "    cqo")
+        emit(state, "    idiv " + operand_with_size(divisor))
+        if op == 14 {
+            emit(state, "    mov rax, rdx")
+        }
+        return
+    }
+    if op == 15 {
+        emit(state, "    and rax, " + rhs)
+        return
+    }
+    if op == 18 {
+        emit(state, "    or rax, " + rhs)
+        return
+    }
+    if op == 19 {
+        emit(state, "    xor rax, " + rhs)
+        return
+    }
+    if op == 16 or op == 17 {
+        mnemonic = "sar"
+        if op == 17 { mnemonic = "shl" }
+        if right_imm == 1 and node.right.kind == "Number" and node.right.val_int >= 0 and node.right.val_int < 64 {
+            emit(state, "    " + mnemonic + " rax, " + rhs)
+        } else {
+            emit(state, "    mov rcx, " + rhs)
+            emit(state, "    " + mnemonic + " rax, cl")
+        }
+        return
+    }
+}
+
+def power_two_value(k: int) -> int {
+    v = 1
+    i = 0
+    while i < k {
+        v = v * 2
+        i = i + 1
+    }
+    return v
+}
+
+# Jump to `target` when `cond` is false (jump_if == 0) or true (jump_if == 1); fall through otherwise.
+def compile_cond_jump(state: CodegenState, cond: AstNode, target: string, jump_if: int) {
+    k = cond.kind
+    if k == "UnaryOp" and cond.val_str == "not" {
+        compile_cond_jump(state, cond.left, target, 1 - jump_if)
+        return
+    }
+    if k == "BinOp" and (cond.val_str == "and" or cond.val_str == "or") {
+        is_and = 0
+        if cond.val_str == "and" { is_and = 1 }
+        if is_and == 1 and jump_if == 0 {
+            compile_cond_jump(state, cond.left, target, 0)
+            compile_cond_jump(state, cond.right, target, 0)
+            return
+        }
+        if is_and == 0 and jump_if == 1 {
+            compile_cond_jump(state, cond.left, target, 1)
+            compile_cond_jump(state, cond.right, target, 1)
+            return
+        }
+        skip = next_label(state, "L_cj_skip")
+        if is_and == 1 {
+            compile_cond_jump(state, cond.left, skip, 0)
+            compile_cond_jump(state, cond.right, target, 1)
+        } else {
+            compile_cond_jump(state, cond.left, skip, 1)
+            compile_cond_jump(state, cond.right, target, 0)
+        }
+        emit(state, skip + ":")
+        return
+    }
+    if value_native(state, cond) == 1 and (k == "Compare" or k == "BinOp") {
+        op = binop_id(cond.val_str)
+        if op >= 3 and op <= 8 {
+            rhs = compile_binary_operands(state, cond.left, cond.right)
+            emit(state, "    cmp rax, " + rhs)
+            if jump_if == 1 {
+                emit(state, "    j" + jcc_suffix(op) + " " + target)
+            } else {
+                emit(state, "    j" + inverse_jcc_suffix(op) + " " + target)
+            }
+            return
+        }
+    }
+    compile_value(state, cond)
+    emit(state, "    cmp rax, 0")
+    if jump_if == 1 {
+        emit(state, "    jne " + target)
+    } else {
+        emit(state, "    je " + target)
+    }
+}
+
 def compile_expr(state: CodegenState, node: AstNode) {
     if node.kind == "SizeOf" {
         sz = 8
@@ -381,6 +751,11 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    push %a")
     }
     if node.kind == "BinOp" {
+        if value_native(state, node) == 1 {
+            compile_value(state, node)
+            emit(state, "    push %a")
+            return
+        }
         op = 0
         if node.val_str == "and" { op = 1 }
         elif node.val_str == "or" { op = 2 }
@@ -643,6 +1018,11 @@ def compile_expr(state: CodegenState, node: AstNode) {
         }
     }
     if node.kind == "Compare" {
+        if value_native(state, node) == 1 {
+            compile_value(state, node)
+            emit(state, "    push %a")
+            return
+        }
         left_leaf2 = is_leaf_expr(state, node.left)
         right_leaf2 = is_leaf_expr(state, node.right)
         all_leaf2 = left_leaf2 + right_leaf2
@@ -756,8 +1136,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
         }
     }
     if node.kind == "UnaryOp" {
-        compile_expr(state, node.left)
-        emit(state, "    pop %a")
+        compile_value(state, node.left)
         if node.val_str == "-" {
             emit(state, "    neg rax")
         }
