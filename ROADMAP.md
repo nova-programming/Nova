@@ -2,8 +2,12 @@
 
 ## Near-Term Goals
 
-### 1. Cross-Platform Abstractions (`os_*.nv`)
-Develop a unified OS-layer interface (`system.nv`) that automatically swaps out implementations based on whether the host is Windows (`os_win.nv`), Linux (`os_linux.nv`), or macOS (`os_mac.nv`), completely hiding specific configs from end-users.
+### 1. Cross-Platform Abstractions (Implemented)
+`system.nv` is the unified OS-layer interface; it imports the pseudo-module `os_impl`, which
+`resolve_imports` (`stdlib/compiler.nv`, `bootstrap/modules/resolver.py`) rewrites to
+`os_windows` or `os_unix` based on `target_os` before resolving the file — one shared Unix
+implementation rather than separate Linux/macOS files, which is simpler than originally
+specified and has the same effect: end-user code never sees the platform split.
 
 ### 2. Galaxy Package Manager (Implemented)
 Galaxy is a fully functional package manager with a Git-backed registry website, standalone CLI (`galaxy`), three trust tiers (Core/Verified/Community), template system (`galaxy init`), GitHub Issues-based publishing workflow, and GitHub Actions automation for validation/quarantine/promotion. See the [Galaxy Registry](https://galaxy-registry.vercel.app) for documentation.
@@ -11,13 +15,18 @@ Galaxy is a fully functional package manager with a Git-backed registry website,
 ### 3. Small Function Inlining (Implemented)
 Implement advanced compiler optimizations to inline extremely short, non-recursive functions, entirely eliminating call/ret overhead for utility methods.
 
-### 4. Language Feature Roadmap (Specified — Sequenced Delivery)
-Ten features specified with developer-vs-backend contracts. Delivered first: `nova run` (instant execution). The remainder are sequenced by blast radius to protect self-hosting stability:
-- **Next:** `@entry` annotations (bare-metal), `defer` (LIFO scope cleanup), `alloc[T]` typed pointers.
-- **Later (ABI changes):** C FFI `extern def`, zero-copy `{ptr,len}` slices, `.ptr`/`.as_list` bridge, multiple returns with `_` discard, auto-inlining with `@noinline`.
-- **Tooling:** "Did you mean?" Levenshtein diagnostics, macOS ARM64 bootstrap, POSIX layer completion.
-- Full SSO (inline ≤15B string buffers) deferred: it changes the `char*` ABI at every codegen/VM boundary; shipped instead the ABI-preserving subset (empty-slice static, full-slice aliasing in `_str_sub`).
-- See `docs/features.md` for the full specification and status of each item.
+### 4. Language Feature Roadmap (All Ten Shipped)
+Ten features were specified with developer-vs-backend contracts, sequenced by blast radius to
+protect self-hosting stability; all ten now show **Shipped** in `docs/features.md`: `nova run`,
+`defer`, `alloc[T]` typed pointers, `@entry` bare-metal annotations, "Did you mean?" Levenshtein
+diagnostics, C FFI `extern def`, zero-copy `{ptr,len}` slices, the `.ptr`/`.as_list` bridge,
+multiple returns with `_` discard, and auto-inlining with `@noinline`. Two items from that batch
+are still open and tracked separately below/elsewhere, not as part of this list: full SSO
+(inline ≤15B string buffers) was deferred entirely — it changes the `char*` ABI at every
+codegen/VM boundary, so the ABI-preserving subset shipped instead (empty-slice static,
+full-slice aliasing in `_str_sub`) — and the macOS ARM64 **self-hosted** bootstrap still crashes
+during codegen (Python-bootstrap builds on macOS ARM64 work fine); see
+`docs/internals/macos_arm64_bootstrap.md`.
 
 ## Current Engineering Priorities
 
