@@ -91,3 +91,11 @@ class OpCode(Enum):
     PUSH_HANDLER = auto()  # Push exception handler (arg = catch address)
     POP_HANDLER = auto()   # Pop current exception handler
     THROW = auto()         # Throw exception with top-of-stack value
+
+    # Multi-value return (MultiReturn/UnpackAssign). RETURN's own frame cleanup collapses
+    # the operand stack down to a single value (see _vm_run's "garbage above the return
+    # value is dropped" comment), so values[1:] ride in a side stash instead of the main
+    # stack; values[0] stays the normal single RETURN value.
+    CLEAR_RETURN_STASH = auto()  # Clear the stash (start of a MultiReturn)
+    STASH_RETURN = auto()        # Pop top-of-stack, append to the stash
+    UNSTASH_RETURN = auto()      # Pop front of the stash, push onto the stack

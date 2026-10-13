@@ -376,6 +376,17 @@ class X86_64Codegen:
         self.data_section.append(".global __nova_argv")
         self.data_section.append("__nova_argv:")
         self.data_section.append("    .quad 0")
+        # Extra MultiReturn values (anything past the first) ride here instead of in
+        # registers: value[0] stays in rax, the normal single-value return, so a
+        # MultiReturn-returning function still looks like an ordinary function to
+        # everything else (including its own prologue/epilogue register save/restore,
+        # which would otherwise clobber any register used to smuggle a 2nd/3rd value
+        # out). UnpackAssign reads this immediately after the call that fills it, which
+        # is safe for the sanctioned `a, b = f()` pattern; it is not reentrant across a
+        # nested MultiReturn call made before unpacking the outer one.
+        self.data_section.append(".align 8")
+        self.data_section.append("_nova_multi_ret:")
+        self.data_section.append("    .quad " + ", ".join(["0"] * 8))
 
         self.assembly.append(".data")
         for line in self.data_section:
@@ -483,6 +494,15 @@ class X86_64Codegen:
         # Handle nodes that introduce new variables
         if isinstance(node, Assignment):
             self.register_var(node.name)
+            self.scan_vars(node.value, visited)
+            return
+        if isinstance(node, UnpackAssign):
+            # Bare Variable targets aren't registered by the generic recursive walk below
+            # (only Assignment/ForLoop/ForIn introduce new locals there), so without this,
+            # every unpacked name would silently fail to get a stack slot.
+            for target in node.targets:
+                if isinstance(target, Variable) and target.name != '_':
+                    self.register_var(target.name)
             self.scan_vars(node.value, visited)
             return
         if isinstance(node, ForLoop):
@@ -1004,15 +1024,19 @@ class X86_64Codegen:
             sym = f"_{node.name}" if self.target_os == "macos" else node.name
             self.assembly.append(f".extern {sym}")
         elif isinstance(node, MultiReturn):
+            # value[0] is the normal, ABI-compatible return (rax). Anything past it goes
+            # into the _nova_multi_ret static buffer instead of a register -- see its
+            # declaration in generate() for why.
+            max_extra = 8
             for i, val in enumerate(node.values):
                 self.compile_expr(val)
                 self.assembly.append("    pop rax")
                 if i == 0:
                     self.assembly.append("    mov rbx, rax")
-                elif i == 1:
-                    self.assembly.append("    mov rcx, rax")
-                elif i == 2:
-                    self.assembly.append("    mov rdx, rax")
+                elif i - 1 < max_extra:
+                    slot = (i - 1) * 8
+                    self.assembly.append("    lea rcx, [rip + _nova_multi_ret]")
+                    self.assembly.append(f"    mov [rcx + {slot}], rax")
             self.assembly.append("    mov rax, rbx")
             for reg in reversed(getattr(self, 'used_regs', [])):
                 self.assembly.append(f"    pop {reg}")
@@ -1020,41 +1044,45 @@ class X86_64Codegen:
             self.assembly.append("    pop rbp")
             self.assembly.append("    ret")
         elif isinstance(node, UnpackAssign):
+            # Mirrors MultiReturn: target[0] comes from rax (the call's normal return
+            # value, already on the stack from compile_expr below); target[1:] are read
+            # back out of _nova_multi_ret, which the callee's own MultiReturn just filled.
+            # This only works for the `a, b = f()` pattern -- reading the buffer right
+            # after the call that's supposed to have filled it -- not for an arbitrary
+            # multi-valued expression.
             self.compile_expr(node.value)
             self.assembly.append("    pop rax")
+            # Per-position types, so string_vars gets the same treatment UnpackAssign's
+            # targets would get from a plain `x = some_string_fn()` Assignment -- without
+            # this, print(name) picks the %d format and shows a string's raw pointer value
+            # as a huge integer instead of calling it as a string.
+            target_types = []
+            if isinstance(node.value, Call):
+                rt = self.func_returns.get(node.value.name, "")
+                if rt.startswith("(") and rt.endswith(")"):
+                    target_types = [t.strip() for t in rt[1:-1].split(",")]
+            max_extra = 8
             for i, target in enumerate(node.targets):
                 if isinstance(target, Variable) and target.name == '_':
                     continue
+                if isinstance(target, Variable) and i < len(target_types) and target_types[i] == "string":
+                    self.string_vars.add(target.name)
                 if i == 0:
-                    self.assembly.append(f"    mov rbx, rax")
-                    if isinstance(target, Variable):
-                        offset = self.local_vars.get(target.name)
-                        if offset is not None:
-                            if isinstance(offset, str):
-                                self.assembly.append(f"    mov {offset}, rbx")
-                            else:
-                                self.assembly.append(f"    mov [rbp - {offset}], rbx")
-                elif i == 1:
-                    self.assembly.append(f"    mov rcx, rax")
-                    if isinstance(target, Variable):
-                        offset = self.local_vars.get(target.name)
-                        if offset is not None:
-                            if isinstance(offset, str):
-                                self.assembly.append(f"    mov {offset}, rcx")
-                            else:
-                                self.assembly.append(f"    mov [rbp - {offset}], rcx")
-                elif i == 2:
-                    self.assembly.append(f"    mov rdx, rax")
-                    if isinstance(target, Variable):
-                        offset = self.local_vars.get(target.name)
-                        if offset is not None:
-                            if isinstance(offset, str):
-                                self.assembly.append(f"    mov {offset}, rdx")
-                            else:
-                                self.assembly.append(f"    mov [rbp - {offset}], rdx")
-            for stmt in node.catch_body:
-                self.compile_stmt(stmt)
-            self.assembly.append(f"{after_label}:")
+                    reg = "rax"
+                elif i - 1 < max_extra:
+                    slot = (i - 1) * 8
+                    self.assembly.append("    lea rcx, [rip + _nova_multi_ret]")
+                    self.assembly.append(f"    mov rax, [rcx + {slot}]")
+                    reg = "rax"
+                else:
+                    continue
+                if isinstance(target, Variable):
+                    offset = self.local_vars.get(target.name)
+                    if offset is not None:
+                        if isinstance(offset, str):
+                            self.assembly.append(f"    mov {offset}, {reg}")
+                        else:
+                            self.assembly.append(f"    mov [rbp - {offset}], {reg}")
         elif isinstance(node, Throw):
             self.compile_expr(node.value)
             self.assembly.append("    pop rdi")

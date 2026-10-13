@@ -931,7 +931,20 @@ class Parser:
         return_type = ""
         if self.current() and self.current()[0] == "ARROW":
             self.eat("ARROW")
-            return_type = self.parse_type_annotation()
+            if self.current() and self.current()[0] == "LPAREN":
+                # Multi-return type annotation: -> (T1, T2, ...). Stored as "(T1,T2,...)";
+                # nothing currently parses this string back apart (type-checking and
+                # float-return inference just won't recognize it as any particular single
+                # type, which is correct -- a multi-return function isn't float-typed).
+                self.eat("LPAREN")
+                parts = [self.parse_type_annotation()]
+                while self.current() and self.current()[0] == "COMMA":
+                    self.eat("COMMA")
+                    parts.append(self.parse_type_annotation())
+                self.eat("RPAREN")
+                return_type = "(" + ",".join(parts) + ")"
+            else:
+                return_type = self.parse_type_annotation()
 
         self.eat("LBRACE")
         body = []

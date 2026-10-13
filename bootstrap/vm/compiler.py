@@ -328,6 +328,27 @@ class Compiler:
         elif isinstance(node, Return):
             self.compile_expr(node.value)
             self.emit(OpCode.RETURN)
+        elif isinstance(node, MultiReturn):
+            # RETURN's frame cleanup collapses the operand stack down to exactly one
+            # value (statement-level calls leave their result on the stack, and that
+            # cleanup exists to drop any extra operands so callers aren't corrupted) --
+            # pushing values[1:] there doesn't survive it. They ride in a side stash
+            # instead; values[0] is the normal, single RETURN value.
+            self.emit(OpCode.CLEAR_RETURN_STASH)
+            for val in node.values[1:]:
+                self.compile_expr(val)
+                self.emit(OpCode.STASH_RETURN)
+            self.compile_expr(node.values[0])
+            self.emit(OpCode.RETURN)
+        elif isinstance(node, UnpackAssign):
+            self.compile_expr(node.value)
+            targets = node.targets
+            first_name = targets[0].name if isinstance(targets[0], Variable) else "_"
+            self.emit(OpCode.STORE_NAME, first_name)
+            for target in targets[1:]:
+                name = target.name if isinstance(target, Variable) else "_"
+                self.emit(OpCode.UNSTASH_RETURN)
+                self.emit(OpCode.STORE_NAME, name)
         elif isinstance(node, RawBlock):
             for stmt in node.body:
                 self.compile_stmt(stmt)

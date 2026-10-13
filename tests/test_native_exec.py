@@ -155,6 +155,35 @@ class TestNativeExec:
             )
         _assert_vm_native_parity(source)
 
+    def test_vm_native_parity_for_multi_return(self):
+        """Regression: MultiReturn/UnpackAssign ('Shipped' in docs/features.md) didn't work in
+        any pipeline. The documented -> (T1, T2, ...) return-type syntax didn't parse; the VM
+        had zero opcode handling for either AST node (silently read unpacked names as unknown);
+        and the Python-bootstrap native backend's UnpackAssign case had a stray copy-paste tail
+        from the Try/Catch handler (`for stmt in node.catch_body`, referencing an attribute
+        UnpackAssign doesn't have) plus logic that assumed rbx/rcx/rdx still held the callee's
+        return values after the call, when the function's own epilogue had already restored
+        them to the caller's values first."""
+        _assert_vm_native_parity(
+            'def get_user() -> (string, int, bool) {\n'
+            '    return "Alice", 30, true\n'
+            '}\n'
+            'name, age, ok = get_user()\n'
+            'print(name)\n'
+            'print(age)\n'
+            'if ok { print(1) } else { print(0) }\n'
+        )
+
+    def test_vm_native_parity_for_multi_return_discard(self):
+        _assert_vm_native_parity(
+            'def minmax(a, b) -> (int, int) {\n'
+            '    if a < b { return a, b }\n'
+            '    return b, a\n'
+            '}\n'
+            'lo, _ = minmax(10, 3)\n'
+            'print(lo)\n'
+        )
+
     def test_vm_native_parity_for_scalar_value_boxing(self):
         _assert_vm_native_parity(
             'boxed = value_box_int(42)\n'

@@ -51,6 +51,7 @@ class VirtualMachine:
         self.open_files = {}
         self.next_fd = 1
         self.handler_stack = []
+        self.return_stash = []  # MultiReturn's values[1:]; see CLEAR/STASH/UNSTASH_RETURN
 
     def retain(self, obj):
         if isinstance(obj, Instance):
@@ -870,6 +871,12 @@ def _vm_run(self):
             elif opcode.value == OpCode.POP_HANDLER.value:
                 if handler_stack:
                     handler_stack.pop()
+            elif opcode.value == OpCode.CLEAR_RETURN_STASH.value:
+                self.return_stash.clear()
+            elif opcode.value == OpCode.STASH_RETURN.value:
+                self.return_stash.append(stack.pop())
+            elif opcode.value == OpCode.UNSTASH_RETURN.value:
+                stack.append(self.return_stash.pop(0) if self.return_stash else 0)
             elif opcode.value == OpCode.RETURN.value:
                 if frames:
                     frame = frames.pop()

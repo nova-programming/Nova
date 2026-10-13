@@ -114,28 +114,60 @@ Delivery: `alloc[T](count)` syntax parsed with type parameter support.
 handler multiplies count by sizeof(T) before calling malloc. Both x86_64
 and ARM64 backends updated.
 
-## 7. Multiple Returns + `_` Discard — Broken, Not Shipped (Correcting an Earlier Status Here)
+## 7. Multiple Returns + `_` Discard — Shipped (Python Bootstrap + VM Only)
 
-The example this section used to show does not work in any pipeline, found while using it as
-a reference for an unrelated feature (`process_capture`, see `stdlib/process.nv`) and
-confirming every claim here against the actual code rather than taking "Shipped" on faith:
+```nova
+def get_user() -> (string, int, bool) {
+    return "Alice", 30, true
+}
+name, age, ok = get_user()
+```
 
-- `def get_user() -> (string, int, bool) { ... }` — the `->` return-type annotation does not
-  accept a parenthesized type list at all (`bootstrap/parser/parser.py`'s `parse_function`
-  calls `parse_type_annotation()`, which parses one type, not a tuple); this is a parse error
-  (`Expected LBRACE, got LPAREN`) in every pipeline.
-- Dropping the return-type annotation (`def get_user() { return "Alice", 30, true }` with
-  `name, age, _ = get_user()`) parses, but:
-  - **VM** (`nova dev`): `bootstrap/vm/machine.py` has no handling at all for `MultiReturn` or
-    `UnpackAssign` — the unpacked names resolve as unknown identifiers and silently read as
-    `0`/empty, with only a resolver warning, no error.
-  - **Python-bootstrap native** (`nova build`): `bootstrap/compiler/backend/x86_64/codegen.py`'s
-    `compile_stmt` crashes outright — `AttributeError: 'UnpackAssign' object has no attribute
-    'catch_body'` — so the feature was never reachable here either.
-- Not fixed this session; this needs a real pass across both bootstrap backends plus the VM,
-  not a touch-up. Tracked in `ROADMAP.md`. Until then, functions needing to return more than
-  one value should use a `data` struct or encode multiple values into one return (as
-  `process_capture` does) instead of `MultiReturn`/`UnpackAssign`.
+This section previously claimed "Shipped" when the documented example didn't work in any
+pipeline (found, and now fixed, while using it as a reference for an unrelated feature,
+`process_capture` — see `stdlib/process.nv`). Fixed this time by actually confirming each
+claim against the code rather than taking the status label on faith:
+
+- **Parser**: the `->` return-type annotation didn't accept a parenthesized type list at all.
+  `parse_function` now special-cases `-> (T1, T2, ...)`, storing it as the string
+  `"(T1,T2,...)"` (nothing currently parses that back apart for anything beyond the one
+  per-position check described below — a multi-return function's `return_type` just doesn't
+  match any single type, which is the correct behavior for it).
+- **VM** (`nova dev`): `bootstrap/vm/machine.py`/`compiler.py` had zero opcode handling for
+  `MultiReturn`/`UnpackAssign` — unpacked names silently read as unknown/`0`. `RETURN`'s frame
+  cleanup collapses the operand stack down to exactly one value (by design, to protect callers
+  from leftover statement-level-call operands), so pushing multiple return values on the main
+  stack doesn't survive it. Fixed with a side stash instead: three new opcodes
+  (`CLEAR_RETURN_STASH`/`STASH_RETURN`/`UNSTASH_RETURN`) carry `values[1:]` across the call
+  boundary while `values[0]` stays the normal single return value. `TypeInferer` also had no
+  `visit_UnpackAssign`/`visit_MultiReturn`, which produced spurious "unknown identifier"
+  warnings on otherwise-working code; fixed by registering each target as `AnyType`.
+- **Python-bootstrap native** (`nova build`): `codegen.py`'s `UnpackAssign` case had a stray
+  copy-paste tail from the `Try`/`Catch` handler right above it (`for stmt in node.catch_body:
+  ...`, referencing an attribute `UnpackAssign` doesn't have) — a straight `AttributeError`
+  crash. Underneath that, the actual logic was wrong regardless: it assumed `rbx`/`rcx`/`rdx`
+  still held the callee's 2nd/3rd return values after the call returned, but the callee's own
+  epilogue (`for reg in reversed(self.used_regs): pop reg`) restores the *caller's* values into
+  those same registers before `ret` — so even without the crash, this would have read back
+  garbage. Fixed the same way as the VM: `values[0]` stays in `rax` (the ABI-compatible single
+  return value, unchanged), `values[1:]` go through a small static buffer
+  (`_nova_multi_ret`, 8 `.quad` slots) that `UnpackAssign` reads from immediately after the
+  call. Also added a `scan_vars` case for `UnpackAssign` (targets weren't getting registered
+  as locals at all, so they'd silently get no stack slot) and `string_vars` tracking driven by
+  the callee's parsed `(T1,T2,...)` return-type string (without it, `print()` on a `string`
+  target picked the `%d` format and showed the raw pointer as a huge integer).
+- **Self-hosted compiler**: never implemented at all — no `MultiReturn`/`UnpackAssign` support
+  anywhere in `stdlib/parser.nv` or the self-hosted codegen. Not part of this fix; this would
+  be adding a new feature to the self-hosted parser/codegen (`AGENTS.md`'s "language features
+  go into `stdlib`"), not fixing an existing one, and is tracked separately.
+- **ARM64 Python-bootstrap** (`bootstrap/compiler/backend/arm64/codegen.py`): has the identical
+  register-smuggling bug as the x86_64 native backend did (`x1`/`x2`/`x3` assumed to survive
+  the callee's epilogue). Not fixed — no ARM64 hardware or emulator is available in this
+  environment to verify a fix, same reasoning as the ARM64 float-negation gap noted elsewhere
+  in this doc's history.
+- Verified: VM and Python-bootstrap native agree on the exact documented example plus a `_`
+  discard case. See `tests/test_native_exec.py::test_vm_native_parity_for_multi_return` and
+  `::test_vm_native_parity_for_multi_return_discard`.
 
 ## 8. Auto-Inlining — Shipped
 

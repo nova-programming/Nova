@@ -15,18 +15,22 @@ Galaxy is a fully functional package manager with a Git-backed registry website,
 ### 3. Small Function Inlining (Implemented)
 Implement advanced compiler optimizations to inline extremely short, non-recursive functions, entirely eliminating call/ret overhead for utility methods.
 
-### 4. Language Feature Roadmap (Nine of Ten Shipped)
+### 4. Language Feature Roadmap (All Ten Shipped — Python Bootstrap + VM)
 Ten features were specified with developer-vs-backend contracts, sequenced by blast radius to
-protect self-hosting stability. Nine work and show **Shipped** in `docs/features.md`: `nova
-run`, `defer`, `alloc[T]` typed pointers, `@entry` bare-metal annotations, "Did you mean?"
-Levenshtein diagnostics, C FFI `extern def`, zero-copy `{ptr,len}` slices, the `.ptr`/`.as_list`
-bridge, and auto-inlining with `@noinline`. **The tenth, multiple returns with `_` discard, is
-not actually shipped** despite the doc previously saying so — its documented syntax doesn't
-parse, and the form that does parse crashes the Python-bootstrap native backend outright and
-silently produces wrong values (`0`/empty) in the VM; see `docs/features.md` section 7 for the
-specifics, found while using it as a reference while adding `process_capture`
-(`stdlib/process.nv`). Needs a real pass across both bootstrap backends and the VM, not a
-touch-up — not attempted this session.
+protect self-hosting stability; all ten now show **Shipped** in `docs/features.md`: `nova run`,
+`defer`, `alloc[T]` typed pointers, `@entry` bare-metal annotations, "Did you mean?" Levenshtein
+diagnostics, C FFI `extern def`, zero-copy `{ptr,len}` slices, the `.ptr`/`.as_list` bridge,
+multiple returns with `_` discard, and auto-inlining with `@noinline`. The tenth was found
+broken in every pipeline (not actually shipped despite the doc previously saying so — see
+`docs/features.md` section 7's full history) and has now been fixed for the Python bootstrap
+and VM: a parser gap (`-> (T1, T2, ...)` didn't parse), a stray copy-paste bug plus a
+fundamentally wrong register-smuggling scheme in the native backend, and zero VM opcode support
+at all, replaced in both backends with a side-stash that doesn't fight the callee's own
+epilogue/frame-cleanup. **Still not implemented in the self-hosted compiler at all** (a new
+feature there, not a fix — tracked separately) **and still has the identical
+register-smuggling bug in the ARM64 Python-bootstrap backend** (not fixed — no ARM64
+hardware/emulator available to verify it, same constraint as the ARM64 float-negation gap
+below).
 
 Two further items are open and tracked separately, not part of this nine/ten count: full SSO
 (inline ≤15B string buffers) was deferred entirely — it changes the `char*` ABI at every
