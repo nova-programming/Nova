@@ -238,6 +238,7 @@ class X86_64Codegen:
             self.assembly.append(f".extern {b_sym}")
 
         self.assembly.append(".extern _slice_list")
+        self.assembly.append(".extern _as_list")
         self.assembly.append(".extern _list_insert")
         self.assembly.append(".extern _list_clear")
         self.assembly.append(".extern _sys_awrite_c")
@@ -1526,13 +1527,26 @@ class X86_64Codegen:
             struct_name = None
             if hasattr(node.instance, 'inferred_type') and getattr(node.instance.inferred_type, 'name', None):
                 struct_name = node.instance.inferred_type.name
-            
-            if struct_name and struct_name != "any":
-                offset = self.get_struct_prop_offset(struct_name, node.field_name)
+
+            if node.field_name == "ptr" and struct_name not in self.struct_defs:
+                # Builtin `.ptr` on a list/string value (docs/features.md's "High-to-Low
+                # Bridge"), not a user struct field literally named "ptr" (those have
+                # struct_name set and go through get_struct_prop_offset below, unaffected).
+                # This used to fall through to get_prop_offset's "no struct defines this
+                # field" default of offset 0 -- `lst.ptr` silently returned the list's own
+                # element count instead of its data pointer.
+                if self._is_string_expr(node.instance):
+                    self.assembly.append("    push rax")
+                else:
+                    self.assembly.append("    mov rax, [rax + 8]")
+                    self.assembly.append("    push rax")
             else:
-                offset = self.get_prop_offset(node.field_name)
-            self.assembly.append(f"    mov rax, [rax + {offset}]")
-            self.assembly.append("    push rax")
+                if struct_name and struct_name != "any":
+                    offset = self.get_struct_prop_offset(struct_name, node.field_name)
+                else:
+                    offset = self.get_prop_offset(node.field_name)
+                self.assembly.append(f"    mov rax, [rax + {offset}]")
+                self.assembly.append("    push rax")
         elif isinstance(node, Alloc):
             self.compile_expr(node.size)
             self.assembly.append("    pop rdi")
@@ -1789,20 +1803,28 @@ class X86_64Codegen:
                 self.assembly.append("    call _fclose")
                 self.assembly.append("    add rsp, 32")
             elif node.method_name == "as_list":
+                # Was completely broken: the instance pointer was popped into rax, then
+                # immediately clobbered by _malloc's own return value before ever being
+                # stored anywhere, leaving the wrapper's data pointer pointing at itself
+                # (mov [rax+8], rax) with count hardcoded to 0 regardless of `count=`, and
+                # the 16-byte header had no ARC tag (runtime.c's _nova_value_retain/
+                # _release/_kind would read 16 bytes before the block looking for one --
+                # see docs/internals/ownership.md). Delegating to runtime.c's _as_list
+                # fixes both: it actually wires up the given pointer/count, and allocates
+                # through _nova_arc_alloc with the "borrowed" pad flag set so the wrapper
+                # is a real, safely ARC-manageable list without the wrap ever taking
+                # ownership of (and incorrectly freeing) the caller's buffer.
                 self.compile_expr(node.instance)
-                self.assembly.append("    pop rax")
                 count = 100
                 if hasattr(node, 'kwargs') and 'count' in node.kwargs:
                     count_node = node.kwargs['count']
                     if isinstance(count_node, Number):
                         count = count_node.value
-                self.assembly.append("    mov rdi, 16")
+                self.assembly.append("    pop rdi")
+                self.assembly.append(f"    mov rsi, {count}")
                 self.assembly.append("    sub rsp, 32")
-                self.assembly.append("    call _malloc")
+                self.assembly.append("    call _as_list")
                 self.assembly.append("    add rsp, 32")
-                self.assembly.append("    mov dword ptr [rax], 0")
-                self.assembly.append("    mov dword ptr [rax + 4], " + str(count))
-                self.assembly.append("    mov [rax + 8], rax")
                 self.assembly.append("    push rax")
             elif node.method_name == "flush":
                 self.compile_expr(node.instance)

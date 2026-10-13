@@ -263,6 +263,39 @@ class TestNativeExec:
             "hello world\n"
         )
 
+    def test_ptr_and_as_list_round_trip(self):
+        """Regression, three compounding bugs found together:
+        1. `.ptr` on a list went through the generic struct-field-offset fallback (no
+           user struct defines a field called "ptr"), which silently defaulted to offset
+           0 -- a list's own element count -- instead of offset 8, the data pointer.
+        2. `.as_list()`'s inline codegen popped the instance pointer into rax, then
+           immediately clobbered it with _malloc's own return value before it was ever
+           stored, leaving the wrapper pointing at itself with count hardcoded to 0
+           regardless of `count=`.
+        3. The 16-byte wrapper header had no ARC tag at all (plain malloc, not
+           _nova_arc_alloc), so passing it to anything that generically retains/releases a
+           value (value_box_list here) was a heap-buffer-underflow read.
+        Fixed (1) and (2) directly, and (3) by routing through runtime.c's _as_list, now
+        allocated via _nova_arc_alloc with a "borrowed" flag so releasing the wrapper
+        frees only the 16-byte header, never the caller's buffer (see
+        docs/internals/ownership.md)."""
+        _build_and_run(
+            'original = [10, 20, 30]\n'
+            'p = original.ptr\n'
+            'wrapped = p.as_list(count=3)\n'
+            'print(len(wrapped))\n'
+            'print(wrapped[0])\n'
+            'print(wrapped[1])\n'
+            'print(wrapped[2])\n'
+            'boxed = value_box_list(wrapped)\n'
+            'print(nova_value_kind(boxed))\n'
+            'nova_value_release(boxed)\n'
+            'print(original[0])\n'
+            'print(original[1])\n'
+            'print(original[2])\n',
+            "3\n10\n20\n30\n1\n10\n20\n30\n"
+        )
+
     def test_arithmetic(self):
         _build_and_run(
             'print(2 + 3 * 4)',

@@ -49,30 +49,31 @@ and will reuse (on append/resize) or free (when the list's `ref_count` hits zero
 - Passing a `.ptr` result to `alloc`-side APIs (anything that expects to own and later `free`
   what you hand it) is the same mistake as calling `free()` on it directly — don't.
 
-### `.as_list(ptr, count=n)` — wrap raw memory as a list header, without ARC
+### `.as_list(ptr, count=n)` — wrap raw memory as an ARC-managed, non-owning view
 
-`raw_ptr.as_list(count=n)` calls `_list_wrap`, which does a plain `malloc(16)` for the header
-(count/capacity/data-pointer) — **not** `_nova_arc_alloc`. The returned list has no
-`NovaARCHeader` at all.
+`raw_ptr.as_list(count=n)` calls `_list_wrap`, which allocates its 16-byte header (count/
+capacity/data-pointer) through `_nova_arc_alloc` like any other list, with one difference: it
+sets the header's otherwise-unused `pad` field to `1`, marking it "borrowed." The returned
+wrapper is a real, safely ARC-manageable list — `_nova_value_retain`/`_release`/`_kind`,
+boxing it as a dict value, etc. all work correctly on it — but `_nova_dec_ref` checks that
+`pad` flag before freeing anything: when a *normal* list's refcount hits zero it frees its
+data pointer too, but a borrowed one only frees its own 16-byte header, never `raw_ptr`.
 
 **Rules:**
-- **The wrapped list and the buffer it wraps are two independent allocations, and nothing
-  frees either one for you.** `free(my_list)` frees only the 16-byte header; `free(my_list.ptr)`
-  (equivalently, `free(raw_ptr)`) frees only the buffer. If you own `raw_ptr`, you are still
-  responsible for freeing it yourself once you're done — wrapping it in a list does not
-  transfer that responsibility to the runtime, because there is no refcounting here at all.
-- **Do not let a `.as_list()` result reach any code path that assumes ARC semantics** —
-  storing it as a dict value, returning it somewhere that retains/releases generically, or
-  anything else that calls `_nova_value_retain`/`_nova_value_release`/`_nova_value_kind` on it.
-  Those walk back 16 bytes from the pointer looking for a `NovaARCHeader` that was never
-  written there; for a plain `malloc(16)` block, that's a heap-buffer-underflow read of
-  whatever memory happens to precede it (unmapped guard page, allocator metadata, or an
-  unrelated block), not a defined "not ARC-managed" result. Keep `.as_list()` results on the
-  manual side of the boundary — index into them, pass them to other manual/FFI code, free them
-  explicitly — and never hand them to anything that might box or generically retain a value.
-- `.as_list()` is for consuming foreign memory (an `alloc[T]` buffer, an FFI return value) as a
-  list *view*, not for turning foreign memory into a first-class, refcounted Nova value. There
-  is currently no supported way to do the latter.
+- **`.as_list()` does not take ownership of `raw_ptr`.** If you own it, you are still
+  responsible for `free(raw_ptr)` yourself once nothing — including the wrapper and anything
+  that retained it — still needs it. The wrapper's own lifetime (ARC-managed, freed
+  automatically) and the buffer's lifetime (yours, manual) are independent; only the 16-byte
+  header goes away when the wrapper is released.
+- **The same buffer can safely be wrapped more than once, or aliased by its original owner,
+  without risking a double-free** — exactly because wrapping never frees the buffer. (This is
+  also why it doesn't: a scheme where releasing a wrapper freed `raw_ptr` would double-free the
+  moment the same buffer was wrapped twice, or freed by both its original owner and a wrapper.)
+- `.as_list()` is for presenting foreign memory (an `alloc[T]` buffer, an FFI return value) as
+  a list *view* — safe to pass anywhere a list is expected, including ARC-generic code — not
+  for transferring ownership of that memory to Nova. There is currently no supported way to do
+  the latter (hand Nova a buffer and have ARC free it for you); only `[1, 2, 3]`-style literals
+  and other Nova-native allocations get that.
 
 ### `alloc[T]` / `free` — manual, and only manual
 
@@ -97,4 +98,4 @@ doesn't make the invariants it violates stop mattering.
 | A list/dict/string value | Nothing — ARC frees it when unreferenced | `free()` it directly |
 | `alloc[T](n)` result | `free(p)`, exactly once | Double-free, use-after-free, or `.as_list()`-wrap-then-forget |
 | `list.ptr` / `string.ptr` | Nothing — you don't own it | `free()` it; use it after the owner mutates or drops |
-| `raw_ptr.as_list(count=n)` | `free(wrapped)` **and separately** `free(raw_ptr)` if you own it | Let it reach ARC-aware code (dict values, generic retain/release) |
+| `raw_ptr.as_list(count=n)` | Nothing for the wrapper (ARC frees it) — `free(raw_ptr)` separately if you own it | Assume wrapping transfers ownership of `raw_ptr` |

@@ -1198,13 +1198,18 @@ SYSCALL void _nova_dec_ref(void *ptr) {
         hdr->ref_count--;
         if (hdr->ref_count <= 0) {
             if (hdr->type_tag == 1) { /* LIST */
-                void *data = *(void**)((char*)ptr + 8);
-                if (data) {
+                /* pad == 1 marks a .as_list()-wrapped view over caller-owned memory
+                 * (see _list_wrap) -- the wrapper is ours to free, the buffer it points
+                 * at is not. */
+                if (!hdr->pad) {
+                    void *data = *(void**)((char*)ptr + 8);
+                    if (data) {
 #if defined(_WIN32)
-                    STR_PFX(free)(data);
+                        STR_PFX(free)(data);
 #else
-                    free(data);
+                        free(data);
 #endif
+                    }
                 }
             } else if (hdr->type_tag == 2) { /* DICT */
                 dict_free(ptr);
@@ -1697,8 +1702,24 @@ SYSCALL void *_nova_value_dict_items(void *dict) {
 
 /* ===== Pointer/alloc bridge helpers ===== */
 SYSCALL void *_list_wrap(void *ptr, intptr_t count) {
-    void *list = malloc(16);
+    /* Allocated via _nova_arc_alloc (not a plain malloc(16)) so the returned list is a
+     * real ARC-managed value like any other list literal: _nova_value_retain/_release/
+     * _nova_value_kind walk back from the pointer looking for a NovaARCHeader, and a
+     * plain malloc(16) block has no such header -- anything that generically retained or
+     * released a .as_list() result (storing it as a dict value, for instance) was a
+     * heap-buffer-underflow read of whatever memory happened to precede that block.
+     *
+     * `pad` is repurposed as a "borrowed" flag (normally always 0/unused): .as_list()
+     * wraps foreign memory as a VIEW, not a transfer of ownership (docs/internals/
+     * ownership.md), so _nova_dec_ref must not free `ptr` itself when this wrapper's
+     * refcount reaches zero -- only the 16-byte wrapper. Without this flag, giving it a
+     * real ARC header would silently turn every .as_list() into an ownership transfer:
+     * the buffer would get freed out from under the caller (or double-freed, if the same
+     * buffer were ever wrapped more than once, or still aliased by its original owner)
+     * the first time the wrapped list's refcount happened to drop to zero. */
+    void *list = _nova_arc_alloc(16, NOVA_VALUE_LIST);
     if (!list) return 0;
+    ((NovaARCHeader*)list - 1)->pad = 1;
     *(int*)list = (int)count;
     *(int*)((char*)list + 4) = (int)count;
     *(intptr_t*)((char*)list + 8) = (intptr_t)ptr;
