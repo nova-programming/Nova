@@ -713,13 +713,17 @@ def _op_return(vm, arg):
     else:
         vm.ip = len(vm.code)
 
+# _vm_run (the actual interpreter loop -- see `VirtualMachine.run = _vm_run` below) has
+# its own inline `elif opcode.value == OpCode.X.value` chain for the hottest opcodes, and
+# only falls back to this table (via _OPCODE_TABLE) for whatever that chain doesn't
+# handle. The inline chain always matches first, so entries here for opcodes it also
+# covers are unreachable; those are omitted (LOAD_CONST/LOAD_STR/LOAD_BOOL/LOAD_NAME/
+# STORE_NAME/ADD/PUSH_HANDLER/POP_HANDLER/THROW/JUMP/JUMP_IF_FALSE/CALL/RETURN -- their
+# _op_* functions are still defined above, just never called). Found and trimmed per
+# ROADMAP.md's note from an earlier session; left the dead functions themselves alone
+# rather than also deleting those, to keep this change to the part that was actually
+# misleading (a dispatch table implying these are reachable, when they aren't).
 _OPCODE_DISPATCH = {
-    OpCode.LOAD_CONST: _op_load_const,
-    OpCode.LOAD_STR: _op_load_str,
-    OpCode.LOAD_BOOL: _op_load_bool,
-    OpCode.LOAD_NAME: _op_load_name,
-    OpCode.STORE_NAME: _op_store_name,
-    OpCode.ADD: _op_add,
     OpCode.SUB: _op_sub,
     OpCode.MUL: _op_mul,
     OpCode.DIV: _op_div,
@@ -740,11 +744,6 @@ _OPCODE_DISPATCH = {
     OpCode.SAR: _op_sar,
     OpCode.HAS: _op_has,
     OpCode.NOT: _op_not,
-    OpCode.PUSH_HANDLER: _op_push_handler,
-    OpCode.POP_HANDLER: _op_pop_handler,
-    OpCode.THROW: _op_throw,
-    OpCode.JUMP: _op_jump,
-    OpCode.JUMP_IF_FALSE: _op_jump_if_false,
     OpCode.PRINT: _op_print,
     OpCode.ALLOC: _op_alloc,
     OpCode.FREE: _op_free,
@@ -771,8 +770,6 @@ _OPCODE_DISPATCH = {
     OpCode.CALL_LIB: _op_call_lib,
     OpCode.SLICE: _op_slice,
     OpCode.STR_CONVERT: _op_str_convert,
-    OpCode.CALL: _op_call,
-    OpCode.RETURN: _op_return,
 }
 
 _OPCODE_TABLE = [None] * (max(k.value for k in _OPCODE_DISPATCH.keys()) + 1)

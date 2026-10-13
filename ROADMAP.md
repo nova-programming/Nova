@@ -48,9 +48,23 @@ The next work is correctness-first rather than another large syntax batch:
    `.as_list`, and `@raw` before expanding unsafe APIs.~~ Done — see
    `docs/internals/ownership.md`. It documents the current contract (two parallel memory
    systems, ARC-managed vs. manual, and exactly where `.ptr`/`.as_list` cross between them)
-   rather than proposing new runtime behavior; one concrete gap it surfaces and leaves open:
-   `.as_list()`'s wrapper has no ARC header, so passing its result anywhere that generically
-   retains/releases a value is a heap-buffer-underflow read, not a defined error.
+   rather than proposing new runtime behavior. The one concrete gap it originally surfaced
+   and left open — `.as_list()`'s wrapper having no ARC header, so passing its result
+   anywhere that generically retains/releases a value was a heap-buffer-underflow read —
+   is now fixed: `_list_wrap`/`_as_list` (`runtime.c`) allocates through `_nova_arc_alloc`
+   with a new "borrowed" flag (the header's otherwise-unused `pad` field) so releasing the
+   wrapper frees only the 16-byte header, never the caller's buffer. Fixing it surfaced two
+   more real, independent bugs in the x86_64 Python-bootstrap backend while verifying the
+   round-trip actually worked (`bootstrap/compiler/backend/x86_64/codegen.py`): `.ptr` on a
+   list went through a generic struct-field-offset fallback that silently defaulted to
+   offset 0 (a list's own element count) instead of offset 8 (the data pointer), since no
+   user struct defines a field literally named "ptr"; and `.as_list()`'s inline codegen
+   popped the instance pointer into `rax`, then immediately clobbered it with `_malloc`'s
+   own return value before it was ever stored, leaving every wrapped list pointing at
+   itself with count hardcoded to 0. Both fixed; the ARM64 Python-bootstrap backend had the
+   identical bugs and got the identical fixes, verified by cross-assembling with
+   `clang --target=arm64-apple-macos11 -c` (no ARM64 hardware/emulator available here to
+   run it). See `tests/test_native_exec.py::test_ptr_and_as_list_round_trip`.
 3. Keep VM-only features such as `call()` explicit and rejected by native builds.
 4. Add `nova check`, formatting, structured diagnostics, and reproducible
    dependency/build metadata. `nova fmt` is deterministic and opt-in;
