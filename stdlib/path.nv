@@ -58,6 +58,77 @@ def path_dirname(value: string) -> string {
     return "."
 }
 
+# True for a leading "/" or "\", or a Windows drive prefix like "C:/" or "C:\".
+def path_is_absolute(value: string) -> int {
+    if len(value) == 0 {
+        return 0
+    }
+    if value[0] == "/" or value[0] == "\\" {
+        return 1
+    }
+    if len(value) >= 3 and value[1] == ":" {
+        if value[2] == "/" or value[2] == "\\" {
+            return 1
+        }
+    }
+    return 0
+}
+
+# Collapses "." segments, resolves ".." against the segments seen so far, and reduces runs of
+# "/"/"\\" to a single "/". A leading drive prefix ("C:") or absolute slash is preserved; a
+# ".." that would escape an absolute path's root, or past a relative path's known segments, is
+# kept literally (there is nothing above it to resolve against).
+def path_normalize(value: string) -> string {
+    prefix = ""
+    rest = value
+    if len(value) >= 2 and value[1] == ":" {
+        prefix = str_sub(value, 0, 2)
+        rest = str_sub(value, 2, len(value))
+    }
+    absolute = 0
+    if len(rest) > 0 and (rest[0] == "/" or rest[0] == "\\") {
+        absolute = 1
+    }
+
+    segments = []
+    n = len(rest)
+    i = 0
+    while i < n {
+        while i < n and (rest[i] == "/" or rest[i] == "\\") {
+            i = i + 1
+        }
+        start = i
+        while i < n and rest[i] != "/" and rest[i] != "\\" {
+            i = i + 1
+        }
+        if i > start {
+            seg = str_sub(rest, start, i)
+            if seg == "." {
+                # drop
+            } elif seg == ".." {
+                if len(segments) > 0 and segments[len(segments) - 1] != ".." {
+                    segments.pop()
+                } elif absolute == 0 {
+                    segments.append(seg)
+                }
+            } else {
+                segments.append(seg)
+            }
+        }
+    }
+
+    joined = path_join(segments)
+    result = prefix
+    if absolute == 1 {
+        result = result + "/"
+    }
+    result = result + joined
+    if len(result) == 0 {
+        return "."
+    }
+    return result
+}
+
 def path_extension(value: string) -> string {
     name = path_basename(value)
     i = len(name) - 1

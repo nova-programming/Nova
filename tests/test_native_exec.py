@@ -122,6 +122,20 @@ class TestNativeExec:
             )
             _assert_vm_native_parity(source)
 
+    def test_vm_native_parity_for_path_normalize_and_is_absolute(self):
+        _assert_vm_native_parity(
+            'import path\n'
+            'print(path_normalize("a/./b/../c"))\n'
+            'print(path_normalize("/a/b/../../c"))\n'
+            'print(path_normalize("a//b///c"))\n'
+            'print(path_normalize("../a/b"))\n'
+            'print(path_normalize("./././"))\n'
+            'if path_is_absolute("/usr/bin") == 1 { print(1) } else { print(0) }\n'
+            'if path_is_absolute("relative/path") == 1 { print(1) } else { print(0) }\n'
+            'if path_is_absolute("C:/Users") == 1 { print(1) } else { print(0) }\n'
+            'if path_is_absolute("") == 1 { print(1) } else { print(0) }\n'
+        )
+
     def test_vm_native_parity_for_control_flow_and_collections(self):
         _assert_vm_native_parity(
             'xs = [1, 2, 3]\n'

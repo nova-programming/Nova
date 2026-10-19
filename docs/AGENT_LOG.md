@@ -1038,3 +1038,23 @@ path, unstashed, and confirmed the test now passes.
   shape (non-empty, correct value kind via `value_box_list`, survives `nova_value_release`)
   rather than exact argv content, since the executable's own path varies by build location.
 - Validation: full suite green (`python -m pytest tests/ -q`, 503 passed / 1 skipped).
+
+### Phase 42: `path_normalize` / `path_is_absolute` Added (2026-10-19)
+
+Another gap in the "portable path helpers" roadmap item: `path.nv` had `path_join`/`path_basename`/
+`path_dirname`/`path_extension` but no way to collapse `.`/`..` segments or redundant slashes, or
+check whether a path is absolute (confirmed via grep — neither existed anywhere in the codebase).
+Added both, pure Nova string manipulation with no runtime/VM/backend changes needed (unlike
+Phase 40's `fs_list_dir`, which needed a real syscall):
+- `path_is_absolute(value: string) -> int`: true for a leading `/`/`\` or a Windows drive prefix
+  (`C:/`, `C:\`).
+- `path_normalize(value: string) -> string`: segments the path, drops `.`, resolves `..` against
+  a stack of prior segments (kept literally if there's nothing to resolve against — can't escape
+  an absolute root, and a relative path with no prior segments keeps the leading `..`), and
+  rejoins with single `/` separators. Preserves a drive prefix and absoluteness.
+- Verified actual output values (not just VM/native agreement) with a direct `nova dev` run:
+  `a/./b/../c` → `a/c`, `/a/b/../../c` → `/c`, `a//b///c` → `a/b/c`, `../a/b` → `../a/b` (kept,
+  nothing to resolve against), `./././` → `.`.
+- Test: `tests/test_native_exec.py::test_vm_native_parity_for_path_normalize_and_is_absolute`.
+- Verified the self-hosted compiler still builds and runs after these stdlib changes.
+- Validation: full suite green (`python -m pytest tests/ -q`, 504 passed / 1 skipped).
