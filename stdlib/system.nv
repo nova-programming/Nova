@@ -33,6 +33,10 @@ def file_delete(path: string) -> int {
     return os_impl.sys_delete(path)
 }
 
+def file_listdir(path: string) -> list[string] {
+    return os_impl.sys_listdir(path)
+}
+
 def file_copy(source: string, destination: string) -> int {
     return os_impl.sys_copy(source, destination)
 }

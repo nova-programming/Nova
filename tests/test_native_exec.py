@@ -105,6 +105,23 @@ class TestNativeExec:
             )
             _assert_vm_native_parity(source)
 
+    def test_vm_native_parity_for_fs_list_dir(self):
+        if not _find_gcc():
+            pytest.skip("GCC not found — native parity tests require GCC")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            listdir_target = os.path.join(tmpdir, "listdir_target")
+            os.mkdir(listdir_target)
+            with open(os.path.join(listdir_target, "only_entry.txt"), "w", encoding="utf-8") as f:
+                f.write("x")
+            dir_path = listdir_target.replace("\\", "/")
+            source = (
+                "import fs\n"
+                f'entries = fs_list_dir("{dir_path}")\n'
+                'print(len(entries))\n'
+                'print(entries[0])\n'
+            )
+            _assert_vm_native_parity(source)
+
     def test_vm_native_parity_for_control_flow_and_collections(self):
         _assert_vm_native_parity(
             'xs = [1, 2, 3]\n'

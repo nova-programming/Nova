@@ -9,6 +9,7 @@
     "    .extern _sys_close_c"
     "    .extern _sys_mkdir_c"
     "    .extern _sys_delete_c"
+    "    .extern _sys_listdir_c"
     "    .extern _sys_copy_c"
     "    .extern _sys_move_c"
     "    .extern _sys_alloc_c"
@@ -51,6 +52,10 @@ def sys_mkdir(path: string) -> int {
 
 def sys_delete(path: string) -> int {
     return sys_delete_c(path)
+}
+
+def sys_listdir(path: string) -> list {
+    return sys_listdir_c(path)
 }
 
 def sys_copy(source: string, destination: string) -> int {

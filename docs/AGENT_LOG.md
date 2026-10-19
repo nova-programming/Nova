@@ -992,3 +992,33 @@ after a bigger problem turned up than the one being fixed.
 1. **Self-hosted `compile_stmt` crash — attempted repro, could not trigger.** Followed up on Phase 38 item 4's leading theory (a fixed-size limit on distinct local-variable names in `compile_stmt`) by adding new uniquely-named local variables directly to that function in `stdlib/backend/x86_64/codegen_stmt.nv` — first one, then ~25 more scattered across several of its `if node.kind == ...` branches — and rebuilding `nova.exe` with itself (`./nova build nova.nv -o ...`) each time. Every build succeeded; the rebuilt compiler ran correctly (smoke-tested and used to rebuild itself again). Also checked `register_var`'s register-caching scheme (`stdlib/backend/x86_64/codegen.nv`): it caps at 4 callee-saved registers (`r12`-`r15`) and falls back to a stack slot cleanly beyond that — no overflow there. Conclusion: the crash is real (per Phase 38's detailed account) but does not reproduce from variable *count* alone — it needed the specific multi-return feature code path that was reverted. Reproducing it again would require re-landing that feature, which is out of scope for a quick follow-up. Left as an open, now-narrowed-but-still-unconfirmed gap: not a simple "N variables" limit.
 2. **Remaining dead VM opcode functions, removed** (`bootstrap/vm/machine.py`). Phase 38 removed 13 dead `_OPCODE_DISPATCH` entries but left their now-fully-unreachable `_op_*` function bodies in place. Verified via grep that each of the 14 candidates (`_op_noop`, `_op_load_const`, `_op_load_str`, `_op_load_bool`, `_op_load_name`, `_op_store_name`, `_op_add`, `_op_push_handler`, `_op_pop_handler`, `_op_throw`, `_op_jump`, `_op_jump_if_false`, `_op_call`, `_op_return`) has exactly one reference in the whole Python codebase (its own `def` line) — i.e. genuinely dead, not just absent from the dispatch table. Deleted all 14 and updated the explanatory comment above `_OPCODE_DISPATCH` accordingly. `_op_noop` was dead from the start (never in the table at all).
 - Validation: full suite green (`python -m pytest tests/ -q`, 501 passed / 1 skipped) after the VM cleanup.
+
+### Phase 40: `fs_list_dir` — Directory Listing Added to All Pipelines (2026-10-19)
+
+ROADMAP's "expand portable filesystem... libraries" priority had a real gap: `fs.nv` could
+create/delete/copy/move/read/write files, but nothing anywhere in the stack (runtime, VM, either
+native backend) could enumerate a directory's contents. Added end to end, following the existing
+`sys_mkdir`/`sys_get_args` plumbing pattern exactly:
+- `runtime.c`: `_sys_listdir_c`, implemented separately for Windows (`FindFirstFileA`/
+  `FindNextFileA`) and Unix (`opendir`/`readdir`), both returning a dynamically-grown list of
+  filename strings through a properly `_nova_arc_alloc`'d list header (matching Phase 38's
+  `.as_list()`/`_list_wrap` fix — a bare `malloc`'d list header, which is what `_sys_get_args_c`
+  still uses today, is unsafe to hand back as a generic Nova list value; not fixing that
+  pre-existing inconsistency here since it's unrelated to this feature, but noting it as a
+  latent issue for whoever touches `get_args()` next). Needed a forward declaration of
+  `_nova_arc_alloc`/`_nova_dec_ref` ahead of the Windows implementation, which sits earlier in
+  the file than their real definitions.
+- `bootstrap/vm/machine.py`: `_builtin_sys_listdir` (`os.listdir`), registered under both
+  `sys_listdir` and `sys_listdir_c`.
+- `stdlib/backend/{x86_64,arm64}/os_{windows,unix}.nv` (all four): `.extern _sys_listdir_c` plus
+  a `sys_listdir` wrapper — no backend-specific codegen needed, since calls to externs declared
+  via `@raw` are generic in both native backends.
+- `stdlib/system.nv` → `file_listdir`, `stdlib/fs.nv` → `fs_list_dir` (the public API).
+- Regression test: `tests/test_native_exec.py::test_vm_native_parity_for_fs_list_dir` — compares
+  VM vs. native output for a directory containing exactly one file, to stay independent of
+  directory-enumeration order (which differs between `os.listdir` and `readdir`/`FindNextFile`
+  and isn't guaranteed sorted by either).
+- Also verified the self-hosted compiler itself still builds and runs after these stdlib changes
+  (`./nova build nova.nv`), bypassing its own build cache (`.nova_cache.txt`) to force a real
+  rebuild rather than trust a cache hit on the unchanged top-level `nova.nv` file.
+- Validation: full suite green (`python -m pytest tests/ -q`, 502 passed / 1 skipped).

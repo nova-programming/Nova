@@ -23,6 +23,10 @@ def fs_delete(path: string) -> int {
     return file_delete(path)
 }
 
+def fs_list_dir(path: string) -> list[string] {
+    return file_listdir(path)
+}
+
 def fs_copy(source: string, destination: string) -> int {
     return file_copy(source, destination)
 }

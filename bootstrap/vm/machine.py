@@ -1179,6 +1179,14 @@ def _builtin_sys_move(m, args):
         m.stack.append(0)
 
 
+def _builtin_sys_listdir(m, args):
+    import os
+    try:
+        m.stack.append([bytearray(name.encode("utf-8")) for name in os.listdir(m._to_str(args[0]))])
+    except (OSError, ValueError):
+        m.stack.append([])
+
+
 def _builtin_sys_platform(m, args):
     import sys
     value = "windows" if sys.platform == "win32" else ("macos" if sys.platform == "darwin" else "linux")
@@ -1651,6 +1659,8 @@ _BUILTIN_HANDLERS = {
     "sys_mkdir_c": _builtin_sys_mkdir,
     "sys_delete": _builtin_sys_delete,
     "sys_delete_c": _builtin_sys_delete,
+    "sys_listdir": _builtin_sys_listdir,
+    "sys_listdir_c": _builtin_sys_listdir,
     "sys_copy": _builtin_sys_copy,
     "sys_copy_c": _builtin_sys_copy,
     "sys_move": _builtin_sys_move,

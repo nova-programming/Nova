@@ -306,6 +306,17 @@ SYSCALL void STR_PFX(out_of_bounds)(void) {
     STR_PFX(exit)(1);
 }
 
+/* Forward declarations: ARC allocation lives further down (near the dict/list helpers) but
+ * _sys_listdir_c, defined here, needs to return a properly ARC-headed list (see the
+ * .as_list()/_list_wrap fix in docs/internals/ownership.md for why a bare malloc'd list
+ * header is unsafe to hand back as an ordinary Nova list value). */
+SYSCALL void *_nova_arc_alloc(unsigned int size, uint32_t type_tag);
+SYSCALL void _nova_dec_ref(void *ptr);
+/* NOVA_VALUE_LIST's enum definition comes later in the file; its value (1) is used
+ * directly here rather than via a macro, to avoid colliding with that enum's own
+ * `NOVA_VALUE_LIST = 1` member declaration. */
+#define _SYS_LISTDIR_VALUE_LIST 1
+
 /* ============== Nova sys_* runtime (_c suffix to match Nova codegen naming) ============== */
 SYSCALL long long _sys_open_c(const char *path, const char *mode) { return STR_PFX(fopen)(path, mode); }
 SYSCALL void _sys_close_c(long long s) { STR_PFX(fclose)(s); }
@@ -324,6 +335,45 @@ SYSCALL int _sys_copy_c(const char *source, const char *destination) {
 SYSCALL int _sys_move_c(const char *source, const char *destination) {
     if (!source || !destination) return 0;
     return MoveFileExA(source, destination, MOVEFILE_REPLACE_EXISTING) ? 1 : 0;
+}
+SYSCALL void *_sys_listdir_c(const char *path) {
+    if (!path) return 0;
+    size_t plen = strlen(path);
+    char *pattern = (char*)STR_PFX(malloc)(plen + 3);
+    if (!pattern) return 0;
+    strcpy(pattern, path);
+    if (plen > 0 && pattern[plen - 1] != '\\' && pattern[plen - 1] != '/') pattern[plen++] = '\\';
+    pattern[plen] = '*'; pattern[plen + 1] = '\0';
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern, &fd);
+    STR_PFX(free)(pattern);
+    void *list = _nova_arc_alloc(16, _SYS_LISTDIR_VALUE_LIST);
+    if (!list) return 0;
+    int cap = 8;
+    void *data = STR_PFX(malloc)((size_t)cap * sizeof(intptr_t));
+    if (!data) { _nova_dec_ref(list); return 0; }
+    int n = 0;
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (STR_PFX(strcmp)(fd.cFileName, ".") == 0 || STR_PFX(strcmp)(fd.cFileName, "..") == 0) continue;
+            if (n >= cap) {
+                cap *= 2;
+                void *bigger = STR_PFX(realloc)(data, (size_t)cap * sizeof(intptr_t));
+                if (!bigger) break;
+                data = bigger;
+            }
+            size_t sl = strlen(fd.cFileName) + 1;
+            char *copy = (char*)STR_PFX(malloc)(sl);
+            if (copy) strcpy(copy, fd.cFileName);
+            *(intptr_t*)((char*)data + n * sizeof(intptr_t)) = (intptr_t)(copy ? copy : "");
+            n++;
+        } while (FindNextFileA(h, &fd));
+        FindClose(h);
+    }
+    *(int*)list = n;
+    *(int*)((char*)list + 4) = n;
+    *(intptr_t*)((char*)list + 8) = (intptr_t)data;
+    return list;
 }
 SYSCALL char *_sys_read_c(long long s) {
     long len;
@@ -1885,6 +1935,7 @@ SYSCALL void *_sys_process_capture_c(const char *command) {
 #include <sys/wait.h>
 #include <sys/mman.h>
 #include <dlfcn.h>
+#include <dirent.h>
 
 SYSCALL char *_nova_read_file(int fd) {
     off_t len = lseek(fd, 0, SEEK_END);
@@ -1954,6 +2005,39 @@ SYSCALL int _sys_copy_c(const char *source, const char *destination) {
 SYSCALL int _sys_move_c(const char *source, const char *destination) {
     if (!source || !destination) return 0;
     return rename(source, destination) == 0 ? 1 : 0;
+}
+
+SYSCALL void *_sys_listdir_c(const char *path) {
+    if (!path) return 0;
+    DIR *dir = opendir(path);
+    void *list = _nova_arc_alloc(16, NOVA_VALUE_LIST);
+    if (!list) return 0;
+    int cap = 8;
+    void *data = malloc((size_t)cap * sizeof(intptr_t));
+    if (!data) { _nova_dec_ref(list); return 0; }
+    int n = 0;
+    if (dir) {
+        struct dirent *ent;
+        while ((ent = readdir(dir)) != NULL) {
+            if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+            if (n >= cap) {
+                cap *= 2;
+                void *bigger = realloc(data, (size_t)cap * sizeof(intptr_t));
+                if (!bigger) break;
+                data = bigger;
+            }
+            size_t sl = strlen(ent->d_name) + 1;
+            char *copy = (char*)malloc(sl);
+            if (copy) strcpy(copy, ent->d_name);
+            *(intptr_t*)((char*)data + n * sizeof(intptr_t)) = (intptr_t)(copy ? copy : "");
+            n++;
+        }
+        closedir(dir);
+    }
+    *(int*)list = n;
+    *(int*)((char*)list + 4) = n;
+    *(intptr_t*)((char*)list + 8) = (intptr_t)data;
+    return list;
 }
 
 SYSCALL void _sys_close_c(long long fd) {
