@@ -313,6 +313,26 @@ class TestNativeExec:
             "3\n10\n20\n30\n1\n10\n20\n30\n"
         )
 
+    def test_get_args_list_survives_generic_retain_release(self):
+        """Regression: _sys_get_args_c (runtime.c) built its returned list with a bare
+        malloc(16) header, not _nova_arc_alloc -- the same class of bug as (3) in
+        test_ptr_and_as_list_round_trip above. Passing the result to anything that
+        generically retains/releases a value (value_box_list here) walked back 16 bytes
+        looking for a NovaARCHeader that was never there, reading whatever malloc's own
+        bookkeeping happened to leave in that memory. Exact arg strings vary by build
+        path, so this only checks shape (non-empty, correct value kind, survives
+        release) rather than exact content."""
+        _build_and_run(
+            'import system\n'
+            'args = system.get_args()\n'
+            'if len(args) >= 1 { print(1) } else { print(0) }\n'
+            'boxed = value_box_list(args)\n'
+            'print(nova_value_kind(boxed))\n'
+            'nova_value_release(boxed)\n'
+            'if len(args) >= 1 { print(1) } else { print(0) }\n',
+            "1\n1\n1\n"
+        )
+
     def test_arithmetic(self):
         _build_and_run(
             'print(2 + 3 * 4)',

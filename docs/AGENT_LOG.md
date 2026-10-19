@@ -1022,3 +1022,19 @@ native backend) could enumerate a directory's contents. Added end to end, follow
   (`./nova build nova.nv`), bypassing its own build cache (`.nova_cache.txt`) to force a real
   rebuild rather than trust a cache hit on the unchanged top-level `nova.nv` file.
 - Validation: full suite green (`python -m pytest tests/ -q`, 502 passed / 1 skipped).
+
+### Phase 41: `get_args()` Missing ARC Header, Fixed (2026-10-19)
+
+Followed up on the latent issue noted in Phase 40: `_sys_get_args_c` (`runtime.c`, all three
+platform variants — Linux, Windows x64, macOS) built its returned list with a bare `malloc(16)`
+header instead of `_nova_arc_alloc`, the same bug class as Phase 38's `.as_list()` fix. Confirmed
+it was real (not just theoretical) before fixing: wrote the regression test first, temporarily
+`git stash`ed the fix, and watched it actually fail — `nova_value_kind()` on a boxed `get_args()`
+result came back `0` instead of `1`, reading whatever garbage happened to sit 16 bytes before
+the list where a `NovaARCHeader` should have been. Fixed all three variants to allocate via
+`_nova_arc_alloc(16, NOVA_VALUE_LIST)` and release via `_nova_dec_ref` on the allocation-failure
+path, unstashed, and confirmed the test now passes.
+- Test: `tests/test_native_exec.py::test_get_args_list_survives_generic_retain_release` — checks
+  shape (non-empty, correct value kind via `value_box_list`, survives `nova_value_release`)
+  rather than exact argv content, since the executable's own path varies by build location.
+- Validation: full suite green (`python -m pytest tests/ -q`, 503 passed / 1 skipped).

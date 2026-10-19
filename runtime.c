@@ -1787,10 +1787,10 @@ SYSCALL void *_sys_get_args_c(void) {
     extern int __nova_argc;
     extern char **__nova_argv;
     int n = __nova_argc;
-    void *list = malloc(16);
+    void *list = _nova_arc_alloc(16, NOVA_VALUE_LIST);
     if (!list) return 0;
     void *data = malloc((size_t)n * sizeof(intptr_t));
-    if (!data) { free(list); return 0; }
+    if (!data) { _nova_dec_ref(list); return 0; }
     *(int*)list = n;
     *(int*)((char*)list + 4) = n;
     *(intptr_t*)((char*)list + 8) = (intptr_t)data;
@@ -1807,10 +1807,10 @@ SYSCALL void *_sys_get_args_c(void) {
     extern int __argc;
     extern char **__argv;
     int n = __argc;
-    void *list = malloc(16);
+    void *list = _nova_arc_alloc(16, NOVA_VALUE_LIST);
     if (!list) return 0;
     void *data = malloc((size_t)n * sizeof(intptr_t));
-    if (!data) { free(list); return 0; }
+    if (!data) { _nova_dec_ref(list); return 0; }
     *(int*)list = n;
     *(int*)((char*)list + 4) = n;
     *(intptr_t*)((char*)list + 8) = (intptr_t)data;
@@ -1828,10 +1828,10 @@ SYSCALL const char *_sys_platform_c(void) { return "macos"; }
 SYSCALL void *_sys_get_args_c(void) {
     int n = *_NSGetArgc();
     char **argv = *_NSGetArgv();
-    void *list = malloc(16);
+    void *list = _nova_arc_alloc(16, NOVA_VALUE_LIST);
     if (!list) return 0;
     void *data = malloc((size_t)n * sizeof(intptr_t));
-    if (!data) { free(list); return 0; }
+    if (!data) { _nova_dec_ref(list); return 0; }
     *(int*)list = n;
     *(int*)((char*)list + 4) = n;
     *(intptr_t*)((char*)list + 8) = (intptr_t)data;
