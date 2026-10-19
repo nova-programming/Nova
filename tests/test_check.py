@@ -51,6 +51,19 @@ def test_check_type_mismatch_names_actual_and_expected_in_order():
     assert "cannot use int where string is expected" not in result.stdout
 
 
+def test_check_arg_count_mismatch_message_is_ascii():
+    """Regression: the arg-count mismatch suggestion used a literal em dash (U+2014).
+    Printed to a Windows console in its default (non-UTF-8) code page, that byte sequence
+    renders as mojibake ('?' or '�') instead of readable text. Every other message in
+    this file uses plain ASCII '--', so this one should too."""
+    result = run_check(
+        'def greet(name: string) -> string { return "hi " + name }\n'
+        'print(greet(1, 2))\n'
+    )
+    assert result.returncode != 0
+    assert "—" not in result.stdout
+    assert "--" in result.stdout
+
 def test_lint_is_advisory_by_default_and_strict_is_opt_in():
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "style.nv")
