@@ -26,11 +26,13 @@ broken in every pipeline (not actually shipped despite the doc previously saying
 and VM: a parser gap (`-> (T1, T2, ...)` didn't parse), a stray copy-paste bug plus a
 fundamentally wrong register-smuggling scheme in the native backend, and zero VM opcode support
 at all, replaced in both backends with a side-stash that doesn't fight the callee's own
-epilogue/frame-cleanup. **Still not implemented in the self-hosted compiler at all** (a new
-feature there, not a fix — tracked separately) **and still has the identical
-register-smuggling bug in the ARM64 Python-bootstrap backend** (not fixed — no ARM64
-hardware/emulator available to verify it, same constraint as the ARM64 float-negation gap
-below).
+epilogue/frame-cleanup. The identical register-smuggling bug in the ARM64 Python-bootstrap
+backend is also now fixed (same side-stash design), verified by cross-assembling with
+`clang --target=arm64-apple-macos11 -c` (no ARM64 hardware/emulator available here to run it).
+**Still not implemented in the self-hosted compiler at all** (a new feature there, not a fix —
+tracked separately; an attempt surfaced a real, unconfirmed memory-safety bug somewhere in the
+self-hosted compiler's own internals — see `docs/AGENT_LOG.md` Phase 38/39 — so it was reverted
+rather than shipped untested).
 
 Two further items are open and tracked separately, not part of this nine/ten count: full SSO
 (inline ≤15B string buffers) was deferred entirely — it changes the `char*` ABI at every
