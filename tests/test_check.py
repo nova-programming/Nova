@@ -36,6 +36,21 @@ def test_check_reports_syntax_context():
     assert "value = (" in result.stdout
 
 
+def test_check_type_mismatch_names_actual_and_expected_in_order():
+    """Regression: TypeInferer.unify's error message had its two type names backwards --
+    every call site passes (expected_type, actual_type) (e.g. unify(param_type, arg_t, ...)
+    for a call argument), but the message read "cannot use {expected} where {actual} is
+    expected", i.e. exactly backwards. A string argument passed where an int parameter is
+    declared must report that a string was given where an int was wanted, not the reverse."""
+    result = run_check(
+        'def add(a: int, b: int) -> int { return a + b }\n'
+        'print(add(1, "2"))\n'
+    )
+    assert result.returncode != 0
+    assert "cannot use string where int is expected" in result.stdout
+    assert "cannot use int where string is expected" not in result.stdout
+
+
 def test_lint_is_advisory_by_default_and_strict_is_opt_in():
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "style.nv")
