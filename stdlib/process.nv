@@ -19,12 +19,13 @@ def process_run(args: list) -> int {
 #
 # Returns the raw "<exit_code>\n<captured stdout>" the runtime encodes into one string
 # (stdlib/backend/*/os_*.nv, runtime.c's _sys_process_capture_c) rather than unpacking it
-# here: `multi_return`/`UnpackAssign` (docs/features.md's "Multiple Returns" feature) has
-# no VM implementation at all (bootstrap/vm/machine.py never handles those AST nodes), so
-# `-> (int, string)` plus `code, out = process_capture(...)` silently breaks under `nova
-# dev` despite the feature being marked Shipped -- see ROADMAP.md. Use
-# process_capture_code()/process_capture_output() on the result instead, which work
-# identically in the VM and both native backends and only run the command once.
+# here. Multi-return (docs/features.md's "Multiple Returns" feature) now works in both the
+# VM and the Python-bootstrap native backends (fixed pre-dating this comment's last
+# update), but process_capture() still returns the encoded string rather than
+# `-> (int, string)` directly, since the self-hosted compiler still has no multi-return
+# support at all (see ROADMAP.md) and this module's callers shouldn't have to care which
+# compiler built them. Use process_capture_code()/process_capture_output() on the result,
+# which work identically across every pipeline and only run the command once.
 def process_capture(command: string) -> string {
     return system_process_capture(command)
 }
