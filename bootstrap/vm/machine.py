@@ -95,61 +95,6 @@ class VirtualMachine:
 
 # --- Opcode dispatch handlers (module-level for speed) ---
 
-def _op_noop(vm, arg):
-    pass
-
-def _op_load_const(vm, arg):
-    vm.stack.append(vm.constants[arg])
-
-def _op_load_str(vm, arg):
-    vm.stack.append(bytearray(vm.strings[arg].encode('utf-8')))
-
-def _op_load_bool(vm, arg):
-    vm.stack.append(arg)
-
-def _op_load_name(vm, arg):
-    name = arg
-    if vm.frames and name in vm.frames[-1].locals:
-        vm.stack.append(vm.frames[-1].locals[name])
-    elif name in vm.env:
-        vm.stack.append(vm.env[name])
-    else:
-        vm.stack.append(0)
-
-def _op_store_name(vm, arg):
-    val = vm.stack.pop()
-    if vm.frames:
-        old_val = vm.frames[-1].locals.get(arg)
-        vm.release(old_val)
-        vm.retain(val)
-        vm.frames[-1].locals[arg] = val
-    else:
-        old_val = vm.env.get(arg)
-        vm.release(old_val)
-        vm.retain(val)
-        vm.env[arg] = val
-
-def _op_add(vm, arg):
-    b = vm.stack.pop()
-    a = vm.stack.pop()
-    if isinstance(a, Instance):
-        method_name = f"{a.class_name}.__add__"
-        if method_name in vm.functions:
-            func_meta = vm.functions[method_name]
-            local_env = {}
-            params = func_meta["params"]
-            if len(params) > 0:
-                p = params[0][0] if isinstance(params[0], (list, tuple)) else params[0]
-                local_env[p] = b
-            vm.frames.append(Frame(vm.ip, local_env, self_context=a, handler_depth=len(vm.handler_stack)))
-            vm.ip = func_meta["ip"]
-            return
-    if isinstance(a, bytearray) and not isinstance(b, bytearray):
-        b = bytearray(str(b).encode('utf-8'))
-    elif isinstance(b, bytearray) and not isinstance(a, bytearray):
-        a = bytearray(str(a).encode('utf-8'))
-    vm.stack.append(a + b)
-
 def _op_sub(vm, arg):
     b = vm.stack.pop()
     a = vm.stack.pop()
@@ -259,32 +204,6 @@ def _op_has(vm, arg):
 
 def _op_not(vm, arg):
     a = vm.stack.pop(); vm.stack.append(not a)
-
-def _op_push_handler(vm, arg):
-    vm.handler_stack.append((arg, len(vm.stack)))
-
-def _op_pop_handler(vm, arg):
-    if vm.handler_stack:
-        vm.handler_stack.pop()
-
-def _op_throw(vm, arg):
-    exc_val = vm.stack.pop()
-    if not vm.handler_stack:
-        print(f"Unhandled exception: {exc_val}")
-        vm.ip = len(vm.code)
-        return
-    catch_ip, saved_sp = vm.handler_stack.pop()
-    del vm.stack[saved_sp:]
-    vm.stack.append(exc_val)
-    vm.ip = catch_ip
-
-def _op_jump(vm, arg):
-    vm.ip = arg
-
-def _op_jump_if_false(vm, arg):
-    cond = vm.stack.pop()
-    if not cond:
-        vm.ip = arg
 
 def _op_print(vm, arg):
     val = vm.stack.pop()
@@ -664,65 +583,13 @@ def _op_str_convert(vm, arg):
     else:
         vm.stack.append(bytearray(str(val).encode('utf-8')))
 
-def _op_call(vm, arg):
-    func_name, num_args = arg
-    args = [vm.stack.pop() for _ in range(num_args)]
-    args.reverse()
-    if func_name in vm.classes:
-        instance = Instance(func_name)
-        init_name = f"{func_name}.__init__"
-        if init_name in vm.functions:
-            func_meta = vm.functions[init_name]
-            local_env = {}
-            for i, param in enumerate(func_meta["params"]):
-                param_name = param[0] if isinstance(param, (list, tuple)) else param
-                local_env[param_name] = args[i] if i < len(args) else 0
-            vm.stack.append(instance)
-            vm.frames.append(Frame(vm.ip, local_env, self_context=instance, is_init=True, handler_depth=len(vm.handler_stack)))
-            vm.ip = func_meta["ip"]
-        else:
-            vm.stack.append(instance)
-        return
-    if func_name not in vm.functions:
-        if vm._call_builtin(func_name, args):
-            return
-        raise Exception(f"Function {func_name} not found")
-    func_meta = vm.functions[func_name]
-    local_env = {}
-    for i, param in enumerate(func_meta["params"]):
-        param_name = param[0] if isinstance(param, (list, tuple)) else param
-        local_env[param_name] = args[i] if i < len(args) else 0
-    vm.frames.append(Frame(vm.ip, local_env, handler_depth=len(vm.handler_stack)))
-    vm.ip = func_meta["ip"]
-
-def _op_return(vm, arg):
-    if vm.frames:
-        frame = vm.frames.pop()
-        del vm.handler_stack[frame.handler_depth:]
-        for val in frame.locals.values():
-            vm.release(val)
-        if frame.is_init:
-            vm.stack.pop()
-        if frame.pending_action == 'print':
-            ret_val = vm.stack.pop()
-            if isinstance(ret_val, bytearray):
-                print(ret_val.decode('utf-8'))
-            else:
-                print(ret_val)
-        vm.ip = frame.return_address
-    else:
-        vm.ip = len(vm.code)
-
 # _vm_run (the actual interpreter loop -- see `VirtualMachine.run = _vm_run` below) has
 # its own inline `elif opcode.value == OpCode.X.value` chain for the hottest opcodes, and
 # only falls back to this table (via _OPCODE_TABLE) for whatever that chain doesn't
 # handle. The inline chain always matches first, so entries here for opcodes it also
-# covers are unreachable; those are omitted (LOAD_CONST/LOAD_STR/LOAD_BOOL/LOAD_NAME/
-# STORE_NAME/ADD/PUSH_HANDLER/POP_HANDLER/THROW/JUMP/JUMP_IF_FALSE/CALL/RETURN -- their
-# _op_* functions are still defined above, just never called). Found and trimmed per
-# ROADMAP.md's note from an earlier session; left the dead functions themselves alone
-# rather than also deleting those, to keep this change to the part that was actually
-# misleading (a dispatch table implying these are reachable, when they aren't).
+# covers would be unreachable; those (LOAD_CONST/LOAD_STR/LOAD_BOOL/LOAD_NAME/STORE_NAME/
+# ADD/PUSH_HANDLER/POP_HANDLER/THROW/JUMP/JUMP_IF_FALSE/CALL/RETURN) and their never-called
+# _op_* functions were removed.
 _OPCODE_DISPATCH = {
     OpCode.SUB: _op_sub,
     OpCode.MUL: _op_mul,
