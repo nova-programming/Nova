@@ -1198,3 +1198,49 @@ backend's AST walker is hand-written per node kind instead of generic:
 - Validation: full suite green (`python -m pytest tests/ -q`, 508 passed / 1 skipped);
   `./nova build nova.nv` (via `build.sh`) rebuilds cleanly and the resulting `nova.exe` passes
   both hand-checked correctness cases.
+
+### Phase 46: Windows Crash Diagnostics — A Real, Partial Fix (2026-10-20)
+
+User asked to continue root-causing the still-unresolved self-hosted `compile_stmt` crash
+(Phase 38/39's negative result). Before attempting a blind reimplementation of the self-hosted
+multi-return feature (the only known trigger, never committed, so it would mean rewriting it
+from scratch with no guarantee of hitting the same bug), checked what crash diagnostics exist
+on this Windows dev environment — concluded that answer matters enough to resolve first, since
+it decides whether bisection is even tractable.
+
+Found the existing `runtime.c` SIGSEGV/`backtrace()` handler is **entirely dead code on
+Windows**: it's textually nested inside `#elif defined(LINUX_WRAP) || defined(MACOS)` (traced
+the open conditional stack at that line to confirm), so its own internal
+`#if defined(_WIN32)` branch never compiles in on an actual `_WIN32` build. It also calls
+`backtrace()`/`backtrace_symbols_fd()`, glibc functions MinGW doesn't provide, so it couldn't
+have worked even if reachable (confirmed by trying to compile the same pattern in isolation —
+hard "implicit declaration" errors).
+
+Replaced it with a real Win32 mechanism, `SetUnhandledExceptionFilter` plus
+`CaptureStackBackTrace` for raw frame addresses (no symbol names without a `dbghelp.lib`
+dependency, out of scope here) — verified working in an isolated plain-C test (null-pointer
+write, handler fires, prints exception code and address).
+
+That isolated success didn't carry over to the real target, though: rebuilt `nova.exe` with the
+handler installed and the actual, previously-fixed null-pointer `len()` bug from Phase 45
+temporarily reintroduced (reverted the `!= 0` guards, confirmed via `git diff` that nothing else
+changed) — still a bare "Segmentation fault" with no `SIGNAL:` line, despite confirming via an
+added, later-removed print that the handler *was* installed. Root cause: every function in
+`runtime.c` is declared `SYSCALL` (`__attribute__((sysv_abi))`) to match Nova's own calling
+convention, but GCC's Windows x64 backend generates `.pdata`/`.xdata` unwind metadata assuming
+the standard Microsoft x64 ABI — overriding to `sysv_abi` breaks or skips that metadata. Without
+valid unwind info, the OS's table-based exception dispatcher can't walk the frame at all, so it
+apparently never reaches even the top-level filter, not just per-frame handlers. That's a
+different, deeper problem than "no handler was installed," and a real fix means emitting correct
+Windows unwind tables for `sysv_abi`-attributed functions — out of scope for this detour.
+
+**Decision: stopped the self-hosted-crash investigation here** rather than continue into a
+blind reimplementation. The practical conclusion is unchanged from before this detour (still no
+way to get a backtrace or fault address for a crash in actual Nova-compiled code or this
+runtime), but it's now a confirmed architectural fact instead of an assumption, which is worth
+knowing before anyone next attempts self-hosted multi-return or touches `compile_stmt` again.
+Kept the `SetUnhandledExceptionFilter` handler anyway: it's a real, documented, strictly-better-
+than-dead-code improvement for crashes in non-`SYSCALL` code (Windows API glue, anything added
+to this file without that attribute), and the comment above it states its limitation plainly so
+nobody trusts it for more than it actually covers.
+- Validation: full suite green (`python -m pytest tests/ -q`, 511 passed / 1 skipped).

@@ -498,6 +498,62 @@ SYSCALL void *_sys_process_capture_c(const char *command) {
     return result;
 }
 
+/* ============== Crash diagnostics for native Windows builds (PARTIAL -- read before relying on this) ============== */
+/* The SIGSEGV/SIGBUS handler further down (guarded by "#if defined(_WIN32)") looks like it
+ * covers Windows too, but it's nested inside this file's "#elif defined(LINUX_WRAP) ||
+ * defined(MACOS)" branch, so on an actual _WIN32 build it's dead code that never compiles
+ * in -- and it calls backtrace()/backtrace_symbols_fd(), glibc functions MinGW doesn't
+ * provide, so it couldn't have worked here even if it were reachable. signal(SIGSEGV, ...)
+ * itself isn't the right tool either: it's a POSIX API for software-raised signals, not
+ * Windows hardware exceptions. SetUnhandledExceptionFilter is the actual Win32 mechanism
+ * for catching an access violation, and it does work -- verified with a plain C
+ * SetUnhandledExceptionFilter + null-pointer-write test in isolation.
+ *
+ * It does NOT fire for a crash inside an actual compiled Nova program, including one
+ * inside this very runtime (verified by reintroducing a known, previously-fixed
+ * null-pointer len() bug from stdlib/backend/x86_64/codegen.nv and rebuilding nova.exe:
+ * still a bare "Segmentation fault" with no SIGNAL: line, even though this handler is
+ * confirmed installed). Every function in this file is declared SYSCALL
+ * (__attribute__((sysv_abi))) so its generated code and calling convention match what
+ * Nova's own x86_64 codegen emits -- but GCC's Windows x64 backend generates .pdata/.xdata
+ * unwind metadata assuming the standard Microsoft x64 ABI, and overriding to sysv_abi
+ * breaks or skips that metadata. Without valid unwind info, the OS's table-based exception
+ * dispatcher can't walk the frame at all, so it apparently never reaches the top-level
+ * filter either -- not just intermediate per-frame handlers. That's a different, deeper
+ * problem than "no handler exists," and fixing it for real would mean emitting correct
+ * Windows unwind tables for sysv_abi-attributed functions, which is out of scope here.
+ *
+ * What this DOES still catch: a crash in code that isn't SYSCALL-attributed (Windows API
+ * glue, anything added to this file without that attribute). Keeping it despite the
+ * limited coverage -- strictly better than the fully-dead code it replaces, and accurately
+ * documented is better than silently wrong. This can't give symbol names without a
+ * dbghelp.lib dependency either, but printed addresses are enough to pinpoint a crashing
+ * instruction via `objdump -d program.exe` against the generated .s file, for whatever it
+ * does catch. */
+static LONG WINAPI _nova_crash_filter(EXCEPTION_POINTERS *ep) {
+    char buf[256];
+    void *frames[32];
+    USHORT n;
+    USHORT i;
+    HANDLE out = GetStdHandle(STD_ERROR_HANDLE);
+    DWORD written;
+    int len = snprintf(buf, sizeof(buf),
+        "SIGNAL:ACCESS_VIOLATION code=0x%08lx addr=%p\n",
+        (unsigned long)ep->ExceptionRecord->ExceptionCode,
+        ep->ExceptionRecord->ExceptionAddress);
+    WriteFile(out, buf, (DWORD)len, &written, NULL);
+    n = CaptureStackBackTrace(0, 32, frames, NULL);
+    for (i = 0; i < n; i++) {
+        len = snprintf(buf, sizeof(buf), "  frame[%u] = %p\n", (unsigned)i, frames[i]);
+        WriteFile(out, buf, (DWORD)len, &written, NULL);
+    }
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+__attribute__((constructor))
+static void _nova_install_crash_filter(void) {
+    SetUnhandledExceptionFilter(_nova_crash_filter);
+}
+
 /* ============== Entry point bridge for Windows x64 ============== */
 /* MinGW x64 CRT expects main() (no _ prefix). Nova codegen emits _main (with _ prefix
  * for Linux compatibility). This bridge lets CRT startup find the entry point. */
