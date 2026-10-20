@@ -1,0 +1,19 @@
+# List append/index workload -- exercises the list header + separately malloc'd data
+# array (and its reallocs as it grows), not raw arithmetic.
+def build_and_sum(n) {
+    xs = []
+    i = 0
+    while i < n {
+        xs.append(i)
+        i = i + 1
+    }
+    total = 0
+    j = 0
+    while j < len(xs) {
+        total = total + xs[j]
+        j = j + 1
+    }
+    return total
+}
+
+print(build_and_sum(300000))

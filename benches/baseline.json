@@ -1,0 +1,35 @@
+{
+  "dict_ops.nv": {
+    "native_median_ms": 27.828399994177744,
+    "native_min_ms": 26.10129999811761,
+    "native_max_ms": 28.64140000019688,
+    "vm_median_ms": 3595.250500002294
+  },
+  "fib_recursive.nv": {
+    "native_median_ms": 19.18810000643134,
+    "native_min_ms": 18.010499989031814,
+    "native_max_ms": 19.415599992498755
+  },
+  "list_ops.nv": {
+    "native_median_ms": 22.823999999673106,
+    "native_min_ms": 21.45510000991635,
+    "native_max_ms": 43.11050000251271,
+    "vm_median_ms": 20118.93384999712
+  },
+  "register_pressure.nv": {
+    "native_median_ms": 45.78790000232402,
+    "native_min_ms": 42.26539999945089,
+    "native_max_ms": 56.80000000575092
+  },
+  "string_building.nv": {
+    "native_median_ms": 1018.3197000005748,
+    "native_min_ms": 959.2349999875296,
+    "native_max_ms": 1074.3149000045378,
+    "vm_median_ms": 1121.3838999974541
+  },
+  "tight_loop_arith.nv": {
+    "native_median_ms": 47.52219999500085,
+    "native_min_ms": 44.10959999950137,
+    "native_max_ms": 52.36729999887757
+  }
+}

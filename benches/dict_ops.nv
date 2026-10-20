@@ -1,0 +1,19 @@
+# Dict set/get workload -- exercises hashing, open-addressing probes, and the resize
+# (_dg) path as the table grows past its 70% load factor.
+def build_and_count(n) {
+    d = {}
+    i = 0
+    while i < n {
+        d.set(str(i), i)
+        i = i + 1
+    }
+    found = 0
+    j = 0
+    while j < n {
+        if d.has(str(j)) == 1 { found = found + 1 }
+        j = j + 1
+    }
+    return found
+}
+
+print(build_and_count(60000))

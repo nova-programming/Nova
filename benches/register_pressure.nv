@@ -1,0 +1,26 @@
+# Designed to expose register-allocation quality: a,b,c,d are declared first but barely
+# used, while total/x/y/z/i are declared later and are the actual hot loop variables.
+# A register allocator that picks registers by declaration order (first N names seen)
+# wastes its registers on a/b/c/d and leaves every hot variable in memory; one that picks
+# by reference count gets this right.
+def work(n) {
+    a = 1
+    b = 2
+    c = 3
+    d = 4
+    total = 0
+    x = 0
+    y = 0
+    z = 0
+    i = 0
+    while i < n {
+        x = x + i
+        y = y + x
+        z = y - x
+        total = total + z
+        i = i + 1
+    }
+    return total + a + b + c + d
+}
+
+print(work(20000000))
