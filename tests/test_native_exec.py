@@ -465,3 +465,28 @@ class TestNativeExec:
             )
             assert result.returncode != 0
             assert "call(name, args) is VM-only" in (result.stdout + result.stderr)
+
+    def test_undefined_variable_is_a_clean_build_error(self):
+        """Regression: referencing an undefined variable (a typo, most commonly) made both
+        native codegen backends raise a raw Python KeyError (self.local_vars[node.name])
+        that propagated all the way out as an unhandled traceback, instead of a normal Nova
+        compile error -- despite `nova check` reporting the same program as fine, since
+        TypeInferer falls back to AnyType for names it doesn't recognize. Native builds
+        should fail cleanly here, the same way any other compile error does."""
+        if not _find_gcc():
+            pytest.skip("GCC not found — native execution tests require GCC")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src_path = os.path.join(tmpdir, "undef.nv")
+            with open(src_path, "w") as f:
+                f.write('print(totally_undefined_name)\n')
+
+            result = subprocess.run(
+                [sys.executable, MAIN_PY, "build", src_path],
+                capture_output=True, text=True, timeout=120,
+                cwd=BOOTSTRAP_DIR
+            )
+            assert result.returncode != 0
+            assert "Undefined variable 'totally_undefined_name'" in result.stdout
+            assert "Traceback" not in result.stderr
+            assert "KeyError" not in result.stderr

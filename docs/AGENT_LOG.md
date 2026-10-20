@@ -1058,3 +1058,45 @@ Phase 40's `fs_list_dir`, which needed a real syscall):
 - Test: `tests/test_native_exec.py::test_vm_native_parity_for_path_normalize_and_is_absolute`.
 - Verified the self-hosted compiler still builds and runs after these stdlib changes.
 - Validation: full suite green (`python -m pytest tests/ -q`, 504 passed / 1 skipped).
+
+### Phase 43: Undefined-Variable Native-Build Crash, Message Swap, Mojibake (2026-10-20)
+
+Three more real bugs found by cross-checking the Python-bootstrap compiler against its
+self-hosted twin and by directly exercising `nova check`/`nova build` on deliberately bad input,
+rather than reading code cold:
+1. **`process.nv`'s multi-return comment was stale.** It claimed the VM had zero multi-return
+   support (true in an earlier phase, not anymore — verified directly: `code, out = get_pair()`
+   works under `nova dev`). Corrected the comment; `process_capture()`'s actual behavior
+   (returning an encoded string rather than `-> (int, string)`) is unchanged, just for the real
+   reason now: the self-hosted compiler still has no multi-return at all.
+2. **Type-mismatch error had expected/actual backwards** (`bootstrap/compiler/type_checker.py`).
+   Every `unify()` call site passes `(expected_type, actual_type)`, but the message read
+   `"cannot use {expected} where {actual} is expected"` — exactly reversed. `add(a: int, b: int)`
+   called with a string argument reported *"cannot use int where string is expected"*. The
+   self-hosted compiler's equivalent message already had this right, which is what flagged it.
+   Fixed the message template; added `tests/test_check.py::test_check_type_mismatch_names_actual_and_expected_in_order`.
+3. **Em dash mojibake in CLI messages.** Several diagnostics (arg-count mismatch suggestions,
+   did-you-mean warnings, the build-cache message, the native-build-fallback message) used a
+   literal em dash (U+2014), which renders as `�` on a Windows console's default (non-UTF-8)
+   code page — reproduced directly (`[cached] ... unchanged <?> ... is up to date`). Replaced
+   with the ASCII `--` every other message in these files already uses. Added
+   `tests/test_check.py::test_check_arg_count_mismatch_message_is_ascii`.
+4. **The real find: `nova build` crashed with a raw unhandled `KeyError` traceback**, not a
+   clean compile error, on the single most common user mistake there is — referencing an
+   undefined or typo'd variable name. `self.local_vars[node.name]` (both native backends,
+   `compiler/backend/{x86_64,arm64}/codegen.py`, in the read paths — `compile_expr`'s and
+   `compile_leaf_to_reg`'s `Variable` cases) indexed the dict directly with no guard, and
+   `main.py` didn't wrap `codegen.generate()` in any exception handler at all (only
+   `TypeInferer().infer(ast)` was guarded). Root cause: `nova check`/`TypeInferer` deliberately
+   falls back to `AnyType()` for names it doesn't recognize (gradual-typing leniency, left alone
+   here since changing it is a bigger, separate judgment call) and never flags a genuinely
+   undefined variable as a type error, so the mistake sailed straight through type-checking and
+   only surfaced as an internal crash during codegen. Fixed both backends to raise a clean
+   `StaticTypeError("Undefined variable '...'")` instead, and wrapped `codegen.generate()` in
+   `main.py` with the same `except StaticTypeError` handling already used for the type-checking
+   phase. Did not touch the Assignment-target `self.local_vars[node.name]` sites (write targets,
+   pre-registered by variable scanning — a KeyError there would indicate a different, scanner-
+   level bug, not a user typo) or the VM's/`nova check`'s leniency. Added
+   `tests/test_native_exec.py::test_undefined_variable_is_a_clean_build_error`.
+- Validation: full suite green after each fix (`python -m pytest tests/ -q`), ending at
+  507 passed / 1 skipped.
