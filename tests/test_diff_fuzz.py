@@ -2,10 +2,12 @@
 and in native builds made by the self-hosted compiler (stage 1 and stage 2).
 
 This is the safety net for backend optimizations: it exercises register allocation (more locals than
-registers), operand folding, branch fusion, leaf-function frames, calls with up to six arguments and list
-indexing. Values are kept in [0, 999] after every assignment and operands of - and * are reduced first, so VM
-(unbounded ints, floor modulo) and native (64-bit, truncating modulo) cannot diverge on overflow or sign,
-and / and % only ever see non-negative operands.
+registers), operand folding, branch fusion, leaf-function frames, calls with up to six arguments, list
+indexing, and dict set/get/has over a small fixed key set (never anything depending on dict iteration
+order, which the VM's Python dict and native's open-addressing table have no reason to agree on). Values
+are kept in [0, 999] after every assignment and operands of - and * are reduced first, so VM (unbounded
+ints, floor modulo) and native (64-bit, truncating modulo) cannot diverge on overflow or sign, and / and %
+only ever see non-negative operands.
 
 Seeds are fixed; set NOVA_FUZZ_SEED / NOVA_FUZZ_COUNT for a deeper local run.
 """
@@ -151,7 +153,7 @@ class Gen:
                 out.append(f"{pad}    }}")
                 out.append(f"{pad}    {target} = (xs[{counter}] + {counter}) % 1000")
                 out.append(f"{pad}}}")
-            elif kind < 0.93:
+            elif kind < 0.90:
                 # string loop; the body may rebind the string, so its length must not be hoisted then
                 counter = f"c{depth}_{self.uid()}"
                 rebinds = self.r.random() < 0.5
@@ -160,6 +162,16 @@ class Gen:
                 if rebinds:
                     out.append(f"{pad}    if len(sv) < 9 {{ sv = sv + \"l\" }}")
                 out.append(f"{pad}}}")
+            elif kind < 0.97:
+                # dict ops over a small fixed key set. Only .set/.get/.has with an explicit
+                # key, never anything that reads key order (e.g. .keys()) -- the VM's Python
+                # dict and native's open-addressing table have no reason to agree on
+                # iteration order, only on what a given key maps to.
+                key = self.r.choice(['"a"', '"b"', '"c"', '"d"', '"e"'])
+                if self.r.random() < 0.5:
+                    out.append(f"{pad}dv.set({key}, {self.wrap(self.expr(scope, 2, mult))})")
+                else:
+                    out.append(f"{pad}if dv.has({key}) == 1 {{ {target} = (dv.get({key}) + {self.atom(scope)}) % 1000 }}")
             else:
                 idx = self.wrap(self.expr(scope, 2, mult))
                 out.append(f"{pad}xs[{idx} % 8] = {self.wrap(self.expr(scope, mult=mult))}")
@@ -180,6 +192,7 @@ class Gen:
             scope.append(v)
         body.append("    xs = [1, 2, 3, 4, 5, 6, 7, 8]")
         body.append("    sv = \"hello\"")
+        body.append("    dv = {}")
         body += self.stmts(scope, locals_, 1, 0, self.r.randint(3, 7))
         ret = self.wrap(" + ".join(self.r.sample(scope, min(len(scope), 3))) if scope else "0")
         body.append(f"    return {ret}")
