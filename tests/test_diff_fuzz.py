@@ -162,7 +162,7 @@ class Gen:
                 if rebinds:
                     out.append(f"{pad}    if len(sv) < 9 {{ sv = sv + \"l\" }}")
                 out.append(f"{pad}}}")
-            elif kind < 0.97:
+            elif kind < 0.93:
                 # dict ops over a small fixed key set. Only .set/.get/.has with an explicit
                 # key, never anything that reads key order (e.g. .keys()) -- the VM's Python
                 # dict and native's open-addressing table have no reason to agree on
@@ -172,6 +172,13 @@ class Gen:
                     out.append(f"{pad}dv.set({key}, {self.wrap(self.expr(scope, 2, mult))})")
                 else:
                     out.append(f"{pad}if dv.has({key}) == 1 {{ {target} = (dv.get({key}) + {self.atom(scope)}) % 1000 }}")
+            elif kind < 0.97:
+                # struct field read/write
+                field = self.r.choice(["fa", "fb"])
+                if self.r.random() < 0.5:
+                    out.append(f"{pad}pt.{field} = {self.wrap(self.expr(scope, 2, mult))}")
+                else:
+                    out.append(f"{pad}{target} = (pt.{field} + {self.atom(scope)}) % 1000")
             else:
                 idx = self.wrap(self.expr(scope, 2, mult))
                 out.append(f"{pad}xs[{idx} % 8] = {self.wrap(self.expr(scope, mult=mult))}")
@@ -193,6 +200,7 @@ class Gen:
         body.append("    xs = [1, 2, 3, 4, 5, 6, 7, 8]")
         body.append("    sv = \"hello\"")
         body.append("    dv = {}")
+        body.append("    pt = FuzzStruct()")
         body += self.stmts(scope, locals_, 1, 0, self.r.randint(3, 7))
         ret = self.wrap(" + ".join(self.r.sample(scope, min(len(scope), 3))) if scope else "0")
         body.append(f"    return {ret}")
@@ -206,6 +214,7 @@ class Gen:
         self.funcs.append((name, nparams))
 
     def program(self):
+        self.lines.append("data FuzzStruct { fa: int fb: int }")
         for i in range(self.r.randint(3, 6)):
             self.function(i)
         for name, n in self.funcs:
