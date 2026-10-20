@@ -1100,3 +1100,48 @@ rather than reading code cold:
    `tests/test_native_exec.py::test_undefined_variable_is_a_clean_build_error`.
 - Validation: full suite green after each fix (`python -m pytest tests/ -q`), ending at
   507 passed / 1 skipped.
+
+### Phase 44: Benchmark Suite + Frequency-Weighted Register Allocation (2026-10-20)
+
+User asked for a benchmark suite before any further performance work, explicitly deferring the
+macOS ARM64 bootstrap crash (untestable here) and asking to continue improving the language
+generally. Built `benches/` — six programs isolating pure native execution time (build once,
+discard a warm-up run, median of 5 timed runs), distinct from `tests/benchmark_overall.py`'s
+build+run system-level comparison against Python/C. `benches/baseline.json` is the committed
+baseline for `--compare` after future codegen changes.
+
+Used it to validate a real improvement to the x86_64 Python-bootstrap backend's register
+allocator (`bootstrap/compiler/backend/x86_64/codegen.py`): `compile_function` handed its 4
+available callee-saved registers (`r12`-`r15`) to whichever 4 variable names were
+declared/assigned first (`register_var`, called in AST-declaration order by `scan_vars`),
+regardless of how often each was actually used afterward. Added `count_var_refs`, a pass that
+counts how often each name is read or written, and claims registers for the highest-count names
+*before* the normal declaration-order scan gets to them (which still runs unchanged and simply
+falls back to a stack slot for anything already claimed).
+
+First version counted raw syntactic occurrences and immediately caused a real, measured
+regression on `dict_ops.nv` (+51%): a dict referenced twice inside a 60,000-iteration loop lost
+its register to a loop counter referenced a few more times *textually* in the same loop, because
+syntactic count doesn't capture that a reference inside a loop body executes once per iteration,
+not once. Fixed by weighting references by loop nesting depth (`count_var_refs` gained a
+`weight` parameter, multiplied by 10 per enclosing `While`/`ForLoop`/`ForIn` body) — `While`
+wasn't even special-cased before (relying only on the generic fallback, which doesn't know it's
+a loop), so it was added alongside the existing `ForLoop`/`ForIn` cases.
+
+After that fix, a `--compare` run showed `tight_loop_arith.nv` (the designed control case, 3
+variables that already fit in all 4 registers under both schemes) at +13.5% slower -- investigated
+before accepting anything, since the generated assembly for old vs. new is instruction-for-
+instruction identical modulo which physical register name each variable got (confirmed by diffing
+`.s` output directly). Proved this was pure measurement drift, not the code: re-measuring the
+*old* scheme at that same moment (via `git stash`) gave ~53ms, not the baseline's original
+47.5ms: the whole system had drifted slower over this long session (background load, thermal
+state, etc.), and an interleaved old/new/old/new run showed both schemes tracking each other
+within noise. The actual improvements (`dict_ops.nv` -6%, `fib_recursive.nv` -6%,
+`list_ops.nv` -33%, `register_pressure.nv` -17%, the last being the benchmark purpose-built to
+expose this exact allocator flaw) are if anything understated by the same drift, since it was
+pulling measurements in the slower direction throughout.
+- Test: `tests/test_native_exec.py::test_vm_native_parity_for_register_allocation_priority` --
+  nested loops, a barely-used parameter, and four barely-used locals declared before the hot
+  ones, to exercise both the frequency ranking and the loop-depth weighting together.
+- Validation: full suite green (`python -m pytest tests/ -q`, 507 passed / 1 skipped);
+  `benches/baseline.json` refreshed with the new allocator in place.

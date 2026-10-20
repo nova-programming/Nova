@@ -1,35 +1,34 @@
 {
   "dict_ops.nv": {
-    "native_median_ms": 27.828399994177744,
-    "native_min_ms": 26.10129999811761,
-    "native_max_ms": 28.64140000019688,
-    "vm_median_ms": 3595.250500002294
+    "native_median_ms": 24.82560000498779,
+    "native_min_ms": 24.135700004990213,
+    "native_max_ms": 25.359999999636784,
+    "vm_median_ms": 3661.8664500056184
   },
   "fib_recursive.nv": {
-    "native_median_ms": 19.18810000643134,
-    "native_min_ms": 18.010499989031814,
-    "native_max_ms": 19.415599992498755
+    "native_median_ms": 19.109800006845035,
+    "native_min_ms": 18.115700004273094,
+    "native_max_ms": 28.354599999147467
   },
   "list_ops.nv": {
-    "native_median_ms": 22.823999999673106,
-    "native_min_ms": 21.45510000991635,
-    "native_max_ms": 43.11050000251271,
-    "vm_median_ms": 20118.93384999712
+    "native_median_ms": 19.09400000295136,
+    "native_min_ms": 15.301799998269416,
+    "native_max_ms": 19.924800013541244
   },
   "register_pressure.nv": {
-    "native_median_ms": 45.78790000232402,
-    "native_min_ms": 42.26539999945089,
-    "native_max_ms": 56.80000000575092
+    "native_median_ms": 44.25950000586454,
+    "native_min_ms": 36.254999999073334,
+    "native_max_ms": 44.94100000010803
   },
   "string_building.nv": {
-    "native_median_ms": 1018.3197000005748,
-    "native_min_ms": 959.2349999875296,
-    "native_max_ms": 1074.3149000045378,
-    "vm_median_ms": 1121.3838999974541
+    "native_median_ms": 998.466200006078,
+    "native_min_ms": 987.2283000004245,
+    "native_max_ms": 1024.6628999884706,
+    "vm_median_ms": 1096.3347500000964
   },
   "tight_loop_arith.nv": {
-    "native_median_ms": 47.52219999500085,
-    "native_min_ms": 44.10959999950137,
-    "native_max_ms": 52.36729999887757
+    "native_median_ms": 53.23869999847375,
+    "native_min_ms": 50.16899999463931,
+    "native_max_ms": 55.835899998783134
   }
 }

@@ -93,6 +93,41 @@ def _assert_vm_native_parity(source: str):
 
 
 class TestNativeExec:
+    def test_vm_native_parity_for_register_allocation_priority(self):
+        """Regression: the x86_64 backend's register allocator picks its small, fixed set of
+        registers by how often each variable is referenced (weighted by loop nesting depth),
+        not by declaration order -- a,b,c,d are declared/assigned first but barely used (and
+        n, a parameter, is used once), while total/x/y/z/i are declared later and are the
+        actual hot variables in a nested loop. Correctness must hold regardless of which
+        variables land in registers vs. memory, including params that lose the register
+        priority they unconditionally had before this change."""
+        _assert_vm_native_parity(
+            'def work(n) {\n'
+            '    a = 1\n'
+            '    b = 2\n'
+            '    c = 3\n'
+            '    d = 4\n'
+            '    total = 0\n'
+            '    x = 0\n'
+            '    y = 0\n'
+            '    z = 0\n'
+            '    i = 0\n'
+            '    while i < 50 {\n'
+            '        j = 0\n'
+            '        while j < 10 {\n'
+            '            x = x + i\n'
+            '            y = y + x\n'
+            '            z = y - x\n'
+            '            total = total + z + j\n'
+            '            j = j + 1\n'
+            '        }\n'
+            '        i = i + 1\n'
+            '    }\n'
+            '    return total + a + b + c + d + n\n'
+            '}\n'
+            'print(work(5))\n'
+        )
+
     def test_vm_native_parity_for_fs_helpers(self):
         if not _find_gcc():
             pytest.skip("GCC not found — native parity tests require GCC")
