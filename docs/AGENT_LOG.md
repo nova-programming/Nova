@@ -1145,3 +1145,56 @@ pulling measurements in the slower direction throughout.
   ones, to exercise both the frequency ranking and the loop-depth weighting together.
 - Validation: full suite green (`python -m pytest tests/ -q`, 507 passed / 1 skipped);
   `benches/baseline.json` refreshed with the new allocator in place.
+
+### Phase 45: Mirroring Register Allocation into the Self-Hosted Backend (2026-10-20)
+
+AGENTS.md requires both codegens stay in step for features that already exist, and Phase 44
+only touched the Python-bootstrap x86_64 backend, leaving `./nova build` (the self-hosted
+compiler most users actually run) without the improvement. Mirrored it into
+`stdlib/backend/x86_64/codegen.nv`, and in the process found two real bugs that the Python
+version's generic AST reflection (`dir(node)`) never could have had, because the self-hosted
+backend's AST walker is hand-written per node kind instead of generic:
+
+1. **A segfault.** `AstNode` (`stdlib/parser.nv`) is a single tagged-union struct where every
+   field (`left`, `right`, `cond`, `body`, `else_body`, `args`) always exists, but list-typed
+   fields default to a bare `0` (not an empty list) for node kinds that never populate them.
+   `count_var_refs`'s generic fallback called `len(node.args)`/`len(node.else_body)`
+   unconditionally on every node kind reaching it (`BinOp`, `Compare`, `Call`,
+   `DataFieldAccess`, ...) — `len(0)` segfaults rather than returning 0. Reproduced reliably by
+   compiling `benches/register_pressure.nv` with a self-rebuilt `nova.exe`; confirmed the
+   unmodified compiler builds it fine, and that merely adding the new functions *unused* didn't
+   crash either — only actually calling them during a real compile did. Fixed with explicit
+   `!= 0` guards before each `len(...)` call.
+2. **A silent correctness bug, worse than the crash.** After fixing the segfault,
+   `work(5)` (five variables, a loop, a lightly-used parameter) computed `5380300355189866506`
+   instead of `25`. Root cause: `compile_function`'s parameter argument-copy step read
+   `state.local_var_regs[p]` / `state.local_vars[p]` *positionally*, assuming parameters always
+   occupy the first `len(node.params)` slots of those parallel arrays — true only because the
+   original code always registered parameters before any other local. Claiming registers for
+   hot non-param locals *before* parameters (the whole point of this change) breaks that
+   assumption: a parameter and an unrelated hot local silently ended up sharing one physical
+   register, each clobbering the other. The Python backend never had this bug because it reads
+   parameters by name (`self.local_vars[param_name]`, a dict) rather than position. Fixed by
+   switching the self-hosted version to the already-existing name-keyed
+   `find_var_reg`/`find_var_offset` lookups instead of positional indexing — confirmed by
+   reverting just this one fix and watching `tests/test_selfhost_register_allocation.py`'s two
+   collision tests fail (one with the wrong number, one by hanging in an infinite loop — an even
+   worse failure mode than the one found by hand).
+- Verified via direct inspection that this was genuinely scoped to my new code, not a
+  resurfacing of the still-unresolved Phase 38/39 `compile_stmt` memory-safety bug: bisected by
+  adding the new functions *unused* first (no crash), then wiring them in (crash), isolating the
+  cause to the traversal logic itself rather than "too many variables in a big function" (the
+  earlier bug's leading theory).
+- Tests: new `tests/test_selfhost_register_allocation.py` (3 tests, using the existing
+  `selfhost_run` fixture that builds a real stage-1 self-hosted compiler from current sources)
+  — the two collision shapes above, plus a rich-expression test (structs, lists, dicts, nested
+  calls, if/elif/else) exercising every `compile_expr` node kind reachable from ordinary syntax,
+  to catch any other unguarded `len()` call on an unset field.
+- Measured via direct A/B timing (self-hosted `nova.exe`, old vs. new scheme, interleaved):
+  `register_pressure.nv` ~113-128ms -> ~107-114ms, a smaller but real improvement than the
+  Python backend's -17% (the self-hosted backend's baseline codegen is already considerably
+  slower per-program than the Python one for unrelated reasons, so the relative win is more
+  modest here).
+- Validation: full suite green (`python -m pytest tests/ -q`, 508 passed / 1 skipped);
+  `./nova build nova.nv` (via `build.sh`) rebuilds cleanly and the resulting `nova.exe` passes
+  both hand-checked correctness cases.

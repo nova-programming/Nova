@@ -756,6 +756,126 @@ def scan_vars(state: CodegenState, node: AstNode) {
     }
 }
 
+def count_var_refs(state: CodegenState, node: AstNode, counts: dict, weight: int) {
+    if node == 0 { return }
+    LOOP_WEIGHT = 10
+    if node.kind == "Variable" {
+        prev = 0
+        if counts.has(node.val_str) { prev = counts.get(node.val_str) }
+        counts.set(node.val_str, prev + weight)
+        return
+    }
+    if node.kind == "Assignment" {
+        prev = 0
+        if counts.has(node.val_str) { prev = counts.get(node.val_str) }
+        counts.set(node.val_str, prev + weight)
+        count_var_refs(state, node.left, counts, weight)
+        return
+    }
+    if node.kind == "ForLoop" {
+        prev = 0
+        if counts.has(node.val_str) { prev = counts.get(node.val_str) }
+        counts.set(node.val_str, prev + weight)
+        count_var_refs(state, node.left, counts, weight)
+        count_var_refs(state, node.right, counts, weight)
+        i = 0
+        while i < len(node.body) {
+            count_var_refs(state, node.body[i], counts, weight * LOOP_WEIGHT)
+            i = i + 1
+        }
+        return
+    }
+    if node.kind == "ForIn" {
+        prev = 0
+        if counts.has(node.val_str) { prev = counts.get(node.val_str) }
+        counts.set(node.val_str, prev + weight)
+        count_var_refs(state, node.left, counts, weight)
+        i = 0
+        while i < len(node.body) {
+            count_var_refs(state, node.body[i], counts, weight * LOOP_WEIGHT)
+            i = i + 1
+        }
+        return
+    }
+    if node.kind == "While" {
+        count_var_refs(state, node.cond, counts, weight)
+        i = 0
+        while i < len(node.body) {
+            count_var_refs(state, node.body[i], counts, weight * LOOP_WEIGHT)
+            i = i + 1
+        }
+        return
+    }
+    if node.kind == "IfElse" {
+        count_var_refs(state, node.cond, counts, weight)
+        i = 0
+        while i < len(node.body) {
+            count_var_refs(state, node.body[i], counts, weight)
+            i = i + 1
+        }
+        i = 0
+        while i < len(node.else_body) {
+            count_var_refs(state, node.else_body[i], counts, weight)
+            i = i + 1
+        }
+        return
+    }
+    count_var_refs(state, node.left, counts, weight)
+    count_var_refs(state, node.right, counts, weight)
+    count_var_refs(state, node.cond, counts, weight)
+    # .body/.else_body/.args default to 0 (not an empty list) for node kinds the parser
+    # never populates them for -- scan_vars above only ever reads these fields for the
+    # specific kinds it knows they're set for; this fallback runs for every other kind
+    # (BinOp, Compare, Call, DataFieldAccess, ...), so it must check first. Calling len()
+    # on a bare 0 segfaults instead of returning 0.
+    i = 0
+    while node.body != 0 and i < len(node.body) {
+        count_var_refs(state, node.body[i], counts, weight)
+        i = i + 1
+    }
+    i = 0
+    while node.else_body != 0 and i < len(node.else_body) {
+        count_var_refs(state, node.else_body[i], counts, weight)
+        i = i + 1
+    }
+    i = 0
+    while node.args != 0 and i < len(node.args) {
+        count_var_refs(state, node.args[i], counts, weight)
+        i = i + 1
+    }
+}
+
+def top_register_candidates(ref_counts: dict, max_count: int) -> list {
+    names = ref_counts.keys()
+    chosen = []
+    chosen_set = {}
+    limit = max_count
+    if limit > len(names) { limit = len(names) }
+    k = 0
+    while k < limit {
+        best_name = ""
+        best_count = 0 - 1
+        i = 0
+        while i < len(names) {
+            name = names[i]
+            if chosen_set.has(name) == 0 {
+                c = ref_counts.get(name)
+                if c > best_count {
+                    best_count = c
+                    best_name = name
+                }
+            }
+            i = i + 1
+        }
+        if best_name == "" { k = limit } else {
+            chosen.append(best_name)
+            chosen_set.set(best_name, 1)
+            k = k + 1
+        }
+    }
+    return chosen
+}
+
 # --- Function compilation ---
 
 def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
@@ -795,6 +915,24 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     psize = ptr_size(state)
     bp = reg32(state, "ebp", "rbp")
     sp = reg32(state, "esp", "rsp")
+
+    ref_counts = {}
+    p = 0
+    while p < len(node.params) {
+        ref_counts.set(node.params[p], 0)
+        p = p + 1
+    }
+    s = 0
+    while s < len(node.body) {
+        count_var_refs(state, node.body[s], ref_counts, 1)
+        s = s + 1
+    }
+    hot_names = top_register_candidates(ref_counts, 4)
+    h = 0
+    while h < len(hot_names) {
+        register_var(state, hot_names[h])
+        h = h + 1
+    }
 
     p = 0
     while p < len(node.params) {
@@ -856,11 +994,16 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
             elif p == 4 { arg_reg = "r8" }
             else { arg_reg = "r9" }
             if arg_reg != "" {
-                var_reg = state.local_var_regs[p]
+                # Looked up by name (not state.local_var_regs[p]/local_vars[p] positionally):
+                # register priority can now claim registers for hot non-param locals before
+                # params are registered below, so params no longer necessarily occupy the
+                # first len(node.params) slots of those parallel arrays in declaration order.
+                param_name = node.params[p]
+                var_reg = find_var_reg(state, param_name)
                 if var_reg != "" {
                     emit(state, "    mov " + var_reg + ", " + arg_reg)
                 } else {
-                    off = state.local_vars[p]
+                    off = find_var_offset(state, param_name)
                     if off > 0 {
                         emit(state, "    mov [%b - " + str(off) + "], " + arg_reg)
                     }
