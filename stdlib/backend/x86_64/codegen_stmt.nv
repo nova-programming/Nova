@@ -745,13 +745,22 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
     if node.kind == "TRY" {
         catch_label = next_label(state, "L_catch")
         after_label = next_label(state, "L_after_try")
-        
+
+        # _try_catch_sp/_catch_ip are arrays indexed by _try_depth (a real handler
+        # stack), not a single slot -- mirrors the identical fix made to both
+        # Python-bootstrap native backends. A single slot breaks as soon as a try is
+        # nested inside a called function or a second try follows the first: the inner
+        # try's normal exit would zero/clobber the outer try's still-active handler.
+        emit(state, "    lea %c, [rip + _try_depth]")
+        emit(state, "    mov %d, [%c]")
         emit(state, "    lea %a, [rip + _try_catch_sp]")
-        emit(state, "    mov [%a], %s")
+        emit(state, "    mov [%a + %d*8], %s")
         emit(state, "    lea %a, [rip + _catch_ip]")
-        emit(state, "    lea %c, [rip + " + catch_label + "]")
-        emit(state, "    mov [%a], %c")
-        
+        emit(state, "    lea %x, [rip + " + catch_label + "]")
+        emit(state, "    mov [%a + %d*8], %x")
+        emit(state, "    inc %d")
+        emit(state, "    mov [%c], %d")
+
         defer_push_scope(state)
         i = 0
         while i < len(node.body) {
@@ -759,10 +768,11 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             i = i + 1
         }
         defer_end_scope(state, debug_mode)
-        
-        emit(state, "    lea %a, [rip + _try_catch_sp]")
-        emit(state, "    xor %c, %c")
-        emit(state, "    mov [%a], %c")
+
+        emit(state, "    lea %c, [rip + _try_depth]")
+        emit(state, "    mov %d, [%c]")
+        emit(state, "    dec %d")
+        emit(state, "    mov [%c], %d")
         emit(state, "    jmp " + after_label)
         emit(state, catch_label + ":")
         emit(state, "    lea %a, [rip + _exception_val]")
@@ -794,11 +804,17 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    lea %a, [rip + _exception_val]")
         emit(state, "    mov [%a], %j")
         defer_emit_down_to(state, 0, debug_mode)
-        emit(state, "    lea %c, [rip + _try_catch_sp]")
-        emit(state, "    mov %s, [%c]")
-        emit(state, "    lea %c, [rip + _catch_ip]")
-        emit(state, "    mov %c, [%c]")
-        emit(state, "    jmp %c")
+        # Pop the handler stack before jumping to it, so a throw from inside a catch
+        # body resumes at the next-outer handler rather than re-entering this one.
+        emit(state, "    lea %c, [rip + _try_depth]")
+        emit(state, "    mov %d, [%c]")
+        emit(state, "    dec %d")
+        emit(state, "    mov [%c], %d")
+        emit(state, "    lea %a, [rip + _try_catch_sp]")
+        emit(state, "    mov %s, [%a + %d*8]")
+        emit(state, "    lea %a, [rip + _catch_ip]")
+        emit(state, "    mov %a, [%a + %d*8]")
+        emit(state, "    jmp %a")
     }
     if node.kind == "Call" or node.kind == "MethodCall" {
         compile_expr(state, node)

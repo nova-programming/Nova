@@ -483,17 +483,29 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
     if node.kind == "TRY" {
         catch_label = next_label(state, "L_catch")
         after_label = next_label(state, "L_after_try")
-        
-        emit(state, "    adrp %c, _try_catch_sp@PAGE")
-        emit(state, "    add %c, %c, _try_catch_sp@PAGEOFF")
-        emit(state, "    mov %d, %s")
+
+        # _try_catch_sp/_catch_ip are arrays indexed by _try_depth (a real handler
+        # stack), not a single slot -- mirrors the identical fix made to both
+        # Python-bootstrap native backends. A single slot breaks as soon as a try is
+        # nested inside a called function or a second try follows the first: the inner
+        # try's normal exit would zero/clobber the outer try's still-active handler.
+        emit(state, "    adrp %c, _try_depth@PAGE")
+        emit(state, "    add %c, %c, _try_depth@PAGEOFF")
+        emit(state, "    ldr %d, [%c]")
+        emit(state, "    adrp %a, _try_catch_sp@PAGE")
+        emit(state, "    add %a, %a, _try_catch_sp@PAGEOFF")
+        emit(state, "    add %a, %a, %d, lsl #3")
+        emit(state, "    mov %x, %s")
+        emit(state, "    str %x, [%a]")
+        emit(state, "    adrp %a, _catch_ip@PAGE")
+        emit(state, "    add %a, %a, _catch_ip@PAGEOFF")
+        emit(state, "    add %a, %a, %d, lsl #3")
+        emit(state, "    adrp %x, " + catch_label + "@PAGE")
+        emit(state, "    add %x, %x, " + catch_label + "@PAGEOFF")
+        emit(state, "    str %x, [%a]")
+        emit(state, "    add %d, %d, #1")
         emit(state, "    str %d, [%c]")
-        emit(state, "    adrp %c, _catch_ip@PAGE")
-        emit(state, "    add %c, %c, _catch_ip@PAGEOFF")
-        emit(state, "    adrp %d, " + catch_label + "@PAGE")
-        emit(state, "    add %d, %d, " + catch_label + "@PAGEOFF")
-        emit(state, "    str %d, [%c]")
-        
+
         defer_push_scope(state)
         i = 0
         while i < len(node.body) {
@@ -501,10 +513,12 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             i = i + 1
         }
         defer_end_scope(state, debug_mode)
-        
-        emit(state, "    adrp %c, _try_catch_sp@PAGE")
-        emit(state, "    add %c, %c, _try_catch_sp@PAGEOFF")
-        emit(state, "    str xzr, [%c]")
+
+        emit(state, "    adrp %c, _try_depth@PAGE")
+        emit(state, "    add %c, %c, _try_depth@PAGEOFF")
+        emit(state, "    ldr %d, [%c]")
+        emit(state, "    sub %d, %d, #1")
+        emit(state, "    str %d, [%c]")
         emit(state, "    b " + after_label)
         emit(state, catch_label + ":")
         emit(state, "    adrp %a, _exception_val@PAGE")
@@ -533,12 +547,21 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    add %c, %c, _exception_val@PAGEOFF")
         emit(state, "    str %a, [%c]")
         defer_emit_down_to(state, 0, debug_mode)
-        emit(state, "    adrp %d, _try_catch_sp@PAGE")
-        emit(state, "    add %d, %d, _try_catch_sp@PAGEOFF")
-        emit(state, "    ldr %d, [%d]")
-        emit(state, "    mov %s, %d")
+        # Pop the handler stack before jumping to it, so a throw from inside a catch
+        # body resumes at the next-outer handler rather than re-entering this one.
+        emit(state, "    adrp %c, _try_depth@PAGE")
+        emit(state, "    add %c, %c, _try_depth@PAGEOFF")
+        emit(state, "    ldr %d, [%c]")
+        emit(state, "    sub %d, %d, #1")
+        emit(state, "    str %d, [%c]")
+        emit(state, "    adrp %x, _try_catch_sp@PAGE")
+        emit(state, "    add %x, %x, _try_catch_sp@PAGEOFF")
+        emit(state, "    add %x, %x, %d, lsl #3")
+        emit(state, "    ldr %x, [%x]")
+        emit(state, "    mov %s, %x")
         emit(state, "    adrp %c, _catch_ip@PAGE")
         emit(state, "    add %c, %c, _catch_ip@PAGEOFF")
+        emit(state, "    add %c, %c, %d, lsl #3")
         emit(state, "    ldr %c, [%c]")
         emit(state, "    br %c")
     }

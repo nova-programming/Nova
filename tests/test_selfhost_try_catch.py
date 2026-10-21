@@ -68,3 +68,32 @@ def test_try_inside_function_with_conditional_throw(selfhost_run):
     r, _ = selfhost_run(source, "selfhost_catch_fn")
     assert r.returncode == 0, r.stdout + r.stderr
     assert r.stdout.split() == ["10", "99"]
+
+
+def test_try_catch_survives_a_caught_throw_inside_a_called_function(selfhost_run):
+    """Regression: _try_catch_sp/_catch_ip (runtime.c) were a single global slot, not a
+    stack -- see the identical fix and full explanation in
+    tests/test_native_exec.py's test_try_catch_survives_a_caught_throw_inside_a_called_function.
+    Once an inner try/catch (inside a called function) actually caught something, the
+    stale slot corrupted an outer try's later throw. Fixed by turning
+    _try_catch_sp/_catch_ip into a real LIFO stack indexed by _try_depth, mirrored across
+    all four backends (both Python-bootstrap native, and self-hosted x86_64/ARM64)."""
+    source = (
+        'def inner(n) {\n'
+        '    try {\n'
+        '        throw n\n'
+        '    } catch e {\n'
+        '        return e * 2\n'
+        '    }\n'
+        '}\n'
+        'try {\n'
+        '    x = inner(5)\n'
+        '    print(x)\n'
+        '    throw 99\n'
+        '} catch e {\n'
+        '    print(e)\n'
+        '}\n'
+    )
+    r, _ = selfhost_run(source, "selfhost_catch_nested_call")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.stdout.split() == ["10", "99"]

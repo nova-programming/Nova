@@ -9,10 +9,13 @@ field read/write. Values are kept in [0, 999] after every assignment and operand
 first, so VM (unbounded ints, floor modulo) and native (64-bit, truncating modulo) cannot diverge on
 overflow or sign, and / and % only ever see non-negative operands.
 
-No try/catch here: the self-hosted parser this fuzzer targets (selfhost_run) doesn't parse try/catch at
-all (confirmed 2026-10-21 -- "expected LPAREN but got IDENT" on `catch e {`), a much bigger gap than
-anything this fuzzer is meant to shake out. See docs/AGENT_LOG.md for the actual bug this exploration
-found: the Python-bootstrap x86_64 backend's catch variable was never registered as a local at all.
+Also covers try/catch, including a try nested inside a called function with the outer try catching
+something after the inner one already caught and returned -- the shape that found a real bug: runtime.c's
+_try_catch_sp/_catch_ip were a single global slot, not a stack, so the already-returned inner frame's
+stale state corrupted the outer throw (see runtime.c's comment on _try_catch_sp, and
+tests/test_native_exec.py's test_try_catch_survives_a_caught_throw_inside_a_called_function). An earlier,
+more basic gap -- the self-hosted parser rejecting every `catch e { ... }` outright -- is fixed too; see
+docs/AGENT_LOG.md.
 
 Seeds are fixed; set NOVA_FUZZ_SEED / NOVA_FUZZ_COUNT for a deeper local run.
 """
@@ -167,23 +170,41 @@ class Gen:
                 if rebinds:
                     out.append(f"{pad}    if len(sv) < 9 {{ sv = sv + \"l\" }}")
                 out.append(f"{pad}}}")
-            elif kind < 0.90:
+            elif kind < 0.885:
                 # dict ops over a small fixed key set. Only .set/.get/.has with an explicit
                 # key, never anything that reads key order (e.g. .keys()) -- the VM's Python
                 # dict and native's open-addressing table have no reason to agree on
                 # iteration order, only on what a given key maps to.
+                # (Was also gated on "< 0.90", same as the string-loop bucket above it --
+                # that made it dead code, since the string-loop check already claimed
+                # every value up to 0.90. Fixed alongside the try/catch addition below.)
                 key = self.r.choice(['"a"', '"b"', '"c"', '"d"', '"e"'])
                 if self.r.random() < 0.5:
                     out.append(f"{pad}dv.set({key}, {self.wrap(self.expr(scope, 2, mult))})")
                 else:
                     out.append(f"{pad}if dv.has({key}) == 1 {{ {target} = (dv.get({key}) + {self.atom(scope)}) % 1000 }}")
-            elif kind < 0.97:
+            elif kind < 0.95:
                 # struct field read/write
                 field = self.r.choice(["fa", "fb"])
                 if self.r.random() < 0.5:
                     out.append(f"{pad}pt.{field} = {self.wrap(self.expr(scope, 2, mult))}")
                 else:
                     out.append(f"{pad}{target} = (pt.{field} + {self.atom(scope)}) % 1000")
+            elif kind < 0.99:
+                # try/catch, conditionally throwing out of a body that may itself call
+                # another generated function (which may, recursively, contain its own
+                # try/catch). This is exactly the shape that found the real bug: a try
+                # nested inside a called function, with the outer try catching something
+                # *after* the inner one already caught and returned. See
+                # tests/test_native_exec.py's
+                # test_try_catch_survives_a_caught_throw_inside_a_called_function and
+                # runtime.c's _try_catch_sp comment.
+                out.append(f"{pad}try {{")
+                out.append(f"{pad}    {target} = {self.wrap(self.expr(scope, 2, mult))}")
+                out.append(f"{pad}    if {self.cond(scope, mult=mult)} {{ throw {self.wrap(self.expr(scope, 2, mult))} }}")
+                out.append(f"{pad}}} catch e {{")
+                out.append(f"{pad}    {target} = (e + {self.atom(scope)}) % 1000")
+                out.append(f"{pad}}}")
             else:
                 idx = self.wrap(self.expr(scope, 2, mult))
                 out.append(f"{pad}xs[{idx} % 8] = {self.wrap(self.expr(scope, mult=mult))}")

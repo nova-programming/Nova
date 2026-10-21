@@ -2139,9 +2139,23 @@ SYSCALL void _sys_exit_c(int code) {
 }
 #endif
 
-/* ==================== Exception handling (manual stack unwind) ==================== */
-long long _try_catch_sp;
-long long _catch_ip;
+/* ==================== Exception handling (manual stack unwind) ====================
+ * _try_catch_sp/_catch_ip are a LIFO stack of handlers indexed by _try_depth, not a
+ * single slot -- a try nested inside a called function, or a second try later in the
+ * same function, must not clobber an outer try's still-active handler. With a single
+ * slot, the inner try's normal exit zeroed it out (or a third try overwrote it), so a
+ * later throw reachable from an outer try either crashed (rsp set to 0) or landed on a
+ * stale catch_ip from an unrelated try block. Found via the differential fuzzer running
+ * try/catch across nested function calls (seeds 1005/1016: native output diverged from
+ * the VM with a plain wrong value, not a crash -- the stale catch_ip executed the wrong
+ * catch body). 256 nesting levels (recursion depth included, since each active call
+ * frame with its own live try consumes one slot) comfortably exceeds any real program's
+ * native call-stack depth.
+ */
+#define NOVA_MAX_TRY_DEPTH 256
+long long _try_catch_sp[NOVA_MAX_TRY_DEPTH];
+long long _catch_ip[NOVA_MAX_TRY_DEPTH];
+long long _try_depth;
 long long _exception_val;
 
 /* ==================== String helper functions ==================== */

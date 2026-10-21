@@ -503,6 +503,35 @@ class TestNativeExec:
             "42\n"
         )
 
+    def test_try_catch_survives_a_caught_throw_inside_a_called_function(self):
+        """Regression: _try_catch_sp/_catch_ip (runtime.c) were a single global slot, not a
+        stack. The *normal*-exit path of a try reset the slot to 0, but the *exceptional*
+        (caught) exit path never touched it at all -- so once an inner try/catch (inside a
+        called function) actually caught something, the slot was left holding the inner
+        try's stale rsp/catch_ip, pointing at a stack frame that had already returned. A
+        later throw from an outer try then restored rsp to that stale address and jumped to
+        the wrong catch_ip, producing a wrong value rather than a crash (harder to notice).
+        Found via the differential fuzzer with try/catch re-enabled in the generator (seeds
+        1005/1016, 2026-10-21): divergence reproduced on both native backends. Fixed by
+        turning _try_catch_sp/_catch_ip into a real LIFO stack indexed by _try_depth."""
+        _build_and_run(
+            'def inner(n) {\n'
+            '    try {\n'
+            '        throw n\n'
+            '    } catch e {\n'
+            '        return e * 2\n'
+            '    }\n'
+            '}\n'
+            'try {\n'
+            '    x = inner(5)\n'
+            '    print(x)\n'
+            '    throw 99\n'
+            '} catch e {\n'
+            '    print(e)\n'
+            '}\n',
+            "10\n99\n"
+        )
+
     def test_dynamic_call_is_rejected_for_native_builds(self):
         if not _find_gcc():
             pytest.skip("GCC not found — native execution tests require GCC")

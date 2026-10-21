@@ -1297,3 +1297,67 @@ instead of the default 14.
    and this session has already seen how much self-hosted-backend changes can bite even when
    seemingly small (Phase 45).
 - Validation: full suite green (`python -m pytest tests/ -q`) after each change.
+
+### Phase 48: Self-Hosted Try/Catch (Three Bugs) + a Real Handler-Stack Bug Found by the Fuzzer (2026-10-21)
+
+Follow-up to Phase 47's left-as-a-gap item: user directed that the self-hosted compiler (not Python)
+become the sole build/ship path on every platform, with Python bootstrap kept only as a dev/test
+reference. Closing the self-hosted try/catch gap was the natural next piece.
+
+1. **Self-hosted try/catch didn't work at all — three compounding bugs**, each only reachable once
+   the previous one was fixed:
+   - `stdlib/parser.nv`'s `parse_try_block` expected `catch(e) { ... }` (parens around the catch
+     variable) — syntax nothing else in the language or test suite ever used. Removed the
+     `LPAREN`/`RPAREN` expectations to match `bootstrap/parser/parser.py`'s `parse_try` exactly.
+   - `stdlib/backend/x86_64/codegen.nv`'s `scan_vars` had no `"TRY"` case at all, so the catch
+     variable was never registered — worse than Phase 47's Python-bootstrap bug, since the
+     self-hosted fallback offset of 0 for an unregistered name means "write to `[rbp - 0]`",
+     directly over the saved frame pointer. Fixed by registering `node.val_str` and recursing into
+     `node.body`/`node.else_body`.
+   - `stdlib/type_checker.nv`'s `TRY` case (`h == 12`) read `node.args`/`node.cond`, but the parser
+     actually sets `node.body`/`node.else_body` — `node.args`/`node.cond` are always unset (null)
+     for a TRY node, so `len(node.args)` segfaulted instead of returning 0 (the same "len() on an
+     unset field" bug class as Phase 45, pre-existing and never exercised until bug #1 stopped
+     blocking every real try/catch program before it reached this code).
+   Added `tests/test_selfhost_try_catch.py` (3 tests), verified against VM reference output.
+2. **Re-enabled the fuzzer's try/catch generator coverage and found a real, deeper bug.** A 20-seed
+   batch surfaced value mismatches (not crashes) on both native backends — e.g. seeds 1005/1016.
+   Root cause: `runtime.c`'s `_try_catch_sp`/`_catch_ip` were a single global slot, not a stack. The
+   *normal*-exit path of a try reset the slot, but the *exceptional* (caught) exit path never
+   touched it — so once an inner try/catch (inside a called function) actually caught something, the
+   slot was left holding that inner try's stale `rsp`/`catch_ip`, pointing at a stack frame that had
+   already returned. A later throw from an *outer*, still-active try then restored `rsp` to that
+   stale address and jumped to the wrong `catch_ip` — a wrong value, not a crash, which is why it
+   slipped past every hand-written test (none of which nested a catching try inside a called
+   function called from within another try).
+   - Fixed by turning `_try_catch_sp`/`_catch_ip` into a real LIFO stack indexed by a new
+     `_try_depth` counter (`runtime.c`, `NOVA_MAX_TRY_DEPTH = 256`). Each `TRY` entry pushes
+     (store at `[depth]`, increment); normal exit pops (decrement); `THROW` pops *before* jumping
+     (so a throw from inside a catch body resumes at the next-outer handler, not its own).
+   - Mirrored across all four codegens that had the identical single-slot pattern: Python-bootstrap
+     x86_64 (`bootstrap/compiler/backend/x86_64/codegen.py`) and ARM64
+     (`bootstrap/compiler/backend/arm64/codegen.py`), and self-hosted x86_64
+     (`stdlib/backend/x86_64/codegen_stmt.nv`) and ARM64 (`stdlib/backend/arm64/codegen_stmt.nv`).
+     Added the new `_try_depth` extern to `stdlib/codegen_common.nv`'s shared externs list (used by
+     both self-hosted backends) and to both Python-bootstrap backends' extern lists.
+   - ARM64 (neither backend executable here): cross-assembled the generated `.s` with
+     `clang --target=arm64-apple-macos11 -c` and read the instructions directly — scratch registers
+     chosen as `x9`/`x10`/`x16`/`x17`, deliberately avoiding `x18` (a reserved platform register on
+     Apple's ABI). Assembles cleanly; correctness reasoned through by hand (same confidence level as
+     Phase 44's ARM64 MultiReturn fix).
+   - Added `test_try_catch_survives_a_caught_throw_inside_a_called_function` to both
+     `tests/test_native_exec.py` (Python-bootstrap x86_64) and `tests/test_selfhost_try_catch.py`
+     (self-hosted x86_64) — both pass. Re-ran the fuzzer's try/catch coverage at 40 seeds against
+     both native backends (80 runs total, including the original failing seeds 1005/1016): 80/80
+     pass.
+   - In passing, found and fixed a dead branch in the fuzzer generator: the dict-ops bucket added in
+     Phase 47 was gated on `kind < 0.90`, identical to the string-loop bucket right above it, so it
+     could never actually fire. Dict coverage had silently been running zero times since Phase 47.
+3. Full suite green: 531 passed, 1 skipped, 13 subtests passed.
+
+Net effect: self-hosted try/catch now works end-to-end, and the underlying exception-handling
+mechanism is now actually correct under nesting on every backend, not just the one the bug happened
+to be found on. Still outstanding for the "self-hosted is the sole build/ship path" goal: self-hosted
+multi-return (never implemented), the pre-existing self-hosted `compile_stmt` crash (Phase 39,
+investigation abandoned for lack of a Windows crash-diagnostics path), and ARM64/macOS reliability in
+general (no hardware to execute on, only cross-assembly review).
