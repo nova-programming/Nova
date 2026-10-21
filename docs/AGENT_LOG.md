@@ -1244,3 +1244,56 @@ than-dead-code improvement for crashes in non-`SYSCALL` code (Windows API glue, 
 to this file without that attribute), and the comment above it states its limitation plainly so
 nobody trusts it for more than it actually covers.
 - Validation: full suite green (`python -m pytest tests/ -q`, 511 passed / 1 skipped).
+
+### Phase 47: Differential Fuzzer at Scale — Call-Graph Fix, Dict/Struct Coverage, a Real Try/Catch Bug (2026-10-20/21)
+
+User asked what would most improve the language long-term; recommended investing in the existing
+differential fuzzer (`tests/test_diff_fuzz.py`, VM vs. self-hosted native) over more manual bug
+sweeps, since every bug found so far this session was found by hand. Ran it with 300 seeds
+instead of the default 14.
+
+1. **300-seed run found 5 timeouts, not a compiler bug.** Each one exceeded the VM's 30s
+   reference-output timeout. Read the actual generated program for seed 1079: 6 chained
+   functions, each calling earlier ones from inside loops, multiplying actual call counts well
+   past what the ~250-line source suggests — every individual loop bound is small and finite, no
+   real infinite loop. Fixed the *generator*, not the compiler: added a weighted call-cost budget
+   (`count_var_refs`-style loop-depth weighting, threaded through `expr()`/`stmts()`/`cond()`),
+   calibrated empirically by sweeping VM-only timing across 300 seeds at a few budget values.
+   Final budget keeps the worst case under the 30s timeout with 3x margin. All 5 originally-
+   failing seeds pass the full differential test now; re-ran the full 300 and got 300/300.
+2. **Added dict coverage** (`.set`/`.get`/`.has` over a small fixed key set) — previously zero,
+   despite dicts being exactly the kind of area (hashing, resize, probing) that's bitten this
+   project before. Deliberately never reads key order (`.keys()`), since the VM's Python dict and
+   native's open-addressing table have no reason to agree on that. 100-seed run: no divergences.
+3. **Added struct field read/write coverage** (`pt.fa`/`pt.fb` on a shared instance) — also
+   previously zero. Verified first that an unset int field zero-initializes identically in VM and
+   native. 100-seed run: no divergences.
+4. **Attempted try/catch coverage, found a real bug, then reverted the generator change.**
+   Adding `try { throw <int> } catch e { ... use e ... }` immediately surfaced a genuine native-
+   only bug: `scan_vars` (both Python-bootstrap backends) never registered the catch variable as
+   a local at all — it's a plain string (`Try.catch_var`), not a nested AST node, so the generic
+   walk that finds `Assignment`/`ForLoop`/`ForIn` targets never saw it. `compile_stmt`'s own `Try`
+   handling already tried to store the exception value via `self.local_vars.get(node.catch_var)`,
+   but that was always `None`, so the store silently never happened. The existing
+   `test_try_catch` (`tests/test_native_exec.py`) never caught this because it never reads the
+   caught value — it only checks that control reaches the catch block. Confirmed with a minimal
+   hand-written case: `catch e { print(e) }` printed `42` in the VM and failed to even compile
+   natively ("Undefined variable 'e'" — the clean error Phase 43 added, not a crash). Fixed
+   `scan_vars` in both the x86_64 (verified: now prints `42` natively) and ARM64 (same missing
+   case, same fix, verified by cross-assembling with clang and inspecting the generated
+   instructions directly — the exception value now stores to and loads from a real stack slot
+   instead of the store being silently skipped) Python-bootstrap backends. Added
+   `tests/test_native_exec.py::test_try_catch_binds_the_exception_value`.
+
+   Then reverted the fuzzer's generator change for try/catch itself: `selfhost_run` (the fixture
+   this fuzzer uses for its native comparison) builds via the *self-hosted* compiler, and its
+   parser doesn't support `try`/`catch` syntax at all (`expected LPAREN but got IDENT` on
+   `catch e {`) — a much bigger, pre-existing gap than anything this fuzzer is meant to shake out
+   for a quick exploration. ROADMAP's June 2026 exceptions milestone describes "full
+   implementation" across lexer/parser/VM/native runtime, but that was before self-hosting was
+   the priority; the self-hosted parser evidently never got try/catch grammar added. Left as a
+   known, documented, unfixed gap (same spirit as the self-hosted multi-return gap) — adding full
+   try/catch grammar to the self-hosted parser is a new-feature-sized project, not a quick fix,
+   and this session has already seen how much self-hosted-backend changes can bite even when
+   seemingly small (Phase 45).
+- Validation: full suite green (`python -m pytest tests/ -q`) after each change.

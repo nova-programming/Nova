@@ -3,11 +3,16 @@ and in native builds made by the self-hosted compiler (stage 1 and stage 2).
 
 This is the safety net for backend optimizations: it exercises register allocation (more locals than
 registers), operand folding, branch fusion, leaf-function frames, calls with up to six arguments, list
-indexing, and dict set/get/has over a small fixed key set (never anything depending on dict iteration
-order, which the VM's Python dict and native's open-addressing table have no reason to agree on). Values
-are kept in [0, 999] after every assignment and operands of - and * are reduced first, so VM (unbounded
-ints, floor modulo) and native (64-bit, truncating modulo) cannot diverge on overflow or sign, and / and %
-only ever see non-negative operands.
+indexing, dict set/get/has over a small fixed key set (never anything depending on dict iteration order,
+which the VM's Python dict and native's open-addressing table have no reason to agree on), and struct
+field read/write. Values are kept in [0, 999] after every assignment and operands of - and * are reduced
+first, so VM (unbounded ints, floor modulo) and native (64-bit, truncating modulo) cannot diverge on
+overflow or sign, and / and % only ever see non-negative operands.
+
+No try/catch here: the self-hosted parser this fuzzer targets (selfhost_run) doesn't parse try/catch at
+all (confirmed 2026-10-21 -- "expected LPAREN but got IDENT" on `catch e {`), a much bigger gap than
+anything this fuzzer is meant to shake out. See docs/AGENT_LOG.md for the actual bug this exploration
+found: the Python-bootstrap x86_64 backend's catch variable was never registered as a local at all.
 
 Seeds are fixed; set NOVA_FUZZ_SEED / NOVA_FUZZ_COUNT for a deeper local run.
 """
@@ -162,7 +167,7 @@ class Gen:
                 if rebinds:
                     out.append(f"{pad}    if len(sv) < 9 {{ sv = sv + \"l\" }}")
                 out.append(f"{pad}}}")
-            elif kind < 0.93:
+            elif kind < 0.90:
                 # dict ops over a small fixed key set. Only .set/.get/.has with an explicit
                 # key, never anything that reads key order (e.g. .keys()) -- the VM's Python
                 # dict and native's open-addressing table have no reason to agree on

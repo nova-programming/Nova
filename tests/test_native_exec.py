@@ -484,6 +484,25 @@ class TestNativeExec:
             "caught\n"
         )
 
+    def test_try_catch_binds_the_exception_value(self):
+        """Regression: scan_vars never registered the catch variable as a local at all --
+        it's a plain string (Try.catch_var), not a nested AST node, so the generic
+        recursive walk that finds Assignment/ForLoop/ForIn targets never saw it. The actual
+        store (compile_stmt's Try handling, which does try self.local_vars.get(node.catch_var))
+        was always silently skipped, so any later read of the caught value failed as an
+        undefined variable. test_try_catch above never caught this because it never reads
+        `e` -- it only checks that control reaches the catch block. Found via the
+        differential fuzzer exploring try/catch coverage (2026-10-21): print(e) after a
+        caught throw 42 printed 42 in the VM and failed to even compile natively."""
+        _build_and_run(
+            'try {\n'
+            '    throw 42\n'
+            '} catch e {\n'
+            '    print(e)\n'
+            '}\n',
+            "42\n"
+        )
+
     def test_dynamic_call_is_rejected_for_native_builds(self):
         if not _find_gcc():
             pytest.skip("GCC not found — native execution tests require GCC")
