@@ -353,14 +353,19 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     }
     
     if h == 12 {
+        # parse_try_block (stdlib/parser.nv) sets .body (try body) and .else_body (catch
+        # body), not .args/.cond -- those are always unset (null) for a TRY node, so
+        # len(node.args)/len(node.cond) segfaulted instead of returning 0. Never caught
+        # before because the self-hosted parser itself rejected every real try/catch
+        # program with a syntax error until that was fixed alongside this.
         i = 0
-        while i < len(node.args) {
-            tc_visit(tc, node.args[i])
+        while i < len(node.body) {
+            tc_visit(tc, node.body[i])
             i = i + 1
         }
         i = 0
-        while i < len(node.cond) {
-            tc_visit(tc, node.cond[i])
+        while i < len(node.else_body) {
+            tc_visit(tc, node.else_body[i])
             i = i + 1
         }
         return create_any_type()

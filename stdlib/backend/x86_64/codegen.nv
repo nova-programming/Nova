@@ -714,6 +714,27 @@ def scan_vars(state: CodegenState, node: AstNode) {
         }
         return
     }
+    if node.kind == "TRY" {
+        # val_str is the catch variable (a plain string, not a nested AstNode), so it's
+        # never found by the generic case below. Without this, compile_stmt's TRY handler
+        # (which stores the caught exception value via find_var_offset(state, node.val_str))
+        # gets back 0 for an unregistered name -- not a safe no-op here, since offset 0 means
+        # "write to [rbp - 0]", i.e. directly over the saved frame pointer on the stack.
+        if node.val_str != "" {
+            register_var(state, node.val_str)
+        }
+        i = 0
+        while i < len(node.body) {
+            scan_vars(state, node.body[i])
+            i = i + 1
+        }
+        i = 0
+        while i < len(node.else_body) {
+            scan_vars(state, node.else_body[i])
+            i = i + 1
+        }
+        return
+    }
     if node.kind == "Print" {
         if node.left != 0 { scan_vars(state, node.left) }
         return
