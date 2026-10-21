@@ -1430,3 +1430,49 @@ all.
    in *every* self-hosted compile -- confirmed by building a trivial one-line program and seeing it in
    the output. Removed.
 - Validation: full suite green (`python -m pytest tests/ -q`) after all changes.
+
+### Phase 50: Fuzzer Multi-Return Coverage Finds a Real rbx-Clobber Bug (2026-10-21)
+
+Natural follow-up to Phase 49: now that self-hosted multi-return works, extended the differential
+fuzzer (`tests/test_diff_fuzz.py`) to cover it, the same way Phase 47/48 did for try/catch -- each
+generated function now sometimes returns 2 or 3 values (biased toward the plain single-value case),
+and call sites (both top-level and inside a function body) sometimes unpack a multi-return call
+instead of just using its first value in an expression.
+
+1. **A 40-seed self-hosted batch passed clean (40/40)** -- the x86_64 self-hosted multi-return
+   implementation from Phase 49 holds up under the fuzzer.
+2. **The next full-suite run found a real, pre-existing bug in the Python-bootstrap x86_64
+   backend**, unrelated to anything built this session: `test_bootstrap_native_matches_vm` failed on
+   12 of 14 default seeds. Reproduced directly (seed 1001): `print(fn0(84, 991, 228, 824, 617, 184))`
+   printed `1000` where the VM (and now self-hosted) printed `94`. Read the generated assembly:
+   `MultiReturn`'s codegen (`bootstrap/compiler/backend/x86_64/codegen.py`) stashed value[0] in `rbx`
+   across the evaluation of values[1:], but ordinary binary-op codegen copies a register-allocated
+   hot variable (Phase 44/45's frequency-weighted allocator; r12-r15) into `rbx` as scratch whenever
+   it's read -- confirmed directly in the assembly: `mov rbx, r14` (loading `v1` for the third return
+   expression) landed *after* `mov rbx, rax` (the value[0] stash) and *before* the final `mov rax,
+   rbx`, so the function returned `v1`'s value instead of its real first return value. This bug
+   predates this session (MultiReturn itself is older), just never exercised by the fuzzer since it
+   never generated multi-return functions until now. Fixed by stashing value[0] on the real stack
+   (`push`/`pop`) instead of in `rbx`, the same design self-hosted's x86_64 MultiReturn already used
+   from Phase 49 (lucky choice, not foresight) -- and, while fixing it, also added the
+   `emit_deferred()` call this function was missing (bootstrap's own Return already runs deferred
+   cleanups; skipping them only for the multi-value case was a second, quieter pre-existing gap).
+3. **Checked the ARM64 bootstrap backend for the same bug class by code comparison** (no ARM64
+   hardware/emulator here to execute or reproduce it directly) and found two bugs, both fixed:
+   - The identical register-stash issue, `mov x1, x0` instead of a stack push -- ARM64 has no
+     hot-variable allocator to mirror x86_64's path, but its own `_alloc_reg()` scratch-register pool
+     (`_compile_expr_to_reg`) starts at x0 and hands out x1 next, so any values[1]/values[2]
+     expression needing two live temporaries at once would clobber the stash exactly the same way.
+   - A second, more serious issue found only by comparing MultiReturn's epilogue against this same
+     file's Return case line by line: MultiReturn never did `add sp, sp, #{self.local_aligned}` (the
+     local-variables stack space Return's epilogue always reclaims) before `ldp fp, lr, [sp], #16` --
+     meaning `ldp` read the saved frame pointer and return address from the wrong stack slot for any
+     multi-return function with local variables, corrupting the caller's frame on return. This is a
+     plausible crash-or-worse bug, not just a wrong value.
+4. **Verified the x86_64 fix directly**: rebuilding and re-running seed 1001 now prints `94` (matching
+   the VM) instead of `1000`. Re-ran the 40-seed batch against both native backends after the fix:
+   80/80 pass. Full suite green.
+
+The ARM64 fix remains unverified beyond careful reading -- consistent with every other ARM64 bootstrap
+change this project has made without hardware, but worth stating plainly rather than implying more
+confidence than that.

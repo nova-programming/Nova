@@ -17,6 +17,11 @@ tests/test_native_exec.py's test_try_catch_survives_a_caught_throw_inside_a_call
 more basic gap -- the self-hosted parser rejecting every `catch e { ... }` outright -- is fixed too; see
 docs/AGENT_LOG.md.
 
+Also covers multi-return (`return a, b[, c]`) and unpacking it (`a, b = f(...)`), both at top level and
+inside a function body -- self-hosted had no support for this at all until added this session (see
+tests/test_selfhost_multi_return.py and docs/AGENT_LOG.md). Each returned value is independently wrapped
+into [0, 999] like every other assignment.
+
 Seeds are fixed; set NOVA_FUZZ_SEED / NOVA_FUZZ_COUNT for a deeper local run.
 """
 import os
@@ -81,7 +86,7 @@ class Gen:
         if op in ("/", "%"):
             return f"({a} {op} {self.r.randint(1, 9)})"
         if op == "call" and self.funcs:
-            name, n = self.r.choice(self.funcs)
+            name, n, nret = self.r.choice(self.funcs)
             cost = (self.func_cost.get(name, 0) + 1) * mult
             if self.total_weight + cost > self.CALL_BUDGET:
                 op = "+"
@@ -190,6 +195,23 @@ class Gen:
                     out.append(f"{pad}pt.{field} = {self.wrap(self.expr(scope, 2, mult))}")
                 else:
                     out.append(f"{pad}{target} = (pt.{field} + {self.atom(scope)}) % 1000")
+            elif kind < 0.97:
+                # Unpacks a multi-return call (`a, b = fnN(...)`) inside a function body, not
+                # just at top level (program() also does this at top level) -- so a
+                # nested/looped unpack gets exercised too. No-ops if no multi-return function
+                # has been generated yet (functions can only call ones defined earlier in
+                # generation order, same guard as expr()'s "call" case above).
+                multi_funcs = [f for f in self.funcs if f[2] > 1]
+                if multi_funcs:
+                    name, n, nret = self.r.choice(multi_funcs)
+                    cost = (self.func_cost.get(name, 0) + 1) * mult
+                    if self.total_weight + cost <= self.CALL_BUDGET:
+                        self.total_weight += cost
+                        args = ", ".join(self.expr(scope, 2, mult) for _ in range(n))
+                        targets = self.r.sample(locals_, min(nret, len(locals_)))
+                        while len(targets) < nret:
+                            targets.append("_")
+                        out.append(f"{pad}{', '.join(targets)} = {name}({args})")
             elif kind < 0.99:
                 # try/catch, conditionally throwing out of a body that may itself call
                 # another generated function (which may, recursively, contain its own
@@ -228,8 +250,15 @@ class Gen:
         body.append("    dv = {}")
         body.append("    pt = FuzzStruct()")
         body += self.stmts(scope, locals_, 1, 0, self.r.randint(3, 7))
-        ret = self.wrap(" + ".join(self.r.sample(scope, min(len(scope), 3))) if scope else "0")
-        body.append(f"    return {ret}")
+        # Multi-value return (`return a, b[, c]`), biased toward the plain single-value case
+        # so most of the existing coverage shape is unchanged. Each value is independently
+        # wrapped into [0, 999] -- MultiReturn bypasses the normal "= wrap(expr)" assignment
+        # path that would otherwise do this, and the whole module's overflow-safety invariant
+        # depends on every value staying in that range.
+        nret = self.r.choices([1, 2, 3], weights=[6, 3, 1])[0]
+        rets = [self.wrap(" + ".join(self.r.sample(scope, min(len(scope), 3))) if scope else "0")
+                for _ in range(nret)]
+        body.append(f"    return {', '.join(rets)}")
         # This function's own weight (including whatever it itself calls) is what callers
         # defined after it should be charged for calling it -- recorded before appending to
         # self.funcs so this function can't immediately call itself in its own body.
@@ -237,16 +266,23 @@ class Gen:
         self.lines.append(f"def {name}({', '.join(params)}) {{")
         self.lines += body
         self.lines.append("}")
-        self.funcs.append((name, nparams))
+        self.funcs.append((name, nparams, nret))
 
     def program(self):
         self.lines.append("data FuzzStruct { fa: int fb: int }")
         for i in range(self.r.randint(3, 6)):
             self.function(i)
-        for name, n in self.funcs:
+        for name, n, nret in self.funcs:
             for _ in range(3):
                 args = ", ".join(str(self.r.randint(0, 999)) for _ in range(n))
-                self.lines.append(f"print({name}({args}))")
+                if nret > 1 and self.r.random() < 0.5:
+                    # Also exercise unpacking at top level, not just inside a function body.
+                    targets = [f"top_{self.uid()}" for _ in range(nret)]
+                    self.lines.append(f"{', '.join(targets)} = {name}({args})")
+                    for t in targets:
+                        self.lines.append(f"print({t})")
+                else:
+                    self.lines.append(f"print({name}({args}))")
         return "\n".join(self.lines) + "\n"
 
 
