@@ -87,6 +87,35 @@ def selfhost_run(selfhost):
 
 
 @pytest.fixture(scope="session")
+def bootstrap_native_run(tmp_path_factory):
+    """Callable: compile + run a program with the Python-bootstrap native x86_64 backend
+    directly (bootstrap/compiler/backend/x86_64/codegen.py), bypassing the self-hosted
+    compiler entirely. The self-hosted compiler is itself built BY this backend, so a bug here
+    affects every native Nova program compiled via `python bootstrap/main.py build`, not just
+    ones built with a self-hosted stage1/stage2 -- distinct from `selfhost_run`, which only
+    exercises the self-hosted compiler's own codegen (stdlib/backend/x86_64/codegen.nv)."""
+    if platform.machine().lower() not in ("amd64", "x86_64"):
+        pytest.skip("x86_64 host required")
+    env = gcc_env()
+    if env is None:
+        pytest.skip("64-bit GCC not found")
+    work = tmp_path_factory.mktemp("bootstrap_native")
+
+    def run(source, name):
+        src = work / (name + ".nv")
+        src.write_text(source, encoding="utf-8")
+        exe = work / (name + EXE)
+        if exe.exists():
+            exe.unlink()
+        b = subprocess.run([sys.executable, MAIN_PY, "build", str(src)], capture_output=True, text=True,
+                           timeout=300, cwd=work, env=env)
+        assert exe.exists(), b.stdout[-2000:] + b.stderr[-2000:]
+        return subprocess.run([str(exe)], capture_output=True, text=True, timeout=60, cwd=work)
+
+    return run
+
+
+@pytest.fixture(scope="session")
 def stage2(selfhost, tmp_path_factory):
     """(stage2 exe, work dir, env): the compiler as built by the self-hosted compiler itself.
 

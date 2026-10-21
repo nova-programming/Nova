@@ -249,6 +249,20 @@ def test_native_matches_vm(seed, selfhost_run):
     assert r.stdout.split() == expected, f"seed {seed} differs\n{program}"
 
 
+@pytest.mark.parametrize("seed", range(START, START + COUNT))
+def test_bootstrap_native_matches_vm(seed, bootstrap_native_run):
+    """Same as test_native_matches_vm, but against the Python-bootstrap native backend
+    directly (bootstrap/compiler/backend/x86_64/codegen.py) instead of the self-hosted
+    compiler. The two backends are maintained in parallel (AGENTS.md) but can diverge --
+    Phase 47's try/catch bug existed in this backend specifically, found by hand, not by this
+    fuzzer, because this comparison didn't exist yet when that bug was found."""
+    program = generate(seed)
+    expected = _vm_output(program).split()
+    r = bootstrap_native_run(program, f"fuzzbn_{seed}")
+    assert r.returncode == 0, f"bootstrap native build crashed for seed {seed}\n{program}"
+    assert r.stdout.split() == expected, f"seed {seed} differs\n{program}"
+
+
 def test_stage2_matches_vm_on_a_sample(stage2):
     from test_stage2 import _run
     for seed in (START, START + 1, START + 2):
