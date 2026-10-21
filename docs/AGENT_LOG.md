@@ -1361,3 +1361,72 @@ to be found on. Still outstanding for the "self-hosted is the sole build/ship pa
 multi-return (never implemented), the pre-existing self-hosted `compile_stmt` crash (Phase 39,
 investigation abandoned for lack of a Windows crash-diagnostics path), and ARM64/macOS reliability in
 general (no hardware to execute on, only cross-assembly review).
+
+### Phase 49: Self-Hosted Multi-Return, a Debug-Print Leftover, and a Real Cross-Compile Bug (2026-10-21)
+
+Continuing the Phase 48 punch list: self-hosted multi-return (`return a, b, c` / `a, b = f()`) was
+entirely unimplemented -- not a bug, a missing feature. `stdlib/parser.nv` never parsed the grammar at
+all.
+
+1. **Added the full pipeline for x86_64**, mirroring `bootstrap/compiler/backend/x86_64/codegen.py`'s
+   existing MultiReturn/UnpackAssign design (value[0] in the normal return register, values[1:] in a
+   static `_nova_multi_ret` buffer):
+   - `stdlib/parser.nv`: RETURN with a trailing comma builds a `MultiReturn` node (reusing the generic
+     `args` list field for its values, the same way TRY reuses `else_body`); the statement-fallback
+     assignment path builds an `UnpackAssign` node on `expr, expr2, ... = value` (targets in `args`,
+     RHS in `left`).
+   - `stdlib/type_checker.nv`: added `MultiReturn`/`UnpackAssign` handlers (kinds 32/33) -- visits
+     children and binds unpacked targets to `any`, since the self-hosted type system has no
+     per-component type for a multi-return call's individual values.
+   - `stdlib/backend/x86_64/codegen.nv`: added the `_nova_multi_ret` static data buffer; added
+     `scan_vars` cases for both kinds (MultiReturn recurses into its values; UnpackAssign registers
+     each `Variable` target, skipping `_`).
+   - `stdlib/backend/x86_64/codegen_stmt.nv`: added the actual codegen. One deliberate difference from
+     the Python-bootstrap reference: self-hosted's MultiReturn runs `defer_emit_down_to` before
+     returning (bootstrap's x86_64 MultiReturn doesn't) -- self-hosted's own single-value Return
+     already runs deferred cleanups, so skipping them only for the multi-value case would be a new,
+     self-inconsistent bug, not faithful mirroring.
+   - Verified end-to-end: 2 and 3 return values, `_` skipping a target, and defers firing (and firing
+     *before* the caller reads the returned values) all work. New
+     `tests/test_selfhost_multi_return.py` (4 tests, all passing).
+2. **Mirrored to ARM64** (`stdlib/backend/arm64/codegen.nv` and `codegen_stmt.nv`) per AGENTS.md policy,
+   plus found and fixed a *separate*, pre-existing gap while there: ARM64's `scan_vars` had no `"TRY"`
+   case at all (x86_64's got this fix in Phase 48; ARM64 never did), meaning the self-hosted ARM64
+   backend has had the identical "catch variable never registered, offset 0 overwrites the saved frame
+   pointer" bug as x86_64 did, for as long as ARM64 try/catch codegen has existed. Fixed the same way.
+   **Correction to Phase 48's record**: that phase's "ARM64 ... verified by cross-assembling with
+   clang" claim, read carefully, only cross-assembled `bootstrap/compiler/backend/arm64/codegen.py`'s
+   output (the Python-bootstrap backend, also edited that phase) -- it never actually exercised
+   `stdlib/backend/arm64/codegen_stmt.nv`'s try/catch code at all. That self-hosted ARM64 code, and this
+   phase's self-hosted ARM64 multi-return code, remain verified only by hand-reading plus confirming
+   they compile cleanly through the self-hosting chain (see finding 3) -- a real but weaker guarantee
+   than "assembles to valid instructions I inspected," and the AGENT_LOG should say so plainly rather
+   than imply more confidence than that.
+3. **Found a real, independent bug while trying to actually test self-hosted ARM64 output**: invoking
+   `stage1.exe build foo.nv -arch arm64 --os macos` silently emitted plain x86_64 `.intel_syntax
+   noprefix` assembly while printing "Generated executable" -- a cross-compile that silently produces
+   the *wrong* architecture's output instead of failing. Root cause: `import codegen`
+   (`stdlib/compiler.nv`) resolves to exactly one of `stdlib/backend/{x86_64,arm64}/codegen.nv`, chosen
+   once, statically, at THIS compiler binary's own build time -- Nova has no dynamic/conditional
+   import, unlike the Python-bootstrap backend's runtime `from compiler.backend.arm64.codegen import
+   ...` inside `compile_native`. An ordinary x86_64-targeting nova.exe (the only kind this project
+   actually ships) therefore has no ARM64 codegen compiled into it at all; its `-arch` flag was
+   silently a no-op that fell through to the one backend it has. This also means self-hosted ARM64 has
+   no way to be executed in THIS environment at all (no ARM64 hardware, and no way to get an
+   ARM64-targeting nova.exe without a toolchain that can run it) -- a stronger version of the
+   already-known "no ARM64 hardware" limitation.
+   - Fixed with a `codegen_native_arch()` function (one per backend, returning that backend's own
+     architecture name as a string literal) and a check at the top of `compile_file`
+     (`stdlib/compiler.nv`) that errors clearly instead of mis-compiling when the requested
+     `target_arch` doesn't match. Verified both directions: the mismatch now fails loudly with no `.s`
+     or output file produced, and matching-arch builds are unaffected. New
+     `tests/test_selfhost_arch_guard.py` (2 tests).
+   - This does not make self-hosted able to cross-compile -- that would need both backends compiled
+     into one binary with runtime dispatch, a genuinely new-feature-sized refactor (comparable to
+     Phase 47/48's assessment of try/catch grammar) -- it only turns a silent wrong-architecture binary
+     into a clear, actionable error.
+4. **Unrelated one-line fix found in passing**: `stdlib/type_checker.nv`'s Assignment handler
+   (`h == 7`) had a leftover `print("TC Assignexists")` debug statement, firing on *every* assignment
+   in *every* self-hosted compile -- confirmed by building a trivial one-line program and seeing it in
+   the output. Removed.
+- Validation: full suite green (`python -m pytest tests/ -q`) after all changes.

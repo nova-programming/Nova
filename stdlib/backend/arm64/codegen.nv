@@ -34,6 +34,13 @@ data CodegenState {
     ptr_vars: dict
 }
 
+# See stdlib/backend/x86_64/codegen.nv's codegen_native_arch for why this exists: whichever of
+# the two codegen.nv files got statically imported into this nova.exe at ITS OWN build time is
+# the only one this binary can emit, regardless of what `-arch` the end user later passes.
+def codegen_native_arch() -> string {
+    return "arm64"
+}
+
 def new_codegen(tgt: int, target_os: string) -> CodegenState {
     state = CodegenState()
     state.target = tgt
@@ -412,6 +419,39 @@ def scan_vars(state: CodegenState, node: AstNode) {
         if node.left != 0 { scan_vars(state, node.left) }
         return
     }
+    if node.kind == "TRY" {
+        # val_str is the catch variable (a plain string, not a nested AstNode), so it's never
+        # found by the generic recursion below. Mirrors the identical fix already made to the
+        # x86_64 self-hosted backend (stdlib/backend/x86_64/codegen.nv) -- without this,
+        # codegen_stmt.nv's TRY handler stores the caught exception value via
+        # find_var_offset(state, node.val_str), which returns 0 for an unregistered name, and
+        # offset 0 means "write to [fp - 0]", directly over the saved frame pointer.
+        if node.val_str != "" {
+            register_var(state, node.val_str)
+        }
+        i = 0
+        while i < len(node.body) { scan_vars(state, node.body[i]); i = i + 1 }
+        i = 0
+        while i < len(node.else_body) { scan_vars(state, node.else_body[i]); i = i + 1 }
+        return
+    }
+    if node.kind == "MultiReturn" {
+        i = 0
+        while i < len(node.args) { scan_vars(state, node.args[i]); i = i + 1 }
+        return
+    }
+    if node.kind == "UnpackAssign" {
+        i = 0
+        while i < len(node.args) {
+            target = node.args[i]
+            if target.kind == "Variable" {
+                register_var(state, target.val_str)
+            }
+            i = i + 1
+        }
+        if node.left != 0 { scan_vars(state, node.left) }
+        return
+    }
     if node.kind == "Defer" {
         if node.left != 0 { scan_vars(state, node.left) }
         if node.body != 0 {
@@ -590,6 +630,12 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     emit_data(state, ".global __nova_argv")
     emit_data(state, "__nova_argv:")
     emit_data(state, "    .quad 0")
+
+    # Mirrors the x86_64 self-hosted backend's _nova_multi_ret buffer -- see its comment.
+    # Same layout as bootstrap/compiler/backend/arm64/codegen.py's identical buffer.
+    emit_data(state, ".align 3")
+    emit_data(state, "_nova_multi_ret:")
+    emit_data(state, "    .quad 0, 0, 0, 0, 0, 0, 0, 0")
 
     i = 0
     while i < len(ast) {

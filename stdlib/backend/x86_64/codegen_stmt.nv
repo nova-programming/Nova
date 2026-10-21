@@ -424,6 +424,79 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    pop " + state.bp)
         emit(state, "    ret")
     }
+    if node.kind == "MultiReturn" {
+        # `return a, b, c` -- values[0] goes in the normal, ABI-compatible return register
+        # (%a) so a MultiReturn-returning function still looks like an ordinary function to
+        # its own prologue/epilogue register save/restore; values[1:] (up to 8) go through
+        # the static _nova_multi_ret buffer instead of extra registers. The value-marshalling
+        # mirrors bootstrap/compiler/backend/x86_64/codegen.py's MultiReturn, but value[0] is
+        # pushed onto the real stack (not kept in a register) across defer_emit_down_to,
+        # matching this file's own Return case just above -- a function's defers must run
+        # the same way whether it returns one value or several, which the x86_64
+        # Python-bootstrap backend's MultiReturn doesn't actually do (a pre-existing gap
+        # there, not mirrored here: self-hosted's own Return already runs defers, so skipping
+        # them only for the multi-value case would be a new, self-inconsistent bug).
+        max_extra = 8
+        i = 0
+        while i < len(node.args) {
+            compile_expr(state, node.args[i])
+            emit(state, "    pop %a")
+            if i == 0 {
+                emit(state, "    push %a")
+            } elif i - 1 < max_extra {
+                slot = (i - 1) * 8
+                emit(state, "    lea %c, [rip + _nova_multi_ret]")
+                emit(state, "    mov [%c + " + str(slot) + "], %a")
+            }
+            i = i + 1
+        }
+        defer_emit_down_to(state, 0, debug_mode)
+        emit(state, "    pop %a")
+        r = len(state.used_regs) - 1
+        while r >= 0 {
+            emit(state, "    pop " + state.used_regs[r])
+            r = r - 1
+        }
+        emit(state, "    mov " + state.sp + ", " + state.bp)
+        emit(state, "    pop " + state.bp)
+        emit(state, "    ret")
+    }
+    if node.kind == "UnpackAssign" {
+        # Mirrors MultiReturn: target[0] comes from %a (the call's normal return value,
+        # already on the stack from compile_expr below); target[1:] are read back out of
+        # _nova_multi_ret, which the callee's own MultiReturn just filled. Only safe for the
+        # sanctioned `a, b = f()` pattern -- reading the buffer right after the call that's
+        # supposed to have filled it -- not reentrant across a nested MultiReturn call made
+        # before unpacking the outer one.
+        compile_expr(state, node.left)
+        emit(state, "    pop %a")
+        max_extra = 8
+        i = 0
+        while i < len(node.args) {
+            target = node.args[i]
+            if target.kind == "Variable" and str_eq(target.val_str, "_") == 0 {
+                if i == 0 {
+                    reg_str = "%a"
+                } elif i - 1 < max_extra {
+                    slot = (i - 1) * 8
+                    emit(state, "    lea %c, [rip + _nova_multi_ret]")
+                    emit(state, "    mov %a, [%c + " + str(slot) + "]")
+                    reg_str = "%a"
+                } else {
+                    i = i + 1
+                    continue
+                }
+                err_reg = find_var_reg(state, target.val_str)
+                if err_reg != "" {
+                    emit(state, "    mov " + err_reg + ", " + reg_str)
+                } else {
+                    var_offset = find_var_offset(state, target.val_str)
+                    emit(state, "    mov [%b - " + str(abs(var_offset)) + "], " + reg_str)
+                }
+            }
+            i = i + 1
+        }
+    }
     if node.kind == "IfElse" {
         else_label = "L_else_" + str(state.label_count)
         state.label_count = state.label_count + 1

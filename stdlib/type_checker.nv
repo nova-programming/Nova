@@ -242,7 +242,7 @@ def tc_visit(tc: TypeChecker, node: AstNode) -> Type {
 
 def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     if node == 0 { return create_any_type() }
-    kind_handlers = {"Number": 1, "String": 2, "Boolean": 3, "Variable": 4, "BinOp": 5, "Compare": 6, "Assignment": 7, "Function": 8, "Return": 9, "Print": 10, "PrintD": 11, "TRY": 12, "THROW": 13, "Call": 14, "IfElse": 15, "While": 16, "MethodCall": 17, "DataFieldAccess": 18, "DataFieldAssign": 19, "ArrayIndex": 20, "ArrayIndexAssign": 21, "DictLiteral": 22, "ListLiteral": 23, "RawBlock": 24, "ForLoop": 25, "ForIn": 26, "Len": 27, "SizeOf": 28, "Comptime": 29, "Block": 30, "Defer": 31}
+    kind_handlers = {"Number": 1, "String": 2, "Boolean": 3, "Variable": 4, "BinOp": 5, "Compare": 6, "Assignment": 7, "Function": 8, "Return": 9, "Print": 10, "PrintD": 11, "TRY": 12, "THROW": 13, "Call": 14, "IfElse": 15, "While": 16, "MethodCall": 17, "DataFieldAccess": 18, "DataFieldAssign": 19, "ArrayIndex": 20, "ArrayIndexAssign": 21, "DictLiteral": 22, "ListLiteral": 23, "RawBlock": 24, "ForLoop": 25, "ForIn": 26, "Len": 27, "SizeOf": 28, "Comptime": 29, "Block": 30, "Defer": 31, "MultiReturn": 32, "UnpackAssign": 33}
     h = kind_handlers.get(node.kind)
     if h == 1 {
         if node.is_float == 1 { return create_scalar_type("float") }
@@ -290,7 +290,6 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     if h == 7 {
         t = tc_visit(tc, node.left)
         existing = tc_get_var(tc, node.val_str)
-        print("TC Assignexists")
         if existing == 0 {
             tc_set_var(tc, node.val_str, t)
         } else {
@@ -632,6 +631,38 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
 
     if h == 29 {
         if node.left != 0 { return tc_visit(tc, node.left) }
+        return create_any_type()
+    }
+
+    if h == 32 {
+        # parse_statement's RETURN handling (stdlib/parser.nv) puts `return a, b, c`'s values in
+        # node.args (reusing the generic list field, same as TRY reuses else_body). Each value is
+        # just a normal expression; there's no single result type for the statement itself.
+        i = 0
+        while i < len(node.args) {
+            tc_visit(tc, node.args[i])
+            i = i + 1
+        }
+        return create_any_type()
+    }
+
+    if h == 33 {
+        # `a, b = f()` -- node.args holds the target expressions, node.left the RHS call. Targets
+        # get `any` rather than the call's own return type: the self-hosted type system has no
+        # per-component type for a multi-return call (func_returns' comma-joined "(int,string)"
+        # string isn't a Type), and `any` matches what codegen already assumes for them.
+        tc_visit(tc, node.left)
+        i = 0
+        while i < len(node.args) {
+            target = node.args[i]
+            if target.kind == "Variable" and str_eq(target.val_str, "_") == 0 {
+                existing = tc_get_var(tc, target.val_str)
+                if existing == 0 {
+                    tc_set_var(tc, target.val_str, create_any_type())
+                }
+            }
+            i = i + 1
+        }
         return create_any_type()
     }
 

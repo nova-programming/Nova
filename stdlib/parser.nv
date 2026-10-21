@@ -1407,6 +1407,25 @@ def parse_statement(state: ParserState) -> AstNode {
         } else {
             expr = parse_expr(state)
         }
+        # `return a, b, c` -- a comma after the first value means a multi-value return
+        # (MultiReturn), matching bootstrap/parser/parser.py's identical check. Reuses
+        # the generic `args` list field rather than adding a new one, the same way TRY
+        # reuses `else_body` for its catch body.
+        check_comma = current_tok(state)
+        if check_comma.kind == "COMMA" {
+            values = [expr]
+            while check_comma.kind == "COMMA" {
+                eat_tok(state, "COMMA")
+                values.append(parse_expr(state))
+                check_comma = current_tok(state)
+            }
+            node = AstNode()
+            node.line = stmt_line
+            node.col = stmt_col
+            node.kind = "MultiReturn"
+            node.args = values
+            return node
+        }
         node = AstNode()
         node.line = stmt_line
         node.col = stmt_col
@@ -1781,8 +1800,31 @@ def parse_statement(state: ParserState) -> AstNode {
             node.left = val_expr
             return node
         }
+    } elif next_tok.kind == "COMMA" {
+        # `a, b = f()` -- destructures a MultiReturn call's values, matching
+        # bootstrap/parser/parser.py's identical check. Reuses `args` for the target
+        # list and `left` for the RHS expression, the same way MultiReturn above
+        # reuses `args` for its value list.
+        targets = [expr]
+        check = next_tok
+        while check.kind == "COMMA" {
+            eat_tok(state, "COMMA")
+            targets.append(parse_expr(state))
+            check = current_tok(state)
+        }
+        if check.kind == "EQUALS" {
+            eat_tok(state, "EQUALS")
+            value_expr = parse_expr(state)
+            node = AstNode()
+            node.line = stmt_line
+            node.col = stmt_col
+            node.kind = "UnpackAssign"
+            node.args = targets
+            node.left = value_expr
+            return node
+        }
     }
-    
+
     return expr
 }
 

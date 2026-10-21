@@ -181,6 +181,21 @@ def build_stamp(path: string) -> string {
 }
 
 def compile_file(path: string, debug_mode: int, target_arch: string, target_os: string) -> list {
+    # This self-hosted compiler has exactly one codegen backend statically compiled into it --
+    # whichever of stdlib/backend/{x86_64,arm64}/codegen.nv `import codegen` resolved to at THIS
+    # binary's own build time, never at this build invocation (see codegen_native_arch's
+    # comment). Passing a `-arch` this binary can't actually emit used to silently fall through
+    # to its one real backend and produce the wrong architecture's assembly while claiming
+    # success. To cross-compile for a different architecture, build a nova.exe for that
+    # architecture instead (e.g. via the Python-bootstrap compiler, which does pick its backend
+    # dynamically per invocation).
+    native_arch = codegen_native_arch()
+    if target_arch != native_arch {
+        print("ERROR: this compiler was built for " + native_arch + " and cannot emit " + target_arch + " code")
+        print("  -> build a " + target_arch + "-targeting nova.exe instead (e.g. with the Python-bootstrap compiler's -arch flag), or drop -arch " + target_arch + " to use this compiler's native " + native_arch + " backend")
+        sys_exit(1)
+    }
+
     cache_file = cache_path(path)
     cached_lines = load_cache(cache_file)
     current_stamp = build_stamp(path)

@@ -245,6 +245,71 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         emit(state, "    ldp fp, lr, [sp], #16")
         emit(state, "    ret")
     }
+    if node.kind == "MultiReturn" {
+        # `return a, b, c` -- mirrors this file's own Return case just above (defer, used_regs
+        # restore, sp cleanup, ldp fp/lr, ret), not bootstrap/compiler/backend/arm64/codegen.py's
+        # MultiReturn, which skips the used_regs/sp-cleanup part of its own Return's epilogue --
+        # a function's defers and frame teardown must happen the same way whether it returns one
+        # value or several. values[0] goes through %a/x0 (the normal, ABI-compatible return
+        # register); values[1:] (up to 8) go through the static _nova_multi_ret buffer instead of
+        # extra registers, so a MultiReturn-returning function still looks ordinary to its own
+        # prologue/epilogue.
+        max_extra = 8
+        i = 0
+        while i < len(node.args) {
+            compile_expr(state, node.args[i])
+            emit(state, "    ldr %a, [sp], #16")
+            if i == 0 {
+                emit(state, "    str %a, [sp, #-16]!")
+            } elif i - 1 < max_extra {
+                slot = (i - 1) * 8
+                emit(state, "    adrp %c, _nova_multi_ret@PAGE")
+                emit(state, "    add %c, %c, _nova_multi_ret@PAGEOFF")
+                emit(state, "    str %a, [%c, #" + str(slot) + "]")
+            }
+            i = i + 1
+        }
+        defer_emit_down_to(state, 0, debug_mode)
+        emit(state, "    ldr %a, [sp], #16")
+        r = len(state.used_regs) - 1
+        while r >= 0 {
+            emit(state, "    ldr " + state.used_regs[r] + ", [sp], #16")
+            r = r - 1
+        }
+        if state.local_offset > 0 {
+            emit(state, "    add sp, sp, #" + str(state.local_offset))
+        }
+        emit(state, "    ldp fp, lr, [sp], #16")
+        emit(state, "    ret")
+    }
+    if node.kind == "UnpackAssign" {
+        # Mirrors MultiReturn: target[0] comes from %a/x0 (the call's normal return value,
+        # already on the stack from compile_expr below); target[1:] are read back out of
+        # _nova_multi_ret, which the callee's own MultiReturn just filled. Only safe for the
+        # sanctioned `a, b = f()` pattern -- not reentrant across a nested MultiReturn call made
+        # before unpacking the outer one.
+        compile_expr(state, node.left)
+        emit(state, "    ldr %a, [sp], #16")
+        max_extra = 8
+        i = 0
+        while i < len(node.args) {
+            target = node.args[i]
+            if target.kind == "Variable" and str_eq(target.val_str, "_") == 0 {
+                if i > 0 and i - 1 < max_extra {
+                    slot = (i - 1) * 8
+                    emit(state, "    adrp %c, _nova_multi_ret@PAGE")
+                    emit(state, "    add %c, %c, _nova_multi_ret@PAGEOFF")
+                    emit(state, "    ldr %a, [%c, #" + str(slot) + "]")
+                } elif i > 0 {
+                    i = i + 1
+                    continue
+                }
+                var_offset = find_var_offset(state, target.val_str)
+                emit_fp_store(state, "x0", var_offset)
+            }
+            i = i + 1
+        }
+    }
     if node.kind == "IfElse" {
         else_label = "L_else_" + str(state.label_count)
         state.label_count = state.label_count + 1

@@ -58,6 +58,20 @@ data CodegenState {
     for_depth: int
 }
 
+# `import codegen` (stdlib/compiler.nv) resolves to exactly one of
+# stdlib/backend/{x86_64,arm64}/codegen.nv, chosen once -- statically, at this nova.exe's OWN
+# build time -- never at the end user's build invocation (Nova has no dynamic/conditional
+# import, unlike the Python-bootstrap backend's runtime `from compiler.backend.arm64.codegen
+# import ...`). So a normal x86_64-targeting nova.exe has no ARM64 codegen compiled into it at
+# all: passing it `-arch arm64` used to silently fall through to this (the only codegen it
+# has) and emit plain x86_64 assembly while claiming success -- a cross-compile silently
+# produces the wrong architecture's binary instead of failing loudly. compile_to_exe
+# (stdlib/compiler.nv) calls this to check the requested target_arch against what this binary
+# can actually emit, and errors instead of mis-compiling.
+def codegen_native_arch() -> string {
+    return "x86_64"
+}
+
 def new_codegen(tgt: int, target_os: string) -> CodegenState {
     state = CodegenState()
     state.target = tgt
@@ -747,6 +761,26 @@ def scan_vars(state: CodegenState, node: AstNode) {
         if node.left != 0 { scan_vars(state, node.left) }
         return
     }
+    if node.kind == "MultiReturn" {
+        i = 0
+        while i < len(node.args) {
+            scan_vars(state, node.args[i])
+            i = i + 1
+        }
+        return
+    }
+    if node.kind == "UnpackAssign" {
+        i = 0
+        while i < len(node.args) {
+            target = node.args[i]
+            if target.kind == "Variable" {
+                register_var(state, target.val_str)
+            }
+            i = i + 1
+        }
+        if node.left != 0 { scan_vars(state, node.left) }
+        return
+    }
     if node.kind == "Defer" {
         if node.left != 0 { scan_vars(state, node.left) }
         if node.body != 0 {
@@ -1105,6 +1139,17 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     emit_data(state, ".global __nova_argv")
     emit_data(state, "__nova_argv:")
     emit_data(state, "    .quad 0")
+
+    # A MultiReturn (`return a, b, c`) puts values[0] in the normal, ABI-compatible return
+    # register; values[1:] (up to 8) go through this static buffer instead of extra registers,
+    # so a MultiReturn-returning function still looks like an ordinary function to everything
+    # else, including its own prologue/epilogue register save/restore. Mirrors
+    # bootstrap/compiler/backend/x86_64/codegen.py's identical buffer. Not reentrant across a
+    # nested MultiReturn call made before the outer one's UnpackAssign reads it back -- same
+    # accepted limitation as the Python-bootstrap backend.
+    emit_data(state, ".align 8")
+    emit_data(state, "_nova_multi_ret:")
+    emit_data(state, "    .quad 0, 0, 0, 0, 0, 0, 0, 0")
 
     emit(state, ".text")
 
