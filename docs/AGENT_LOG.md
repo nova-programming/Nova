@@ -1476,3 +1476,84 @@ instead of just using its first value in an expression.
 The ARM64 fix remains unverified beyond careful reading -- consistent with every other ARM64 bootstrap
 change this project has made without hardware, but worth stating plainly rather than implying more
 confidence than that.
+
+### Phase 51: Real ARM64 Execution, At Last -- Infrastructure, Confirmations, and Five More Bugs (2026-10-21/22)
+
+Every ARM64 fix across this entire project, including Phase 50's, had been "verified" by code reading and
+cross-assembly only -- never actually executed, for lack of ARM64 hardware. This phase fixes that gap for
+good and spends the new capability immediately.
+
+**Infrastructure (reusable in future sessions):** installed QEMU (`winget install
+SoftwareFreedomConservancy.QEMU`) and discovered its Windows build ships only full-system emulators
+(`qemu-system-aarch64`), not the lightweight user-mode one needed to run a single ARM64 binary directly.
+Switched to the existing WSL Ubuntu instance instead: `apt-get install qemu-user binfmt-support
+gcc-aarch64-linux-gnu` (as root via `wsl -d Ubuntu -u root --`, since non-interactive `sudo` needs a
+password that can't and shouldn't be supplied) gives a real `qemu-aarch64` plus a real
+`aarch64-linux-gnu-gcc` cross-toolchain -- genuine ARM64 Linux binaries, genuinely executed, right on this
+machine. Gotcha worth recording: WSL's `/tmp` is tmpfs and gets wiped between separate `wsl.exe`
+invocations when the lightweight VM shuts down; use a persistent directory under `$HOME` for anything that
+needs to survive across calls.
+
+**Confirmed under real execution, for the first time:** Phase 50's two bootstrap-ARM64 fixes both produce
+correct output. `divmod(17, 5)` via a cross-compiled, QEMU-executed binary prints `3`, `2` (multi-return).
+A nested try/catch across a function call prints `10`, `99` (the handler-stack fix). Both exactly match
+the self-hosted/VM reference behavior already established on x86_64.
+
+**Bugs found and fixed while building the pipeline to get there (none related to Phase 48-50's actual
+logic, all pre-existing and newly exposed just by trying to execute ARM64 output at all):**
+1. Bootstrap ARM64's codegen hardcoded Mach-O-only `adrp reg, sym@PAGE` / `add reg, reg, sym@PAGEOFF`
+   addressing unconditionally -- confirmed directly, `aarch64-linux-gnu-as` rejects `@PAGE`/`@PAGEOFF`
+   outright. `-arch arm64 --os linux` had likely never actually produced valid assembly in this project's
+   history. Fixed with `_adrp`/`_page_add` helpers, OS-conditional on `target_os`. Symbol *names* needed no
+   equivalent fix -- `runtime.c`'s `LINUX_WRAP` wrappers already bridge those.
+2. The identical bug, separately, in the self-hosted ARM64 backend (`stdlib/backend/arm64/codegen.nv` and
+   `codegen_stmt.nv` -- different files, same copy-pasted pattern, same fix: `adrp_page`/`page_add`
+   helpers). Found one function (`push_data_label`) that mixed Mach-O's `adrp ...@PAGE` with Linux's
+   `add ..., :lo12:...` in the *same* instruction pair -- wrong on both platforms at once.
+3. `runtime.c`'s non-Windows GUI stub functions wrapped every name in `STR_PFX(...)`, but `STR_PFX`'s own
+   `#define` is nested inside `#if defined(_WIN32)` (it exists specifically to bridge a MinGW x64 naming
+   quirk -- see that block's own comment) and is therefore never defined when the non-Windows `#else`
+   branch is the one being compiled, by definition. This has silently broken compiling `runtime.c` for
+   *any* non-Windows target this whole time; nobody had apparently ever actually tried. Fixed by
+   hardcoding a plain `_` prefix instead (matching what `extern def`-declared functions actually get
+   called as on every target: ARM64's `ExternDef` case emits `.extern _{name}` unconditionally) --
+   there's no OS-naming convention to bridge here, unlike the real MinGW quirk STR_PFX exists for.
+4. `runtime.c` was missing `#include <sys/wait.h>` before its first use of `waitpid` -- the real include
+   existed 60-ish lines later, apparently never hit on whatever platform/libc combination this was last
+   built against.
+5. `stdlib/compiler.nv`'s own `_compile_runtime` unconditionally ran `to_win_path` (rewrites `/` to `\`)
+   on the runtime.c/runtime.o paths regardless of `target_os`, so the self-hosted compiler literally
+   searched for a file named `.\runtime.c` (a single bogus filename on Linux, where `\` isn't a path
+   separator) on any non-Windows host. Fixed to match the already-established `if host ==
+   "windows" { ... }` pattern used everywhere else `to_win_path` is called in this file.
+
+**A sixth, more fundamental bug, found trying to get self-hosted ARM64's own codegen to execute (not
+bootstrap's -- distinguishing which backend is "running" vs. which backend "compiled what's running" took
+real care here; see the detailed trace in-session):** compiling even a two-parameter function produced a
+nonsensical stack offset (`str x0, [fp, #-1786902168]`) in its prologue. Added a temporary debug print and
+confirmed the *value* being passed to `emit_fp_store` was correct (-8) right up until the call -- meaning
+bootstrap ARM64's own `Call` codegen was corrupting it. Found it: the general `Call` case (and, by the
+same pattern, the `random`, `chacha20_init`, and class-method-call cases) evaluated each argument into a
+register via `_compile_expr_to_reg`, then held *all* of them in registers while evaluating the *next*
+argument, only pushing to the stack afterward. Any argument whose evaluation needs a nested function call
+(here: `"x" + str(p)`, a string concat) can clobber an earlier argument's value sitting in an ARM64
+caller-saved register (x0-x18) -- the ARM64 analog of the Phase 50 rbx-stash bug, but in the fully general
+call path rather than one specific builtin. x86_64's equivalent path never had this problem because its
+`compile_expr` always leaves its result on the stack, never held in a register across other code. Fixed
+by pushing each argument immediately after evaluating it, in all four call sites, preserving the exact
+same final push order (verified by inspection) so later pop-into-x0/x1/... logic is unaffected.
+
+**Still unresolved:** applying that fix immediately exposed a *further*, different bug -- self-hosted
+ARM64 now crashes (SIGSEGV) compiling even `print(1)`, earlier in execution than before the fix (it used
+to get all the way through codegen and only fail at the final assemble step). `addr2line` resolves the
+fault to `L_loop_5224`, an unnamed label inside the compiled self-hosted compiler, past the point where
+source-level debug prints could narrow it further without deeper tooling. Given the fix that exposed it
+is independently correct (confirmed by the two real-execution passes above, and by the full test suite
+staying green), this is logged as a known, separate, next-session item rather than chased further this
+session -- self-hosted ARM64 has evidently never been executed successfully even once before this phase,
+and finding one bug at a time by actually running it, rather than guessing, is exactly the right way to
+retire that debt, just not all in one sitting.
+
+- Validation: full suite green (537 passed, 1 skipped, 13 subtests) after all changes. The normal x86_64
+  Windows self-hosted build (what this project actually ships) rebuilt and spot-checked working correctly
+  throughout -- none of this phase's changes touch its code paths.

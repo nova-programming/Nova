@@ -161,8 +161,8 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             }
             return
         } else {
-            emit(state, "    adrp %x, _oob_line@PAGE")
-            emit(state, "    add %x, %x, _oob_line@PAGEOFF")
+            emit(state, adrp_page(state, "%x", "_oob_line"))
+            emit(state, page_add(state, "%x", "_oob_line"))
             emit(state, "    mov %i, #" + str(node.line))
             emit(state, "    str %i, [%x]")
             oob_lbl = next_label(state, "L_oob")
@@ -263,8 +263,8 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
                 emit(state, "    str %a, [sp, #-16]!")
             } elif i - 1 < max_extra {
                 slot = (i - 1) * 8
-                emit(state, "    adrp %c, _nova_multi_ret@PAGE")
-                emit(state, "    add %c, %c, _nova_multi_ret@PAGEOFF")
+                emit(state, adrp_page(state, "%c", "_nova_multi_ret"))
+                emit(state, page_add(state, "%c", "_nova_multi_ret"))
                 emit(state, "    str %a, [%c, #" + str(slot) + "]")
             }
             i = i + 1
@@ -297,8 +297,8 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
             if target.kind == "Variable" and str_eq(target.val_str, "_") == 0 {
                 if i > 0 and i - 1 < max_extra {
                     slot = (i - 1) * 8
-                    emit(state, "    adrp %c, _nova_multi_ret@PAGE")
-                    emit(state, "    add %c, %c, _nova_multi_ret@PAGEOFF")
+                    emit(state, adrp_page(state, "%c", "_nova_multi_ret"))
+                    emit(state, page_add(state, "%c", "_nova_multi_ret"))
                     emit(state, "    ldr %a, [%c, #" + str(slot) + "]")
                 } elif i > 0 {
                     i = i + 1
@@ -554,19 +554,19 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         # Python-bootstrap native backends. A single slot breaks as soon as a try is
         # nested inside a called function or a second try follows the first: the inner
         # try's normal exit would zero/clobber the outer try's still-active handler.
-        emit(state, "    adrp %c, _try_depth@PAGE")
-        emit(state, "    add %c, %c, _try_depth@PAGEOFF")
+        emit(state, adrp_page(state, "%c", "_try_depth"))
+        emit(state, page_add(state, "%c", "_try_depth"))
         emit(state, "    ldr %d, [%c]")
-        emit(state, "    adrp %a, _try_catch_sp@PAGE")
-        emit(state, "    add %a, %a, _try_catch_sp@PAGEOFF")
+        emit(state, adrp_page(state, "%a", "_try_catch_sp"))
+        emit(state, page_add(state, "%a", "_try_catch_sp"))
         emit(state, "    add %a, %a, %d, lsl #3")
         emit(state, "    mov %x, %s")
         emit(state, "    str %x, [%a]")
-        emit(state, "    adrp %a, _catch_ip@PAGE")
-        emit(state, "    add %a, %a, _catch_ip@PAGEOFF")
+        emit(state, adrp_page(state, "%a", "_catch_ip"))
+        emit(state, page_add(state, "%a", "_catch_ip"))
         emit(state, "    add %a, %a, %d, lsl #3")
-        emit(state, "    adrp %x, " + catch_label + "@PAGE")
-        emit(state, "    add %x, %x, " + catch_label + "@PAGEOFF")
+        emit(state, adrp_page(state, "%x", catch_label))
+        emit(state, page_add(state, "%x", catch_label))
         emit(state, "    str %x, [%a]")
         emit(state, "    add %d, %d, #1")
         emit(state, "    str %d, [%c]")
@@ -579,15 +579,15 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         }
         defer_end_scope(state, debug_mode)
 
-        emit(state, "    adrp %c, _try_depth@PAGE")
-        emit(state, "    add %c, %c, _try_depth@PAGEOFF")
+        emit(state, adrp_page(state, "%c", "_try_depth"))
+        emit(state, page_add(state, "%c", "_try_depth"))
         emit(state, "    ldr %d, [%c]")
         emit(state, "    sub %d, %d, #1")
         emit(state, "    str %d, [%c]")
         emit(state, "    b " + after_label)
         emit(state, catch_label + ":")
-        emit(state, "    adrp %a, _exception_val@PAGE")
-        emit(state, "    add %a, %a, _exception_val@PAGEOFF")
+        emit(state, adrp_page(state, "%a", "_exception_val"))
+        emit(state, page_add(state, "%a", "_exception_val"))
         emit(state, "    ldr %a, [%a]")
         
         defer_push_scope(state)
@@ -608,24 +608,24 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
     if node.kind == "THROW" {
         compile_expr(state, node.left)
         emit(state, "    ldr %a, [%s], #16")
-        emit(state, "    adrp %c, _exception_val@PAGE")
-        emit(state, "    add %c, %c, _exception_val@PAGEOFF")
+        emit(state, adrp_page(state, "%c", "_exception_val"))
+        emit(state, page_add(state, "%c", "_exception_val"))
         emit(state, "    str %a, [%c]")
         defer_emit_down_to(state, 0, debug_mode)
         # Pop the handler stack before jumping to it, so a throw from inside a catch
         # body resumes at the next-outer handler rather than re-entering this one.
-        emit(state, "    adrp %c, _try_depth@PAGE")
-        emit(state, "    add %c, %c, _try_depth@PAGEOFF")
+        emit(state, adrp_page(state, "%c", "_try_depth"))
+        emit(state, page_add(state, "%c", "_try_depth"))
         emit(state, "    ldr %d, [%c]")
         emit(state, "    sub %d, %d, #1")
         emit(state, "    str %d, [%c]")
-        emit(state, "    adrp %x, _try_catch_sp@PAGE")
-        emit(state, "    add %x, %x, _try_catch_sp@PAGEOFF")
+        emit(state, adrp_page(state, "%x", "_try_catch_sp"))
+        emit(state, page_add(state, "%x", "_try_catch_sp"))
         emit(state, "    add %x, %x, %d, lsl #3")
         emit(state, "    ldr %x, [%x]")
         emit(state, "    mov %s, %x")
-        emit(state, "    adrp %c, _catch_ip@PAGE")
-        emit(state, "    add %c, %c, _catch_ip@PAGEOFF")
+        emit(state, adrp_page(state, "%c", "_catch_ip"))
+        emit(state, page_add(state, "%c", "_catch_ip"))
         emit(state, "    add %c, %c, %d, lsl #3")
         emit(state, "    ldr %c, [%c]")
         emit(state, "    br %c")

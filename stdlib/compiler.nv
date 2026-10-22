@@ -456,7 +456,19 @@ def _compile_runtime(gcc_name: string, target_os: string, target_arch: string, c
         if target_os == "windows" { sys_system("cmd /c del /f /q " + _quote(to_win_path(runtime_o_path))) }
         else { sys_system("rm -f " + runtime_o_path) }
     }
-    cmd = gcc_name + " -O3 -c " + _quote(to_win_path(runtime_c_path)) + " -o " + _quote(to_win_path(runtime_o_path))
+    # to_win_path only makes sense when THIS compile is actually running on Windows (it
+    # rewrites "/" to "\"); applying it unconditionally broke every non-Windows host,
+    # including the self-hosted ARM64 backend running under QEMU on Linux, confirmed
+    # directly: it searched for a file literally named ".\runtime.c" (backslash is not a
+    # path separator on Linux, so that's a single bogus filename) and failed every time.
+    if target_os == "windows" {
+        rc_arg = _quote(to_win_path(runtime_c_path))
+        ro_arg = _quote(to_win_path(runtime_o_path))
+    } else {
+        rc_arg = _quote(runtime_c_path)
+        ro_arg = _quote(runtime_o_path)
+    }
+    cmd = gcc_name + " -O3 -c " + rc_arg + " -o " + ro_arg
     if target_os == "macos" {
         cmd = cmd + " -D MACOS"
         if target_arch == "arm64" { cmd = cmd + " -arch arm64" }

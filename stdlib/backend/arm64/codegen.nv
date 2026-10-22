@@ -171,9 +171,35 @@ def emit_data(state: CodegenState, line: string) {
     state.data_lines.append(line)
 }
 
+# Load the page address of `label` into `reg`. Mach-O (macOS) addresses a symbol as
+# `adrp reg, label@PAGE` / `add reg, reg, label@PAGEOFF`; GNU `as` targeting Linux/ELF
+# rejects `@PAGE`/`@PAGEOFF` outright (confirmed directly: aarch64-linux-gnu-as errors with
+# "unexpected characters following instruction" on them) and instead uses a bare
+# `adrp reg, label` paired with `add reg, reg, :lo12:label` (see page_add). Mirrors the
+# identical fix in bootstrap/compiler/backend/arm64/codegen.py's _adrp. Symbol *names*
+# themselves need no OS-conditional handling -- runtime.c's LINUX_WRAP wrappers already
+# make this codegen's macOS-style underscore-prefixed names resolve correctly on Linux too.
+def adrp_page(state: CodegenState, reg: string, label: string) -> string {
+    if state.target_os == "linux" {
+        return "    adrp " + reg + ", " + label
+    }
+    return "    adrp " + reg + ", " + label + "@PAGE"
+}
+
+# Pairs with adrp_page: completes the page address into a full address of `label` in `reg`.
+def page_add(state: CodegenState, reg: string, label: string) -> string {
+    if state.target_os == "linux" {
+        return "    add " + reg + ", " + reg + ", :lo12:" + label
+    }
+    return "    add " + reg + ", " + reg + ", " + label + "@PAGEOFF"
+}
+
 def push_data_label(state: CodegenState, label: string) {
-    emit(state, "    adrp x0, " + label + "@PAGE")
-    emit(state, "    add x0, x0, :lo12:" + label)
+    # Was already broken on every platform before this fix: the adrp half used Mach-O's
+    # @PAGE while the add half used Linux's :lo12: -- a mismatched pair that's wrong syntax
+    # for BOTH targets (macOS needs @PAGEOFF on the add, Linux rejects @PAGE on the adrp).
+    emit(state, adrp_page(state, "x0", label))
+    emit(state, page_add(state, "x0", label))
     emit(state, "    str x0, [sp, #-16]!")
 }
 
@@ -556,7 +582,6 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     if stack_size > 0 {
         emit(state, "    sub sp, sp, #" + str(stack_size))
     }
-    
     # Store passed arguments to stack (up to 8 args in x0-x7)
     p = 0
     while p < len(node.params) {
@@ -566,7 +591,6 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
         }
         p = p + 1
     }
-
     defer_push_scope(state)
     s = 0
     while s < len(node.body) {
@@ -723,16 +747,16 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     emit(state, entry + ":")
     emit(state, "    stp fp, lr, [sp, #-16]!")
     emit(state, "    mov fp, sp")
-    emit(state, "    adrp x2, __nova_argc@PAGE")
-    emit(state, "    add x2, x2, __nova_argc@PAGEOFF")
+    emit(state, adrp_page(state, "x2", "__nova_argc"))
+    emit(state, page_add(state, "x2", "__nova_argc"))
     emit(state, "    str x0, [x2]")
-    emit(state, "    adrp x2, __nova_argv@PAGE")
-    emit(state, "    add x2, x2, __nova_argv@PAGEOFF")
+    emit(state, adrp_page(state, "x2", "__nova_argv"))
+    emit(state, page_add(state, "x2", "__nova_argv"))
     emit(state, "    str x1, [x2]")
-    emit(state, "    adrp x16, L_oob_source@PAGE")
-    emit(state, "    add x16, x16, L_oob_source@PAGEOFF")
-    emit(state, "    adrp x17, _oob_file_ptr@PAGE")
-    emit(state, "    add x17, x17, _oob_file_ptr@PAGEOFF")
+    emit(state, adrp_page(state, "x16", "L_oob_source"))
+    emit(state, page_add(state, "x16", "L_oob_source"))
+    emit(state, adrp_page(state, "x17", "_oob_file_ptr"))
+    emit(state, page_add(state, "x17", "_oob_file_ptr"))
     emit(state, "    str x16, [x17]")
     if state.local_offset > 0 {
         emit(state, "    sub sp, sp, #" + str(state.local_offset))

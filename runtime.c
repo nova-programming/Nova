@@ -578,6 +578,7 @@ int main(void) {
 #include <stdarg.h>
 #include <stdint.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 #include <signal.h>
@@ -3028,23 +3029,37 @@ SYSCALL void STR_PFX(gui_close)(void) {
 }
 
 #else
-/* Non-Windows stubs */
-SYSCALL int STR_PFX(gui_init_window)(const char *title, int width, int height) { (void)title; (void)width; (void)height; return 0; }
-SYSCALL int STR_PFX(gui_poll_events)(void) { return -1; }
-SYSCALL int STR_PFX(gui_get_mouse_x)(void) { return 0; }
-SYSCALL int STR_PFX(gui_get_mouse_y)(void) { return 0; }
-SYSCALL int STR_PFX(gui_get_mouse_down)(void) { return 0; }
-SYSCALL int STR_PFX(gui_get_mouse_clicked)(void) { return 0; }
-SYSCALL int STR_PFX(gui_get_window_w)(void) { return 0; }
-SYSCALL int STR_PFX(gui_get_window_h)(void) { return 0; }
-SYSCALL void STR_PFX(gui_clear)(int color_hex) { (void)color_hex; }
-SYSCALL void STR_PFX(gui_draw_rect)(int x, int y, int w, int h, int color_hex, int radius) { (void)x; (void)y; (void)w; (void)h; (void)color_hex; (void)radius; }
-SYSCALL void STR_PFX(gui_draw_border)(int x, int y, int w, int h, int border_w, int color_hex) { (void)x; (void)y; (void)w; (void)h; (void)border_w; (void)color_hex; }
-SYSCALL void STR_PFX(gui_draw_text)(const char *text, int x, int y, int font_size, int color_hex, int font_weight) { (void)text; (void)x; (void)y; (void)font_size; (void)color_hex; (void)font_weight; }
-SYSCALL void STR_PFX(gui_present)(void) {}
-SYSCALL void STR_PFX(gui_sleep)(int ms) { (void)ms; }
-SYSCALL int STR_PFX(gui_save_screenshot)(const char *path) { (void)path; return 0; }
-SYSCALL void STR_PFX(gui_close)(void) {}
-SYSCALL int STR_PFX(gui_poll_char)(void) { return 0; }
-SYSCALL const char *STR_PFX(gui_char_to_str)(int c) { (void)c; return ""; }
+/* Non-Windows stubs.
+ *
+ * These used to wrap every name in STR_PFX(...), copied from the real Windows GUI
+ * implementation just above -- but STR_PFX's own #define (top of this file) is itself
+ * nested inside `#if defined(_WIN32)`, specifically to bridge a MinGW x64 naming quirk
+ * (see that comment). It is never defined when this #else branch is the one being
+ * compiled (by definition: you only reach a `#else` when the `#if` was false), so using
+ * it here always failed to compile on any non-Windows target -- confirmed by actually
+ * cross-compiling runtime.c for aarch64-linux-gnu, something this project had apparently
+ * never done before. Hardcoded to a plain `_` prefix instead, matching what every target
+ * this backend actually emits expects: `extern def`-declared functions like these always
+ * get called as `bl _name` regardless of target_os (bootstrap/compiler/backend/arm64/
+ * codegen.py's ExternDef case emits `.extern _{name}` unconditionally) -- there is no
+ * OS-conditional naming to bridge here the way STR_PFX bridges a *libc* function's name
+ * against MinGW's x64 behavior. */
+SYSCALL int _gui_init_window(const char *title, int width, int height) { (void)title; (void)width; (void)height; return 0; }
+SYSCALL int _gui_poll_events(void) { return -1; }
+SYSCALL int _gui_get_mouse_x(void) { return 0; }
+SYSCALL int _gui_get_mouse_y(void) { return 0; }
+SYSCALL int _gui_get_mouse_down(void) { return 0; }
+SYSCALL int _gui_get_mouse_clicked(void) { return 0; }
+SYSCALL int _gui_get_window_w(void) { return 0; }
+SYSCALL int _gui_get_window_h(void) { return 0; }
+SYSCALL void _gui_clear(int color_hex) { (void)color_hex; }
+SYSCALL void _gui_draw_rect(int x, int y, int w, int h, int color_hex, int radius) { (void)x; (void)y; (void)w; (void)h; (void)color_hex; (void)radius; }
+SYSCALL void _gui_draw_border(int x, int y, int w, int h, int border_w, int color_hex) { (void)x; (void)y; (void)w; (void)h; (void)border_w; (void)color_hex; }
+SYSCALL void _gui_draw_text(const char *text, int x, int y, int font_size, int color_hex, int font_weight) { (void)text; (void)x; (void)y; (void)font_size; (void)color_hex; (void)font_weight; }
+SYSCALL void _gui_present(void) {}
+SYSCALL void _gui_sleep(int ms) { (void)ms; }
+SYSCALL int _gui_save_screenshot(const char *path) { (void)path; return 0; }
+SYSCALL void _gui_close(void) {}
+SYSCALL int _gui_poll_char(void) { return 0; }
+SYSCALL const char *_gui_char_to_str(int c) { (void)c; return ""; }
 #endif
