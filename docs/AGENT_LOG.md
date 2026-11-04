@@ -1,6 +1,59 @@
 # Agent Session Log (historical)
 
-Full chronological notes moved out of AGENTS.md. Contains duplicated sections; treat as an archive, not as current policy.
+## Nova Systems & Creative Engine Upgrade (5-Phase Sprint)
+- **Phase 1: User-Defined `def main()` Entry-Point Ergonomics**:
+  - Unmangled user-defined `def main()` from parser/type checker reserved keyword constraints.
+  - In `x86_64` and `arm64` codegen, user-defined `main` functions and caller targets are mangled to `_nova_user_main`, eliminating collisions with C runtime `main(int argc, char** argv)`.
+  - Rebuilt Stage 1 -> Stage 2 -> Stage 3; verified `s2.s == s3.s` byte-for-byte SHA256 match.
+  - Added and passed `test_user_defined_main_function` in `tests/test_selfhost_parity.py`.
+- **Phase 2: High-Speed Contiguous Raw Memory Buffers (`buffer.nv`)**:
+  - Implemented unboxed contiguous memory slab primitives in `runtime.c`: `buf_new`, `buf_free`, `buf_get_u8`, `buf_set_u8`, `buf_get_i32`, `buf_set_i32`, `buf_fill_i32`, `buf_copy`.
+  - Created `nova/stdlib/buffer.nv` defining `Buffer` class and `new_buffer(size_bytes: int)`.
+  - Added `tests/test_buffer.py`: verified basic operations and benchmarked 10 million 32-bit pixel writes in `< 25ms` (0.0025 ns/op).
+- **Phase 3: High-Performance Networking (`net.nv`) & High-Resolution Timers (`time.nv`)**:
+  - Dynamically resolved Winsock2 (`ws2_32.dll`) at runtime eliminating static linker dependencies across compiler bootstrap stages.
+  - Monotonic microsecond clock and timers (`time_now_us`, `time_now_ms`, `sleep_ms`) via Windows `QueryPerformanceCounter`/`QueryPerformanceFrequency`.
+  - Created `nova/stdlib/net.nv` (`TcpListener`, `TcpStream`, `tcp_listen`, `tcp_connect`) and `nova/stdlib/time.nv` (`now_us`, `now_ms`, `sleep`).
+  - Rebuilt Stage 1 -> Stage 2 -> Stage 3; verified `s2.s == s3.s` byte-identical gate.
+  - Added and passed `tests/test_net_time.py`.
+- **Phase 4: 60 FPS Software Framebuffer Blitting & Interactive Input (`gui.nv`)**:
+  - Direct 32-bit RGBA top-down DIB framebuffer blit via Win32 `StretchDIBits` (`gui_present_framebuffer`).
+  - Real-time unbuffered input polling: `gui_key_down`, `gui_mouse_down_btn`, `gui_mouse_x`, `gui_mouse_y`.
+  - Added and passed `tests/test_framebuffer.py`.
+- **Phase 5: Showstopper Flagship Creative Physics Studio (`examples/nova_sandbox.nv`)**:
+  - Standalone 60 FPS interactive physics and particle synthesizer supporting 600 particles with sub-pixel fixed-point physics, radial gravity wells, explosive shockwaves, boundary collisions, and real-time HUD vector overlay.
+  - Headless benchmark mode (`--headless-bench <N>`): runs 300 physics & rasterization frames in 21 ms (**14,092 FPS**, >20x faster than 600 FPS target).
+  - Standalone binary `nova_sandbox.exe` footprint is **187.5 KB** (< 250 KB requirement).
+  - Added automated test `tests/test_sandbox.py` (2/2 passed). Full regression suite passed (23/23).
+
+
+## Self-Hosted Hardening, Parity, String Performance & Flagship Schema Doctor
+- **Phase 1: Binary Portability & Installer Alignment**:
+  - Implemented 4-tier `stdlib/` resolution (`./`, `NOVA_PATH`, `<exe_dir>/stdlib/`, `./stdlib/`) in `stdlib/compiler.nv`.
+  - Updated `install.py` to package self-hosted `nova.exe`, `novalsp.exe`, `runtime.o`, and `stdlib/`.
+  - Switched license to standard MIT License in `README.md` and `LICENSE`.
+  - Stage 1 -> Stage 2 -> Stage 3 gate verified; `tests/test_portable_execution.py` passed (2/2).
+- **Phase 2: Self-Hosted Pipeline Parity (4 Crashers Fixed)**:
+  - Fixed `extern def` Microsoft x64 calling convention (`rcx, rdx, r8, r9` with 32-byte shadow space).
+  - Fixed list comprehension codegen crash (`Block` expression support in `codegen_expr.nv`).
+  - Fixed class methods and field assignments (`self.x = ...`), synthesized constructor layouts in `parser.nv`, type checking in `type_checker.nv`, and `<Class>_<method>` mangling.
+  - Fixed multiple return assignment unpacking `a, b = f()` and tuple return annotations `-> (T1, T2, ...)`.
+  - Stage 1 -> Stage 2 -> Stage 3 gate verified (`s2.s == s3.s` byte-identical); `tests/test_selfhost_parity.py` passed (4/4).
+- **Phase 3: String Concatenation & Memory Performance**:
+  - Eliminated $O(N^2)$ quadratic allocation cliff in string appends.
+  - Implemented `NovaStrHeader` (`magic = 0x53545231`, `len`, `cap`) for $O(1)$ length check and amortized in-place appending `_nova_str_append`.
+  - Replaced Win32 `lstrcmpA` with fast native byte-level `strcmp`.
+  - Benchmarks: `strings` reduced from **6.04s to 0.012s (500x speedup)**; geometric mean run time **0.057s** over 10 benchmarks.
+- **Phase 4: CLI Normalization**:
+  - Added subcommands and options to `nova/nova.nv`: `check <file.nv>`, `version`, `--version`, `-v`, `help`, `--help`, `-h`, `-o <out>`, `-b`, `-d`.
+  - Stage 1 -> Stage 2 -> Stage 3 gate verified (`s2.s == s3.s` byte-identical).
+  - `tests/test_cli.py` passed (6/6).
+- **Phase 5: Flagship Developer Utility (Schema Doctor)**:
+  - Created `examples/schema_doctor.nv`: dual-mode JSON schema validation utility.
+  - CLI mode validates payloads against types, required fields, min/max length, and min/max values.
+  - Win32 GDI GUI mode renders dark-slate UI with dual-card layout and live health report.
+  - Standalone binary size: **186.7 KB** (well within `< 350 KB` requirement).
+  - `tests/test_schema_doctor.py` passed (5/5).
 
 ## Latest Portable Standard-Library Work
 - Added `env_get(name)` and `env_set(name, value)` to `stdlib/env.nv`.

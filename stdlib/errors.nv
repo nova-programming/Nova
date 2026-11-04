@@ -1,19 +1,139 @@
-def err(err_type: string, filename: string, line: int, msg: string, suggestion: string, col: int) {
-    if filename != "" {
-        print("ERROR [" + filename + ":" + str(line) + ":" + str(col) + "] (" + err_type + "): " + msg)
-    } else {
-        print("ERROR [line " + str(line) + ":" + str(col) + "] (" + err_type + "): " + msg)
+import system
+
+# Fixed, build-wide marker file: err() below sets it so compile_file (stdlib/compiler.nv) can
+# tell, after parsing/type-checking, that a diagnostic was reported somewhere in that pass --
+# including inside an imported module, which may have a different `filename` than the file
+# compile_file itself was asked to build -- and fail the build instead of silently emitting
+# (and reporting success for) a broken program. Not threaded through every call site as a
+# parameter: lexer.nv/parser.nv/type_checker.nv call err() from many places with no shared
+# state object reaching all of them.
+#
+# When NOVA_DIAG_FILE is set, diagnostics are also appended there as one JSON object per line
+# and printing to stdout is suppressed. That keeps an embedded front-end (the language server)
+# from writing human-readable errors onto its JSON-RPC channel. With the variable unset,
+# behavior is byte-for-byte the previous CLI output.
+def _diag_file() -> string {
+    return system.system_env_get("NOVA_DIAG_FILE")
+}
+
+def _diag_hex(n: int) -> string {
+    return str_sub("0123456789abcdef", n, n + 1)
+}
+
+def _diag_escape(s: string) -> string {
+    out = ""
+    i = 0
+    while i < len(s) {
+        ch = s[i]
+        if ch == "\"" { out = out + "\\\"" }
+        elif ch == "\\" { out = out + "\\\\" }
+        elif ch == "\n" { out = out + "\\n" }
+        elif ch == "\r" { out = out + "\\r" }
+        elif ch == "\t" { out = out + "\\t" }
+        else {
+            code = char_code(ch, 0)
+            if code < 32 {
+                out = out + "\\u00" + _diag_hex(code / 16) + _diag_hex(code % 16)
+            } else {
+                out = out + ch
+            }
+        }
+        i = i + 1
     }
-    print("  -> " + suggestion)
-    sys_flush()
+    return out
+}
+
+def _diag_emit(severity: string, err_type: string, filename: string, line: int, msg: string, suggestion: string, col: int) {
+    path = _diag_file()
+    if path == "" { return }
+    fd = sys_open(path, "a")
+    if fd == 0 { return }
+    record = "{\"severity\":\"" + severity + "\",\"type\":\"" + _diag_escape(err_type) + "\",\"file\":\"" + _diag_escape(filename) + "\",\"line\":" + str(line) + ",\"column\":" + str(col) + ",\"message\":\"" + _diag_escape(msg) + "\",\"hint\":\"" + _diag_escape(suggestion) + "\"}" + "\n"
+    sys_write(fd, record)
+    sys_close(fd)
+}
+
+# True when this pass reported at least one error. In diagnostic-file mode we read that file
+# instead of the cwd marker, so a long-running embedded front-end (language server) works even
+# when its working directory is read-only. Warnings are written to the same file but must not
+# fail a build, so the search is for an error record specifically.
+def _diag_has_error(s: string) -> int {
+    needle = "{\"severity\":\"error\""
+    n = len(needle)
+    i = 0
+    while i + n <= len(s) {
+        if str_sub(s, i, i + n) == needle { return 1 }
+        i = i + 1
+    }
+    return 0
+}
+
+def had_errors() -> int {
+    path = _diag_file()
+    if path != "" {
+        if file_exists(path) == 0 { return 0 }
+        fd = sys_open(path, "r")
+        if fd == 0 { return 0 }
+        content = sys_read(fd)
+        sys_close(fd)
+        return _diag_has_error(content)
+    }
+    if file_exists(".nova_build_errors") == 0 { return 0 }
+    fd = sys_open(".nova_build_errors", "r")
+    content = sys_read(fd)
+    sys_close(fd)
+    if content == "1" { return 1 }
+    return 0
+}
+
+def reset_errors() {
+    path = _diag_file()
+    if path != "" {
+        # Diagnostic-file mode: the file itself is the error marker (see had_errors), so
+        # no cwd state is needed and a read-only working directory is fine.
+        dfd = sys_open(path, "w")
+        if dfd != 0 { sys_close(dfd) }
+        return
+    }
+    fd = sys_open(".nova_build_errors", "w")
+    if fd != 0 {
+        sys_write(fd, "0")
+        sys_close(fd)
+    }
+}
+
+def _mark_error() {
+    if _diag_file() != "" { return }
+    fd = sys_open(".nova_build_errors", "w")
+    if fd != 0 {
+        sys_write(fd, "1")
+        sys_close(fd)
+    }
+}
+
+def err(err_type: string, filename: string, line: int, msg: string, suggestion: string, col: int) {
+    _diag_emit("error", err_type, filename, line, msg, suggestion, col)
+    if _diag_file() == "" {
+        if filename != "" {
+            print("ERROR [" + filename + ":" + str(line) + ":" + str(col) + "] (" + err_type + "): " + msg)
+        } else {
+            print("ERROR [line " + str(line) + ":" + str(col) + "] (" + err_type + "): " + msg)
+        }
+        print("  -> " + suggestion)
+        sys_flush()
+    }
+    _mark_error()
 }
 
 def warn(err_type: string, filename: string, line: int, msg: string, suggestion: string, col: int) {
-    if filename != "" {
-        print("WARNING [" + filename + ":" + str(line) + ":" + str(col) + "] (" + err_type + "): " + msg)
-    } else {
-        print("WARNING [line " + str(line) + ":" + str(col) + "] (" + err_type + "): " + msg)
+    _diag_emit("warning", err_type, filename, line, msg, suggestion, col)
+    if _diag_file() == "" {
+        if filename != "" {
+            print("WARNING [" + filename + ":" + str(line) + ":" + str(col) + "] (" + err_type + "): " + msg)
+        } else {
+            print("WARNING [line " + str(line) + ":" + str(col) + "] (" + err_type + "): " + msg)
+        }
+        print("  -> " + suggestion)
+        sys_flush()
     }
-    print("  -> " + suggestion)
-    sys_flush()
 }

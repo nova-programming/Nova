@@ -56,6 +56,8 @@ data CodegenState {
     ptr_vars: dict
     internal_fns: dict
     for_depth: int
+    extern_fns: dict
+    class_methods: dict
 }
 
 # `import codegen` (stdlib/compiler.nv) resolves to exactly one of
@@ -108,6 +110,8 @@ def new_codegen(tgt: int, target_os: string) -> CodegenState {
     state.ptr_vars = {}
     state.internal_fns = {}
     state.for_depth = 0
+    state.extern_fns = {}
+    state.class_methods = {}
     if tgt == 0 {
         state.bp = "ebp"
         state.sp = "esp"
@@ -221,6 +225,19 @@ def emit_internal_call(state: CodegenState, func_name: string, arg_count: int) {
     if arg_count >= 5 { emit(state, "    pop r8") }
     if arg_count >= 6 { emit(state, "    pop r9") }
     emit(state, "    call " + func_name)
+    if arg_count > 6 { clean_n(state, arg_count - 6) }
+}
+
+def emit_win_extern_call(state: CodegenState, func_name: string, arg_count: int) {
+    if arg_count >= 1 { emit(state, "    pop rcx") }
+    if arg_count >= 2 { emit(state, "    pop rdx") }
+    if arg_count >= 3 { emit(state, "    pop r8") }
+    if arg_count >= 4 { emit(state, "    pop r9") }
+    emit(state, "    xor eax, eax")
+    emit(state, "    sub rsp, 32")
+    emit(state, "    call " + func_name)
+    emit(state, "    add rsp, 32")
+    if arg_count > 4 { clean_n(state, arg_count - 4) }
 }
 
 def emit_call(state: CodegenState, func_name: string, arg_count: int) {
@@ -240,6 +257,14 @@ def emit_call(state: CodegenState, func_name: string, arg_count: int) {
         emit(state, "    call " + func_name)
         emit(state, "    mov rsp, rbp")
         emit(state, "    pop rbp")
+        # The first six arguments were consumed into registers above; anything past the
+        # sixth is still on the stack and belongs to the caller. Leaving it there shifted
+        # every later push/pop by 8 bytes, most visibly the callee-saved-register pops in
+        # the caller's epilogue (pop r15/r14/r13/r12 then read the wrong slots and return
+        # with garbage in r12-r15). That silently corrupted any live data struct held in a
+        # register across a 7+ argument call -- e.g. errors.err (6 args) calling
+        # _diag_emit (7 args) clobbered the parser's `state` pointer.
+        if arg_count > 6 { clean_n(state, arg_count - 6) }
     } else {
         emit(state, "    call " + func_name)
         if arg_count > 0 {
@@ -339,6 +364,11 @@ def lookup_preferred_field(state: CodegenState, field_name: string) -> int {
     if field_name == "name" { pref = "Type" }
     if field_name == "params" { pref = "AstNode" }
     if field_name == "inferred_type" { pref = "AstNode" }
+    # `line`/`col` exist on both Token (offsets 2/3) and AstNode (offsets 3/4). Untyped
+    # accesses such as node.line in resolve_imports must read the AST slot, not whichever
+    # struct happens to be declared first; otherwise diagnostics report pointer garbage.
+    if field_name == "line" { pref = "AstNode" }
+    if field_name == "col" { pref = "AstNode" }
     if pref != "" {
         si = 0
         while si < len(state.struct_names) {
@@ -420,9 +450,13 @@ def is_string_expr(state: CodegenState, node: AstNode) -> int {
     if node.kind == "StrConvert" {
         return 1
     }
-
-    if node.inferred_type != 0 and node.inferred_type.kind == "scalar" and node.inferred_type.name == "string" {
+    if node.kind == "ReadFile" {
         return 1
+    }
+
+    if node.inferred_type != 0 and node.inferred_type.kind == "scalar" {
+        if node.inferred_type.name == "string" { return 1 }
+        return 0
     }
 
     if node.kind == "Variable" {
@@ -1011,7 +1045,9 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
         s = s + 1
     }
 
-    emit(state, "_" + node.val_str + ":")
+    fn_sym = "_" + node.val_str
+    if node.val_str == "main" { fn_sym = "_nova_user_main" }
+    emit(state, fn_sym + ":")
     regs_size = len(state.used_regs) * psize
     
     emit(state, "    push " + bp)
@@ -1041,26 +1077,47 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
     if is_x64(state) == 1 {
         p = 0
         while p < len(node.params) {
-            arg_reg = ""
-            if p == 0 { arg_reg = "rdi" }
-            elif p == 1 { arg_reg = "rsi" }
-            elif p == 2 { arg_reg = "rdx" }
-            elif p == 3 { arg_reg = "rcx" }
-            elif p == 4 { arg_reg = "r8" }
-            else { arg_reg = "r9" }
-            if arg_reg != "" {
+            param_name = node.params[p]
+            var_reg = find_var_reg(state, param_name)
+            if p < 6 {
+                arg_reg = ""
+                if p == 0 { arg_reg = "rdi" }
+                elif p == 1 { arg_reg = "rsi" }
+                elif p == 2 { arg_reg = "rdx" }
+                elif p == 3 { arg_reg = "rcx" }
+                elif p == 4 { arg_reg = "r8" }
+                else { arg_reg = "r9" }
                 # Looked up by name (not state.local_var_regs[p]/local_vars[p] positionally):
                 # register priority can now claim registers for hot non-param locals before
                 # params are registered below, so params no longer necessarily occupy the
                 # first len(node.params) slots of those parallel arrays in declaration order.
-                param_name = node.params[p]
-                var_reg = find_var_reg(state, param_name)
                 if var_reg != "" {
                     emit(state, "    mov " + var_reg + ", " + arg_reg)
                 } else {
                     off = find_var_offset(state, param_name)
                     if off > 0 {
                         emit(state, "    mov [%b - " + str(off) + "], " + arg_reg)
+                    }
+                }
+            } else {
+                # Seventh and later arguments are stack arguments. emit_call pushes its own
+                # rbp *after* popping the six register arguments, so the first stack argument
+                # always sits at [emit_call_rbp + 8], and emit_call_rbp is the value this
+                # function's prologue just saved at [rbp]. Reading through that saved pointer
+                # (rather than a fixed [rbp + N]) is what makes the offset stable: emit_call
+                # realigns with `and rsp, -16`, which shifts its frame by 0 or 8 bytes depending
+                # on the call site's alignment, so a constant [rbp + N] only matches one parity.
+                # Stack parameters used to fall back to r9, i.e. every arg past the sixth
+                # silently became a copy of the sixth.
+                stack_off = 8 + (p - 6) * psize
+                emit(state, "    mov %a, [%b]")
+                if var_reg != "" {
+                    emit(state, "    mov " + var_reg + ", [%a + " + str(stack_off) + "]")
+                } else {
+                    off = find_var_offset(state, param_name)
+                    if off > 0 {
+                        emit(state, "    mov %a, [%a + " + str(stack_off) + "]")
+                        emit(state, "    mov [%b - " + str(off) + "], %a")
                     }
                 }
             }
@@ -1160,7 +1217,12 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         node = ast[i]
         if node.kind == "Function" {
             if node.val_int == 2 {
-                emit(state, ".extern _" + node.val_str)
+                state.extern_fns.set(node.val_str, 1)
+                if state.target_os == "macos" {
+                    emit(state, ".extern _" + node.val_str)
+                } else {
+                    emit(state, ".extern " + node.val_str)
+                }
             } else {
                 functions.append(node)
                 if len(node.params) <= 6 {
@@ -1168,7 +1230,7 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
                 }
             }
         } else {
-            if node.kind == "Data" {
+            if node.kind == "Data" or node.kind == "ClassDef" {
                 state.struct_names.append(node.val_str)
                 state.struct_fields.append([])
                 max_off = 0
@@ -1184,6 +1246,21 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
                     max_off = 4
                 }
                 state.struct_sizes.append(max_off)
+                if node.kind == "ClassDef" {
+                    mi = 0
+                    while mi < len(node.methods) {
+                        m = node.methods[mi]
+                        orig_mname = m.val_str
+                        mangled = node.val_str + "_" + orig_mname
+                        m.val_str = mangled
+                        functions.append(m)
+                        if len(m.params) <= 6 {
+                            state.internal_fns.set(mangled, 1)
+                        }
+                        state.class_methods.set(node.val_str + "." + orig_mname, mangled)
+                        mi = mi + 1
+                    }
+                }
             } else {
                 top_level.append(node)
             }

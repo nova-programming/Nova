@@ -798,6 +798,30 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    str x0, [x1]")
         emit(state, "    str %x, [sp, #-16]!")
     }
+    # Builtin file I/O (`open`/`read`/`write`/`close`), mirroring the x86_64 backend and mapping
+    # to the same runtime entry points the `sys_*` wrappers and file methods use.
+    if node.kind == "OpenFile" {
+        compile_expr(state, node.right)
+        compile_expr(state, node.left)
+        emit_call(state, "_sys_open_c", 2)
+        emit(state, "    str %a, [sp, #-16]!")
+    }
+    if node.kind == "ReadFile" {
+        compile_expr(state, node.left)
+        emit_call(state, "_sys_read_c", 1)
+        emit(state, "    str %a, [sp, #-16]!")
+    }
+    if node.kind == "WriteFile" {
+        compile_expr(state, node.right)
+        compile_expr(state, node.left)
+        emit_call(state, "_sys_write_c", 2)
+        emit(state, "    str %a, [sp, #-16]!")
+    }
+    if node.kind == "CloseFile" {
+        compile_expr(state, node.left)
+        emit_call(state, "_sys_close_c", 1)
+        emit(state, "    str %a, [sp, #-16]!")
+    }
     if node.kind == "ListLiteral" {
         cap = len(node.args)
         ptr_sz = ptr_size(state)
@@ -1320,7 +1344,9 @@ def compile_expr(state: CodegenState, node: AstNode) {
                 compile_expr(state, node.args[idx_arg])
                 idx_arg = idx_arg - 1
             }
-            emit_call(state, "_" + node.val_str, arg_count)
+            call_target = "_" + node.val_str
+            if node.val_str == "main" { call_target = "_nova_user_main" }
+            emit_call(state, call_target, arg_count)
             emit(state, "    str %a, [sp, #-16]!")
         }
     }

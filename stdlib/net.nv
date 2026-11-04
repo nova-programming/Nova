@@ -1,0 +1,71 @@
+# =============================================================================
+# Nova Native TCP/UDP Networking Primitives (stdlib/net.nv)
+# =============================================================================
+import system
+
+extern def nova_net_init() -> int
+extern def nova_tcp_listen(port: int, backlog: int) -> int
+extern def nova_tcp_accept(listen_sock: int) -> int
+extern def nova_tcp_connect(ip: string, port: int) -> int
+extern def nova_net_send(sock: int, buf: int, length: int) -> int
+extern def nova_net_recv(sock: int, buf: int, max_len: int) -> int
+extern def nova_net_close(sock: int)
+
+def net_init() -> int {
+    return nova_net_init()
+}
+
+class TcpStream {
+    sock: int
+
+    def send(self, data_ptr: int, length: int) -> int {
+        return nova_net_send(self.sock, data_ptr, length)
+    }
+
+    def recv(self, data_ptr: int, max_len: int) -> int {
+        return nova_net_recv(self.sock, data_ptr, max_len)
+    }
+
+    def close(self) {
+        if self.sock > 0 {
+            nova_net_close(self.sock)
+            self.sock = 0
+        }
+    }
+}
+
+def new_tcp_stream(sock: int) -> TcpStream {
+    s = TcpStream()
+    s.sock = sock
+    return s
+}
+
+class TcpListener {
+    sock: int
+    port: int
+
+    def accept(self) -> TcpStream {
+        s = nova_tcp_accept(self.sock)
+        return new_tcp_stream(s)
+    }
+
+    def close(self) {
+        if self.sock > 0 {
+            nova_net_close(self.sock)
+            self.sock = 0
+        }
+    }
+}
+
+def tcp_listen(port: int, backlog: int) -> TcpListener {
+    s = nova_tcp_listen(port, backlog)
+    l = TcpListener()
+    l.sock = s
+    l.port = port
+    return l
+}
+
+def tcp_connect(ip: string, port: int) -> TcpStream {
+    s = nova_tcp_connect(ip, port)
+    return new_tcp_stream(s)
+}

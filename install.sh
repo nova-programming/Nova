@@ -43,10 +43,38 @@ create_launchers() {
     # Probe for python command — prefer python3, fall back to python
     py_cmd="python3"
     command -v python3 >/dev/null 2>&1 || py_cmd="python"
-    printf '%s\n' "#!/usr/bin/env ${py_cmd}" 'import sys, os' 'sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))' 'os.chdir(os.path.dirname(os.path.abspath(__file__)))' 'from bootstrap.main import main; main()' > "${INSTALL_DIR}/nova"
+    # nova: run the fast native self-hosted compiler if build_native_compiler produced one
+    # next to this launcher, else fall back to the Python bootstrap (always works).
+    printf '%s\n' "#!/usr/bin/env ${py_cmd}" 'import sys, os' \
+        '_d = os.path.dirname(os.path.abspath(__file__))' \
+        '_native = os.path.join(_d, "nova_native")' \
+        'if os.path.exists(_native) and os.access(_native, os.X_OK):' \
+        '    os.execv(_native, [_native] + sys.argv[1:])' \
+        'sys.path.insert(0, _d)' 'os.chdir(_d)' \
+        'from bootstrap.main import main; main()' > "${INSTALL_DIR}/nova"
     printf '%s\n' "#!/usr/bin/env ${py_cmd}" 'import sys, os' 'sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))' 'from _galaxy import main; main()' > "${INSTALL_DIR}/galaxy"
     chmod +x "${INSTALL_DIR}/nova" "${INSTALL_DIR}/galaxy"
     ok "Created launchers"
+}
+
+build_native_compiler() {
+    # Best-effort: build the self-hosted native compiler (bootstrap -> stage1 -> stage2) so
+    # the nova launcher runs it directly instead of the slower Python bootstrap every time.
+    # Never fatal -- on any failure the launcher already falls back to the bootstrap.
+    command -v gcc >/dev/null 2>&1 || { info "No GCC — nova will run via the Python bootstrap."; return; }
+    py_cmd="python3"
+    command -v python3 >/dev/null 2>&1 || py_cmd="python"
+    [ -f "${INSTALL_DIR}/bootstrap/main.py" ] && [ -f "${INSTALL_DIR}/nova.nv" ] || return
+    info "Building the self-hosted native compiler (stage 1 -> stage 2)..."
+    if "$py_cmd" "${INSTALL_DIR}/bootstrap/main.py" build "${INSTALL_DIR}/nova.nv" -o "${INSTALL_DIR}/nova_stage1" >/dev/null 2>&1 \
+        && [ -f "${INSTALL_DIR}/nova_stage1" ] \
+        && "${INSTALL_DIR}/nova_stage1" build "${INSTALL_DIR}/nova.nv" -o "${INSTALL_DIR}/nova_native" >/dev/null 2>&1 \
+        && [ -f "${INSTALL_DIR}/nova_native" ]; then
+        chmod +x "${INSTALL_DIR}/nova_native"
+        ok "Built native self-hosted compiler"
+    else
+        warn "Native compiler build failed — nova will run via the Python bootstrap."
+    fi
 }
 
 do_install() {
@@ -141,6 +169,7 @@ zf.close()
         warn "Or use 'nova dev <file.nv>' (VM mode, no compiler needed)."
     fi
 
+    build_native_compiler
     create_launchers
     add_to_path
 

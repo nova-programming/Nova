@@ -1,0 +1,474 @@
+# novalsp — Nova language server (JSON-RPC over stdio).
+#
+# The front-end is the compiler itself: check_source() parses, resolves imports and
+# type-checks without running codegen or touching the build cache. Diagnostics are
+# written by errors.nv to NOVA_DIAG_FILE as JSONL, which keeps this process's stdout
+# reserved for the JSON-RPC channel even when the checked file has errors.
+#
+# Protocol framing: Content-Length headers + one JSON body (LSP 3.17).
+# Position encoding: UTF-8 (Nova columns are byte offsets).
+# Document sync: full (the client sends the whole buffer on every change).
+#
+# Supported: initialize, initialized, shutdown, exit,
+#            textDocument/didOpen, didChange, didSave, didClose,
+#            workspace/didChangeConfiguration (ignored), $/cancelRequest (ignored).
+# `novalsp --check file.nv` runs the same front-end once and prints diagnostics,
+# which is useful in CI and keeps the behaviour under test identical to the server.
+#
+# NB: Nova strings treat an unescaped "{" as interpolation. Every literal JSON
+# brace below is therefore written "\{" / "\}", which lexes to a plain brace.
+
+import system
+import text
+import json
+import compiler
+
+data LspState {
+    uris: list
+    versions: list
+    texts: list
+    diag_path: string
+    shutdown: int
+}
+
+def lsp_version() -> string {
+    return "0.1.0"
+}
+
+# ---------------------------------------------------------------- small helpers
+
+def lsp_hex_digit(n: int) -> string {
+    if n < 10 { return str_sub("0123456789", n, n + 1) }
+    return str_sub("abcdef", n - 10, n - 9)
+}
+
+# JSON string escaping. Messages may contain quotes, newlines and the compiler's
+# typographic hints, so this is shared by every response and notification.
+def lsp_escape(s: string) -> string {
+    out = ""
+    i = 0
+    while i < len(s) {
+        ch = s[i]
+        if ch == "\"" { out = out + "\\\"" }
+        elif ch == "\\" { out = out + "\\\\" }
+        elif ch == "\n" { out = out + "\\n" }
+        elif ch == "\r" { out = out + "\\r" }
+        elif ch == "\t" { out = out + "\\t" }
+        else {
+            code = char_code(ch, 0)
+            if code < 32 {
+                out = out + "\\u00" + lsp_hex_digit(code / 16) + lsp_hex_digit(code % 16)
+            } else {
+                out = out + ch
+            }
+        }
+        i = i + 1
+    }
+    return out
+}
+
+def lsp_json_str(s: string) -> string {
+    return "\"" + lsp_escape(s) + "\""
+}
+
+# Path comparison is insurance: the compiler normally reports the exact filename we
+# hand it, but imported modules can use either slash and Windows paths are usually
+# case-insensitive.
+def lsp_norm_path(p: string) -> string {
+    out = ""
+    i = 0
+    while i < len(p) {
+        ch = p[i]
+        if ch == "\\" { out = out + "/" } else { out = out + ch }
+        i = i + 1
+    }
+    return text_lower(out)
+}
+
+def lsp_same_path(a: string, b: string) -> int {
+    if lsp_norm_path(a) == lsp_norm_path(b) { return 1 }
+    return 0
+}
+
+# ---------------------------------------------------------------- document store
+
+# Lists rather than a dict: the store stays tiny (open editors only) and this keeps
+# the data layout obvious to the self-hosted codegen.
+def lsp_find_doc(st: LspState, uri: string) -> int {
+    i = 0
+    while i < len(st.uris) {
+        if st.uris[i] == uri { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+def lsp_set_doc(st: LspState, uri: string, version: int, content: string) {
+    i = lsp_find_doc(st, uri)
+    if i < 0 {
+        st.uris.append(uri)
+        st.versions.append(version)
+        st.texts.append(content)
+    } else {
+        st.versions[i] = version
+        st.texts[i] = content
+    }
+}
+
+def lsp_drop_doc(st: LspState, uri: string) {
+    i = lsp_find_doc(st, uri)
+    if i < 0 { return }
+    uris = []
+    versions = []
+    texts = []
+    k = 0
+    while k < len(st.uris) {
+        if k != i {
+            uris.append(st.uris[k])
+            versions.append(st.versions[k])
+            texts.append(st.texts[k])
+        }
+        k = k + 1
+    }
+    st.uris = uris
+    st.versions = versions
+    st.texts = texts
+}
+
+# ---------------------------------------------------------------- wire protocol
+
+def lsp_send(body: string) {
+    # sys_write is unbuffered here (the Windows runtime writes straight to the
+    # handle), so no flush is required and stdout order is preserved.
+    system.file_write(1, "Content-Length: " + str(len(body)) + "\r\n\r\n" + body)
+}
+
+# Reads one framed message. Returns "" at EOF; a valid JSON-RPC body is never empty.
+def lsp_read_message() -> string {
+    length = -1
+    line = system.read_line_raw()
+    if len(line) == 0 { return "" }
+    guard = 0
+    while len(line) > 0 and line != "\n" and guard < 100 {
+        header = text_trim(line)
+        if text_starts_with(text_lower(header), "content-length:") == 1 {
+            length = text_to_int(str_sub(header, 15, len(header)))
+        }
+        line = system.read_line_raw()
+        guard = guard + 1
+    }
+    if length <= 0 { return "" }
+    body = ""
+    remaining = length
+    while remaining > 0 {
+        chunk = system.read_stdin(remaining)
+        if len(chunk) == 0 { return "" }
+        body = body + chunk
+        remaining = remaining - len(chunk)
+    }
+    return body
+}
+
+# JSON-RPC ids may be numbers or strings; echo the same shape back. `null` keeps
+# malformed requests answerable even when no id could be parsed.
+def lsp_id_json(node) -> string {
+    kind = json_kind(node)
+    if kind == 2 { return str(json_as_int(node)) }
+    if kind == 3 { return lsp_json_str(json_as_string(node)) }
+    return "null"
+}
+
+def lsp_respond(id_json: string, result: string) {
+    lsp_send("\{\"jsonrpc\":\"2.0\",\"id\":" + id_json + ",\"result\":" + result + "\}")
+}
+
+def lsp_respond_error(id_json: string, code: int, message: string) {
+    lsp_send("\{\"jsonrpc\":\"2.0\",\"id\":" + id_json + ",\"error\":\{\"code\":" + str(code) + ",\"message\":" + lsp_json_str(message) + "\}\}")
+}
+
+def lsp_publish(st: LspState, uri: string, diagnostics: string) {
+    params = "\{\"uri\":" + lsp_json_str(uri) + ",\"diagnostics\":" + diagnostics + "\}"
+    lsp_send("\{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":" + params + "\}")
+}
+
+# ---------------------------------------------------------------- diagnostics
+
+def lsp_diag_json(rec) -> string {
+    line = json_as_int(json_get(rec, "line"))
+    col = json_as_int(json_get(rec, "column"))
+    if line > 0 { line = line - 1 }
+    if line < 0 { line = 0 }
+    if col < 0 { col = 0 }
+    severity = 1
+    if json_as_string(json_get(rec, "severity")) == "warning" { severity = 2 }
+    code = json_as_string(json_get(rec, "type"))
+    message = json_as_string(json_get(rec, "message"))
+    hint = json_as_string(json_get(rec, "hint"))
+    if len(hint) > 0 { message = message + "\n" + hint }
+    out = "\{\"range\":\{\"start\":\{\"line\":" + str(line) + ",\"character\":" + str(col) + "\}"
+    out = out + ",\"end\":\{\"line\":" + str(line) + ",\"character\":" + str(col + 1) + "\}\}"
+    out = out + ",\"severity\":" + str(severity) + ",\"source\":\"nova\""
+    out = out + ",\"code\":" + lsp_json_str(code) + ",\"message\":" + lsp_json_str(message) + "\}"
+    return out
+}
+
+# Diagnostics in imported stdlib modules are not attached to the editor buffer, so
+# only records for this document (or records without a filename, e.g. a reserved
+# function name) become publishDiagnostics entries.
+def lsp_read_diagnostics(st: LspState, uri: string) -> string {
+    path = st.diag_path
+    if file_exists(path) == 0 { return "[]" }
+    fd = system.file_open(path, "r")
+    if fd == 0 { return "[]" }
+    content = system.file_read(fd)
+    system.file_close(fd)
+    lines = text_lines(content)
+    out = ""
+    count = 0
+    i = 0
+    while i < len(lines) {
+        row = text_trim(lines[i])
+        if len(row) > 0 {
+            rec = json_parse(row)
+            if json_kind(rec) >= 0 {
+                fname = json_as_string(json_get(rec, "file"))
+                if len(fname) == 0 or lsp_same_path(fname, uri) == 1 {
+                    if count > 0 { out = out + "," }
+                    out = out + lsp_diag_json(rec)
+                    count = count + 1
+                }
+            }
+        }
+        i = i + 1
+    }
+    return "[" + out + "]"
+}
+
+# full=1 parses + resolves imports + type-checks (didOpen/didSave).
+# full=0 only parses (didChange), which keeps typing responsive.
+def lsp_check_doc(st: LspState, uri: string, content: string, full: int) {
+    system.system_env_set("NOVA_DIAG_FILE", st.diag_path)
+    if full == 1 {
+        check_source(content, uri, codegen_native_arch(), system.platform())
+    } else {
+        check_syntax_source(content, uri)
+    }
+    lsp_publish(st, uri, lsp_read_diagnostics(st, uri))
+}
+
+# ---------------------------------------------------------------- request routing
+
+def lsp_initialize_result() -> string {
+    return "\{\"capabilities\":\{\"textDocumentSync\":\{\"openClose\":true,\"change\":1,\"save\":\{\"includeText\":true\}\},\"positionEncoding\":\"utf-8\"\},\"serverInfo\":\{\"name\":\"novalsp\",\"version\":\"" + lsp_version() + "\"\}\}"
+}
+
+def lsp_handle(st: LspState, body: string) -> int {
+    msg = json_parse(body)
+    if json_kind(msg) < 0 {
+        lsp_respond_error("null", -32700, "Parse error")
+        return 1
+    }
+    method = json_as_string(json_get(msg, "method"))
+    has_id = json_has(msg, "id")
+    id_json = "null"
+    if has_id == 1 { id_json = lsp_id_json(json_get(msg, "id")) }
+    params = json_get(msg, "params")
+
+    if method == "initialize" {
+        lsp_respond(id_json, lsp_initialize_result())
+        return 1
+    }
+    if method == "initialized" { return 1 }
+    if method == "shutdown" {
+        st.shutdown = 1
+        lsp_respond(id_json, "null")
+        return 1
+    }
+    if method == "exit" {
+        system.file_delete(st.diag_path)
+        if st.shutdown == 1 { system.system_exit(0) }
+        system.system_exit(1)
+        return 0
+    }
+    if method == "$/cancelRequest" { return 1 }
+    if method == "workspace/didChangeConfiguration" { return 1 }
+
+    if method == "textDocument/didOpen" {
+        td = json_get(params, "textDocument")
+        uri = json_as_string(json_get(td, "uri"))
+        version = json_as_int(json_get(td, "version"))
+        content = json_as_string(json_get(td, "text"))
+        lsp_set_doc(st, uri, version, content)
+        lsp_check_doc(st, uri, content, 1)
+        return 1
+    }
+
+    if method == "textDocument/didChange" {
+        td = json_get(params, "textDocument")
+        uri = json_as_string(json_get(td, "uri"))
+        idx = lsp_find_doc(st, uri)
+        if idx < 0 { return 1 }
+        content = st.texts[idx]
+        changes = json_get(params, "contentChanges")
+        if json_size(changes) > 0 {
+            # Full sync: the last change carries the complete document.
+            content = json_as_string(json_get(json_at(changes, json_size(changes) - 1), "text"))
+            lsp_set_doc(st, uri, json_as_int(json_get(td, "version")), content)
+        }
+        lsp_check_doc(st, uri, content, 0)
+        return 1
+    }
+
+    if method == "textDocument/didSave" {
+        td = json_get(params, "textDocument")
+        uri = json_as_string(json_get(td, "uri"))
+        idx = lsp_find_doc(st, uri)
+        if idx < 0 { return 1 }
+        content = st.texts[idx]
+        if json_has(params, "text") == 1 {
+            content = json_as_string(json_get(params, "text"))
+            lsp_set_doc(st, uri, st.versions[idx], content)
+        }
+        lsp_check_doc(st, uri, content, 1)
+        return 1
+    }
+
+    if method == "textDocument/didClose" {
+        td = json_get(params, "textDocument")
+        uri = json_as_string(json_get(td, "uri"))
+        lsp_drop_doc(st, uri)
+        lsp_publish(st, uri, "[]")
+        return 1
+    }
+
+    if has_id == 1 { lsp_respond_error(id_json, -32601, "Method not found: " + method) }
+    return 1
+}
+
+# ---------------------------------------------------------------- entry points
+
+def lsp_temp_dir() -> string {
+    dir = system.system_env_get("TEMP")
+    if len(dir) == 0 { dir = system.system_env_get("TMP") }
+    if len(dir) == 0 { dir = system.system_env_get("TMPDIR") }
+    if len(dir) == 0 { dir = "." }
+    return dir
+}
+
+# One diagnostic file per process so two editors (or a server and --check) never
+# interleave records. Tick count + random is enough without a pid primitive.
+def lsp_make_diag_path() -> string {
+    return lsp_temp_dir() + "/novalsp_" + str(system.get_tick_count()) + "_" + str(random()) + ".jsonl"
+}
+
+def lsp_run_server(diag_path: string) {
+    system.system_env_set("NOVA_DIAG_FILE", diag_path)
+    st = LspState()
+    st.uris = []
+    st.versions = []
+    st.texts = []
+    st.diag_path = diag_path
+    st.shutdown = 0
+    running = 1
+    while running == 1 {
+        body = lsp_read_message()
+        if len(body) == 0 {
+            running = 0
+        } else {
+            running = lsp_handle(st, body)
+        }
+    }
+    system.file_delete(diag_path)
+}
+
+# Prints every diagnostic in the file (including imported modules) and returns the
+# number of error-severity records.
+def lsp_print_diags(diag_path: string) -> int {
+    if file_exists(diag_path) == 0 { return 0 }
+    fd = system.file_open(diag_path, "r")
+    if fd == 0 { return 0 }
+    content = system.file_read(fd)
+    system.file_close(fd)
+    lines = text_lines(content)
+    errors = 0
+    i = 0
+    while i < len(lines) {
+        row = text_trim(lines[i])
+        if len(row) > 0 {
+            rec = json_parse(row)
+            if json_kind(rec) >= 0 {
+                fname = json_as_string(json_get(rec, "file"))
+                line = json_as_int(json_get(rec, "line"))
+                col = json_as_int(json_get(rec, "column"))
+                severity = json_as_string(json_get(rec, "severity"))
+                kind = json_as_string(json_get(rec, "type"))
+                message = json_as_string(json_get(rec, "message"))
+                hint = json_as_string(json_get(rec, "hint"))
+                if severity == "error" { errors = errors + 1 }
+                print(fname + ":" + str(line) + ":" + str(col) + ": " + severity + " [" + kind + "] " + message)
+                if len(hint) > 0 { print("  -> " + hint) }
+            }
+        }
+        i = i + 1
+    }
+    return errors
+}
+
+def lsp_run_check(path: string, diag_path: string) -> int {
+    system.system_env_set("NOVA_DIAG_FILE", diag_path)
+    result = check_file(path, codegen_native_arch(), system.platform())
+    errors = lsp_print_diags(diag_path)
+    if result != 0 or errors > 0 { return 1 }
+    return 0
+}
+
+# ---------------------------------------------------------------- top level
+
+args = system.get_args()
+check_path = ""
+diag_override = ""
+i = 1
+while i < len(args) {
+    arg = args[i]
+    if arg == "--check" {
+        if i + 1 < len(args) {
+            check_path = args[i + 1]
+            i = i + 1
+        } else {
+            print("novalsp: --check requires a file path")
+            system.system_exit(2)
+        }
+    } elif arg == "--diag-file" {
+        if i + 1 < len(args) {
+            diag_override = args[i + 1]
+            i = i + 1
+        } else {
+            print("novalsp: --diag-file requires a path")
+            system.system_exit(2)
+        }
+    } elif arg == "--version" or arg == "-v" {
+        print("novalsp " + lsp_version())
+        system.system_exit(0)
+    } elif arg == "--help" or arg == "-h" {
+        print("novalsp " + lsp_version())
+        print("Usage: novalsp [--stdio] [--diag-file <path>]")
+        print("       novalsp --check <file.nv> [--diag-file <path>]")
+        system.system_exit(0)
+    } elif arg == "--stdio" {
+        # explicit default, accepted for editor configuration compatibility
+    } else {
+        # A bare path is a convenient shorthand for --check.
+        if len(check_path) == 0 { check_path = arg }
+    }
+    i = i + 1
+}
+
+diag_path = diag_override
+if len(diag_path) == 0 { diag_path = lsp_make_diag_path() }
+
+if len(check_path) > 0 {
+    code = lsp_run_check(check_path, diag_path)
+    system.system_exit(code)
+} else {
+    lsp_run_server(diag_path)
+}

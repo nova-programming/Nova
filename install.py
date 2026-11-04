@@ -33,9 +33,9 @@ NOVA_RELEASE_BASE = "https://github.com/nova-programming/Nova/releases/download"
 NOVA_ZIP_URL = "https://github.com/nova-programming/Nova/archive/refs/heads/main.zip"
 ZIP_PREFIX = "Nova-main"
 
-ALLOWED_ROOT_FILES = {"_galaxy.py", "nova.nv", "runtime.c"}
+ALLOWED_ROOT_FILES = {"_galaxy.py", "nova.nv", "runtime.c", "runtime.o", "nova.exe", "nova_native.exe", "novalsp.exe"}
 ALLOWED_SUBDIRS = {
-    "bootstrap", "stdlib", "tools", "galaxy",
+    "bootstrap", "stdlib", "tools", "galaxy", "lsp",
 }
 
 # Portable MinGW-w64 for Windows — only downloaded if 'gcc' not on PATH
@@ -50,7 +50,21 @@ if platform.system() == "Windows":
     LAUNCHER_TEMPLATES = {
         "nova.bat": (
             '@echo off\r\n'
-            'python "%~dp0bootstrap\\main.py" %*\r\n'
+            'if exist "%~dp0nova.exe" (\r\n'
+            '    "%~dp0nova.exe" %*\r\n'
+            ') else if exist "%~dp0nova_native.exe" (\r\n'
+            '    "%~dp0nova_native.exe" %*\r\n'
+            ') else (\r\n'
+            '    python "%~dp0bootstrap\\main.py" %*\r\n'
+            ')\r\n'
+        ),
+        "novalsp.bat": (
+            '@echo off\r\n'
+            'if exist "%~dp0novalsp.exe" (\r\n'
+            '    "%~dp0novalsp.exe" %*\r\n'
+            ') else (\r\n'
+            '    python "%~dp0bootstrap\\main.py" dev "%~dp0lsp\\server.nv" %*\r\n'
+            ')\r\n'
         ),
         "galaxy.bat": (
             '@echo off\r\n'
@@ -72,8 +86,12 @@ else:
             '#!/usr/bin/env python\n'
             '"""Nova compiler launcher"""\n'
             'import sys, os\n'
-            'sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))\n'
-            'os.chdir(os.path.dirname(os.path.abspath(__file__)))\n'
+            '_d = os.path.dirname(os.path.abspath(__file__))\n'
+            '_native = os.path.join(_d, "nova_native")\n'
+            'if os.path.exists(_native) and os.access(_native, os.X_OK):\n'
+            '    os.execv(_native, [_native] + sys.argv[1:])\n'
+            'sys.path.insert(0, _d)\n'
+            'os.chdir(_d)\n'
             'from bootstrap.main import main\n'
             'main()\n'
         ),
@@ -368,6 +386,75 @@ def _install_gcc_if_missing():
         warn(f"Could not extract GCC: {e}")
 
 
+def _build_native_compiler():
+    """Build the self-hosted native compiler (bootstrap -> stage1 -> stage2) inside
+    INSTALL_DIR, so the nova launcher runs the fast native binary instead of falling
+    through to the Python bootstrap on every single invocation. Best-effort: on any
+    failure (no working 64-bit GCC, a build error) this leaves nova_native absent and
+    the launcher silently uses the bootstrap fallback it already has -- never fatal,
+    since the Python bootstrap launcher works everywhere GCC doesn't."""
+    import subprocess
+    is_windows = platform.system() == "Windows"
+    exe = ".exe" if is_windows else ""
+    env = dict(os.environ)
+    gcc_bin_dir = os.path.join(GCC_DIR, "bin")
+    if os.path.isdir(gcc_bin_dir):
+        env["PATH"] = gcc_bin_dir + os.pathsep + env.get("PATH", "")
+    gcc = shutil.which("gcc", path=env.get("PATH", ""))
+    if not gcc:
+        info("No working GCC found — nova will run via the Python bootstrap (use 'nova dev' for VM mode, or install GCC later and re-run this installer).")
+        return
+    try:
+        machine = subprocess.run([gcc, "-dumpmachine"], capture_output=True, text=True, timeout=15).stdout
+    except Exception:
+        machine = ""
+    if "x86_64" not in machine and "amd64" not in machine.lower():
+        info("GCC on PATH isn't 64-bit — skipping the native compiler build.")
+        return
+
+    main_py = os.path.join(INSTALL_DIR, "bootstrap", "main.py")
+    nova_nv = os.path.join(INSTALL_DIR, "nova.nv")
+    stage1 = os.path.join(INSTALL_DIR, "nova_stage1" + exe)
+    native = os.path.join(INSTALL_DIR, "nova" + exe)
+    native_alt = os.path.join(INSTALL_DIR, "nova_native" + exe)
+    if not (os.path.exists(main_py) and os.path.exists(nova_nv)):
+        warn("bootstrap/main.py or nova.nv missing from the install — skipping the native compiler build.")
+        return
+
+    info("Building the self-hosted native compiler (stage 1 -> stage 2)...")
+    try:
+        r1 = subprocess.run([sys.executable, main_py, "build", nova_nv, "-o", stage1],
+                            capture_output=True, text=True, timeout=180, cwd=INSTALL_DIR, env=env)
+        if r1.returncode != 0 or not os.path.exists(stage1):
+            warn("Native compiler stage 1 build failed — nova will run via the Python bootstrap.")
+            return
+        r2 = subprocess.run([stage1, "build", nova_nv, "-o", native],
+                            capture_output=True, text=True, timeout=180, cwd=INSTALL_DIR, env=env)
+        if r2.returncode != 0 or not os.path.exists(native):
+            warn("Native compiler stage 2 build failed — nova will run via the Python bootstrap.")
+            return
+        try:
+            shutil.copy2(native, native_alt)
+        except Exception:
+            pass
+        lsp_src = os.path.join(INSTALL_DIR, "lsp", "server.nv")
+        lsp_exe = os.path.join(INSTALL_DIR, "novalsp" + exe)
+        if os.path.exists(lsp_src):
+            try:
+                subprocess.run([native, "build", lsp_src, "-o", lsp_exe],
+                               capture_output=True, text=True, timeout=180, cwd=INSTALL_DIR, env=env)
+            except Exception:
+                pass
+    except Exception as e:
+        warn(f"Native compiler build failed ({e}) — nova will run via the Python bootstrap.")
+        return
+
+    if not is_windows:
+        st = os.stat(native)
+        os.chmod(native, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    ok(f"Built native self-hosted compiler: {native}")
+
+
 def _create_launchers():
     for name, content in LAUNCHER_TEMPLATES.items():
         path = os.path.join(INSTALL_DIR, name)
@@ -552,6 +639,7 @@ def install():
     ok(f"Extracted {count} files")
 
     _install_gcc_if_missing()
+    _build_native_compiler()
     _create_launchers()
     _add_to_path()
 

@@ -4,7 +4,7 @@
 # Operates on emitted assembly lines (Intel syntax, 4-space indented
 # instructions). Every rule is semantics- and flags-preserving:
 #   push R ; pop R          -> (removed)
-#   push A ; pop B          -> mov B, A        (A, B general-purpose 64-bit)
+#   push A ; pop B          -> mov B, A        (A, B general-purpose 64-bit, or A an integer literal)
 #   mov A, A                -> (removed)
 #   mov A, B ; mov B, A     -> mov A, B
 #   jmp L ; L:              -> L:
@@ -15,6 +15,24 @@
 
 def gp_regs() -> dict {
     return {"rax": 1, "rbx": 1, "rcx": 1, "rdx": 1, "rsi": 1, "rdi": 1, "r8": 1, "r9": 1, "r10": 1, "r11": 1, "r12": 1, "r13": 1, "r14": 1, "r15": 1}
+}
+
+# Decimal integer literal, with an optional leading "-" ("push <imm>" always emits one of these,
+# never hex/octal) -- used to fold `push <imm> ; pop <reg>` into `mov <reg>, <imm>` below. A bare
+# "-" is rejected (len(rest) > 0 check).
+def is_integer_literal(s: string) -> int {
+    if len(s) == 0 { return 0 }
+    start = 0
+    if s[0] == "-" { start = 1 }
+    rest = str_sub(s, start, len(s))
+    if len(rest) == 0 { return 0 }
+    i = 0
+    while i < len(rest) {
+        c = rest[i]
+        if c < "0" or c > "9" { return 0 }
+        i = i + 1
+    }
+    return 1
 }
 
 def find_comma(s: string) -> int {
@@ -115,7 +133,7 @@ def optimize_pass(lines: list, regs: dict) -> list {
                 if str_sub(line, 0, 9) == "    push " and str_sub(nxt, 0, 8) == "    pop " {
                     a = str_sub(line, 9, len(line))
                     b = str_sub(nxt, 8, len(nxt))
-                    if regs.has(a) and regs.has(b) {
+                    if regs.has(b) and (regs.has(a) or is_integer_literal(a) == 1) {
                         if a != b {
                             result.append("    mov " + b + ", " + a)
                         }

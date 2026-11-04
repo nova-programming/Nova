@@ -88,7 +88,11 @@ function Remove-FromPath {
 function New-Launchers {
     $novaLauncher = @'
 @echo off
-python "%~dp0bootstrap\main.py" %*
+if exist "%~dp0nova_native.exe" (
+    "%~dp0nova_native.exe" %*
+) else (
+    python "%~dp0bootstrap\main.py" %*
+)
 '@
     $galaxyLauncher = @'
 @echo off
@@ -158,6 +162,34 @@ function Install-GccIfMissing {
     Remove-Item $tmpFile -Force
 }
 
+function Build-NativeCompiler {
+    # Best-effort: build the self-hosted native compiler (bootstrap -> stage1 -> stage2) so
+    # the nova.bat launcher runs it directly instead of the slower Python bootstrap every
+    # time. Never fatal -- on any failure the launcher already falls back to the bootstrap.
+    $gccBin = Join-Path $GccDir "bin\gcc.exe"
+    $gcc = if (Test-Path $gccBin) { $gccBin } elseif (Get-Command "gcc" -ErrorAction SilentlyContinue) { "gcc" } else { $null }
+    if (-not $gcc) {
+        Info "No GCC found — nova will run via the Python bootstrap."
+        return
+    }
+    $mainPy = Join-Path $InstallDir "bootstrap\main.py"
+    $novaNv = Join-Path $InstallDir "nova.nv"
+    if (-not (Test-Path $mainPy) -or -not (Test-Path $novaNv)) { return }
+    $stage1 = Join-Path $InstallDir "nova_stage1.exe"
+    $native = Join-Path $InstallDir "nova_native.exe"
+    $env:PATH = (Split-Path $gcc -Parent) + ";" + $env:PATH
+    Info "Building the self-hosted native compiler (stage 1 -> stage 2)..."
+    try {
+        python $mainPy build $novaNv -o $stage1 *>$null
+        if (-not (Test-Path $stage1)) { Warn "Native compiler stage 1 build failed — nova will run via the Python bootstrap."; return }
+        & $stage1 build $novaNv -o $native *>$null
+        if (-not (Test-Path $native)) { Warn "Native compiler stage 2 build failed — nova will run via the Python bootstrap."; return }
+        Ok "Built native self-hosted compiler: $native"
+    } catch {
+        Warn "Native compiler build failed: $_ — nova will run via the Python bootstrap."
+    }
+}
+
 function Should-Extract($relPath) {
     $parts = $relPath.Split("/")
     $top = $parts[0]
@@ -225,6 +257,7 @@ function Install-NovaGalaxy {
     Ok "Extracted $count files"
 
     Install-GccIfMissing
+    Build-NativeCompiler
     New-Launchers
     Add-ToPath
 

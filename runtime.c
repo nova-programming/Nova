@@ -132,7 +132,13 @@ SYSCALL unsigned int STR_PFX(strlen)(const char *s) {
     while (s[n]) n++;
     return n;
 }
-SYSCALL int STR_PFX(strcmp)(const char *a, const char *b) { return lstrcmpA(a, b); }
+SYSCALL int STR_PFX(strcmp)(const char *a, const char *b) {
+    if (a == b) return 0;
+    if (!a) return -1;
+    if (!b) return 1;
+    while (*a && (*a == *b)) { a++; b++; }
+    return (int)((unsigned char)*a - (unsigned char)*b);
+}
 SYSCALL char *STR_PFX(strcpy)(char *d, const char *s) { return lstrcpyA(d, s); }
 SYSCALL char *STR_PFX(strcat)(char *d, const char *s) { return lstrcatA(d, s); }
 SYSCALL void *STR_PFX(memset)(void *p, int c, unsigned int n) {
@@ -386,6 +392,47 @@ SYSCALL char *_sys_read_c(long long s) {
     buf[len] = '\0';
     return buf;
 }
+/* Streaming stdin. fd 0 is not a real Win32 HANDLE, so these cannot go through
+ * _sys_read_c (which seeks and would fail on a pipe/console). Read once: this
+ * returns what is currently available, up to `count` bytes, or "" at EOF. */
+SYSCALL char *_sys_read_stdin_c(int count) {
+    HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD n = 0;
+    char *buf;
+    if (count <= 0) return "";
+    buf = (char*)STR_PFX(malloc)((unsigned int)count + 1);
+    if (!buf) return "";
+    if (!ReadFile(h, buf, (DWORD)count, &n, 0)) n = 0;
+    buf[n] = '\0';
+    return buf;
+}
+/* One line from stdin, newline included, CR removed. "" means EOF (a blank
+ * line is "\n"), which lets protocol readers distinguish EOF from an empty
+ * header line without a separate status channel. */
+SYSCALL char *_sys_read_line_c(void) {
+    HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
+    unsigned int cap = 128;
+    unsigned int len = 0;
+    char *buf = (char*)STR_PFX(malloc)(cap);
+    if (!buf) return "";
+    for (;;) {
+        char ch;
+        DWORD n = 0;
+        if (!ReadFile(h, &ch, 1, &n, 0) || n == 0) break;
+        if (ch == '\r') continue;
+        if (len + 2 > cap) {
+            unsigned int bigger = cap * 2;
+            char *next = (char*)STR_PFX(realloc)(buf, bigger);
+            if (!next) break;
+            buf = next;
+            cap = bigger;
+        }
+        buf[len++] = ch;
+        if (ch == '\n') break;
+    }
+    buf[len] = '\0';
+    return buf;
+}
 SYSCALL void _sys_write_c(long long s, const char *str) {
     /* Map Nova fd 0/1/2 to actual Win32 handles.  Nova uses raw HANDLEs as
      * file descriptors (from CreateFileA), but standard streams 0/1/2 must
@@ -426,6 +473,17 @@ SYSCALL int _system_c(const char *c) {
 SYSCALL int _sys_flush_c(int s) { return STR_PFX(fflush)(s); }
 SYSCALL const char *_sys_platform_c(void) { return "windows"; }
 SYSCALL int _sys_get_tick_count_c(void) { return (int)GetTickCount(); }
+/* Full, canonical path to the running executable -- unlike argv[0] (which is whatever the
+ * caller typed, e.g. just "nova" when found via PATH, with no directory at all), this always
+ * resolves to an absolute path, so stdlib/ can be found next to the binary regardless of cwd
+ * or how it was invoked. */
+SYSCALL char *_sys_exe_path_c(void) {
+    char *buf = (char*)STR_PFX(malloc)(MAX_PATH);
+    if (!buf) return 0;
+    DWORD n = GetModuleFileNameA(NULL, buf, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) { buf[0] = '\0'; }
+    return buf;
+}
 SYSCALL const char *_sys_env_get_c(const char *name) {
     const char *value = getenv(name);
     return value ? value : "";
@@ -1097,6 +1155,7 @@ __asm__(".globl _realloc\n.set _realloc, __realloc");
 __asm__(".globl _slice_list\n.set _slice_list, __slice_list");
 __asm__(".globl _str_sub\n.set _str_sub, __str_sub");
 __asm__(".globl _nova_str_concat\n.set _nova_str_concat, __nova_str_concat");
+__asm__(".globl _nova_str_append\n.set _nova_str_append, __nova_str_append");
 __asm__(".globl _sys_alloc_c\n.set _sys_alloc_c, __sys_alloc_c");
 __asm__(".globl _sys_close_c\n.set _sys_close_c, __sys_close_c");
 __asm__(".globl _sys_exit_c\n.set _sys_exit_c, __sys_exit_c");
@@ -1104,6 +1163,7 @@ __asm__(".globl _sys_flush_c\n.set _sys_flush_c, __sys_flush_c");
 __asm__(".globl _sys_free_c\n.set _sys_free_c, __sys_free_c");
 __asm__(".globl _sys_get_args_c\n.set _sys_get_args_c, __sys_get_args_c");
 __asm__(".globl _sys_get_tick_count_c\n.set _sys_get_tick_count_c, __sys_get_tick_count_c");
+__asm__(".globl _sys_exe_path_c\n.set _sys_exe_path_c, __sys_exe_path_c");
 __asm__(".globl _sys_open_c\n.set _sys_open_c, __sys_open_c");
 __asm__(".globl _sys_platform_c\n.set _sys_platform_c, __sys_platform_c");
 __asm__(".globl _sys_read_c\n.set _sys_read_c, __sys_read_c");
@@ -1840,6 +1900,13 @@ SYSCALL void *_as_list(void *ptr, intptr_t count) {
 /* ===== Platform-specific helpers ===== */
 #if defined(LINUX_WRAP)
 SYSCALL const char *_sys_platform_c(void) { return "linux"; }
+SYSCALL char *_sys_exe_path_c(void) {
+    char *buf = (char*)malloc(4096);
+    if (!buf) return 0;
+    ssize_t n = readlink("/proc/self/exe", buf, 4095);
+    if (n <= 0) { buf[0] = '\0'; } else { buf[n] = '\0'; }
+    return buf;
+}
 SYSCALL void *_sys_get_args_c(void) {
     extern int __nova_argc;
     extern char **__nova_argv;
@@ -1881,7 +1948,15 @@ SYSCALL void *_sys_get_args_c(void) {
 }
 #elif defined(MACOS)
 #include <crt_externs.h>
+#include <mach-o/dyld.h>
 SYSCALL const char *_sys_platform_c(void) { return "macos"; }
+SYSCALL char *_sys_exe_path_c(void) {
+    char *buf = (char*)malloc(4096);
+    uint32_t size = 4096;
+    if (!buf) return 0;
+    if (_NSGetExecutablePath(buf, &size) != 0) { buf[0] = '\0'; }
+    return buf;
+}
 SYSCALL void *_sys_get_args_c(void) {
     int n = *_NSGetArgc();
     char **argv = *_NSGetArgv();
@@ -2112,6 +2187,44 @@ SYSCALL char *_sys_read_c(long long fd) {
     return buf;
 }
 
+/* Streaming stdin: one read of up to `count` bytes, "" at EOF. */
+SYSCALL char *_sys_read_stdin_c(int count) {
+    char *buf;
+    ssize_t n;
+    if (count <= 0) return "";
+    buf = (char*)malloc((size_t)count + 1);
+    if (!buf) return "";
+    n = read(0, buf, (size_t)count);
+    if (n < 0) n = 0;
+    buf[n] = '\0';
+    return buf;
+}
+
+/* One line from stdin, newline included, CR removed. "" means EOF. */
+SYSCALL char *_sys_read_line_c(void) {
+    unsigned int cap = 128;
+    unsigned int len = 0;
+    char *buf = (char*)malloc(cap);
+    if (!buf) return "";
+    for (;;) {
+        char ch;
+        ssize_t n = read(0, &ch, 1);
+        if (n <= 0) break;
+        if (ch == '\r') continue;
+        if (len + 2 > cap) {
+            unsigned int bigger = cap * 2;
+            char *next = (char*)realloc(buf, bigger);
+            if (!next) break;
+            buf = next;
+            cap = bigger;
+        }
+        buf[len++] = ch;
+        if (ch == '\n') break;
+    }
+    buf[len] = '\0';
+    return buf;
+}
+
 SYSCALL void _sys_write_c(long long fd, const char *str) {
     int len = strlen(str);
     write(fd, str, (size_t)len);
@@ -2167,7 +2280,79 @@ SYSCALL int _char_code(const char *s, int i) {
 
 static char _str_empty[1] = {0};
 
-/* String concatenation: one length pass per operand and two memcpy calls (was strlen x2 + strcpy + strcat). */
+#define NOVA_STR_MAGIC 0x53545231U
+typedef struct {
+    uint32_t magic;
+    uint32_t len;
+    uint32_t cap;
+    uint32_t pad;
+} NovaStrHeader;
+
+static inline int _is_dyn_str(const char *s, NovaStrHeader **out_hdr) {
+    if (!s || (uintptr_t)s < 4096u) return 0;
+    if (((uintptr_t)s & 0xFFF) < sizeof(NovaStrHeader)) return 0;
+    NovaStrHeader *h = (NovaStrHeader*)s - 1;
+    if (h->magic == NOVA_STR_MAGIC) {
+        if (h->len <= h->cap && h->cap < 0x7FFFFFFF && s[h->len] == '\0') {
+            *out_hdr = h;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Fast amortized in-place string append for s = s + ... accumulator loops */
+SYSCALL char *_nova_str_append(char *a, const char *b) {
+    size_t lb = b ? strlen(b) : 0;
+    if (lb == 0) return a ? a : "";
+    NovaStrHeader *hdr = NULL;
+    if (_is_dyn_str(a, &hdr)) {
+        size_t la = hdr->len;
+        size_t new_len = la + lb;
+        if (new_len <= hdr->cap) {
+            memcpy(a + la, b, lb);
+            a[new_len] = '\0';
+            hdr->len = (uint32_t)new_len;
+            return a;
+        }
+        size_t new_cap = hdr->cap * 2;
+        if (new_cap < new_len + 32) new_cap = new_len + 32;
+        size_t total = sizeof(NovaStrHeader) + new_cap + 1;
+#if defined(_WIN32)
+        NovaStrHeader *new_hdr = (NovaStrHeader*)STR_PFX(realloc)(hdr, (unsigned int)total);
+#else
+        NovaStrHeader *new_hdr = (NovaStrHeader*)realloc(hdr, total);
+#endif
+        if (!new_hdr) return a;
+        char *data = (char*)(new_hdr + 1);
+        memcpy(data + la, b, lb);
+        data[new_len] = '\0';
+        new_hdr->len = (uint32_t)new_len;
+        new_hdr->cap = (uint32_t)new_cap;
+        return data;
+    }
+    size_t la = a ? strlen(a) : 0;
+    size_t new_len = la + lb;
+    size_t new_cap = (new_len < 32 ? 64 : new_len * 2);
+    size_t total = sizeof(NovaStrHeader) + new_cap + 1;
+#if defined(_WIN32)
+    NovaStrHeader *new_hdr = (NovaStrHeader*)_nova_alloc_raw((unsigned int)total);
+#else
+    NovaStrHeader *new_hdr = (NovaStrHeader*)malloc(total);
+#endif
+    if (!new_hdr) return a;
+    new_hdr->magic = NOVA_STR_MAGIC;
+    new_hdr->len = (uint32_t)new_len;
+    new_hdr->cap = (uint32_t)new_cap;
+    new_hdr->pad = 0;
+    char *data = (char*)(new_hdr + 1);
+    if (la) memcpy(data, a, la);
+    memcpy(data + la, b, lb);
+    data[new_len] = '\0';
+    return data;
+}
+
+/* Standard string concatenation */
 SYSCALL char *_nova_str_concat(const char *a, const char *b) {
     size_t la = a ? strlen(a) : 0;
     size_t lb = b ? strlen(b) : 0;
@@ -2181,6 +2366,99 @@ SYSCALL char *_nova_str_concat(const char *a, const char *b) {
     if (lb) memcpy(res + la, b, lb);
     res[la + lb] = '\0';
     return res;
+}
+
+/* ==================== JSON string decoding ====================
+ * json.nv used to decode one character at a time with string concatenation,
+ * which is O(n^2) (a 100 KB document body meant ~10^10 byte copies). This
+ * decodes a JSON string body in one pass and one allocation. The input is the
+ * raw, still-escaped text between the quotes. */
+static int _nova_json_hex4(const char *s, int i) {
+    int value = 0;
+    int k;
+    for (k = 0; k < 4; k++) {
+        char h = s[i + k];
+        int digit;
+        if (h >= '0' && h <= '9') digit = h - '0';
+        else if (h >= 'a' && h <= 'f') digit = h - 'a' + 10;
+        else if (h >= 'A' && h <= 'F') digit = h - 'A' + 10;
+        else return -1;
+        value = value * 16 + digit;
+    }
+    return value;
+}
+
+static void _nova_json_utf8(char *out, size_t *used, unsigned int cp) {
+    if (cp <= 0x7F) {
+        out[(*used)++] = (char)cp;
+    } else if (cp <= 0x7FF) {
+        out[(*used)++] = (char)(0xC0 | (cp >> 6));
+        out[(*used)++] = (char)(0x80 | (cp & 0x3F));
+    } else if (cp <= 0xFFFF) {
+        /* Unpaired surrogates are not valid UTF-8; use U+FFFD. */
+        if (cp >= 0xD800 && cp <= 0xDFFF) cp = 0xFFFD;
+        out[(*used)++] = (char)(0xE0 | (cp >> 12));
+        out[(*used)++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[(*used)++] = (char)(0x80 | (cp & 0x3F));
+    } else {
+        out[(*used)++] = (char)(0xF0 | (cp >> 18));
+        out[(*used)++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+        out[(*used)++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[(*used)++] = (char)(0x80 | (cp & 0x3F));
+    }
+}
+
+SYSCALL char *_nova_json_decode_string(const char *s, int start, int end) {
+    int i = start;
+    size_t used = 0;
+    size_t cap;
+    char *out;
+    if (!s) return "";
+    if (end < start) end = start;
+    cap = (size_t)(end - start) + 1;
+#if defined(_WIN32)
+    out = (char*)_nova_alloc_raw((unsigned int)cap);
+#else
+    out = (char*)malloc(cap);
+#endif
+    if (!out) return "";
+    while (i < end) {
+        char ch = s[i];
+        if (ch == '\\' && i + 1 < end) {
+            char esc = s[i + 1];
+            i += 2;
+            if (esc == 'n') out[used++] = '\n';
+            else if (esc == 't') out[used++] = '\t';
+            else if (esc == 'r') out[used++] = '\r';
+            else if (esc == 'b') out[used++] = '\b';
+            else if (esc == 'f') out[used++] = '\f';
+            else if (esc == 'u' && i + 4 <= end) {
+                int cp = _nova_json_hex4(s, i);
+                i += 4;
+                if (cp < 0) {
+                    out[used++] = '?';
+                } else {
+                    if (cp >= 0xD800 && cp <= 0xDBFF &&
+                        i + 6 <= end && s[i] == '\\' && s[i + 1] == 'u') {
+                        int low = _nova_json_hex4(s, i + 2);
+                        if (low >= 0xDC00 && low <= 0xDFFF) {
+                            cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+                            i += 6;
+                        }
+                    }
+                    _nova_json_utf8(out, &used, (unsigned int)cp);
+                }
+            } else {
+                /* \" \\ \/ and unrecognised escapes decode to the literal byte. */
+                out[used++] = esc;
+            }
+        } else {
+            out[used++] = ch;
+            i++;
+        }
+    }
+    out[used] = '\0';
+    return out;
 }
 
 SYSCALL char *_str_sub(const char *s, int start, int end) {
@@ -3027,6 +3305,315 @@ SYSCALL void STR_PFX(gui_close)(void) {
     g_gui_old_bm = NULL;
     g_gui_is_closed = 1;
 }
+
+/* === Nova High-Speed Buffers, Networking, Timers & Framebuffer === */
+SYSCALL int64_t STR_PFX(buf_new)(int64_t size_bytes) {
+    if (size_bytes <= 0) return 0;
+    void *ptr = STR_PFX(malloc)((size_t)size_bytes);
+    if (ptr) memset(ptr, 0, (size_t)size_bytes);
+    return (int64_t)(uintptr_t)ptr;
+}
+
+SYSCALL void STR_PFX(buf_free)(int64_t buf) {
+    if (buf) STR_PFX(free)((void *)(uintptr_t)buf);
+}
+
+SYSCALL int64_t STR_PFX(buf_get_u8)(int64_t buf, int64_t offset) {
+    if (!buf) return 0;
+    return (int64_t)(((uint8_t *)(uintptr_t)buf)[offset]);
+}
+
+SYSCALL void STR_PFX(buf_set_u8)(int64_t buf, int64_t offset, int64_t val) {
+    if (!buf) return;
+    ((uint8_t *)(uintptr_t)buf)[offset] = (uint8_t)(val & 0xFF);
+}
+
+SYSCALL int64_t STR_PFX(buf_get_i32)(int64_t buf, int64_t offset) {
+    if (!buf) return 0;
+    return (int64_t)(((int32_t *)(uintptr_t)buf)[offset]);
+}
+
+SYSCALL void STR_PFX(buf_set_i32)(int64_t buf, int64_t offset, int64_t val) {
+    if (!buf) return;
+    ((int32_t *)(uintptr_t)buf)[offset] = (int32_t)val;
+}
+
+SYSCALL void STR_PFX(buf_fill_i32)(int64_t buf, int64_t count, int64_t val) {
+    if (!buf || count <= 0) return;
+    int32_t *dst = (int32_t *)(uintptr_t)buf;
+    int32_t v = (int32_t)val;
+    for (int64_t i = 0; i < count; i++) {
+        dst[i] = v;
+    }
+}
+
+SYSCALL void STR_PFX(buf_copy)(int64_t dst, int64_t src, int64_t len) {
+    if (!dst || !src || len <= 0) return;
+    memmove((void *)(uintptr_t)dst, (const void *)(uintptr_t)src, (size_t)len);
+}
+
+/* High-Resolution Monotonic Timers */
+static int64_t g_qpc_freq = 0;
+SYSCALL int64_t STR_PFX(time_now_us)(void) {
+#if defined(_WIN32)
+    if (g_qpc_freq == 0) {
+        LARGE_INTEGER freq;
+        QueryPerformanceFrequency(&freq);
+        g_qpc_freq = freq.QuadPart;
+    }
+    LARGE_INTEGER count;
+    QueryPerformanceCounter(&count);
+    return (int64_t)((count.QuadPart * 1000000LL) / g_qpc_freq);
+#else
+    return 0;
+#endif
+}
+
+SYSCALL int64_t STR_PFX(time_now_ms)(void) {
+    return STR_PFX(time_now_us)() / 1000LL;
+}
+
+SYSCALL void STR_PFX(sleep_ms)(int64_t ms) {
+#if defined(_WIN32)
+    Sleep((DWORD)ms);
+#endif
+}
+
+/* Direct Framebuffer Blit & Input State */
+SYSCALL void STR_PFX(gui_present_framebuffer)(int64_t buffer_ptr, int width, int height) {
+#if defined(_WIN32)
+    if (!g_gui_hwnd || !buffer_ptr || width <= 0 || height <= 0) return;
+    HDC screen_dc = GetDC(g_gui_hwnd);
+    if (!screen_dc) return;
+
+    BITMAPINFO bi;
+    memset(&bi, 0, sizeof(bi));
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = width;
+    bi.bmiHeader.biHeight = -height;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+
+    StretchDIBits(screen_dc,
+                  0, 0, g_gui_phys_w > 0 ? g_gui_phys_w : width,
+                  g_gui_phys_h > 0 ? g_gui_phys_h : height,
+                  0, 0, width, height,
+                  (const void *)(uintptr_t)buffer_ptr,
+                  &bi, DIB_RGB_COLORS, SRCCOPY);
+    ReleaseDC(g_gui_hwnd, screen_dc);
+#endif
+}
+
+SYSCALL int STR_PFX(gui_key_down)(int keycode) {
+#if defined(_WIN32)
+    SHORT s = GetAsyncKeyState(keycode);
+    return (s & 0x8000) ? 1 : 0;
+#else
+    return 0;
+#endif
+}
+
+SYSCALL int STR_PFX(gui_mouse_down_btn)(int button) {
+#if defined(_WIN32)
+    int vk = (button == 1) ? VK_RBUTTON : ((button == 2) ? VK_MBUTTON : VK_LBUTTON);
+    SHORT s = GetAsyncKeyState(vk);
+    return (s & 0x8000) ? 1 : 0;
+#else
+    return 0;
+#endif
+}
+
+/* Dynamic Winsock2 Networking Primitives */
+struct nova_in_addr { unsigned long s_addr; };
+struct nova_sockaddr_in {
+    short sin_family;
+    unsigned short sin_port;
+    struct nova_in_addr sin_addr;
+    char sin_zero[8];
+};
+
+typedef struct {
+    int initialized;
+    int (__stdcall *pfn_WSAStartup)(WORD, void *);
+    int (__stdcall *pfn_WSACleanup)(void);
+    int (__stdcall *pfn_WSAGetLastError)(void);
+    uintptr_t (__stdcall *pfn_socket)(int, int, int);
+    int (__stdcall *pfn_bind)(uintptr_t, const void *, int);
+    int (__stdcall *pfn_listen)(uintptr_t, int);
+    uintptr_t (__stdcall *pfn_accept)(uintptr_t, void *, int *);
+    int (__stdcall *pfn_connect)(uintptr_t, const void *, int);
+    int (__stdcall *pfn_send)(uintptr_t, const char *, int, int);
+    int (__stdcall *pfn_recv)(uintptr_t, char *, int, int);
+    int (__stdcall *pfn_closesocket)(uintptr_t);
+    int (__stdcall *pfn_ioctlsocket)(uintptr_t, long, unsigned long *);
+    unsigned short (__stdcall *pfn_htons)(unsigned short);
+    unsigned long (__stdcall *pfn_inet_addr)(const char *);
+} NovaNetContext;
+static NovaNetContext g_net = {0};
+
+static int _init_net(void) {
+#if defined(_WIN32)
+    if (g_net.initialized) return 1;
+    HMODULE hWs2 = LoadLibraryA("ws2_32.dll");
+    if (!hWs2) return 0;
+    g_net.pfn_WSAStartup = (int (__stdcall *)(WORD, void *))GetProcAddress(hWs2, "WSAStartup");
+    g_net.pfn_WSACleanup = (int (__stdcall *)(void))GetProcAddress(hWs2, "WSACleanup");
+    g_net.pfn_WSAGetLastError = (int (__stdcall *)(void))GetProcAddress(hWs2, "WSAGetLastError");
+    g_net.pfn_socket = (uintptr_t (__stdcall *)(int, int, int))GetProcAddress(hWs2, "socket");
+    g_net.pfn_bind = (int (__stdcall *)(uintptr_t, const void *, int))GetProcAddress(hWs2, "bind");
+    g_net.pfn_listen = (int (__stdcall *)(uintptr_t, int))GetProcAddress(hWs2, "listen");
+    g_net.pfn_accept = (uintptr_t (__stdcall *)(uintptr_t, void *, int *))GetProcAddress(hWs2, "accept");
+    g_net.pfn_connect = (int (__stdcall *)(uintptr_t, const void *, int))GetProcAddress(hWs2, "connect");
+    g_net.pfn_send = (int (__stdcall *)(uintptr_t, const char *, int, int))GetProcAddress(hWs2, "send");
+    g_net.pfn_recv = (int (__stdcall *)(uintptr_t, char *, int, int))GetProcAddress(hWs2, "recv");
+    g_net.pfn_closesocket = (int (__stdcall *)(uintptr_t))GetProcAddress(hWs2, "closesocket");
+    g_net.pfn_ioctlsocket = (int (__stdcall *)(uintptr_t, long, unsigned long *))GetProcAddress(hWs2, "ioctlsocket");
+    g_net.pfn_htons = (unsigned short (__stdcall *)(unsigned short))GetProcAddress(hWs2, "htons");
+    g_net.pfn_inet_addr = (unsigned long (__stdcall *)(const char *))GetProcAddress(hWs2, "inet_addr");
+    if (!g_net.pfn_WSAStartup || !g_net.pfn_socket) return 0;
+    char wsa_buf[512];
+    if (g_net.pfn_WSAStartup(0x0202, wsa_buf) != 0) return 0;
+    g_net.initialized = 1;
+    return 1;
+#else
+    return 1;
+#endif
+}
+
+SYSCALL int64_t STR_PFX(nova_net_init)(void) {
+    return _init_net() ? 1 : 0;
+}
+
+SYSCALL int64_t STR_PFX(nova_tcp_listen)(int64_t port, int64_t backlog) {
+#if defined(_WIN32)
+    if (!_init_net()) return -1;
+    uintptr_t s = g_net.pfn_socket(2 /* AF_INET */, 1 /* SOCK_STREAM */, 6 /* IPPROTO_TCP */);
+    if (s == (uintptr_t)(~0)) return -1;
+    struct nova_sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = 2;
+    addr.sin_port = g_net.pfn_htons((unsigned short)port);
+    addr.sin_addr.s_addr = 0; /* INADDR_ANY */
+    if (g_net.pfn_bind(s, &addr, sizeof(addr)) != 0) {
+        g_net.pfn_closesocket(s);
+        return -1;
+    }
+    if (g_net.pfn_listen(s, backlog > 0 ? (int)backlog : 128) != 0) {
+        g_net.pfn_closesocket(s);
+        return -1;
+    }
+    return (int64_t)s;
+#else
+    return -1;
+#endif
+}
+
+SYSCALL int64_t STR_PFX(nova_tcp_accept)(int64_t listen_sock) {
+#if defined(_WIN32)
+    if (!_init_net() || listen_sock <= 0) return -1;
+    struct nova_sockaddr_in client_addr;
+    int addr_len = sizeof(client_addr);
+    uintptr_t client = g_net.pfn_accept((uintptr_t)listen_sock, &client_addr, &addr_len);
+    if (client == (uintptr_t)(~0)) return -1;
+    return (int64_t)client;
+#else
+    return -1;
+#endif
+}
+
+SYSCALL int64_t STR_PFX(nova_tcp_connect)(const char *ip, int64_t port) {
+#if defined(_WIN32)
+    if (!_init_net() || !ip) return -1;
+    uintptr_t s = g_net.pfn_socket(2, 1, 6);
+    if (s == (uintptr_t)(~0)) return -1;
+    struct nova_sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = 2;
+    addr.sin_port = g_net.pfn_htons((unsigned short)port);
+    addr.sin_addr.s_addr = g_net.pfn_inet_addr(ip);
+    if (g_net.pfn_connect(s, &addr, sizeof(addr)) != 0) {
+        g_net.pfn_closesocket(s);
+        return -1;
+    }
+    return (int64_t)s;
+#else
+    return -1;
+#endif
+}
+
+SYSCALL int64_t STR_PFX(nova_net_send)(int64_t sock, int64_t buf, int64_t len) {
+#if defined(_WIN32)
+    if (!_init_net() || sock <= 0 || !buf || len <= 0) return -1;
+    int sent = g_net.pfn_send((uintptr_t)sock, (const char *)(uintptr_t)buf, (int)len, 0);
+    return (int64_t)sent;
+#else
+    return -1;
+#endif
+}
+
+SYSCALL int64_t STR_PFX(nova_net_recv)(int64_t sock, int64_t buf, int64_t max_len) {
+#if defined(_WIN32)
+    if (!_init_net() || sock <= 0 || !buf || max_len <= 0) return -1;
+    int recvd = g_net.pfn_recv((uintptr_t)sock, (char *)(uintptr_t)buf, (int)max_len, 0);
+    if (recvd < 0 && g_net.pfn_WSAGetLastError) printf("[net_recv err=%d]\n", g_net.pfn_WSAGetLastError());
+    return (int64_t)recvd;
+#else
+    return -1;
+#endif
+}
+
+SYSCALL void STR_PFX(nova_net_close)(int64_t sock) {
+#if defined(_WIN32)
+    if (g_net.initialized && sock > 0) {
+        g_net.pfn_closesocket((uintptr_t)sock);
+    }
+#endif
+}
+
+#if defined(_WIN64)
+int gui_next_click_id(void) { return _gui_next_click_id(); }
+int64_t buf_new(int64_t size_bytes) { return _buf_new(size_bytes); }
+void buf_free(int64_t buf) { _buf_free(buf); }
+int64_t buf_get_u8(int64_t buf, int64_t offset) { return _buf_get_u8(buf, offset); }
+void buf_set_u8(int64_t buf, int64_t offset, int64_t val) { _buf_set_u8(buf, offset, val); }
+int64_t buf_get_i32(int64_t buf, int64_t offset) { return _buf_get_i32(buf, offset); }
+void buf_set_i32(int64_t buf, int64_t offset, int64_t val) { _buf_set_i32(buf, offset, val); }
+void buf_fill_i32(int64_t buf, int64_t count, int64_t val) { _buf_fill_i32(buf, count, val); }
+void buf_copy(int64_t dst, int64_t src, int64_t len) { _buf_copy(dst, src, len); }
+int64_t time_now_us(void) { return _time_now_us(); }
+int64_t time_now_ms(void) { return _time_now_ms(); }
+void sleep_ms(int64_t ms) { _sleep_ms(ms); }
+void gui_present_framebuffer(int64_t buffer_ptr, int width, int height) { _gui_present_framebuffer(buffer_ptr, width, height); }
+int gui_key_down(int keycode) { return _gui_key_down(keycode); }
+int gui_mouse_down_btn(int button) { return _gui_mouse_down_btn(button); }
+int64_t nova_net_init(void) { return _nova_net_init(); }
+int64_t nova_tcp_listen(int64_t port, int64_t backlog) { return _nova_tcp_listen(port, backlog); }
+int64_t nova_tcp_accept(int64_t listen_sock) { return _nova_tcp_accept(listen_sock); }
+int64_t nova_tcp_connect(const char *ip, int64_t port) { return _nova_tcp_connect(ip, port); }
+int64_t nova_net_send(int64_t sock, int64_t buf, int64_t len) { return _nova_net_send(sock, buf, len); }
+int64_t nova_net_recv(int64_t sock, int64_t buf, int64_t max_len) { return _nova_net_recv(sock, buf, max_len); }
+void nova_net_close(int64_t sock) { _nova_net_close(sock); }
+
+int gui_poll_char(void) { return _gui_poll_char(); }
+const char *gui_char_to_str(int c) { return _gui_char_to_str(c); }
+int gui_init_window(const char *title, int width, int height) { return _gui_init_window(title, width, height); }
+int gui_poll_events(void) { return _gui_poll_events(); }
+int gui_get_mouse_x(void) { return _gui_get_mouse_x(); }
+int gui_get_mouse_y(void) { return _gui_get_mouse_y(); }
+int gui_get_mouse_down(void) { return _gui_get_mouse_down(); }
+int gui_get_mouse_clicked(void) { return _gui_get_mouse_clicked(); }
+void gui_clear(int color_hex) { _gui_clear(color_hex); }
+void gui_draw_rect(int x, int y, int w, int h, int color_hex, int radius) { _gui_draw_rect(x, y, w, h, color_hex, radius); }
+void gui_draw_border(int x, int y, int w, int h, int border_w, int color_hex) { _gui_draw_border(x, y, w, h, border_w, color_hex); }
+void gui_draw_text(const char *text, int x, int y, int font_size, int color_hex, int font_weight) { _gui_draw_text(text, x, y, font_size, color_hex, font_weight); }
+void gui_present(void) { _gui_present(); }
+void gui_sleep(int ms) { _gui_sleep(ms); }
+int gui_save_screenshot(const char *path) { return _gui_save_screenshot(path); }
+int gui_get_window_w(void) { return _gui_get_window_w(); }
+int gui_get_window_h(void) { return _gui_get_window_h(); }
+void gui_close(void) { _gui_close(); }
+#endif
 
 #else
 /* Non-Windows stubs.

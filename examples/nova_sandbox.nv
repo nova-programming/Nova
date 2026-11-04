@@ -1,0 +1,304 @@
+# =============================================================================
+# Nova Creative Engine: Interactive Physics & Particle Studio
+# 100% Native Pure Nova - 60+ FPS Framebuffer Blitting & Particle Dynamics
+# =============================================================================
+import system
+import buffer
+import gui
+import time
+
+def str_to_int(s: string) -> int {
+    result = 0
+    i = 0
+    while i < len(s) {
+        ch = s[i]
+        digit = 0
+        if ch == "0" { digit = 0 }
+        elif ch == "1" { digit = 1 }
+        elif ch == "2" { digit = 2 }
+        elif ch == "3" { digit = 3 }
+        elif ch == "4" { digit = 4 }
+        elif ch == "5" { digit = 5 }
+        elif ch == "6" { digit = 6 }
+        elif ch == "7" { digit = 7 }
+        elif ch == "8" { digit = 8 }
+        elif ch == "9" { digit = 9 }
+        result = result * 10 + digit
+        i = i + 1
+    }
+    return result
+}
+
+def draw_particle(fb_h: int, px: int, py: int, col: int, w: int, h: int) {
+    if px >= 2 and px < w - 2 and py >= 2 and py < h - 2 {
+        base = py * w + px
+        buf_set_i32(fb_h, base, col)
+        buf_set_i32(fb_h, base - 1, col)
+        buf_set_i32(fb_h, base + 1, col)
+        buf_set_i32(fb_h, base - w, col)
+        buf_set_i32(fb_h, base + w, col)
+    }
+}
+
+def run_simulation(headless_frames: int) {
+    w = 800
+    h = 600
+    num_particles = 600
+    pixel_count = w * h
+
+    # Framebuffer: 800 x 600 x 4 bytes = 1.92 MB
+    fb = new_buffer(pixel_count * 4)
+
+    # Particle memory slab: num_particles * 6 words (x, y, vx, vy, color, mode)
+    # Using 100x fixed-point scaling for sub-pixel velocity
+    p_mem = new_buffer(num_particles * 24)
+
+    # Initialize particles with radial fountain pattern
+    i = 0
+    palette = [0x0089b4fa, 0x00cba6f7, 0x00a6e3a1, 0x00f9e2af, 0x00f38ba8]
+    while i < num_particles {
+        offset = i * 6
+        # Center coordinates
+        p_mem.set_i32(offset, (w / 2) * 100)
+        p_mem.set_i32(offset + 1, (h / 2) * 100)
+        
+        # Velocity spread (-300 to +300)
+        angle_i = (i * 360) / num_particles
+        vx = ((i % 25) - 12) * 25
+        vy = (((i * 7) % 25) - 12) * 25
+        if vx == 0 and vy == 0 { vx = 30 }
+        p_mem.set_i32(offset + 2, vx)
+        p_mem.set_i32(offset + 3, vy)
+        
+        col = palette[i % 5]
+        p_mem.set_i32(offset + 4, col)
+        i = i + 1
+    }
+
+    # Headless benchmark mode
+    if headless_frames > 0 {
+        t_start = time_now_us()
+        frame = 0
+        while frame < headless_frames {
+            # 1. Clear Framebuffer to #11111b (obsidian slate)
+            fb.fill_i32(pixel_count, 0x0011111b)
+
+            # 2. Physics step & rasterization
+            p = 0
+            while p < num_particles {
+                off = p * 6
+                x = p_mem.get_i32(off)
+                y = p_mem.get_i32(off + 1)
+                vx = p_mem.get_i32(off + 2)
+                vy = p_mem.get_i32(off + 3)
+                col = p_mem.get_i32(off + 4)
+
+                # Gravity well towards center
+                dx = (w / 2) * 100 - x
+                dy = (h / 2) * 100 - y
+                ax = 0
+                ay = 0
+                if dx > 0 { ax = 4 } elif dx < 0 { ax = -4 }
+                if dy > 0 { ay = 4 } elif dy < 0 { ay = -4 }
+
+                vx = vx + ax
+                vy = vy + ay
+                x = x + vx
+                y = y + vy
+
+                # Boundary bounce
+                if x < 1000 {
+                    x = 1000
+                    vx = 0 - vx
+                }
+                if x >= (w - 10) * 100 {
+                    x = (w - 10) * 100
+                    vx = 0 - vx
+                }
+                if y < 1000 {
+                    y = 1000
+                    vy = 0 - vy
+                }
+                if y >= (h - 10) * 100 {
+                    y = (h - 10) * 100
+                    vy = 0 - vy
+                }
+
+                p_mem.set_i32(off, x)
+                p_mem.set_i32(off + 1, y)
+                p_mem.set_i32(off + 2, vx)
+                p_mem.set_i32(off + 3, vy)
+
+                # Rasterize 5-pixel cross
+                draw_particle(fb.handle, x / 100, y / 100, col, w, h)
+                p = p + 1
+            }
+            frame = frame + 1
+        }
+        t_end = time_now_us()
+        diff_us = t_end - t_start
+        if diff_us <= 0 { diff_us = 1 }
+        diff_ms = diff_us / 1000
+        fps = (headless_frames * 1000000) / diff_us
+
+        print("[Headless Benchmark] " + str(headless_frames) + " frames completed in " + str(diff_ms) + " ms (" + str(fps) + " FPS)")
+        fb.release()
+        p_mem.release()
+        return
+    }
+
+    # Interactive Native Desktop GUI mode
+    ok = initWindow("Nova Physics Studio v1.0 [60 FPS Pure Software Framebuffer]", w, h)
+    if ok == 0 {
+        print("Failed to initialize Win32 window.")
+        fb.release()
+        p_mem.release()
+        return
+    }
+
+    running = 1
+    last_tick = time_now_us()
+    frame_count = 0
+    fps_display = 60
+    physics_mode = 0 # 0: Gravity Well, 1: Shockwave, 2: Free Float
+
+    while running == 1 {
+        ev = pollEvents()
+        if ev < 0 or isKeyDown(27) == 1 {
+            running = 0
+            break
+        }
+
+        t_frame_start = time_now_us()
+
+        # Input queries
+        mx = gui_mouse_x()
+        my = gui_mouse_y()
+        l_down = isMouseDown(0)
+        r_down = isMouseDown(1)
+
+        # Mode toggles: Space bar toggles gravity mode
+        if isKeyDown(32) == 1 {
+            physics_mode = (physics_mode + 1) % 3
+            sleep_ms(150)
+        }
+
+        # Clear framebuffer
+        fb.fill_i32(pixel_count, 0x0011111b)
+
+        # Update and render particles
+        p = 0
+        while p < num_particles {
+            off = p * 6
+            x = p_mem.get_i32(off)
+            y = p_mem.get_i32(off + 1)
+            vx = p_mem.get_i32(off + 2)
+            vy = p_mem.get_i32(off + 3)
+            col = p_mem.get_i32(off + 4)
+
+            # Target attraction point (defaults to center or mouse)
+            tx = (w / 2) * 100
+            ty = (h / 2) * 100
+            if mx > 0 and mx < w and my > 0 and my < h {
+                tx = mx * 100
+                ty = my * 100
+            }
+
+            dx = tx - x
+            dy = ty - y
+            ax = 0
+            ay = 0
+
+            # Left click: Strong gravity well
+            if l_down == 1 {
+                if dx > 0 { ax = 12 } elif dx < 0 { ax = -12 }
+                if dy > 0 { ay = 12 } elif dy < 0 { ay = -12 }
+            } elif r_down == 1 {
+                # Right click: Radial explosive shockwave
+                if dx > 0 { ax = -25 } elif dx < 0 { ax = 25 }
+                if dy > 0 { ay = -25 } elif dy < 0 { ay = 25 }
+            } elif physics_mode == 0 {
+                # Gentle ambient orbital pull
+                if dx > 0 { ax = 3 } elif dx < 0 { ax = -3 }
+                if dy > 0 { ay = 3 } elif dy < 0 { ay = -3 }
+            }
+
+            vx = vx + ax
+            vy = vy + ay
+
+            # Air drag dampening (99% velocity retain)
+            vx = (vx * 99) / 100
+            vy = (vy * 99) / 100
+
+            x = x + vx
+            y = y + vy
+
+            # Elastic boundary reflection
+            if x < 1000 {
+                x = 1000
+                vx = 0 - vx
+            }
+            if x >= (w - 10) * 100 {
+                x = (w - 10) * 100
+                vx = 0 - vx
+            }
+            if y < 1000 {
+                y = 1000
+                vy = 0 - vy
+            }
+            if y >= (h - 10) * 100 {
+                y = (h - 10) * 100
+                vy = 0 - vy
+            }
+
+            p_mem.set_i32(off, x)
+            p_mem.set_i32(off + 1, y)
+            p_mem.set_i32(off + 2, vx)
+            p_mem.set_i32(off + 3, vy)
+
+            # Draw particle
+            draw_particle(fb.handle, x / 100, y / 100, col, w, h)
+            p = p + 1
+        }
+
+        # Present 32-bit software framebuffer direct to GDI surface
+        presentFramebuffer(fb.handle, w, h)
+
+        # Draw HUD vector overlay
+        drawRect(20, 20, 260, 95, 0x1e1e2e, 8)
+        drawBorder(20, 20, 260, 95, 1, 0x313244)
+        drawText("Nova Physics Studio", 32, 28, 14, 0xcdd6f4, 1)
+        drawText("FPS: " + str(fps_display) + " | 600 Particles", 32, 48, 11, 0xa6e3a1, 1)
+        drawText("L-Click: Gravity Well | R-Click: Shockwave", 32, 68, 10, 0x89b4fa, 0)
+        drawText("Space: Toggle Mode | Esc: Exit", 32, 85, 10, 0x6c7086, 0)
+
+        # FPS pacing & computation
+        t_frame_end = time_now_us()
+        frame_time_us = t_frame_end - t_frame_start
+        frame_count = frame_count + 1
+        if t_frame_end - last_tick >= 1000000 {
+            fps_display = frame_count
+            frame_count = 0
+            last_tick = t_frame_end
+        }
+
+        # Target 60 FPS pacing (16.6 ms)
+        target_us = 16666
+        if frame_time_us < target_us {
+            sleep_ms((target_us - frame_time_us) / 1000)
+        }
+    }
+
+    closeWindow()
+    fb.release()
+    p_mem.release()
+}
+
+# --- CLI Entry Point ---
+args = system.get_args()
+headless = 0
+if len(args) >= 3 and args[1] == "--headless-bench" {
+    headless = str_to_int(args[2])
+}
+
+run_simulation(headless)

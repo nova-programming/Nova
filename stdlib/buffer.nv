@@ -1,0 +1,55 @@
+# =============================================================================
+# Nova High-Speed Contiguous Raw Memory Buffer (stdlib/buffer.nv)
+# =============================================================================
+import system
+
+extern def buf_new(size_bytes: int) -> int
+extern def buf_free(buf: int)
+extern def buf_get_u8(buf: int, offset: int) -> int
+extern def buf_set_u8(buf: int, offset: int, val: int)
+extern def buf_get_i32(buf: int, offset: int) -> int
+extern def buf_set_i32(buf: int, offset: int, val: int)
+extern def buf_fill_i32(buf: int, count: int, val: int)
+extern def buf_copy(dst: int, src: int, length: int)
+
+class Buffer {
+    handle: int
+    size: int
+
+    def release(self) {
+        if self.handle != 0 {
+            buf_free(self.handle)
+            self.handle = 0
+            self.size = 0
+        }
+    }
+
+    def get_u8(self, offset: int) -> int {
+        return buf_get_u8(self.handle, offset)
+    }
+
+    def set_u8(self, offset: int, val: int) {
+        buf_set_u8(self.handle, offset, val)
+    }
+
+    def get_i32(self, offset: int) -> int {
+        return buf_get_i32(self.handle, offset)
+    }
+
+    def set_i32(self, offset: int, val: int) {
+        buf_set_i32(self.handle, offset, val)
+    }
+
+    def fill_i32(self, count: int, val: int) {
+        buf_fill_i32(self.handle, count, val)
+    }
+
+    def copy_from(self, src, length: int) {
+        buf_copy(self.handle, src.handle, length)
+    }
+}
+
+def new_buffer(size_bytes: int) -> Buffer {
+    h = buf_new(size_bytes)
+    return Buffer(h, size_bytes)
+}

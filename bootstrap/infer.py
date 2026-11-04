@@ -12,7 +12,9 @@ mirror lives in stdlib/infer.nv.
 """
 from nova_ast.nodes import *
 
-STRING_BUILTINS = {"str_sub", "sys_platform", "sys_read", "sys_read_c", "chr", "char_from_code"}
+STRING_BUILTINS = {"str_sub", "sys_platform", "sys_read", "sys_read_c", "chr", "char_from_code",
+                   "sys_read_stdin", "sys_read_stdin_c", "sys_read_line", "sys_read_line_c",
+                   "nova_json_decode_string"}
 _ARITH = {"+", "-", "*", "/", "%"}
 
 

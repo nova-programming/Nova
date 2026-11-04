@@ -135,8 +135,21 @@ def test_soft_keywords_vm(tmp_path):
 
 
 def test_soft_keywords_selfhost(selfhost_run, tmp_path):
-    r, _ = selfhost_run(_soft_program(tmp_path).replace("print(data)\n", ""), "names_soft")
-    assert r.returncode == 0 and r.stdout.split() == ["10"]
+    r, _ = selfhost_run(_soft_program(tmp_path), "names_soft")
+    assert r.returncode == 0 and r.stdout.split() == ["10", "hello"]
+    # The write()/close() must really hit disk, not just parse: read-back alone could succeed
+    # on a zero-length file if write() were silently dropped.
+    assert (tmp_path / "soft.txt").read_text() == "hello"
+
+
+def test_soft_keywords_native(tmp_path):
+    # Regression: the Python-bootstrap native backends read WriteFile.file / CloseFile.value /
+    # ReadFile.file (real fields are .fd), ignored the open() mode, and passed _fputs its
+    # arguments in the wrong order on x86_64 -- so native `open`/`write`/`read`/`close`
+    # failed outright or wrote garbage.
+    out = _native_output(_soft_program(tmp_path), tmp_path)
+    assert out.split() == ["10", "hello"]
+    assert (tmp_path / "soft.txt").read_text() == "hello"
 
 
 def test_user_functions_may_use_soft_keyword_names():

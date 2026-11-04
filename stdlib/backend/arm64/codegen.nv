@@ -277,6 +277,9 @@ def lookup_preferred_field(state: CodegenState, field_name: string) -> int {
     if field_name == "name" { pref = "Type" }
     if field_name == "params" { pref = "AstNode" }
     if field_name == "inferred_type" { pref = "AstNode" }
+    # Keep in step with the x86_64 backend: untyped `.line`/`.col` refer to AST nodes.
+    if field_name == "line" { pref = "AstNode" }
+    if field_name == "col" { pref = "AstNode" }
     if pref != "" {
         si = 0
         while si < len(state.struct_names) {
@@ -339,6 +342,7 @@ def get_prop_offset(state: CodegenState, struct_name: string, field_name: string
 def is_string_expr(state: CodegenState, node: AstNode) -> int {
     if node.kind == "String" { return 1 }
     if node.kind == "StrConvert" { return 1 }
+    if node.kind == "ReadFile" { return 1 }
     if node.inferred_type != 0 and node.inferred_type.kind == "scalar" and node.inferred_type.name == "string" {
         return 1
     }
@@ -576,7 +580,9 @@ def compile_function(state: CodegenState, node: AstNode, debug_mode: int) {
         i = i + 1
     }
 
-    emit(state, "_" + node.val_str + ":")
+    fn_sym = "_" + node.val_str
+    if node.val_str == "main" { fn_sym = "_nova_user_main" }
+    emit(state, fn_sym + ":")
     emit(state, "    stp fp, lr, [sp, #-16]!")
     emit(state, "    mov fp, sp")
     if stack_size > 0 {
@@ -664,7 +670,7 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     i = 0
     while i < len(ast) {
         node = ast[i]
-        if node.kind == "Data" {
+        if node.kind == "Data" or node.kind == "ClassDef" {
             state.struct_names.append(node.val_str)
             state.struct_fields.append([])
             max_off = 0
@@ -689,7 +695,7 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         node = ast[i]
         if node.kind == "Function" {
             functions.append(node)
-        } elif node.kind == "Data" {
+        } elif node.kind == "Data" or node.kind == "ClassDef" {
             # no-op - struct defs are handled by scan_vars
         } else {
             top_level.append(node)

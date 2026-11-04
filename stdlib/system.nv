@@ -13,6 +13,26 @@ def file_read(fd: int) -> string {
     return os_impl.sys_read(fd)
 }
 
+# Streaming input. `read_stdin(count)` returns what is currently available, up to
+# count bytes ("" at EOF). `read_line_raw()` keeps the trailing newline so a
+# caller can distinguish EOF ("") from a genuinely blank line ("\n");
+# `read_line()` is the ergonomic version that strips it.
+def read_stdin(count: int) -> string {
+    return os_impl.sys_read_stdin(count)
+}
+
+def read_line_raw() -> string {
+    return os_impl.sys_read_line()
+}
+
+def read_line() -> string {
+    line = os_impl.sys_read_line()
+    if len(line) > 0 and line[len(line) - 1] == "\n" {
+        return str_sub(line, 0, len(line) - 1)
+    }
+    return line
+}
+
 def file_write(fd: int, content) {
     os_impl.sys_write(fd, content)
 }
@@ -67,6 +87,12 @@ def get_args() -> list[string] {
 
 def get_tick_count() -> int {
     return os_impl.sys_get_tick_count()
+}
+
+# Absolute path to the running executable itself (not argv[0], which is whatever the caller
+# typed and may have no directory at all, e.g. just "nova" when found via PATH).
+def exe_path() -> string {
+    return os_impl.sys_exe_path()
 }
 
 def system_env_get(name: string) -> string {

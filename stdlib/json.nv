@@ -16,6 +16,17 @@ def json_stringify(value) -> string {
     return nova_json_stringify(value)
 }
 
+@raw {
+    "    .extern _nova_json_decode_string"
+}
+
+# Decode the raw body of a JSON string (the bytes between the quotes) in one
+# allocation. Exposed because json_parse_string used to concatenate one character
+# at a time, making parsing a large source file quadratic.
+def json_decode(raw: string, start: int, end: int) -> string {
+    return nova_json_decode_string(raw, start, end)
+}
+
 data Json {
     jtype: int
     jnum: int
@@ -70,66 +81,27 @@ def json_skip_space(c: JsonCursor) {
     }
 }
 
-def json_hex_value(ch: string) -> int {
-    if ch >= "0" and ch <= "9" { return char_code(ch, 0) - char_code("0", 0) }
-    if ch >= "a" and ch <= "f" { return char_code(ch, 0) - char_code("a", 0) + 10 }
-    if ch >= "A" and ch <= "F" { return char_code(ch, 0) - char_code("A", 0) + 10 }
-    return -1
-}
-
-def json_ascii(code: int) -> string {
-    table = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz"
-    if code >= 32 and code <= 122 { return str_sub(table, code - 32, code - 31) }
-    if code == 10 { return "\n" }
-    if code == 9 { return "\t" }
-    if code == 13 { return "\r" }
-    return "?"
-}
-
 def json_parse_string(c: JsonCursor) -> string {
     src = json_src(c)
     c.pos = c.pos + 1
-    result = ""
+    start = c.pos
     while c.pos < c.size {
         ch = src[c.pos]
-        if ch == "\"" {
-            c.pos = c.pos + 1
-            return result
-        }
         if ch == "\\" {
+            # Skip the escape introducer and the escaped byte. For \uXXXX this
+            # lands on the first hex digit, which can never terminate a string,
+            # so the scan still finds the real closing quote.
+            c.pos = c.pos + 2
+        } elif ch == "\"" {
+            end = c.pos
             c.pos = c.pos + 1
-            if c.pos >= c.size { break }
-            esc = src[c.pos]
-            if esc == "n" { result = result + "\n" }
-            elif esc == "t" { result = result + "\t" }
-            elif esc == "r" { result = result + "\r" }
-            elif esc == "b" { result = result + "\b" }
-            elif esc == "f" { result = result + "\f" }
-            elif esc == "u" {
-                code = 0
-                k = 0
-                while k < 4 and c.pos + 1 < c.size {
-                    c.pos = c.pos + 1
-                    digit = json_hex_value(src[c.pos])
-                    if digit < 0 {
-                        c.failed = 1
-                        return result
-                    }
-                    code = code * 16 + digit
-                    k = k + 1
-                }
-                result = result + json_ascii(code)
-            } else {
-                result = result + esc
-            }
-            c.pos = c.pos + 1
+            return json_decode(src, start, end)
         } else {
-            result = result + ch
             c.pos = c.pos + 1
         }
     }
     c.failed = 1
-    return result
+    return ""
 }
 
 def json_parse_word(c: JsonCursor, word: string, jtype: int, jnum: int) -> Json {

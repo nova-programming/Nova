@@ -1,0 +1,71 @@
+{
+  "name": "nova-lang",
+  "displayName": "Nova",
+  "description": "Language support and native Language Server (novalsp) for Nova",
+  "version": "0.1.0",
+  "publisher": "nova-lang",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:nova"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "nova",
+        "aliases": [
+          "Nova",
+          "nova"
+        ],
+        "extensions": [
+          ".nv"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "nova",
+        "scopeName": "source.nova",
+        "path": "./syntaxes/nova.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "nova.restartServer",
+        "title": "Nova: Restart Language Server"
+      }
+    ],
+    "configuration": {
+      "title": "Nova",
+      "properties": {
+        "nova.lsp.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable native Nova Language Server (novalsp)."
+        },
+        "nova.lsp.path": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to the novalsp executable. If omitted, search workspace and PATH."
+        },
+        "nova.lsp.trace": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace communication between VS Code and novalsp."
+        }
+      }
+    }
+  }
+}
+

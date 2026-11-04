@@ -3,6 +3,7 @@
 import struct
 import ctypes
 import os
+import sys
 import json as _json
 import re
 from .opcodes import OpCode
@@ -1121,6 +1122,31 @@ def _builtin_sys_read(m, args):
         m.stack.append(bytearray(b""))
 
 
+def _builtin_sys_read_stdin(m, args):
+    """One blocking read of at most `count` bytes from stdin (mirrors _sys_read_stdin_c)."""
+    try:
+        count = int(args[0])
+    except (TypeError, ValueError):
+        count = 0
+    if count <= 0:
+        m.stack.append(bytearray(b""))
+        return
+    try:
+        data = sys.stdin.buffer.read1(count)
+    except (OSError, ValueError):
+        data = b""
+    m.stack.append(bytearray(data))
+
+
+def _builtin_sys_read_line(m, args):
+    """One line, newline included, CR removed; b"" at EOF."""
+    try:
+        data = sys.stdin.buffer.readline()
+    except (OSError, ValueError):
+        data = b""
+    m.stack.append(bytearray(data.replace(b"\r", b"")))
+
+
 def _builtin_sys_write(m, args):
     fd = args[0]
     file_obj = m.open_files.get(fd)
@@ -1201,6 +1227,12 @@ def _builtin_sys_get_args(m, args):
 def _builtin_sys_get_tick_count(m, args):
     import time
     m.stack.append(int(time.monotonic() * 1000))
+
+
+def _builtin_sys_exe_path(m, args):
+    import os
+    import sys
+    m.stack.append(bytearray(os.path.abspath(sys.argv[0]).encode("utf-8")))
 
 
 def _builtin_sys_env_get(m, args):
@@ -1337,6 +1369,32 @@ def _builtin_nova_json_stringify(m, args):
         ).encode("utf-8")))
     except (TypeError, ValueError, OverflowError):
         m.stack.append(bytearray())
+
+
+def _builtin_nova_json_decode_string(m, args):
+    """Decode a raw JSON string body (the text between the quotes) in one pass.
+
+    The native runtime does this in C; using json.loads on a re-quoted fragment
+    gives the VM identical escape/UTF-8 semantics without duplicating the parser.
+    """
+    raw = m._to_str(args[0])
+    try:
+        start = int(args[1])
+        end = int(args[2])
+    except (TypeError, ValueError):
+        start, end = 0, len(raw)
+    if start < 0:
+        start = 0
+    if end < start:
+        end = start
+    if end > len(raw):
+        end = len(raw)
+    fragment = raw[start:end]
+    try:
+        decoded = _json.loads('"' + fragment + '"')
+    except (ValueError, TypeError):
+        decoded = fragment
+    m.stack.append(bytearray(decoded.encode("utf-8")))
 
 def _builtin_nova_value_is_list(m, args):
     m.stack.append(1 if isinstance(args[0], list) else 0)
@@ -1651,6 +1709,10 @@ _BUILTIN_HANDLERS = {
     "sys_open_c": _builtin_sys_open,
     "sys_read": _builtin_sys_read,
     "sys_read_c": _builtin_sys_read,
+    "sys_read_stdin": _builtin_sys_read_stdin,
+    "sys_read_stdin_c": _builtin_sys_read_stdin,
+    "sys_read_line": _builtin_sys_read_line,
+    "sys_read_line_c": _builtin_sys_read_line,
     "sys_write": _builtin_sys_write,
     "sys_write_c": _builtin_sys_write,
     "sys_close": _builtin_sys_close,
@@ -1671,6 +1733,8 @@ _BUILTIN_HANDLERS = {
     "sys_get_args_c": _builtin_sys_get_args,
     "sys_get_tick_count": _builtin_sys_get_tick_count,
     "sys_get_tick_count_c": _builtin_sys_get_tick_count,
+    "sys_exe_path": _builtin_sys_exe_path,
+    "sys_exe_path_c": _builtin_sys_exe_path,
     "sys_env_get": _builtin_sys_env_get,
     "sys_env_get_c": _builtin_sys_env_get,
     "sys_env_set": _builtin_sys_env_set,
@@ -1696,6 +1760,7 @@ _BUILTIN_HANDLERS = {
     "nova_value_retain": _builtin_nova_value_retain,
     "nova_value_release": _builtin_nova_value_release,
     "nova_json_stringify": _builtin_nova_json_stringify,
+    "nova_json_decode_string": _builtin_nova_json_decode_string,
     "nova_value_is_list": _builtin_nova_value_is_list,
     "nova_value_is_dict": _builtin_nova_value_is_dict,
     "nova_value_is_string": _builtin_nova_value_is_string,

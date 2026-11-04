@@ -185,10 +185,13 @@ class TestArm64CodegenOutput(unittest.TestCase):
         self.assertIn("source_path_str:", asm)
 
     def test_concat_strings_helper(self):
+        """_concat_strings delegates to the runtime's single-pass _nova_str_concat
+        instead of the old strlen/strlen/malloc/strcpy/strcat chain -- see the x86_64
+        backend's matching test for why."""
         asm = compile_to_asm('print("a" + "b")')
         self.assertIn("_concat_strings:", asm)
-        self.assertIn("bl _strlen", asm)
-        self.assertIn("bl _strcat", asm)
+        self.assertIn("bl _nova_str_concat", asm)
+        self.assertNotIn("bl _strcat", asm)
 
     def test_slice_string_helper(self):
         asm = compile_to_asm('print("abc"[1:2])')

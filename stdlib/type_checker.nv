@@ -11,6 +11,7 @@ data TypeChecker {
     func_name_map: dict
     struct_name_map: dict
     current_ret: Type
+    filename: string
 }
 
 data NamedFunc {
@@ -35,6 +36,7 @@ def tc_init(tc: TypeChecker) {
     tc.func_name_map = {}
     tc.struct_name_map = {}
     tc.current_ret = 0
+    tc.filename = ""
     
     # sys_alloc(size: int) -> any
     sys_alloc_t = create_func_type([create_scalar_type("int")], create_any_type())
@@ -55,6 +57,14 @@ def tc_init(tc: TypeChecker) {
     # sys_read(fd: int) -> string
     sys_read_t = create_func_type([create_scalar_type("int")], create_scalar_type("string"))
     tc_add_func(tc, "sys_read", sys_read_t)
+
+    # sys_read_stdin(count: int) -> string
+    sys_read_stdin_t = create_func_type([create_scalar_type("int")], create_scalar_type("string"))
+    tc_add_func(tc, "sys_read_stdin", sys_read_stdin_t)
+
+    # sys_read_line() -> string
+    sys_read_line_t = create_func_type([], create_scalar_type("string"))
+    tc_add_func(tc, "sys_read_line", sys_read_line_t)
 
     # sys_write(fd: int, content: any) -> void
     sys_write_t = create_func_type([create_scalar_type("int"), create_any_type()], create_scalar_type("void"))
@@ -84,6 +94,10 @@ def tc_init(tc: TypeChecker) {
     sys_get_tick_count_t = create_func_type([], create_scalar_type("int"))
     tc_add_func(tc, "sys_get_tick_count", sys_get_tick_count_t)
 
+    # sys_exe_path() -> string
+    sys_exe_path_t = create_func_type([], create_scalar_type("string"))
+    tc_add_func(tc, "sys_exe_path", sys_exe_path_t)
+
     # alloc(size: int) -> any
     alloc_t = create_func_type([create_scalar_type("int")], create_any_type())
     tc_add_func(tc, "alloc", alloc_t)
@@ -103,6 +117,10 @@ def tc_init(tc: TypeChecker) {
     # str_sub(s: string, start: int, end: int) -> string
     str_sub_t = create_func_type([create_scalar_type("string"), create_scalar_type("int"), create_scalar_type("int")], create_scalar_type("string"))
     tc_add_func(tc, "str_sub", str_sub_t)
+
+    # nova_json_decode_string(raw: string, start: int, end: int) -> string
+    json_decode_t = create_func_type([create_scalar_type("string"), create_scalar_type("int"), create_scalar_type("int")], create_scalar_type("string"))
+    tc_add_func(tc, "nova_json_decode_string", json_decode_t)
 
     # abs(n: int) -> int
     abs_t = create_func_type([create_scalar_type("int")], create_scalar_type("int"))
@@ -226,7 +244,7 @@ def tc_unify(tc: TypeChecker, t1: Type, t2: Type, node: AstNode) {
     }
     eq = types_equal(t1, t2)
     if eq == 0 {
-        errors.warn("Type", "", node.line, "expected " + type_to_string(t1) + " but got " + type_to_string(t2), "change the value type or explicitly convert with int() or str()", node.col)
+        errors.warn("Type", tc.filename, node.line, "expected " + type_to_string(t1) + " but got " + type_to_string(t2), "change the value type or explicitly convert with int() or str()", node.col)
         return 0
     }
     return 0
@@ -242,7 +260,7 @@ def tc_visit(tc: TypeChecker, node: AstNode) -> Type {
 
 def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     if node == 0 { return create_any_type() }
-    kind_handlers = {"Number": 1, "String": 2, "Boolean": 3, "Variable": 4, "BinOp": 5, "Compare": 6, "Assignment": 7, "Function": 8, "Return": 9, "Print": 10, "PrintD": 11, "TRY": 12, "THROW": 13, "Call": 14, "IfElse": 15, "While": 16, "MethodCall": 17, "DataFieldAccess": 18, "DataFieldAssign": 19, "ArrayIndex": 20, "ArrayIndexAssign": 21, "DictLiteral": 22, "ListLiteral": 23, "RawBlock": 24, "ForLoop": 25, "ForIn": 26, "Len": 27, "SizeOf": 28, "Comptime": 29, "Block": 30, "Defer": 31, "MultiReturn": 32, "UnpackAssign": 33}
+    kind_handlers = {"Number": 1, "String": 2, "Boolean": 3, "Variable": 4, "BinOp": 5, "Compare": 6, "Assignment": 7, "Function": 8, "Return": 9, "Print": 10, "PrintD": 11, "TRY": 12, "THROW": 13, "Call": 14, "IfElse": 15, "While": 16, "MethodCall": 17, "DataFieldAccess": 18, "DataFieldAssign": 19, "ArrayIndex": 20, "ArrayIndexAssign": 21, "DictLiteral": 22, "ListLiteral": 23, "RawBlock": 24, "ForLoop": 25, "ForIn": 26, "Len": 27, "SizeOf": 28, "Comptime": 29, "Block": 30, "Defer": 31, "MultiReturn": 32, "UnpackAssign": 33, "ClassDef": 34}
     h = kind_handlers.get(node.kind)
     if h == 1 {
         if node.is_float == 1 { return create_scalar_type("float") }
@@ -299,10 +317,6 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     }
     
     if h == 8 {
-        if str_eq(node.val_str, "main") == 1 {
-            errors.err("ReservedName", "", node.line, "Cannot declare a function named 'main'", "the function name 'main' is reserved for the executable's entry point. Please rename it (e.g. to 'run' or 'start')", node.col)
-            sys_exit(1)
-        }
         tc_push_env(tc)
         prev_ret = tc.current_ret
         
@@ -420,7 +434,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         if func_type != 0 {
             fparams = type_params(func_type)
             if len(node.args) != len(fparams) {
-                errors.warn("Args", "", node.line, "function " + node.val_str + " expects " + str(len(fparams)) + " args but got " + str(len(node.args)), "add or remove arguments to match the declaration", node.col)
+                errors.warn("Args", tc.filename, node.line, "function " + node.val_str + " expects " + str(len(fparams)) + " args but got " + str(len(node.args)), "add or remove arguments to match the declaration", node.col)
             }
             i = 0
             n = len(node.args)
@@ -484,6 +498,24 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     }
     
     if h == 17 {
+        inst_t = tc_visit(tc, node.left)
+        if inst_t != 0 and inst_t.kind == "struct" {
+            mfunc = tc_find_func(tc, inst_t.name + "." + node.val_str)
+            if mfunc != 0 {
+                mparams = type_params(mfunc)
+                i = 0
+                while i < len(node.args) {
+                    arg_t = tc_visit(tc, node.args[i])
+                    if i + 1 < len(mparams) {
+                        tc_unify(tc, mparams[i + 1], arg_t, node.args[i])
+                    }
+                    i = i + 1
+                }
+                mret = type_ret(mfunc)
+                if mret != 0 { return mret }
+                return create_any_type()
+            }
+        }
         # Module-scope function call (e.g. system.get_args()): resolve the
         # declared return type so list[string]-typed results flow downstream.
         if node.left.kind == "Variable" {
@@ -506,7 +538,6 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
                 if mret != 0 { return mret }
             }
         }
-        tc_visit(tc, node.left)
         i = 0
         while i < len(node.args) {
             tc_visit(tc, node.args[i])
@@ -663,6 +694,57 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
             }
             i = i + 1
         }
+        return create_any_type()
+    }
+
+    if h == 34 {
+        inst_t = tc_find_struct(tc, node.val_str)
+        m_idx = 0
+        while m_idx < len(node.methods) {
+            m = node.methods[m_idx]
+            tc_push_env(tc)
+            if inst_t != 0 {
+                tc_set_var(tc, "self", inst_t)
+            }
+            j = 0
+            while j < len(m.params) {
+                pname = m.params[j]
+                if pname != "self" {
+                    ptype = resolve_type_annotation(m.param_types[j])
+                    tc_set_var(tc, pname, ptype)
+                }
+                j = j + 1
+            }
+            k = 0
+            while k < len(m.body) {
+                tc_visit(tc, m.body[k])
+                k = k + 1
+            }
+            tc_pop_env(tc)
+            m_idx = m_idx + 1
+        }
+        return create_scalar_type("void")
+    }
+
+    # Builtin file I/O (`open`/`read`/`write`/`close`) has real result types. Without these the
+    # generic fallback below types `data = read(fd)` as `any`, so codegen never marks `data` as a
+    # string and later string operations on it silently miscompile.
+    if node.kind == "OpenFile" {
+        tc_visit(tc, node.left)
+        tc_visit(tc, node.right)
+        return create_scalar_type("int")
+    }
+    if node.kind == "ReadFile" {
+        tc_visit(tc, node.left)
+        return create_scalar_type("string")
+    }
+    if node.kind == "WriteFile" {
+        tc_visit(tc, node.left)
+        tc_visit(tc, node.right)
+        return create_any_type()
+    }
+    if node.kind == "CloseFile" {
+        tc_visit(tc, node.left)
         return create_any_type()
     }
 

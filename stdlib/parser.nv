@@ -350,6 +350,19 @@ def parse_primary(state: ParserState) -> AstNode {
             node.kind = "Comptime"
             node.left = parse_expr(state)
         }
+    } elif tok.kind == "OPEN" {
+        # `open(path, mode)` returns a raw file handle (int), matching the bootstrap parser's
+        # OpenFile node. It must NOT desugar to Openf: openf() returns a wrapper struct, so
+        # write(fd, ...)/read(fd)/close(fd) would then receive a wrapper pointer as the handle.
+        eat_tok(state, "OPEN")
+        eat_tok(state, "LPAREN")
+        path_node = parse_expr(state)
+        eat_tok(state, "COMMA")
+        mode_node = parse_expr(state)
+        eat_tok(state, "RPAREN")
+        node.kind = "OpenFile"
+        node.left = path_node
+        node.right = mode_node
     } elif tok.kind == "OPENF" {
         eat_tok(state, "OPENF")
         eat_tok(state, "LPAREN")
@@ -492,7 +505,8 @@ def parse_primary(state: ParserState) -> AstNode {
         eat_tok(state, "RPAREN")
     } elif tok.kind == "SELF" {
         eat_tok(state, "SELF")
-        node.kind = "Self"
+        node.kind = "Variable"
+        node.val_str = "self"
     } elif tok.kind == "RBRACE" {
         eat_tok(state, "RBRACE")
         node.kind = "NONE"
@@ -743,7 +757,7 @@ def parse_primary(state: ParserState) -> AstNode {
         }
     }
 }
-    
+
     return node
 }
 
@@ -1513,6 +1527,8 @@ def parse_statement(state: ParserState) -> AstNode {
             p_first_tok = current_tok(state)
             if p_first_tok.kind == "CLASS" {
                 param_names.append(eat_tok(state, "CLASS").val)
+            } elif p_first_tok.kind == "SELF" {
+                param_names.append(eat_tok(state, "SELF").val)
             } else {
                 param_names.append(eat_tok(state, "IDENT").val)
             }
@@ -1529,6 +1545,8 @@ def parse_statement(state: ParserState) -> AstNode {
                 p_next_tok = current_tok(state)
                 if p_next_tok.kind == "CLASS" {
                     param_names.append(eat_tok(state, "CLASS").val)
+                } elif p_next_tok.kind == "SELF" {
+                    param_names.append(eat_tok(state, "SELF").val)
                 } else {
                     param_names.append(eat_tok(state, "IDENT").val)
                 }
@@ -1546,7 +1564,18 @@ def parse_statement(state: ParserState) -> AstNode {
         ret_tok = current_tok(state)
         if ret_tok.kind == "ARROW" {
             eat_tok(state, "ARROW")
-            return_type = parse_type_annotation(state)
+            if current_tok(state).kind == "LPAREN" {
+                eat_tok(state, "LPAREN")
+                return_type = "(" + parse_type_annotation(state)
+                while current_tok(state).kind == "COMMA" {
+                    eat_tok(state, "COMMA")
+                    return_type = return_type + "," + parse_type_annotation(state)
+                }
+                eat_tok(state, "RPAREN")
+                return_type = return_type + ")"
+            } else {
+                return_type = parse_type_annotation(state)
+            }
         }
         
         body = []
@@ -1627,7 +1656,14 @@ def parse_statement(state: ParserState) -> AstNode {
                 mparams = []
                 mparam_types = []
                 if current_tok(state).kind != "RPAREN" {
-                    mparams.append(eat_tok(state, "IDENT").val)
+                    m_tok = current_tok(state)
+                    if m_tok.kind == "SELF" {
+                        mparams.append(eat_tok(state, "SELF").val)
+                    } elif m_tok.kind == "CLASS" {
+                        mparams.append(eat_tok(state, "CLASS").val)
+                    } else {
+                        mparams.append(eat_tok(state, "IDENT").val)
+                    }
                     
                     p_type = ""
                     if current_tok(state).kind == "COLON" {
@@ -1638,7 +1674,14 @@ def parse_statement(state: ParserState) -> AstNode {
 
                     while current_tok(state).kind == "COMMA" {
                         eat_tok(state, "COMMA")
-                        mparams.append(eat_tok(state, "IDENT").val)
+                        m_next = current_tok(state)
+                        if m_next.kind == "SELF" {
+                            mparams.append(eat_tok(state, "SELF").val)
+                        } elif m_next.kind == "CLASS" {
+                            mparams.append(eat_tok(state, "CLASS").val)
+                        } else {
+                            mparams.append(eat_tok(state, "IDENT").val)
+                        }
                         p_type = ""
                         if current_tok(state).kind == "COLON" {
                             eat_tok(state, "COLON")
@@ -1652,7 +1695,18 @@ def parse_statement(state: ParserState) -> AstNode {
                 ret_tok = current_tok(state)
                 if ret_tok.kind == "ARROW" {
                     eat_tok(state, "ARROW")
-                    mreturn_type = parse_type_annotation(state)
+                    if current_tok(state).kind == "LPAREN" {
+                        eat_tok(state, "LPAREN")
+                        mreturn_type = "(" + parse_type_annotation(state)
+                        while current_tok(state).kind == "COMMA" {
+                            eat_tok(state, "COMMA")
+                            mreturn_type = mreturn_type + "," + parse_type_annotation(state)
+                        }
+                        eat_tok(state, "RPAREN")
+                        mreturn_type = mreturn_type + ")"
+                    } else {
+                        mreturn_type = parse_type_annotation(state)
+                    }
                 }
                 mbody = parse_block(state)
                 mnode = AstNode()
@@ -1680,6 +1734,7 @@ def parse_statement(state: ParserState) -> AstNode {
             check = current_tok(state)
         }
         eat_tok(state, "RBRACE")
+        state.data_fields.set(name, fields)
         node = AstNode()
         node.line = stmt_line
         node.col = stmt_col

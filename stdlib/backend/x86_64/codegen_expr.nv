@@ -721,6 +721,18 @@ def compile_expr(state: CodegenState, node: AstNode) {
         }
         return
     }
+    if node.kind == "Block" {
+        i = 0
+        while i < len(node.body) {
+            if i < len(node.body) - 1 {
+                codegen_stmt.compile_stmt(state, node.body[i], 0)
+            } else {
+                compile_expr(state, node.body[i])
+            }
+            i = i + 1
+        }
+        return
+    }
     if node.kind == "None" {
         emit(state, "    push 0")
     }
@@ -1249,6 +1261,36 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    push %x")
         return
     }
+    # Builtin file I/O. These map to the same runtime entry points as the `sys_*` wrappers and
+    # `f.write()`/`f.read()`/`f.close()` method calls, so `open`/`read`/`write`/`close` behave
+    # identically in every pipeline (previously the self-hosted parser rejected `open()` outright
+    # and silently dropped statement-level `write()`/`close()`).
+    if node.kind == "OpenFile" {
+        compile_expr(state, node.right)
+        compile_expr(state, node.left)
+        emit_call(state, "_sys_open_c", 2)
+        emit(state, "    push %a")
+        return
+    }
+    if node.kind == "ReadFile" {
+        compile_expr(state, node.left)
+        emit_call(state, "_sys_read_c", 1)
+        emit(state, "    push %a")
+        return
+    }
+    if node.kind == "WriteFile" {
+        compile_expr(state, node.right)
+        compile_expr(state, node.left)
+        emit_call(state, "_sys_write_c", 2)
+        emit(state, "    push %a")
+        return
+    }
+    if node.kind == "CloseFile" {
+        compile_expr(state, node.left)
+        emit_call(state, "_sys_close_c", 1)
+        emit(state, "    push %a")
+        return
+    }
     if node.kind == "ListLiteral" {
         n = len(node.args)
         ptr_sz = ptr_size(state)
@@ -1630,13 +1672,40 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    push %a")
             return
         }
+        is_class_method = 0
+        mangled = ""
+        if node.left != 0 and node.left.inferred_type != 0 and node.left.inferred_type.kind == "struct" {
+            key = node.left.inferred_type.name + "." + node.val_str
+            if state.class_methods.has(key) {
+                mangled = state.class_methods.get(key)
+                is_class_method = 1
+            }
+        }
+        if is_class_method == 1 {
+            idx_arg = len(node.args) - 1
+            while idx_arg >= 0 {
+                compile_expr(state, node.args[idx_arg])
+                idx_arg = idx_arg - 1
+            }
+            compile_expr(state, node.left)
+            n_call = 1 + len(node.args)
+            if n_call <= 6 and state.internal_fns.has(mangled) {
+                emit_internal_call(state, "_" + mangled, n_call)
+            } else {
+                emit_call(state, "_" + mangled, n_call)
+            }
+            emit(state, "    push %a")
+            return
+        }
         # Standard module call (e.g. errors.err)
         idx_arg = len(node.args) - 1
         while idx_arg >= 0 {
             compile_expr(state, node.args[idx_arg])
             idx_arg = idx_arg - 1
         }
-        emit_call(state, "_" + node.val_str, len(node.args))
+        call_target = "_" + node.val_str
+        if node.val_str == "main" { call_target = "_nova_user_main" }
+        emit_call(state, call_target, len(node.args))
         emit(state, "    push %a")
         return
     }
@@ -1772,10 +1841,22 @@ def compile_expr(state: CodegenState, node: AstNode) {
                 compile_expr(state, node.args[idx_arg])
                 idx_arg = idx_arg - 1
             }
-            if arg_count <= 6 and state.internal_fns.has(node.val_str) {
-                emit_internal_call(state, "_" + node.val_str, arg_count)
+            if state.extern_fns.has(node.val_str) {
+                if state.target_os == "macos" {
+                    emit_call(state, "_" + node.val_str, arg_count)
+                } elif state.target_os == "windows" {
+                    emit_win_extern_call(state, node.val_str, arg_count)
+                } else {
+                    emit_call(state, node.val_str, arg_count)
+                }
             } else {
-                emit_call(state, "_" + node.val_str, arg_count)
+                call_target = "_" + node.val_str
+                if node.val_str == "main" { call_target = "_nova_user_main" }
+                if arg_count <= 6 and state.internal_fns.has(node.val_str) {
+                    emit_internal_call(state, call_target, arg_count)
+                } else {
+                    emit_call(state, call_target, arg_count)
+                }
             }
             emit(state, "    push %a")
         }

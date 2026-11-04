@@ -25,6 +25,9 @@ extern def gui_close()
 extern def gui_next_click_id() -> int
 extern def gui_poll_char() -> int
 extern def gui_char_to_str(c: int) -> string
+extern def gui_present_framebuffer(buffer_ptr: int, width: int, height: int)
+extern def gui_key_down(keycode: int) -> int
+extern def gui_mouse_down_btn(button: int) -> int
 
 # --- Clean CamelCase Public Primitives ---
 def getWindowWidth() -> int {
@@ -33,6 +36,30 @@ def getWindowWidth() -> int {
 
 def getWindowHeight() -> int {
     return gui_get_window_h()
+}
+
+def presentFramebuffer(buffer_ptr: int, width: int, height: int) {
+    gui_present_framebuffer(buffer_ptr, width, height)
+}
+
+def isKeyDown(keycode: int) -> int {
+    return gui_key_down(keycode)
+}
+
+def isMouseDown(button: int) -> int {
+    return gui_mouse_down_btn(button)
+}
+
+def gui_mouse_x() -> int {
+    return gui_get_mouse_x()
+}
+
+def gui_mouse_y() -> int {
+    return gui_get_mouse_y()
+}
+
+def gui_mouse_down(button: int) -> int {
+    return gui_mouse_down_btn(button)
 }
 
 def get_window_width() -> int {

@@ -4,12 +4,42 @@ import platform
 import shutil
 import subprocess
 import sys
+import time
 
 import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAIN_PY = os.path.join(ROOT, "bootstrap", "main.py")
 EXE = ".exe" if os.name == "nt" else ""
+
+
+def run_built(args, exe_path, **kwargs):
+    """subprocess.run(args, **kwargs), retrying briefly if `exe_path` doesn't exist right after a
+    build that reported success. On Windows, antivirus real-time scanning can hold a freshly
+    linked .exe's file handle for tens of milliseconds right after GCC's linker closes it, which
+    otherwise shows up as a flaky, unrelated-looking test failure (missing file, or a transient
+    permission error launching it) under a full, long-running suite. Not needed on a real build
+    failure: this only retries a build that *looks* like it already produced its binary."""
+    result = subprocess.run(args, **kwargs)
+    if not os.path.exists(exe_path):
+        for _ in range(3):
+            time.sleep(0.08)
+            if os.path.exists(exe_path):
+                break
+    return result
+
+
+def run_exe(args, **kwargs):
+    """subprocess.run(args, **kwargs), retrying a couple of times on the transient
+    FileNotFoundError / PermissionError that antivirus scanning a just-linked .exe can cause."""
+    last = None
+    for attempt in range(3):
+        try:
+            return subprocess.run(args, **kwargs)
+        except (FileNotFoundError, PermissionError) as e:
+            last = e
+            time.sleep(0.08)
+    raise last
 
 
 @pytest.fixture(autouse=True)
@@ -57,9 +87,9 @@ def selfhost(tmp_path_factory):
     for name in ("nova.nv", "runtime.c"):
         shutil.copy(os.path.join(ROOT, name), work / name)
     stage1 = work / ("stage1" + EXE)
-    r = subprocess.run(
+    r = run_built(
         [sys.executable, MAIN_PY, "build", os.path.join(ROOT, "nova.nv"), "-o", str(stage1)],
-        capture_output=True, text=True, timeout=300, cwd=ROOT, env=env,
+        str(stage1), capture_output=True, text=True, timeout=300, cwd=ROOT, env=env,
     )
     assert r.returncode == 0 and stage1.exists(), r.stdout[-2000:] + r.stderr[-2000:]
     return stage1, work, env
@@ -76,10 +106,10 @@ def selfhost_run(selfhost):
         exe = work / (name + EXE)
         if exe.exists():
             exe.unlink()
-        b = subprocess.run([str(stage1), "build", str(src)], capture_output=True, text=True,
-                           timeout=300, cwd=work, env=env)
+        b = run_built([str(stage1), "build", str(src)], str(exe), capture_output=True, text=True,
+                      timeout=300, cwd=work, env=env)
         assert exe.exists(), b.stdout[-2000:] + b.stderr[-2000:]
-        r = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60, cwd=work)
+        r = run_exe([str(exe)], capture_output=True, text=True, timeout=60, cwd=work)
         asm_path = work / (name + ".nv.s")
         return r, asm_path.read_text() if asm_path.exists() else ""
 
@@ -107,10 +137,10 @@ def bootstrap_native_run(tmp_path_factory):
         exe = work / (name + EXE)
         if exe.exists():
             exe.unlink()
-        b = subprocess.run([sys.executable, MAIN_PY, "build", str(src)], capture_output=True, text=True,
-                           timeout=300, cwd=work, env=env)
+        b = run_built([sys.executable, MAIN_PY, "build", str(src)], str(exe), capture_output=True,
+                      text=True, timeout=300, cwd=work, env=env)
         assert exe.exists(), b.stdout[-2000:] + b.stderr[-2000:]
-        return subprocess.run([str(exe)], capture_output=True, text=True, timeout=60, cwd=work)
+        return run_exe([str(exe)], capture_output=True, text=True, timeout=60, cwd=work)
 
     return run
 
@@ -128,8 +158,8 @@ def stage2(selfhost, tmp_path_factory):
     shutil.copytree(work1 / "stdlib", work / "stdlib")
     for name in ("nova.nv", "runtime.c"):
         shutil.copy(work1 / name, work / name)
-    r = subprocess.run([str(stage1), "build", str(work / "nova.nv"), "-o", str(work / ("stage2" + EXE))],
-                       capture_output=True, text=True, timeout=600, cwd=work, env=env)
     exe = work / ("stage2" + EXE)
+    r = run_built([str(stage1), "build", str(work / "nova.nv"), "-o", str(exe)], str(exe),
+                  capture_output=True, text=True, timeout=600, cwd=work, env=env)
     assert exe.exists(), r.stdout[-2000:] + r.stderr[-2000:]
     return exe, work, env

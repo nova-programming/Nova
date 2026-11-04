@@ -1,0 +1,307 @@
+import system
+import fs
+import json
+
+# --- Native Win32 GDI GUI Externs ---
+extern def gui_init_window(title: string, width: int, height: int) -> int
+extern def gui_poll_events() -> int
+extern def gui_get_mouse_x() -> int
+extern def gui_get_mouse_y() -> int
+extern def gui_get_mouse_down() -> int
+extern def gui_get_mouse_clicked() -> int
+extern def gui_clear(color_hex: int)
+extern def gui_draw_rect(x: int, y: int, w: int, h: int, color_hex: int, radius: int)
+extern def gui_draw_border(x: int, y: int, w: int, h: int, border_w: int, color_hex: int)
+extern def gui_draw_text(text: string, x: int, y: int, font_size: int, color_hex: int, font_weight: int)
+extern def gui_present()
+extern def gui_sleep(ms: int)
+extern def gui_close()
+
+def get_type_name(k: int) -> string {
+    if k == 0 { return "null" }
+    if k == 1 { return "boolean" }
+    if k == 2 { return "integer" }
+    if k == 3 { return "string" }
+    if k == 4 { return "array" }
+    if k == 5 { return "object" }
+    return "unknown"
+}
+
+def validate_node(schema, val, path: string, errors: list) {
+    if json.kind(schema) != 5 {
+        return
+    }
+
+    # 1. Type validation
+    if json.has(schema, "type") == 1 {
+        expected_type = json.asString(json.get(schema, "type"))
+        actual_kind = json.kind(val)
+        actual_type = get_type_name(actual_kind)
+
+        type_match = 0
+        if expected_type == "string" and actual_kind == 3 { type_match = 1 }
+        if (expected_type == "integer" or expected_type == "number") and actual_kind == 2 { type_match = 1 }
+        if expected_type == "boolean" and actual_kind == 1 { type_match = 1 }
+        if expected_type == "array" and actual_kind == 4 { type_match = 1 }
+        if expected_type == "object" and actual_kind == 5 { type_match = 1 }
+
+        if type_match == 0 {
+            errors.append(path + ": expected type '" + expected_type + "', got '" + actual_type + "'")
+            return
+        }
+
+        # String constraints
+        if expected_type == "string" {
+            s_val = json.asString(val)
+            s_len = len(s_val)
+            if json.has(schema, "minLength") == 1 {
+                min_l = json.asInt(json.get(schema, "minLength"))
+                if s_len < min_l {
+                    errors.append(path + ": string length " + str(s_len) + " is less than minLength " + str(min_l))
+                }
+            }
+            if json.has(schema, "maxLength") == 1 {
+                max_l = json.asInt(json.get(schema, "maxLength"))
+                if s_len > max_l {
+                    errors.append(path + ": string length " + str(s_len) + " exceeds maxLength " + str(max_l))
+                }
+            }
+        }
+
+        # Numeric constraints
+        if expected_type == "integer" or expected_type == "number" {
+            num_val = json.asInt(val)
+            if json.has(schema, "minimum") == 1 {
+                min_v = json.asInt(json.get(schema, "minimum"))
+                if num_val < min_v {
+                    errors.append(path + ": value " + str(num_val) + " is less than minimum " + str(min_v))
+                }
+            }
+            if json.has(schema, "maximum") == 1 {
+                max_v = json.asInt(json.get(schema, "maximum"))
+                if num_val > max_v {
+                    errors.append(path + ": value " + str(num_val) + " exceeds maximum " + str(max_v))
+                }
+            }
+        }
+
+        # Array constraints
+        if expected_type == "array" {
+            arr_len = json.size(val)
+            if json.has(schema, "minItems") == 1 {
+                min_i = json.asInt(json.get(schema, "minItems"))
+                if arr_len < min_i {
+                    errors.append(path + ": array size " + str(arr_len) + " is less than minItems " + str(min_i))
+                }
+            }
+            if json.has(schema, "items") == 1 {
+                item_schema = json.get(schema, "items")
+                ai = 0
+                while ai < arr_len {
+                    item_val = json.at(val, ai)
+                    validate_node(item_schema, item_val, path + "[" + str(ai) + "]", errors)
+                    ai = ai + 1
+                }
+            }
+        }
+
+        # Object constraints
+        if expected_type == "object" {
+            if json.has(schema, "required") == 1 {
+                req_arr = json.get(schema, "required")
+                req_len = json.size(req_arr)
+                ri = 0
+                while ri < req_len {
+                    req_key = json.asString(json.at(req_arr, ri))
+                    if json.has(val, req_key) == 0 {
+                        errors.append(path + "." + req_key + ": required property missing")
+                    }
+                    ri = ri + 1
+                }
+            }
+            if json.has(schema, "properties") == 1 {
+                props_obj = json.get(schema, "properties")
+                pi = 0
+                props_count = json.size(props_obj)
+                while pi < props_count {
+                    prop_key = json.keyAt(props_obj, pi)
+                    if json.has(val, prop_key) == 1 {
+                        child_val = json.get(val, prop_key)
+                        child_schema = json.get(props_obj, prop_key)
+                        validate_node(child_schema, child_val, path + "." + prop_key, errors)
+                    }
+                    pi = pi + 1
+                }
+            }
+        }
+    }
+}
+
+def validate_schema(schema_text: string, data_text: string) -> list {
+    errors = []
+    schema_root = json.parse(schema_text)
+    if json.kind(schema_root) == -1 {
+        errors.append("Schema Parse Error: " + json.asString(schema_root))
+        return errors
+    }
+    data_root = json.parse(data_text)
+    if json.kind(data_root) == -1 {
+        errors.append("Data Parse Error: " + json.asString(data_root))
+        return errors
+    }
+    validate_node(schema_root, data_root, "$", errors)
+    return errors
+}
+
+def run_gui(schema_sample: string, data_sample: string) {
+    ok = gui_init_window("Nova Schema Doctor v1.0", 800, 600)
+    if ok == 0 {
+        print("Error: Could not initialize native Win32 window.")
+        sys_exit(1)
+    }
+
+    # Pre-validate sample
+    current_errors = validate_schema(schema_sample, data_sample)
+    btn_hover = 0
+
+    running = 1
+    cycle = 0
+    while running == 1 {
+        ev = gui_poll_events()
+        if ev < 0 {
+            running = 0
+            break
+        }
+
+        mx = gui_get_mouse_x()
+        my = gui_get_mouse_y()
+        clicked = gui_get_mouse_clicked()
+
+        # Validate Button bounds: (330, 260, 140, 36)
+        if mx >= 330 and mx <= 470 and my >= 260 and my <= 296 {
+            btn_hover = 1
+            if clicked == 1 {
+                current_errors = validate_schema(schema_sample, data_sample)
+            }
+        } else {
+            btn_hover = 0
+        }
+
+        # Clear background #181825
+        gui_clear(0x181825)
+
+        # Header Container
+        gui_draw_rect(20, 15, 760, 48, 0x1e1e2e, 8)
+        gui_draw_border(20, 15, 760, 48, 1, 0x313244)
+        gui_draw_text("Nova Schema Doctor", 36, 28, 18, 0xcdd6f4, 1)
+        gui_draw_rect(650, 24, 115, 28, 0x11111b, 6)
+        gui_draw_text("Native Win32", 665, 30, 12, 0xa6e3a1, 1)
+
+        # Left Panel: Schema (x: 20, y: 75, w: 365, h: 170)
+        gui_draw_rect(20, 75, 365, 170, 0x1e1e2e, 8)
+        gui_draw_border(20, 75, 365, 170, 1, 0x313244)
+        gui_draw_text("JSON Schema Definition", 35, 88, 13, 0x89b4fa, 1)
+        gui_draw_text("type: object", 35, 115, 12, 0xa6adc8, 0)
+        gui_draw_text("required: [\"id\", \"name\", \"age\"]", 35, 135, 12, 0xa6adc8, 0)
+        gui_draw_text("properties: id (int), name (str), age (int)", 35, 155, 12, 0xa6adc8, 0)
+        gui_draw_text("constraints: age >= 18, name minLen 3", 35, 175, 12, 0xa6adc8, 0)
+
+        # Right Panel: Data (x: 415, y: 75, w: 365, h: 170)
+        gui_draw_rect(415, 75, 365, 170, 0x1e1e2e, 8)
+        gui_draw_border(415, 75, 365, 170, 1, 0x313244)
+        gui_draw_text("Payload Instance", 430, 88, 13, 0xf9e2af, 1)
+        gui_draw_text("id: 101", 430, 115, 12, 0xa6adc8, 0)
+        gui_draw_text("name: \"Alice Developer\"", 430, 135, 12, 0xa6adc8, 0)
+        gui_draw_text("age: 25", 430, 155, 12, 0xa6adc8, 0)
+        gui_draw_text("tags: [\"systems\", \"compiler\"]", 430, 175, 12, 0xa6adc8, 0)
+
+        # Validate Button
+        btn_col = 0x89b4fa
+        if btn_hover == 1 { btn_col = 0xb4befe }
+        gui_draw_rect(330, 260, 140, 36, btn_col, 8)
+        gui_draw_text("Run Validation", 352, 271, 13, 0x11111b, 1)
+
+        # Bottom Panel: Diagnostics (x: 20, y: 310, w: 760, h: 260)
+        gui_draw_rect(20, 310, 760, 260, 0x1e1e2e, 8)
+        gui_draw_border(20, 310, 760, 260, 1, 0x313244)
+        gui_draw_text("Live Diagnostic & Health Report", 35, 325, 14, 0xcdd6f4, 1)
+
+        if len(current_errors) == 0 {
+            gui_draw_rect(35, 360, 200, 32, 0x1c3a27, 6)
+            gui_draw_border(35, 360, 200, 32, 1, 0x22c55e)
+            gui_draw_text("PASS: Schema Valid", 50, 368, 13, 0x22c55e, 1)
+            gui_draw_text("All required properties, types, and constraints verified cleanly.", 35, 410, 13, 0xa6e3a1, 0)
+            gui_draw_text("Total validation time: < 1 ms (Pure native compiled execution).", 35, 435, 12, 0x6c7086, 0)
+        } else {
+            gui_draw_rect(35, 360, 200, 32, 0x451a1a, 6)
+            gui_draw_border(35, 360, 200, 32, 1, 0xef4444)
+            gui_draw_text("FAIL: " + str(len(current_errors)) + " Error(s)", 50, 368, 13, 0xef4444, 1)
+            ei = 0
+            ey = 405
+            while ei < len(current_errors) and ey < 540 {
+                err_msg = current_errors[ei]
+                gui_draw_text("- " + err_msg, 35, ey, 12, 0xf38ba8, 0)
+                ey = ey + 22
+                ei = ei + 1
+            }
+        }
+
+        gui_present()
+        gui_sleep(16)
+        cycle = cycle + 1
+    }
+
+    gui_close()
+}
+
+# --- Main Entry Point ---
+args = system.get_args()
+
+# Check for CLI flags
+if len(args) == 2 {
+    flag = args[1]
+    if flag == "--help" or flag == "help" or flag == "-h" {
+        print("Nova Schema Doctor v1.0")
+        print("Usage: schema_doctor <schema.json> <data.json>    Run CLI validation")
+        print("       schema_doctor --gui                         Launch native Win32 GUI")
+        print("       schema_doctor                               Launch native Win32 GUI")
+        sys_exit(0)
+    }
+}
+
+# CLI Mode: two file arguments provided
+if len(args) >= 3 and args[1] != "--gui" {
+    schema_path = args[1]
+    data_path = args[2]
+
+    if fs.exists(schema_path) == 0 {
+        print("Error: schema file not found: " + schema_path)
+        sys_exit(1)
+    }
+    if fs.exists(data_path) == 0 {
+        print("Error: data file not found: " + data_path)
+        sys_exit(1)
+    }
+
+    schema_content = fs.read(schema_path)
+    data_content = fs.read(data_path)
+
+    errs = validate_schema(schema_content, data_content)
+    if len(errs) == 0 {
+        print("[PASS] Schema validation succeeded! JSON data conforms to schema.")
+        sys_exit(0)
+    } else {
+        print("[FAIL] Schema validation failed with " + str(len(errs)) + " error(s):")
+        idx = 0
+        while idx < len(errs) {
+            print("  - " + errs[idx])
+            idx = idx + 1
+        }
+        sys_exit(1)
+    }
+}
+
+# Default / --gui Mode: Launch Win32 GUI
+sample_schema = "\{\"type\": \"object\", \"required\": [\"id\", \"name\", \"age\"], \"properties\": \{\"id\": \{\"type\": \"integer\"\}, \"name\": \{\"type\": \"string\", \"minLength\": 3\}, \"age\": \{\"type\": \"integer\", \"minimum\": 18\}\}\}"
+sample_data = "\{\"id\": 101, \"name\": \"Alice Developer\", \"age\": 25\}"
+run_gui(sample_schema, sample_data)

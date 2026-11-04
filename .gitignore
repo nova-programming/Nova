@@ -29,6 +29,8 @@ Thumbs.db
 .nova_cache.json
 .nova_cache.txt
 .nova_*.txt
+.nova_build_errors
+.nova_diag.jsonl
 
 # GCC bundle
 gcc/

@@ -172,10 +172,13 @@ class TestX86_64CodegenOutput(unittest.TestCase):
         self.assertIn("source_path_str:", asm)
 
     def test_concat_strings_helper(self):
+        """_concat_strings delegates to the runtime's single-pass _nova_str_concat
+        (strlen+strlen+memcpy+memcpy) instead of the old strlen/strlen/malloc/strcpy/strcat
+        chain, which rescanned the left operand twice more for no benefit."""
         asm = compile_to_asm('print("a" + "b")')
         self.assertIn("_concat_strings:", asm)
-        self.assertIn("call _strlen", asm)
-        self.assertIn("call _strcat", asm)
+        self.assertIn("call _nova_str_concat", asm)
+        self.assertNotIn("call _strcat", asm)
 
     def test_slice_string_helper(self):
         """_slice_string should be emitted with x86_64 prologue and rip-relative refs."""
