@@ -42,6 +42,12 @@ data JsonCursor {
     failed: int
 }
 
+data JsonToken {
+    kind: int
+    text: string
+    pos: int
+}
+
 # Typed accessor so indexing the source treats it as a string (not a list) in every backend.
 def json_src(c: JsonCursor) -> string {
     return c.src
@@ -306,4 +312,109 @@ def json_get(v: Json, key: string) -> Json {
     i = json_find(v, key)
     if i < 0 { return json_make(0) }
     return v.jitems[i]
+}
+
+# --- Streaming / Incremental JSON Token Parser ---
+def json_cursor_new(src: string) -> JsonCursor {
+    c = JsonCursor()
+    c.src = src
+    c.pos = 0
+    c.size = len(src)
+    c.failed = 0
+    return c
+}
+
+def json_next_token(c: JsonCursor) -> JsonToken {
+    json_skip_space(c)
+    tok = JsonToken()
+    tok.pos = c.pos
+    tok.text = ""
+    if c.pos >= c.size {
+        tok.kind = 0
+        return tok
+    }
+    src = json_src(c)
+    ch = src[c.pos]
+    if ch == "{" {
+        c.pos = c.pos + 1
+        tok.kind = 1
+        tok.text = "{"
+        return tok
+    }
+    if ch == "}" {
+        c.pos = c.pos + 1
+        tok.kind = 2
+        tok.text = "}"
+        return tok
+    }
+    if ch == "[" {
+        c.pos = c.pos + 1
+        tok.kind = 3
+        tok.text = "["
+        return tok
+    }
+    if ch == "]" {
+        c.pos = c.pos + 1
+        tok.kind = 4
+        tok.text = "]"
+        return tok
+    }
+    if ch == ":" {
+        c.pos = c.pos + 1
+        tok.kind = 5
+        tok.text = ":"
+        return tok
+    }
+    if ch == "," {
+        c.pos = c.pos + 1
+        tok.kind = 6
+        tok.text = ","
+        return tok
+    }
+    if ch == "\"" {
+        val = json_parse_string(c)
+        tok.kind = 7
+        tok.text = val
+        return tok
+    }
+    if ch == "t" {
+        json_parse_word(c, "true", 1, 1)
+        tok.kind = 9
+        tok.text = "true"
+        return tok
+    }
+    if ch == "f" {
+        json_parse_word(c, "false", 1, 0)
+        tok.kind = 10
+        tok.text = "false"
+        return tok
+    }
+    if ch == "n" {
+        json_parse_word(c, "null", 0, 0)
+        tok.kind = 11
+        tok.text = "null"
+        return tok
+    }
+    if ch == "-" or (ch >= "0" and ch <= "9") {
+        v = json_parse_number(c)
+        tok.kind = 8
+        tok.text = v.jstr
+        return tok
+    }
+    c.pos = c.pos + 1
+    tok.kind = -1
+    tok.text = ch
+    return tok
+}
+
+def json_token_kind(t: JsonToken) -> int {
+    return t.kind
+}
+
+def json_token_text(t: JsonToken) -> string {
+    return t.text
+}
+
+def json_token_pos(t: JsonToken) -> int {
+    return t.pos
 }

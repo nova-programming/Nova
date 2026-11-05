@@ -123,7 +123,6 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         offset = find_var_offset(state, node.val_str)
         emit_fp_store(state, "x0", offset)
     }
-    }
     if node.kind == "DataFieldAssign" {
         compile_expr(state, node.right)
         compile_expr(state, node.left)
@@ -387,27 +386,10 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
     }
     if node.kind == "ForLoop" {
         state.ptr_vars.remove(node.val_str)
-        is_self_append = 0
-        if node.left != 0 and node.left.kind == "BinOp" and node.left.val_str == "+" {
-            if node.left.left != 0 and node.left.left.kind == "Variable" and node.left.left.val_str == node.val_str {
-                if is_string_expr(state, node.left.left) == 1 or is_string_expr(state, node.left.right) == 1 {
-                    is_self_append = 1
-                }
-            }
-        }
-        if is_self_append == 1 {
-            compile_expr(state, node.left.right)
-            compile_expr(state, node.left.left)
-            emit_call(state, "_nova_str_append", 2)
-            offset = find_var_offset(state, node.val_str)
-            emit_fp_store(state, "x0", offset)
-            return
-        }
         compile_expr(state, node.left)
         emit(state, "    ldr %a, [sp], #16")
         offset = find_var_offset(state, node.val_str)
         emit_fp_store(state, "x0", offset)
-    }
 
         loop_label = next_label(state, "L_for")
         end_label = next_label(state, "L_for_end")

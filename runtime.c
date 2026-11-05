@@ -1,8 +1,8 @@
-/* SysV ABI attribute — Nova x86_64 codegen uses System V AMD64 calling convention
- * (args: rdi, rsi, rdx, rcx, r8, r9) while Windows uses Microsoft x64 ABI
- * (args: rcx, rdx, r8, r9). This attribute makes the compiler generate SysV-convention
- * entry/exit so the assembly's call sites work on both Linux and Windows.
- * Must be defined on all platforms since dict functions use it. */
+/* SysV ABI attribute — Nova x86_64 codegen uses System V AMD64 calling
+ * convention (args: rdi, rsi, rdx, rcx, r8, r9) while Windows uses Microsoft
+ * x64 ABI (args: rcx, rdx, r8, r9). This attribute makes the compiler generate
+ * SysV-convention entry/exit so the assembly's call sites work on both Linux
+ * and Windows. Must be defined on all platforms since dict functions use it. */
 #if defined(__x86_64__)
 #define SYSCALL __attribute__((sysv_abi))
 #else
@@ -16,16 +16,18 @@
 /* On x86 (32-bit), MinGW adds _ prefix to C symbols automatically, matching the
  * assembly's references to _printf, _malloc, etc.
  * On x64, MinGW does NOT add _ prefix. The x86_64 codegen still emits _printf
- * (for Linux/macOS compatibility), so on x64 we must define with explicit _ prefix.
- * Using STR_PFX, on x64 we define _strlen/_malloc etc. which don't conflict with
- * system headers that declare strlen/malloc (without underscore). */
+ * (for Linux/macOS compatibility), so on x64 we must define with explicit _
+ * prefix. Using STR_PFX, on x64 we define _strlen/_malloc etc. which don't
+ * conflict with system headers that declare strlen/malloc (without underscore).
+ */
 #if defined(_WIN64)
 #define STR_PFX(name) _##name
 #else
 #define STR_PFX(name) name
 #endif
 
-/* On x64 Windows, stdlib.h (indirectly included by windows.h) declares _exit with
+/* On x64 Windows, stdlib.h (indirectly included by windows.h) declares _exit
+ * with
  * __cdecl, which conflicts with our SYSCALL (sysv_abi) _exit definition.
  * We suppress _exit declarations before including windows.h, then undefine. */
 #if defined(_WIN64)
@@ -33,266 +35,375 @@
 #endif
 
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
 #include <process.h>
-#include <stdint.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <windows.h>
 
 #if defined(_WIN64)
 #undef _exit
 #endif
 
-/* All runtime functions are SYSCALL to match the Nova codegen calling convention.
- * Inside the function body, Win32 API calls use the default Windows convention —
- * the compiler handles the ABI translation at call sites automatically. */
+/* All runtime functions are SYSCALL to match the Nova codegen calling
+ * convention. Inside the function body, Win32 API calls use the default Windows
+ * convention — the compiler handles the ABI translation at call sites
+ * automatically. */
 
 /* Minimal printf: handles %s, %d, %f, %% for Nova codegen.
  * Uses SysV ABI variadic args directly (read from registers) to avoid MinGW
  * va_start/va_arg incompatibility with __attribute__((sysv_abi)). */
 SYSCALL int STR_PFX(printf)(const char *fmt, const void *arg_s) {
-    HANDLE h = GetStdHandle(-11);
-    DWORD wn;
-    int written = 0;
-    while (*fmt) {
-        if (*fmt == '%') {
-            fmt++;
-            switch (*fmt) {
-                case 's': {
-                    const char *s = (const char*)arg_s;
-                    if (s) { int n = lstrlenA(s); WriteFile(h, s, n, &wn, 0); written += n; }
-                    break;
-                }
-                case 'd': {
-                    char buf[32];
-                    long long val = (long long)arg_s;
-                    int neg = 0, pos = 30, dlen;
-                    buf[31] = 0;
-                    if (val < 0) { neg = 1; val = -val; }
-                    do { buf[pos--] = '0' + (val % 10); val /= 10; } while (val);
-                    if (neg) buf[pos--] = '-';
-                    pos++;
-                    dlen = 31 - pos;
-                    WriteFile(h, buf + pos, dlen, &wn, 0);
-                    written += dlen;
-                    break;
-                }
-                case 'f': {
-                    /* Nova floats are IEEE single precision held in the low 32 bits of the value */
-                    union { uint32_t u; float f; } cv;
-                    cv.u = (uint32_t)(uintptr_t)arg_s;
-                    double val = (double)cv.f;
-                    char buf[512];
-                    int len = snprintf(buf, sizeof(buf), "%.6f", val);
-                    if (len < 0) len = 0;
-                    if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
-                    WriteFile(h, buf, len, &wn, 0);
-                    written += len;
-                    break;
-                }
-                case '%': {
-                    WriteFile(h, "%", 1, &wn, 0); written++;
-                    break;
-                }
-                default: break;
-            }
-        } else {
-            WriteFile(h, fmt, 1, &wn, 0);
-            written++;
+  HANDLE h = GetStdHandle(-11);
+  DWORD wn;
+  int written = 0;
+  while (*fmt) {
+    if (*fmt == '%') {
+      fmt++;
+      switch (*fmt) {
+      case 's': {
+        const char *s = (const char *)arg_s;
+        if (s) {
+          int n = lstrlenA(s);
+          WriteFile(h, s, n, &wn, 0);
+          written += n;
         }
-        fmt++;
+        break;
+      }
+      case 'd': {
+        char buf[32];
+        long long val = (long long)arg_s;
+        int neg = 0, pos = 30, dlen;
+        buf[31] = 0;
+        if (val < 0) {
+          neg = 1;
+          val = -val;
+        }
+        do {
+          buf[pos--] = '0' + (val % 10);
+          val /= 10;
+        } while (val);
+        if (neg)
+          buf[pos--] = '-';
+        pos++;
+        dlen = 31 - pos;
+        WriteFile(h, buf + pos, dlen, &wn, 0);
+        written += dlen;
+        break;
+      }
+      case 'f': {
+        /* Nova floats are IEEE single precision held in the low 32 bits of the
+         * value */
+        union {
+          uint32_t u;
+          float f;
+        } cv;
+        cv.u = (uint32_t)(uintptr_t)arg_s;
+        double val = (double)cv.f;
+        char buf[512];
+        int len = snprintf(buf, sizeof(buf), "%.6f", val);
+        if (len < 0)
+          len = 0;
+        if (len >= (int)sizeof(buf))
+          len = (int)sizeof(buf) - 1;
+        WriteFile(h, buf, len, &wn, 0);
+        written += len;
+        break;
+      }
+      case '%': {
+        WriteFile(h, "%", 1, &wn, 0);
+        written++;
+        break;
+      }
+      default:
+        break;
+      }
+    } else {
+      WriteFile(h, fmt, 1, &wn, 0);
+      written++;
     }
-    return written;
+    fmt++;
+  }
+  return written;
 }
 
 SYSCALL long long STR_PFX(fopen)(const char *path, const char *mode) {
-    HANDLE h; DWORD access, disp;
-    if (*mode == 'w') { access = 0x40000000; disp = 2; }
-    else if (*mode == 'a') { access = 0xC0000000; disp = 4; }
-    else { access = 0x80000000; disp = 3; }
-    h = CreateFileA(path, access, 0, 0, disp, 0x80, 0);
-    if (h == INVALID_HANDLE_VALUE) return 0;
-    if (*mode == 'a') SetFilePointer(h, 0, 0, 2);
-    return (long long)(intptr_t)h;
+  HANDLE h;
+  DWORD access, disp;
+  if (*mode == 'w') {
+    access = 0x40000000;
+    disp = 2;
+  } else if (*mode == 'a') {
+    access = 0xC0000000;
+    disp = 4;
+  } else {
+    access = 0x80000000;
+    disp = 3;
+  }
+  h = CreateFileA(path, access, 0, 0, disp, 0x80, 0);
+  if (h == INVALID_HANDLE_VALUE)
+    return 0;
+  if (*mode == 'a')
+    SetFilePointer(h, 0, 0, 2);
+  return (long long)(intptr_t)h;
 }
-SYSCALL int STR_PFX(fclose)(long long s) { return CloseHandle((HANDLE)(intptr_t)s) ? 0 : -1; }
-SYSCALL int STR_PFX(fread)(void *b, int sz, int c, long long s) { DWORD n; ReadFile((HANDLE)(intptr_t)s, b, sz*c, &n, 0); return n; }
-SYSCALL int STR_PFX(fwrite)(const void *b, int sz, int c, long long s) { DWORD n; WriteFile((HANDLE)(intptr_t)s, b, sz*c, &n, 0); return n; }
-SYSCALL int STR_PFX(fputs)(const char *str, long long s) { int n = lstrlenA(str); STR_PFX(fwrite)(str, 1, n, s); return n; }
-SYSCALL int STR_PFX(fputc)(int c, long long s) { char ch = c; STR_PFX(fwrite)(&ch, 1, 1, s); return c; }
-SYSCALL int STR_PFX(fseek)(long long s, long o, int w) { return SetFilePointer((HANDLE)(intptr_t)s, o, 0, w) == -1 ? -1 : 0; }
-SYSCALL long STR_PFX(ftell)(long long s) { return SetFilePointer((HANDLE)(intptr_t)s, 0, 0, 1); }
-SYSCALL int STR_PFX(fflush)(long long s) { if (s) FlushFileBuffers((HANDLE)(intptr_t)s); return 0; }
+SYSCALL int STR_PFX(fclose)(long long s) {
+  return CloseHandle((HANDLE)(intptr_t)s) ? 0 : -1;
+}
+SYSCALL int STR_PFX(fread)(void *b, int sz, int c, long long s) {
+  DWORD n;
+  ReadFile((HANDLE)(intptr_t)s, b, sz * c, &n, 0);
+  return n;
+}
+SYSCALL int STR_PFX(fwrite)(const void *b, int sz, int c, long long s) {
+  DWORD n;
+  WriteFile((HANDLE)(intptr_t)s, b, sz * c, &n, 0);
+  return n;
+}
+SYSCALL int STR_PFX(fputs)(const char *str, long long s) {
+  int n = lstrlenA(str);
+  STR_PFX(fwrite)(str, 1, n, s);
+  return n;
+}
+SYSCALL int STR_PFX(fputc)(int c, long long s) {
+  char ch = c;
+  STR_PFX(fwrite)(&ch, 1, 1, s);
+  return c;
+}
+SYSCALL int STR_PFX(fseek)(long long s, long o, int w) {
+  return SetFilePointer((HANDLE)(intptr_t)s, o, 0, w) == -1 ? -1 : 0;
+}
+SYSCALL long STR_PFX(ftell)(long long s) {
+  return SetFilePointer((HANDLE)(intptr_t)s, 0, 0, 1);
+}
+SYSCALL int STR_PFX(fflush)(long long s) {
+  if (s)
+    FlushFileBuffers((HANDLE)(intptr_t)s);
+  return 0;
+}
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wbuiltin-declaration-mismatch"
+#endif
 SYSCALL void STR_PFX(exit)(int c) { ExitProcess(c); }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 SYSCALL int STR_PFX(system)(const char *c) { return system(c); }
 
-/* String/memory functions — manual implementations to avoid ABI transition bugs */
+/* String/memory functions — manual implementations to avoid ABI transition bugs
+ */
 SYSCALL unsigned int STR_PFX(strlen)(const char *s) {
-    unsigned int n = 0;
-    while (s[n]) n++;
-    return n;
+  unsigned int n = 0;
+  while (s[n])
+    n++;
+  return n;
 }
 SYSCALL int STR_PFX(strcmp)(const char *a, const char *b) {
-    if (a == b) return 0;
-    if (!a) return -1;
-    if (!b) return 1;
-    while (*a && (*a == *b)) { a++; b++; }
-    return (int)((unsigned char)*a - (unsigned char)*b);
+  if (a == b)
+    return 0;
+  if (!a)
+    return -1;
+  if (!b)
+    return 1;
+  while (*a && (*a == *b)) {
+    a++;
+    b++;
+  }
+  return (int)((unsigned char)*a - (unsigned char)*b);
 }
 SYSCALL char *STR_PFX(strcpy)(char *d, const char *s) { return lstrcpyA(d, s); }
 SYSCALL char *STR_PFX(strcat)(char *d, const char *s) { return lstrcatA(d, s); }
 SYSCALL void *STR_PFX(memset)(void *p, int c, unsigned int n) {
-    unsigned char *b = (unsigned char*)p;
-    while (n--) *b++ = (unsigned char)c;
-    return p;
+  unsigned char *b = (unsigned char *)p;
+  while (n--)
+    *b++ = (unsigned char)c;
+  return p;
 }
 SYSCALL void *STR_PFX(memcpy)(void *d, const void *s, unsigned int n) {
-    unsigned char *bd = (unsigned char*)d;
-    const unsigned char *bs = (const unsigned char*)s;
-    while (n--) *bd++ = *bs++;
-    return d;
+  unsigned char *bd = (unsigned char *)d;
+  const unsigned char *bs = (const unsigned char *)s;
+  while (n--)
+    *bd++ = *bs++;
+  return d;
 }
 
 /* Memory functions via Win32 Heap API (no CRT dependency).
- * Note: HeapReAlloc does not zero memory like realloc; fine for Nova's usage. */
+ * Note: HeapReAlloc does not zero memory like realloc; fine for Nova's usage.
+ */
 static HANDLE _nova_heap = 0;
 SYSCALL void *STR_PFX(malloc)(unsigned int s) {
-    if (!_nova_heap) _nova_heap = GetProcessHeap();
-    return HeapAlloc(_nova_heap, HEAP_ZERO_MEMORY, s);
+  if (!_nova_heap)
+    _nova_heap = GetProcessHeap();
+  return HeapAlloc(_nova_heap, HEAP_ZERO_MEMORY, s);
 }
 SYSCALL void STR_PFX(free)(void *p) {
-    if (p) { if (!_nova_heap) _nova_heap = GetProcessHeap(); HeapFree(_nova_heap, 0, p); }
+  if (p) {
+    if (!_nova_heap)
+      _nova_heap = GetProcessHeap();
+    HeapFree(_nova_heap, 0, p);
+  }
 }
-/* Allocation whose contents the caller fully overwrites (strings): skips HEAP_ZERO_MEMORY's memset. */
+/* Allocation whose contents the caller fully overwrites (strings): skips
+ * HEAP_ZERO_MEMORY's memset. */
 static void *_nova_alloc_raw(unsigned int s) {
-    if (!_nova_heap) _nova_heap = GetProcessHeap();
-    return HeapAlloc(_nova_heap, 0, s);
+  if (!_nova_heap)
+    _nova_heap = GetProcessHeap();
+  return HeapAlloc(_nova_heap, 0, s);
 }
 SYSCALL void *STR_PFX(realloc)(void *p, unsigned int s) {
-    if (!_nova_heap) _nova_heap = GetProcessHeap();
-    return HeapReAlloc(_nova_heap, 0, p, s);
+  if (!_nova_heap)
+    _nova_heap = GetProcessHeap();
+  return HeapReAlloc(_nova_heap, 0, p, s);
 }
 
-/* Arena/Bump Allocator for compiler pipeline — fast linear allocation with bulk free */
+/* Arena/Bump Allocator for compiler pipeline — fast linear allocation with bulk
+ * free */
 #define ARENA_DEFAULT_SIZE (1024 * 1024)
 
 typedef struct {
-    char *base;
-    char *ptr;
-    char *end;
+  char *base;
+  char *ptr;
+  char *end;
 } NovaArena;
 
 static NovaArena _compile_arena = {0};
 
 SYSCALL void arena_init(void) {
-    if (!_compile_arena.base) {
-        _compile_arena.base = (char*)STR_PFX(malloc)(ARENA_DEFAULT_SIZE);
-        _compile_arena.ptr = _compile_arena.base;
-        _compile_arena.end = _compile_arena.base + ARENA_DEFAULT_SIZE;
-    }
+  if (!_compile_arena.base) {
+    _compile_arena.base = (char *)STR_PFX(malloc)(ARENA_DEFAULT_SIZE);
+    _compile_arena.ptr = _compile_arena.base;
+    _compile_arena.end = _compile_arena.base + ARENA_DEFAULT_SIZE;
+  }
 }
 
 SYSCALL void *arena_alloc(size_t size) {
-    if (!_compile_arena.base) arena_init();
-    
-    size = (size + 7) & ~7;  // 8-byte align
-    
-    if (_compile_arena.ptr + size > _compile_arena.end) {
-        size_t new_size = ARENA_DEFAULT_SIZE * 2;
-        char *new_base = (char*)STR_PFX(malloc)(new_size);
-        if (!new_base) return 0;
-        STR_PFX(memcpy)(new_base, _compile_arena.base, _compile_arena.ptr - _compile_arena.base);
-        STR_PFX(free)(_compile_arena.base);
-        _compile_arena.base = new_base;
-        _compile_arena.ptr = new_base + (_compile_arena.ptr - _compile_arena.base);
-        _compile_arena.end = new_base + new_size;
-    }
-    
-    void *result = _compile_arena.ptr;
-    _compile_arena.ptr += size;
-    return result;
+  if (!_compile_arena.base)
+    arena_init();
+
+  size = (size + 7) & ~7; // 8-byte align
+
+  if (_compile_arena.ptr + size > _compile_arena.end) {
+    size_t new_size = ARENA_DEFAULT_SIZE * 2;
+    char *new_base = (char *)STR_PFX(malloc)(new_size);
+    if (!new_base)
+      return 0;
+    STR_PFX(memcpy)(new_base, _compile_arena.base,
+                    _compile_arena.ptr - _compile_arena.base);
+    STR_PFX(free)(_compile_arena.base);
+    _compile_arena.base = new_base;
+    _compile_arena.ptr = new_base + (_compile_arena.ptr - _compile_arena.base);
+    _compile_arena.end = new_base + new_size;
+  }
+
+  void *result = _compile_arena.ptr;
+  _compile_arena.ptr += size;
+  return result;
 }
 
 SYSCALL void arena_reset(void) {
-    if (_compile_arena.base) {
-        _compile_arena.ptr = _compile_arena.base;
-    }
+  if (_compile_arena.base) {
+    _compile_arena.ptr = _compile_arena.base;
+  }
 }
 
 SYSCALL void arena_free(void) {
-    if (_compile_arena.base) {
-        STR_PFX(free)(_compile_arena.base);
-        _compile_arena.base = 0;
-        _compile_arena.ptr = 0;
-        _compile_arena.end = 0;
-    }
+  if (_compile_arena.base) {
+    STR_PFX(free)(_compile_arena.base);
+    _compile_arena.base = 0;
+    _compile_arena.ptr = 0;
+    _compile_arena.end = 0;
+  }
 }
 
 /* strstr — we may not need it but define for completeness */
 SYSCALL char *STR_PFX(strstr)(const char *h, const char *n) {
-    if (!*n) return (char*)h;
-    while (*h) {
-        const char *a = h, *b = n;
-        while (*a && *b && *a == *b) { a++; b++; }
-        if (!*b) return (char*)h;
-        h++;
+  if (!*n)
+    return (char *)h;
+  while (*h) {
+    const char *a = h, *b = n;
+    while (*a && *b && *a == *b) {
+      a++;
+      b++;
     }
-    return 0;
+    if (!*b)
+      return (char *)h;
+    h++;
+  }
+  return 0;
 }
 
-/* Custom sprintf that handles %d and basic floats, respecting SysV ABI registers */
+/* Custom sprintf that handles %d and basic floats, respecting SysV ABI
+ * registers */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wbuiltin-declaration-mismatch"
 SYSCALL int STR_PFX(sprintf)(char *b, const char *fmt, long long arg_d) {
-    char *out = b;
-    while (*fmt) {
-        if (*fmt == '%') {
-            fmt++;
-            if (*fmt == 'd') {
-                char buf[32];
-                long long val = arg_d;
-                int neg = 0, pos = 30;
-                buf[31] = 0;
-                if (val < 0) { neg = 1; val = -val; }
-                do { buf[pos--] = '0' + (val % 10); val /= 10; } while (val);
-                if (neg) buf[pos--] = '-';
-                pos++;
-                while (buf[pos]) *out++ = buf[pos++];
-            } else if (*fmt == 'f') {
-                /* floats are passed in xmm0 */
-                double arg_f = 0.0;
-                asm("movsd %%xmm0, %0" : "=m"(arg_f) : : "memory");
-                
-                long long val = (long long)arg_f;
-                int neg = 0;
-                if (arg_f < 0.0) { neg = 1; val = -val; arg_f = -arg_f; }
-                if (neg) *out++ = '-';
-                
-                char buf[32];
-                int pos = 30;
-                buf[31] = 0;
-                do { buf[pos--] = '0' + (val % 10); val /= 10; } while (val);
-                pos++;
-                while (buf[pos]) *out++ = buf[pos++];
-                
-                *out++ = '.';
-                double frac = arg_f - (double)(long long)arg_f;
-                for (int i = 0; i < 6; i++) {
-                    frac *= 10.0;
-                    int digit = (int)frac;
-                    *out++ = '0' + digit;
-                    frac -= digit;
-                }
-            } else {
-                *out++ = *fmt;
-            }
-        } else {
-            *out++ = *fmt;
+  char *out = b;
+  while (*fmt) {
+    if (*fmt == '%') {
+      fmt++;
+      if (*fmt == 'd') {
+        char buf[32];
+        long long val = arg_d;
+        int neg = 0, pos = 30;
+        buf[31] = 0;
+        if (val < 0) {
+          neg = 1;
+          val = -val;
         }
-        fmt++;
+        do {
+          buf[pos--] = '0' + (val % 10);
+          val /= 10;
+        } while (val);
+        if (neg)
+          buf[pos--] = '-';
+        pos++;
+        while (buf[pos])
+          *out++ = buf[pos++];
+      } else if (*fmt == 'f') {
+        /* floats are passed in xmm0 */
+        double arg_f = 0.0;
+        asm("movsd %%xmm0, %0" : "=m"(arg_f) : : "memory");
+
+        long long val = (long long)arg_f;
+        int neg = 0;
+        if (arg_f < 0.0) {
+          neg = 1;
+          val = -val;
+          arg_f = -arg_f;
+        }
+        if (neg)
+          *out++ = '-';
+
+        char buf[32];
+        int pos = 30;
+        buf[31] = 0;
+        do {
+          buf[pos--] = '0' + (val % 10);
+          val /= 10;
+        } while (val);
+        pos++;
+        while (buf[pos])
+          *out++ = buf[pos++];
+
+        *out++ = '.';
+        double frac = arg_f - (double)(long long)arg_f;
+        for (int i = 0; i < 6; i++) {
+          frac *= 10.0;
+          int digit = (int)frac;
+          *out++ = '0' + digit;
+          frac -= digit;
+        }
+      } else {
+        *out++ = *fmt;
+      }
+    } else {
+      *out++ = *fmt;
     }
-    *out = 0;
-    return out - b;
+    fmt++;
+  }
+  *out = 0;
+  return out - b;
 }
 #pragma GCC diagnostic pop
 
@@ -302,323 +413,382 @@ long long _oob_line;
 
 /* Out-of-bounds handler */
 SYSCALL void STR_PFX(out_of_bounds)(void) {
-    if (_oob_file_ptr) {
-        STR_PFX(printf)("error: Index Out Of Bounds at ", 0);
-        STR_PFX(printf)("%s", (void*)(intptr_t)_oob_file_ptr);
-        STR_PFX(printf)(" line %d\n", (void*)(intptr_t)_oob_line);
-    } else {
-        STR_PFX(printf)("error: Index Out Of Bounds\n", 0);
-    }
-    STR_PFX(exit)(1);
+  if (_oob_file_ptr) {
+    STR_PFX(printf)("error: Index Out Of Bounds at ", 0);
+    STR_PFX(printf)("%s", (void *)(intptr_t)_oob_file_ptr);
+    STR_PFX(printf)(" line %d\n", (void *)(intptr_t)_oob_line);
+  } else {
+    STR_PFX(printf)("error: Index Out Of Bounds\n", 0);
+  }
+  STR_PFX(exit)(1);
 }
 
-/* Forward declarations: ARC allocation lives further down (near the dict/list helpers) but
- * _sys_listdir_c, defined here, needs to return a properly ARC-headed list (see the
- * .as_list()/_list_wrap fix in docs/internals/ownership.md for why a bare malloc'd list
- * header is unsafe to hand back as an ordinary Nova list value). */
+/* Forward declarations: ARC allocation lives further down (near the dict/list
+ * helpers) but _sys_listdir_c, defined here, needs to return a properly
+ * ARC-headed list (see the .as_list()/_list_wrap fix in
+ * docs/internals/ownership.md for why a bare malloc'd list header is unsafe to
+ * hand back as an ordinary Nova list value). */
 SYSCALL void *_nova_arc_alloc(unsigned int size, uint32_t type_tag);
 SYSCALL void _nova_dec_ref(void *ptr);
-/* NOVA_VALUE_LIST's enum definition comes later in the file; its value (1) is used
- * directly here rather than via a macro, to avoid colliding with that enum's own
- * `NOVA_VALUE_LIST = 1` member declaration. */
+/* NOVA_VALUE_LIST's enum definition comes later in the file; its value (1) is
+ * used directly here rather than via a macro, to avoid colliding with that
+ * enum's own `NOVA_VALUE_LIST = 1` member declaration. */
 #define _SYS_LISTDIR_VALUE_LIST 1
 
-/* ============== Nova sys_* runtime (_c suffix to match Nova codegen naming) ============== */
-SYSCALL long long _sys_open_c(const char *path, const char *mode) { return STR_PFX(fopen)(path, mode); }
+/* ============== Nova sys_* runtime (_c suffix to match Nova codegen naming)
+ * ============== */
+SYSCALL long long _sys_open_c(const char *path, const char *mode) {
+  return STR_PFX(fopen)(path, mode);
+}
 SYSCALL void _sys_close_c(long long s) { STR_PFX(fclose)(s); }
 SYSCALL int _sys_mkdir_c(const char *path) {
-    if (!path) return 0;
-    return CreateDirectoryA(path, NULL) ? 1 : 0;
+  if (!path)
+    return 0;
+  return CreateDirectoryA(path, NULL) ? 1 : 0;
 }
 SYSCALL int _sys_delete_c(const char *path) {
-    if (!path) return 0;
-    return DeleteFileA(path) ? 1 : 0;
+  if (!path)
+    return 0;
+  return DeleteFileA(path) ? 1 : 0;
 }
 SYSCALL int _sys_copy_c(const char *source, const char *destination) {
-    if (!source || !destination || STR_PFX(strcmp)(source, destination) == 0) return 0;
-    return CopyFileA(source, destination, TRUE) ? 1 : 0;
+  if (!source || !destination || STR_PFX(strcmp)(source, destination) == 0)
+    return 0;
+  return CopyFileA(source, destination, TRUE) ? 1 : 0;
 }
 SYSCALL int _sys_move_c(const char *source, const char *destination) {
-    if (!source || !destination) return 0;
-    return MoveFileExA(source, destination, MOVEFILE_REPLACE_EXISTING) ? 1 : 0;
+  if (!source || !destination)
+    return 0;
+  return MoveFileExA(source, destination, MOVEFILE_REPLACE_EXISTING) ? 1 : 0;
 }
 SYSCALL void *_sys_listdir_c(const char *path) {
-    if (!path) return 0;
-    size_t plen = strlen(path);
-    char *pattern = (char*)STR_PFX(malloc)(plen + 3);
-    if (!pattern) return 0;
-    strcpy(pattern, path);
-    if (plen > 0 && pattern[plen - 1] != '\\' && pattern[plen - 1] != '/') pattern[plen++] = '\\';
-    pattern[plen] = '*'; pattern[plen + 1] = '\0';
-    WIN32_FIND_DATAA fd;
-    HANDLE h = FindFirstFileA(pattern, &fd);
-    STR_PFX(free)(pattern);
-    void *list = _nova_arc_alloc(16, _SYS_LISTDIR_VALUE_LIST);
-    if (!list) return 0;
-    int cap = 8;
-    void *data = STR_PFX(malloc)((size_t)cap * sizeof(intptr_t));
-    if (!data) { _nova_dec_ref(list); return 0; }
-    int n = 0;
-    if (h != INVALID_HANDLE_VALUE) {
-        do {
-            if (STR_PFX(strcmp)(fd.cFileName, ".") == 0 || STR_PFX(strcmp)(fd.cFileName, "..") == 0) continue;
-            if (n >= cap) {
-                cap *= 2;
-                void *bigger = STR_PFX(realloc)(data, (size_t)cap * sizeof(intptr_t));
-                if (!bigger) break;
-                data = bigger;
-            }
-            size_t sl = strlen(fd.cFileName) + 1;
-            char *copy = (char*)STR_PFX(malloc)(sl);
-            if (copy) strcpy(copy, fd.cFileName);
-            *(intptr_t*)((char*)data + n * sizeof(intptr_t)) = (intptr_t)(copy ? copy : "");
-            n++;
-        } while (FindNextFileA(h, &fd));
-        FindClose(h);
-    }
-    *(int*)list = n;
-    *(int*)((char*)list + 4) = n;
-    *(intptr_t*)((char*)list + 8) = (intptr_t)data;
-    return list;
+  if (!path)
+    return 0;
+  size_t plen = strlen(path);
+  char *pattern = (char *)STR_PFX(malloc)(plen + 3);
+  if (!pattern)
+    return 0;
+  strcpy(pattern, path);
+  if (plen > 0 && pattern[plen - 1] != '\\' && pattern[plen - 1] != '/')
+    pattern[plen++] = '\\';
+  pattern[plen] = '*';
+  pattern[plen + 1] = '\0';
+  WIN32_FIND_DATAA fd;
+  HANDLE h = FindFirstFileA(pattern, &fd);
+  STR_PFX(free)(pattern);
+  void *list = _nova_arc_alloc(16, _SYS_LISTDIR_VALUE_LIST);
+  if (!list)
+    return 0;
+  int cap = 8;
+  void *data = STR_PFX(malloc)((size_t)cap * sizeof(intptr_t));
+  if (!data) {
+    _nova_dec_ref(list);
+    return 0;
+  }
+  int n = 0;
+  if (h != INVALID_HANDLE_VALUE) {
+    do {
+      if (STR_PFX(strcmp)(fd.cFileName, ".") == 0 ||
+          STR_PFX(strcmp)(fd.cFileName, "..") == 0)
+        continue;
+      if (n >= cap) {
+        cap *= 2;
+        void *bigger = STR_PFX(realloc)(data, (size_t)cap * sizeof(intptr_t));
+        if (!bigger)
+          break;
+        data = bigger;
+      }
+      size_t sl = strlen(fd.cFileName) + 1;
+      char *copy = (char *)STR_PFX(malloc)(sl);
+      if (copy)
+        strcpy(copy, fd.cFileName);
+      *(intptr_t *)((char *)data + n * sizeof(intptr_t)) =
+          (intptr_t)(copy ? copy : "");
+      n++;
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+  }
+  *(int *)list = n;
+  *(int *)((char *)list + 4) = n;
+  *(intptr_t *)((char *)list + 8) = (intptr_t)data;
+  return list;
 }
 SYSCALL char *_sys_read_c(long long s) {
-    long len;
-    char *buf;
-    STR_PFX(fseek)(s, 0, 2);
-    len = STR_PFX(ftell)(s);
-    STR_PFX(fseek)(s, 0, 0);
-    buf = (char *)STR_PFX(malloc)(len + 1);
-    STR_PFX(fread)(buf, 1, len, s);
-    buf[len] = '\0';
-    return buf;
+  long len;
+  char *buf;
+  STR_PFX(fseek)(s, 0, 2);
+  len = STR_PFX(ftell)(s);
+  STR_PFX(fseek)(s, 0, 0);
+  buf = (char *)STR_PFX(malloc)(len + 1);
+  STR_PFX(fread)(buf, 1, len, s);
+  buf[len] = '\0';
+  return buf;
 }
 /* Streaming stdin. fd 0 is not a real Win32 HANDLE, so these cannot go through
  * _sys_read_c (which seeks and would fail on a pipe/console). Read once: this
  * returns what is currently available, up to `count` bytes, or "" at EOF. */
 SYSCALL char *_sys_read_stdin_c(int count) {
-    HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
-    DWORD n = 0;
-    char *buf;
-    if (count <= 0) return "";
-    buf = (char*)STR_PFX(malloc)((unsigned int)count + 1);
-    if (!buf) return "";
-    if (!ReadFile(h, buf, (DWORD)count, &n, 0)) n = 0;
-    buf[n] = '\0';
-    return buf;
+  HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
+  DWORD n = 0;
+  char *buf;
+  if (count <= 0)
+    return "";
+  buf = (char *)STR_PFX(malloc)((unsigned int)count + 1);
+  if (!buf)
+    return "";
+  if (!ReadFile(h, buf, (DWORD)count, &n, 0))
+    n = 0;
+  buf[n] = '\0';
+  return buf;
 }
 /* One line from stdin, newline included, CR removed. "" means EOF (a blank
  * line is "\n"), which lets protocol readers distinguish EOF from an empty
  * header line without a separate status channel. */
 SYSCALL char *_sys_read_line_c(void) {
-    HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
-    unsigned int cap = 128;
-    unsigned int len = 0;
-    char *buf = (char*)STR_PFX(malloc)(cap);
-    if (!buf) return "";
-    for (;;) {
-        char ch;
-        DWORD n = 0;
-        if (!ReadFile(h, &ch, 1, &n, 0) || n == 0) break;
-        if (ch == '\r') continue;
-        if (len + 2 > cap) {
-            unsigned int bigger = cap * 2;
-            char *next = (char*)STR_PFX(realloc)(buf, bigger);
-            if (!next) break;
-            buf = next;
-            cap = bigger;
-        }
-        buf[len++] = ch;
-        if (ch == '\n') break;
+  HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
+  unsigned int cap = 128;
+  unsigned int len = 0;
+  char *buf = (char *)STR_PFX(malloc)(cap);
+  if (!buf)
+    return "";
+  for (;;) {
+    char ch;
+    DWORD n = 0;
+    if (!ReadFile(h, &ch, 1, &n, 0) || n == 0)
+      break;
+    if (ch == '\r')
+      continue;
+    if (len + 2 > cap) {
+      unsigned int bigger = cap * 2;
+      char *next = (char *)STR_PFX(realloc)(buf, bigger);
+      if (!next)
+        break;
+      buf = next;
+      cap = bigger;
     }
-    buf[len] = '\0';
-    return buf;
+    buf[len++] = ch;
+    if (ch == '\n')
+      break;
+  }
+  buf[len] = '\0';
+  return buf;
 }
 SYSCALL void _sys_write_c(long long s, const char *str) {
-    /* Map Nova fd 0/1/2 to actual Win32 handles.  Nova uses raw HANDLEs as
-     * file descriptors (from CreateFileA), but standard streams 0/1/2 must
-     * be mapped via GetStdHandle since (HANDLE)1/2 are invalid handles. */
-    HANDLE h;
-    if (s == 0) h = GetStdHandle(STD_INPUT_HANDLE);
-    else if (s == 1) h = GetStdHandle(STD_OUTPUT_HANDLE);
-    else if (s == 2) h = GetStdHandle(STD_ERROR_HANDLE);
-    else h = (HANDLE)(intptr_t)s;
-    STR_PFX(fputs)(str, (long long)(intptr_t)h);
+  /* Map Nova fd 0/1/2 to actual Win32 handles.  Nova uses raw HANDLEs as
+   * file descriptors (from CreateFileA), but standard streams 0/1/2 must
+   * be mapped via GetStdHandle since (HANDLE)1/2 are invalid handles. */
+  HANDLE h;
+  if (s == 0)
+    h = GetStdHandle(STD_INPUT_HANDLE);
+  else if (s == 1)
+    h = GetStdHandle(STD_OUTPUT_HANDLE);
+  else if (s == 2)
+    h = GetStdHandle(STD_ERROR_HANDLE);
+  else
+    h = (HANDLE)(intptr_t)s;
+  STR_PFX(fputs)(str, (long long)(intptr_t)h);
 }
 SYSCALL int _sys_write_raw_c(int s, void *arr) {
-    int *iarr = (int*)arr;
-    int len = iarr[0];
-    char *data = (char*)arr + 16;
-    return STR_PFX(fwrite)(data, 1, len, s);
+  int *iarr = (int *)arr;
+  int len = iarr[0];
+  char *data = (char *)arr + 16;
+  return STR_PFX(fwrite)(data, 1, len, s);
 }
 SYSCALL void *_sys_alloc_c(int sz) { return STR_PFX(malloc)(sz); }
 SYSCALL void _sys_free_c(void *p) { STR_PFX(free)(p); }
 SYSCALL void _sys_exit_c(int c) { STR_PFX(exit)(c); }
 SYSCALL int _system_c(const char *c) {
-    if (!c) return -1;
-    if (strchr(c, '"')) {
-        size_t len = strlen(c);
-        char *wrapped = (char*)malloc(len + 3);
-        if (wrapped) {
-            wrapped[0] = '"';
-            memcpy(wrapped + 1, c, len);
-            wrapped[len + 1] = '"';
-            wrapped[len + 2] = '\0';
-            int ret = STR_PFX(system)(wrapped);
-            free(wrapped);
-            return ret;
-        }
+  if (!c)
+    return -1;
+  if (strchr(c, '"')) {
+    size_t len = strlen(c);
+    char *wrapped = (char *)malloc(len + 3);
+    if (wrapped) {
+      wrapped[0] = '"';
+      memcpy(wrapped + 1, c, len);
+      wrapped[len + 1] = '"';
+      wrapped[len + 2] = '\0';
+      int ret = STR_PFX(system)(wrapped);
+      free(wrapped);
+      return ret;
     }
-    return STR_PFX(system)(c);
+  }
+  return STR_PFX(system)(c);
 }
 SYSCALL int _sys_flush_c(int s) { return STR_PFX(fflush)(s); }
 SYSCALL const char *_sys_platform_c(void) { return "windows"; }
 SYSCALL int _sys_get_tick_count_c(void) { return (int)GetTickCount(); }
-/* Full, canonical path to the running executable -- unlike argv[0] (which is whatever the
- * caller typed, e.g. just "nova" when found via PATH, with no directory at all), this always
- * resolves to an absolute path, so stdlib/ can be found next to the binary regardless of cwd
- * or how it was invoked. */
+/* Full, canonical path to the running executable -- unlike argv[0] (which is
+ * whatever the caller typed, e.g. just "nova" when found via PATH, with no
+ * directory at all), this always resolves to an absolute path, so stdlib/ can
+ * be found next to the binary regardless of cwd or how it was invoked. */
 SYSCALL char *_sys_exe_path_c(void) {
-    char *buf = (char*)STR_PFX(malloc)(MAX_PATH);
-    if (!buf) return 0;
-    DWORD n = GetModuleFileNameA(NULL, buf, MAX_PATH);
-    if (n == 0 || n >= MAX_PATH) { buf[0] = '\0'; }
-    return buf;
+  char *buf = (char *)STR_PFX(malloc)(MAX_PATH);
+  if (!buf)
+    return 0;
+  DWORD n = GetModuleFileNameA(NULL, buf, MAX_PATH);
+  if (n == 0 || n >= MAX_PATH) {
+    buf[0] = '\0';
+  }
+  return buf;
 }
 SYSCALL const char *_sys_env_get_c(const char *name) {
-    const char *value = getenv(name);
-    return value ? value : "";
+  const char *value = getenv(name);
+  return value ? value : "";
 }
 SYSCALL int _sys_env_set_c(const char *name, const char *value) {
-    return _putenv_s(name, value) == 0 ? 1 : 0;
+  return _putenv_s(name, value) == 0 ? 1 : 0;
 }
 SYSCALL int _sys_process_run_c(void *args) {
-    int count;
-    intptr_t *values;
-    char **argv;
-    int i;
-    if (!args) return -1;
-    count = *(int*)args;
-    values = (intptr_t*)(*(intptr_t*)((char*)args + 8));
-    if (count <= 0) return -1;
-    argv = (char**)malloc((size_t)(count + 1) * sizeof(char*));
-    if (!argv) return -1;
-    for (i = 0; i < count; i++) {
-        argv[i] = (char*)values[i];
-        if (!argv[i]) { free(argv); return -1; }
+  int count;
+  intptr_t *values;
+  char **argv;
+  int i;
+  if (!args)
+    return -1;
+  count = *(int *)args;
+  values = (intptr_t *)(*(intptr_t *)((char *)args + 8));
+  if (count <= 0)
+    return -1;
+  argv = (char **)malloc((size_t)(count + 1) * sizeof(char *));
+  if (!argv)
+    return -1;
+  for (i = 0; i < count; i++) {
+    argv[i] = (char *)values[i];
+    if (!argv[i]) {
+      free(argv);
+      return -1;
     }
-    argv[count] = NULL;
-    i = _spawnvp(_P_WAIT, argv[0], (const char *const *)argv);
-    free(argv);
-    return i < 0 ? -1 : i;
+  }
+  argv[count] = NULL;
+  i = _spawnvp(_P_WAIT, argv[0], (const char *const *)argv);
+  free(argv);
+  return i < 0 ? -1 : i;
 }
-/* Runs `command` through the shell (same as process_shell/_system_c) and captures its
- * stdout. Returns a malloc'd "<exit_code>\n<captured stdout>" string -- the Nova-level
- * wrapper (stdlib/process.nv) splits on the first newline so this stays a single-value,
- * no-ABI-changes runtime call rather than needing a struct return. */
+/* Runs `command` through the shell (same as process_shell/_system_c) and
+ * captures its stdout. Returns a malloc'd "<exit_code>\n<captured stdout>"
+ * string -- the Nova-level wrapper (stdlib/process.nv) splits on the first
+ * newline so this stays a single-value, no-ABI-changes runtime call rather than
+ * needing a struct return. */
 SYSCALL void *_sys_process_capture_c(const char *command) {
-    FILE *p;
-    size_t cap, len;
-    char *buf;
-    char *result;
-    char prefix[16];
-    int plen;
-    int exit_code;
-    if (!command) return 0;
-    p = _popen(command, "r");
-    if (!p) return 0;
-    cap = 4096;
-    len = 0;
-    buf = (char*)malloc(cap);
-    if (!buf) { _pclose(p); return 0; }
-    for (;;) {
-        size_t n;
-        if (len + 4096 + 1 > cap) {
-            size_t new_cap = cap * 2;
-            char *nb = (char*)realloc(buf, new_cap);
-            if (!nb) break;
-            buf = nb;
-            cap = new_cap;
-        }
-        n = fread(buf + len, 1, 4096, p);
-        if (n == 0) break;
-        len += n;
+  FILE *p;
+  size_t cap, len;
+  char *buf;
+  char *result;
+  char prefix[16];
+  int plen;
+  int exit_code;
+  if (!command)
+    return 0;
+  p = _popen(command, "r");
+  if (!p)
+    return 0;
+  cap = 4096;
+  len = 0;
+  buf = (char *)malloc(cap);
+  if (!buf) {
+    _pclose(p);
+    return 0;
+  }
+  for (;;) {
+    size_t n;
+    if (len + 4096 + 1 > cap) {
+      size_t new_cap = cap * 2;
+      char *nb = (char *)realloc(buf, new_cap);
+      if (!nb)
+        break;
+      buf = nb;
+      cap = new_cap;
     }
-    exit_code = _pclose(p);
-    buf[len] = 0;
-    plen = snprintf(prefix, sizeof(prefix), "%d\n", exit_code);
-    result = (char*)malloc((size_t)plen + len + 1);
-    if (result) {
-        memcpy(result, prefix, (size_t)plen);
-        memcpy(result + plen, buf, len);
-        result[(size_t)plen + len] = 0;
-    }
-    free(buf);
-    return result;
+    n = fread(buf + len, 1, 4096, p);
+    if (n == 0)
+      break;
+    len += n;
+  }
+  exit_code = _pclose(p);
+  buf[len] = 0;
+  plen = snprintf(prefix, sizeof(prefix), "%d\n", exit_code);
+  result = (char *)malloc((size_t)plen + len + 1);
+  if (result) {
+    memcpy(result, prefix, (size_t)plen);
+    memcpy(result + plen, buf, len);
+    result[(size_t)plen + len] = 0;
+  }
+  free(buf);
+  return result;
 }
 
-/* ============== Crash diagnostics for native Windows builds (PARTIAL -- read before relying on this) ============== */
-/* The SIGSEGV/SIGBUS handler further down (guarded by "#if defined(_WIN32)") looks like it
- * covers Windows too, but it's nested inside this file's "#elif defined(LINUX_WRAP) ||
- * defined(MACOS)" branch, so on an actual _WIN32 build it's dead code that never compiles
- * in -- and it calls backtrace()/backtrace_symbols_fd(), glibc functions MinGW doesn't
- * provide, so it couldn't have worked here even if it were reachable. signal(SIGSEGV, ...)
- * itself isn't the right tool either: it's a POSIX API for software-raised signals, not
- * Windows hardware exceptions. SetUnhandledExceptionFilter is the actual Win32 mechanism
- * for catching an access violation, and it does work -- verified with a plain C
- * SetUnhandledExceptionFilter + null-pointer-write test in isolation.
+/* ============== Crash diagnostics for native Windows builds (PARTIAL -- read
+ * before relying on this) ============== */
+/* The SIGSEGV/SIGBUS handler further down (guarded by "#if defined(_WIN32)")
+ * looks like it covers Windows too, but it's nested inside this file's "#elif
+ * defined(LINUX_WRAP) || defined(MACOS)" branch, so on an actual _WIN32 build
+ * it's dead code that never compiles in -- and it calls
+ * backtrace()/backtrace_symbols_fd(), glibc functions MinGW doesn't provide, so
+ * it couldn't have worked here even if it were reachable. signal(SIGSEGV, ...)
+ * itself isn't the right tool either: it's a POSIX API for software-raised
+ * signals, not Windows hardware exceptions. SetUnhandledExceptionFilter is the
+ * actual Win32 mechanism for catching an access violation, and it does work --
+ * verified with a plain C SetUnhandledExceptionFilter + null-pointer-write test
+ * in isolation.
  *
- * It does NOT fire for a crash inside an actual compiled Nova program, including one
- * inside this very runtime (verified by reintroducing a known, previously-fixed
- * null-pointer len() bug from stdlib/backend/x86_64/codegen.nv and rebuilding nova.exe:
- * still a bare "Segmentation fault" with no SIGNAL: line, even though this handler is
- * confirmed installed). Every function in this file is declared SYSCALL
- * (__attribute__((sysv_abi))) so its generated code and calling convention match what
- * Nova's own x86_64 codegen emits -- but GCC's Windows x64 backend generates .pdata/.xdata
- * unwind metadata assuming the standard Microsoft x64 ABI, and overriding to sysv_abi
- * breaks or skips that metadata. Without valid unwind info, the OS's table-based exception
- * dispatcher can't walk the frame at all, so it apparently never reaches the top-level
- * filter either -- not just intermediate per-frame handlers. That's a different, deeper
- * problem than "no handler exists," and fixing it for real would mean emitting correct
- * Windows unwind tables for sysv_abi-attributed functions, which is out of scope here.
+ * It does NOT fire for a crash inside an actual compiled Nova program,
+ * including one inside this very runtime (verified by reintroducing a known,
+ * previously-fixed null-pointer len() bug from stdlib/backend/x86_64/codegen.nv
+ * and rebuilding nova.exe: still a bare "Segmentation fault" with no SIGNAL:
+ * line, even though this handler is confirmed installed). Every function in
+ * this file is declared SYSCALL
+ * (__attribute__((sysv_abi))) so its generated code and calling convention
+ * match what Nova's own x86_64 codegen emits -- but GCC's Windows x64 backend
+ * generates .pdata/.xdata unwind metadata assuming the standard Microsoft x64
+ * ABI, and overriding to sysv_abi breaks or skips that metadata. Without valid
+ * unwind info, the OS's table-based exception dispatcher can't walk the frame
+ * at all, so it apparently never reaches the top-level filter either -- not
+ * just intermediate per-frame handlers. That's a different, deeper problem than
+ * "no handler exists," and fixing it for real would mean emitting correct
+ * Windows unwind tables for sysv_abi-attributed functions, which is out of
+ * scope here.
  *
- * What this DOES still catch: a crash in code that isn't SYSCALL-attributed (Windows API
- * glue, anything added to this file without that attribute). Keeping it despite the
- * limited coverage -- strictly better than the fully-dead code it replaces, and accurately
- * documented is better than silently wrong. This can't give symbol names without a
- * dbghelp.lib dependency either, but printed addresses are enough to pinpoint a crashing
- * instruction via `objdump -d program.exe` against the generated .s file, for whatever it
+ * What this DOES still catch: a crash in code that isn't SYSCALL-attributed
+ * (Windows API glue, anything added to this file without that attribute).
+ * Keeping it despite the limited coverage -- strictly better than the
+ * fully-dead code it replaces, and accurately documented is better than
+ * silently wrong. This can't give symbol names without a dbghelp.lib dependency
+ * either, but printed addresses are enough to pinpoint a crashing instruction
+ * via `objdump -d program.exe` against the generated .s file, for whatever it
  * does catch. */
 static LONG WINAPI _nova_crash_filter(EXCEPTION_POINTERS *ep) {
-    char buf[256];
-    void *frames[32];
-    USHORT n;
-    USHORT i;
-    HANDLE out = GetStdHandle(STD_ERROR_HANDLE);
-    DWORD written;
-    int len = snprintf(buf, sizeof(buf),
-        "SIGNAL:ACCESS_VIOLATION code=0x%08lx addr=%p\n",
-        (unsigned long)ep->ExceptionRecord->ExceptionCode,
-        ep->ExceptionRecord->ExceptionAddress);
+  char buf[256];
+  void *frames[32];
+  USHORT n;
+  USHORT i;
+  HANDLE out = GetStdHandle(STD_ERROR_HANDLE);
+  DWORD written;
+  int len = snprintf(buf, sizeof(buf),
+                     "SIGNAL:ACCESS_VIOLATION code=0x%08lx addr=%p\n",
+                     (unsigned long)ep->ExceptionRecord->ExceptionCode,
+                     ep->ExceptionRecord->ExceptionAddress);
+  WriteFile(out, buf, (DWORD)len, &written, NULL);
+  n = CaptureStackBackTrace(0, 32, frames, NULL);
+  for (i = 0; i < n; i++) {
+    len = snprintf(buf, sizeof(buf), "  frame[%u] = %p\n", (unsigned)i,
+                   frames[i]);
     WriteFile(out, buf, (DWORD)len, &written, NULL);
-    n = CaptureStackBackTrace(0, 32, frames, NULL);
-    for (i = 0; i < n; i++) {
-        len = snprintf(buf, sizeof(buf), "  frame[%u] = %p\n", (unsigned)i, frames[i]);
-        WriteFile(out, buf, (DWORD)len, &written, NULL);
-    }
-    return EXCEPTION_EXECUTE_HANDLER;
+  }
+  return EXCEPTION_EXECUTE_HANDLER;
 }
-__attribute__((constructor))
-static void _nova_install_crash_filter(void) {
-    SetUnhandledExceptionFilter(_nova_crash_filter);
+__attribute__((constructor)) static void _nova_install_crash_filter(void) {
+  SetUnhandledExceptionFilter(_nova_crash_filter);
 }
 
 /* ============== Entry point bridge for Windows x64 ============== */
-/* MinGW x64 CRT expects main() (no _ prefix). Nova codegen emits _main (with _ prefix
- * for Linux compatibility). This bridge lets CRT startup find the entry point. */
+/* MinGW x64 CRT expects main() (no _ prefix). Nova codegen emits _main (with _
+ * prefix for Linux compatibility). This bridge lets CRT startup find the entry
+ * point. */
 #if defined(_WIN64)
 int main(void) {
-    extern int _main(void);
-    return _main();
+  extern int _main(void);
+  return _main();
 }
 #endif
 
@@ -630,21 +800,26 @@ int main(void) {
 #if defined(LINUX_WRAP)
 #define _GNU_SOURCE
 #endif
+#include <dlfcn.h>
+#include <execinfo.h>
+#include <signal.h>
+#include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdarg.h>
-#include <stdint.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-#include <signal.h>
-#include <execinfo.h>
-#include <dlfcn.h>
 /* MinGW's dlfcn.h lacks Dl_info/dladdr (real POSIX provides them). */
 #if defined(__MINGW32__) || defined(__MINGW64__)
-typedef struct { const char *dli_fname; void *dli_fbase; const char *dli_sname; void *dli_saddr; } Dl_info;
+typedef struct {
+  const char *dli_fname;
+  void *dli_fbase;
+  const char *dli_sname;
+  void *dli_saddr;
+} Dl_info;
 int dladdr(const void *, Dl_info *);
 #endif
 
@@ -653,41 +828,54 @@ int dladdr(const void *, Dl_info *);
  * with fprintf(stdout, ...) when called from hand-written assembly. */
 #if defined(LINUX_WRAP) || defined(MACOS)
 SYSCALL int _printf(const char *fmt, int64_t arg) {
-    int written = 0;
-    while (*fmt) {
-        if (*fmt == '%') {
-            fmt++;
-            switch (*fmt) {
-                case 's': {
-                    const char *s = (const char*)arg;
-                    if (s) { int n = strlen(s); write(1, s, n); written += n; }
-                    break;
-                }
-                case 'd': {
-                    char buf[32];
-                    int val = (int)arg, neg = 0, pos = 30, dlen;
-                    buf[31] = 0;
-                    if (val < 0) { neg = 1; val = -val; }
-                    do { buf[pos--] = '0' + (val % 10); val /= 10; } while (val);
-                    if (neg) buf[pos--] = '-';
-                    pos++; dlen = 31 - pos;
-                    write(1, buf + pos, dlen);
-                    written += dlen;
-                    break;
-                }
-                case '%':
-                    write(1, "%", 1);
-                    written++;
-                    break;
-                default: break;
-            }
-        } else {
-            write(1, fmt, 1);
-            written++;
+  int written = 0;
+  while (*fmt) {
+    if (*fmt == '%') {
+      fmt++;
+      switch (*fmt) {
+      case 's': {
+        const char *s = (const char *)arg;
+        if (s) {
+          int n = strlen(s);
+          write(1, s, n);
+          written += n;
         }
-        fmt++;
+        break;
+      }
+      case 'd': {
+        char buf[32];
+        int val = (int)arg, neg = 0, pos = 30, dlen;
+        buf[31] = 0;
+        if (val < 0) {
+          neg = 1;
+          val = -val;
+        }
+        do {
+          buf[pos--] = '0' + (val % 10);
+          val /= 10;
+        } while (val);
+        if (neg)
+          buf[pos--] = '-';
+        pos++;
+        dlen = 31 - pos;
+        write(1, buf + pos, dlen);
+        written += dlen;
+        break;
+      }
+      case '%':
+        write(1, "%", 1);
+        written++;
+        break;
+      default:
+        break;
+      }
+    } else {
+      write(1, fmt, 1);
+      written++;
     }
-    return written;
+    fmt++;
+  }
+  return written;
 }
 /* Fixed-arg signature — same reasoning as _printf above.
  * LINUX ONLY: on Linux, libc exports `sprintf` (no underscore) so the
@@ -697,7 +885,7 @@ SYSCALL int _printf(const char *fmt, int64_t arg) {
  * alias maps back to this very function. */
 #if defined(LINUX_WRAP)
 SYSCALL int _sprintf(char *b, const char *fmt, int64_t arg) {
-    return sprintf(b, fmt, arg);
+  return sprintf(b, fmt, arg);
 }
 #endif
 /* _system_c: called from Nova stdlib's system_exec(). Safe to alias on macOS
@@ -724,70 +912,81 @@ SYSCALL char *_strcat(char *d, const char *s) { return strcat(d, s); }
 SYSCALL void *_memset(void *p, int c, size_t n) { return memset(p, c, n); }
 SYSCALL char *_strstr(const char *h, const char *n) { return strstr(h, n); }
 SYSCALL int _fopen(const char *p, const char *m) {
-    FILE *f = fopen(p, m);
-    return f ? (intptr_t)f : 0;
+  FILE *f = fopen(p, m);
+  return f ? (intptr_t)f : 0;
 }
-SYSCALL int _fclose(int s) { return fclose((FILE*)(intptr_t)s); }
-SYSCALL int _fwrite(const void *b, int sz, int c, int s) { return fwrite(b, sz, c, (FILE*)(intptr_t)s); }
-SYSCALL int _fread(void *b, int sz, int c, int s) { return fread(b, sz, c, (FILE*)(intptr_t)s); }
-SYSCALL int _fputs(const char *str, int s) { return fputs(str, (FILE*)(intptr_t)s); }
-SYSCALL int _fputc(int c, int s) { return fputc(c, (FILE*)(intptr_t)s); }
-SYSCALL int _fseek(int s, long o, int w) { return fseek((FILE*)(intptr_t)s, o, w); }
-SYSCALL long _ftell(int s) { return ftell((FILE*)(intptr_t)s); }
-SYSCALL int _fflush(int s) { return fflush((FILE*)(intptr_t)s); }
+SYSCALL int _fclose(int s) { return fclose((FILE *)(intptr_t)s); }
+SYSCALL int _fwrite(const void *b, int sz, int c, int s) {
+  return fwrite(b, sz, c, (FILE *)(intptr_t)s);
+}
+SYSCALL int _fread(void *b, int sz, int c, int s) {
+  return fread(b, sz, c, (FILE *)(intptr_t)s);
+}
+SYSCALL int _fputs(const char *str, int s) {
+  return fputs(str, (FILE *)(intptr_t)s);
+}
+SYSCALL int _fputc(int c, int s) { return fputc(c, (FILE *)(intptr_t)s); }
+SYSCALL int _fseek(int s, long o, int w) {
+  return fseek((FILE *)(intptr_t)s, o, w);
+}
+SYSCALL long _ftell(int s) { return ftell((FILE *)(intptr_t)s); }
+SYSCALL int _fflush(int s) { return fflush((FILE *)(intptr_t)s); }
 SYSCALL void _exit(int c) { exit(c); }
 
 /* Arena/Bump Allocator for Linux */
 #define ARENA_DEFAULT_SIZE (1024 * 1024)
 typedef struct {
-    char *base;
-    char *ptr;
-    char *end;
+  char *base;
+  char *ptr;
+  char *end;
 } NovaArena;
 static NovaArena _compile_arena = {0};
 
 SYSCALL void arena_init(void) {
-    if (!_compile_arena.base) {
-        _compile_arena.base = (char*)malloc(ARENA_DEFAULT_SIZE);
-        _compile_arena.ptr = _compile_arena.base;
-        _compile_arena.end = _compile_arena.base + ARENA_DEFAULT_SIZE;
-    }
+  if (!_compile_arena.base) {
+    _compile_arena.base = (char *)malloc(ARENA_DEFAULT_SIZE);
+    _compile_arena.ptr = _compile_arena.base;
+    _compile_arena.end = _compile_arena.base + ARENA_DEFAULT_SIZE;
+  }
 }
 
 SYSCALL void *arena_alloc(size_t size) {
-    if (!_compile_arena.base) arena_init();
-    
-    size = (size + 7) & ~7;
-    
-    if (_compile_arena.ptr + size > _compile_arena.end) {
-        size_t new_size = ARENA_DEFAULT_SIZE * 2;
-        char *new_base = (char*)malloc(new_size);
-        if (!new_base) return 0;
-        memcpy(new_base, _compile_arena.base, _compile_arena.ptr - _compile_arena.base);
-        free(_compile_arena.base);
-        _compile_arena.base = new_base;
-        _compile_arena.ptr = new_base + (_compile_arena.ptr - _compile_arena.base);
-        _compile_arena.end = new_base + new_size;
-    }
-    
-    void *result = _compile_arena.ptr;
-    _compile_arena.ptr += size;
-    return result;
+  if (!_compile_arena.base)
+    arena_init();
+
+  size = (size + 7) & ~7;
+
+  if (_compile_arena.ptr + size > _compile_arena.end) {
+    size_t new_size = ARENA_DEFAULT_SIZE * 2;
+    char *new_base = (char *)malloc(new_size);
+    if (!new_base)
+      return 0;
+    memcpy(new_base, _compile_arena.base,
+           _compile_arena.ptr - _compile_arena.base);
+    free(_compile_arena.base);
+    _compile_arena.base = new_base;
+    _compile_arena.ptr = new_base + (_compile_arena.ptr - _compile_arena.base);
+    _compile_arena.end = new_base + new_size;
+  }
+
+  void *result = _compile_arena.ptr;
+  _compile_arena.ptr += size;
+  return result;
 }
 
 SYSCALL void arena_reset(void) {
-    if (_compile_arena.base) {
-        _compile_arena.ptr = _compile_arena.base;
-    }
+  if (_compile_arena.base) {
+    _compile_arena.ptr = _compile_arena.base;
+  }
 }
 
 SYSCALL void arena_free(void) {
-    if (_compile_arena.base) {
-        free(_compile_arena.base);
-        _compile_arena.base = 0;
-        _compile_arena.ptr = 0;
-        _compile_arena.end = 0;
-    }
+  if (_compile_arena.base) {
+    free(_compile_arena.base);
+    _compile_arena.base = 0;
+    _compile_arena.ptr = 0;
+    _compile_arena.end = 0;
+  }
 }
 
 #endif /* defined(LINUX_WRAP) */
@@ -801,315 +1000,354 @@ SYSCALL void arena_free(void) {
 #include <dlfcn.h>
 static void *_last_realloc_from = 0;
 static void *_diag_real_realloc(void *p, size_t s) {
-    static void *(*fn)(void *, size_t) = 0;
-    if (!fn) fn = (void *(*)(void *, size_t))dlsym(RTLD_NEXT, "realloc");
-    return fn(p, s);
+  static void *(*fn)(void *, size_t) = 0;
+  if (!fn)
+    fn = (void *(*)(void *, size_t))dlsym(RTLD_NEXT, "realloc");
+  return fn(p, s);
 }
 SYSCALL void *_realloc(void *p, size_t s) {
-    void *r = _diag_real_realloc(p, s);
-    _last_realloc_from = __builtin_return_address(0);
-    return r;
+  void *r = _diag_real_realloc(p, s);
+  _last_realloc_from = __builtin_return_address(0);
+  return r;
 }
 
 /* Arena/Bump Allocator for macOS */
 #define ARENA_DEFAULT_SIZE (1024 * 1024)
 typedef struct {
-    char *base;
-    char *ptr;
-    char *end;
+  char *base;
+  char *ptr;
+  char *end;
 } NovaArena;
 static NovaArena _compile_arena = {0};
 
 SYSCALL void arena_init(void) {
-    if (!_compile_arena.base) {
-        _compile_arena.base = (char*)malloc(ARENA_DEFAULT_SIZE);
-        _compile_arena.ptr = _compile_arena.base;
-        _compile_arena.end = _compile_arena.base + ARENA_DEFAULT_SIZE;
-    }
+  if (!_compile_arena.base) {
+    _compile_arena.base = (char *)malloc(ARENA_DEFAULT_SIZE);
+    _compile_arena.ptr = _compile_arena.base;
+    _compile_arena.end = _compile_arena.base + ARENA_DEFAULT_SIZE;
+  }
 }
 
 SYSCALL void *arena_alloc(size_t size) {
-    if (!_compile_arena.base) arena_init();
-    
-    size = (size + 7) & ~7;
-    
-    if (_compile_arena.ptr + size > _compile_arena.end) {
-        size_t new_size = ARENA_DEFAULT_SIZE * 2;
-        char *new_base = (char*)malloc(new_size);
-        if (!new_base) return 0;
-        memcpy(new_base, _compile_arena.base, _compile_arena.ptr - _compile_arena.base);
-        free(_compile_arena.base);
-        _compile_arena.base = new_base;
-        _compile_arena.ptr = new_base + (_compile_arena.ptr - _compile_arena.base);
-        _compile_arena.end = new_base + new_size;
-    }
-    
-    void *result = _compile_arena.ptr;
-    _compile_arena.ptr += size;
-    return result;
+  if (!_compile_arena.base)
+    arena_init();
+
+  size = (size + 7) & ~7;
+
+  if (_compile_arena.ptr + size > _compile_arena.end) {
+    size_t new_size = ARENA_DEFAULT_SIZE * 2;
+    char *new_base = (char *)malloc(new_size);
+    if (!new_base)
+      return 0;
+    memcpy(new_base, _compile_arena.base,
+           _compile_arena.ptr - _compile_arena.base);
+    free(_compile_arena.base);
+    _compile_arena.base = new_base;
+    _compile_arena.ptr = new_base + (_compile_arena.ptr - _compile_arena.base);
+    _compile_arena.end = new_base + new_size;
+  }
+
+  void *result = _compile_arena.ptr;
+  _compile_arena.ptr += size;
+  return result;
 }
 
 SYSCALL void arena_reset(void) {
-    if (_compile_arena.base) {
-        _compile_arena.ptr = _compile_arena.base;
-    }
+  if (_compile_arena.base) {
+    _compile_arena.ptr = _compile_arena.base;
+  }
 }
 
 SYSCALL void arena_free(void) {
-    if (_compile_arena.base) {
-        free(_compile_arena.base);
-        _compile_arena.base = 0;
-        _compile_arena.ptr = 0;
-        _compile_arena.end = 0;
-    }
+  if (_compile_arena.base) {
+    free(_compile_arena.base);
+    _compile_arena.base = 0;
+    _compile_arena.ptr = 0;
+    _compile_arena.end = 0;
+  }
 }
 
 #endif /* defined(MACOS) */
 
-/* SIGSEGV/SIGBUS handler for debug — prints fault address, registers, backtrace */
+/* SIGSEGV/SIGBUS handler for debug — prints fault address, registers, backtrace
+ */
 /* Write to BOTH fd 1 and fd 2 — the failing fd must not hide the dump. */
-static void _w2(const char *s, int n) { (void)!write(1, s, n); (void)!write(2, s, n); }
+static void _w2(const char *s, int n) {
+  (void)!write(1, s, n);
+  (void)!write(2, s, n);
+}
 /* Nested-fault guard: if a dump read touches unmapped memory, the second
  * fault re-enters the handler — exit cleanly instead of hanging, keeping all
  * lines already printed. */
 static volatile int _in_handler = 0;
 #if defined(_WIN32)
 static void _sigsegv(int sig) {
-    if (_in_handler) { _exit(139); }
-    _in_handler = 1;
-    void *buf[64];
-    int n = backtrace(buf, 64);
-    write(2, sig == 11 ? "SIGNAL:SIGSEGV\n" : "SIGNAL:SIGBUS\n", 16);
-    backtrace_symbols_fd(buf, n, 2);
+  if (_in_handler) {
     _exit(139);
+  }
+  _in_handler = 1;
+  void *buf[64];
+  int n = backtrace(buf, 64);
+  write(2, sig == 11 ? "SIGNAL:SIGSEGV\n" : "SIGNAL:SIGBUS\n", 16);
+  backtrace_symbols_fd(buf, n, 2);
+  _exit(139);
 }
-__attribute__((constructor))
-static void _init_sig(void) {
-    signal(SIGSEGV, _sigsegv);
-    signal(SIGBUS, _sigsegv);
+__attribute__((constructor)) static void _init_sig(void) {
+  signal(SIGSEGV, _sigsegv);
+  signal(SIGBUS, _sigsegv);
 }
 #else
 static void _sigsegv(int sig, siginfo_t *info, void *uctx) {
-    void *buf[64];
-    if (_in_handler) { _w2("NESTED-FAULT-EXIT\n", 17); _exit(139); }
-    _in_handler = 1;
-    /* Raw-write the marker FIRST — a corrupted heap can crash fopen/fprintf
-     * inside the handler, so everything critical goes to stderr via write(). */
-    _w2(sig == 11 ? "SIGNAL:SIGSEGV\n" : "SIGNAL:SIGBUS\n", 16);
-    int n = backtrace(buf, 64);
-    char line[512];
-    int len;
-    FILE *df = NULL;
-    /* Darwin arm64: mcontext64 = __es (16: far 0, esr 8, exception 12)
-     * + thread state64 at +0x10 (x0..x28, fp 232, lr 240, sp 248, pc 256,
-     * cpsr 264, pad 268). uc_mcontext pointer read at uctx+0x30. */
-    if (uctx) {
-        void *mctx = *(void **)((char *)uctx + 0x30);
-        unsigned char *mb = (unsigned char *)mctx;
-        char hdr[64];
-        int hl = snprintf(hdr, sizeof(hdr), "UCTX=%p UC_MCONTEXT=%p\n", uctx, mctx);
-        _w2(hdr, hl);
-        if (df) fputs(hdr, df);
-        if (mb) {
-            unsigned long long far = *(unsigned long long *)(mb + 0);
-            unsigned int esr = *(unsigned int *)(mb + 8);
-            unsigned char *ts = mb + 16;
-            unsigned long long x0 = *(unsigned long long *)(ts + 0);
-            unsigned long long x29 = *(unsigned long long *)(ts + 232);
-            unsigned long long x30 = *(unsigned long long *)(ts + 240);
-            unsigned long long x31 = *(unsigned long long *)(ts + 248);
-            unsigned long long pc = *(unsigned long long *)(ts + 256);
-            unsigned int cpsr = *(unsigned int *)(ts + 264);
-            len = snprintf(line, sizeof(line),
-                "SIG: far=%llx esr=%x x0=%llx fp=%llx lr=%llx sp=%llx pc=%llx cpsr=%x\n",
-                far, esr, x0, x29, x30, x31, pc, cpsr);
-            _w2(line, len);
-            if (df) fputs(line, df);
-            /* Resolve the faulting instruction and its caller via dladdr —
-             * identifies the exact function + offset without needing the
-             * PIE slide (dladdr returns running addresses). */
-            {
-                Dl_info di;
-                if (dladdr((void *)pc, &di) && di.dli_sname) {
-                    len = snprintf(line, sizeof(line), "PC_SYM: %s+%lld\n",
-                        di.dli_sname, (long long)((unsigned long long)pc -
-                        (unsigned long long)di.dli_saddr));
-                    _w2(line, len);
-                }
-                if (dladdr((void *)x30, &di) && di.dli_sname) {
-                    len = snprintf(line, sizeof(line), "LR_SYM: %s+%lld\n",
-                        di.dli_sname, (long long)((unsigned long long)x30 -
-                        (unsigned long long)di.dli_saddr));
-                    _w2(line, len);
-                }
-#if defined(MACOS)
-                if (_last_realloc_from && dladdr(_last_realloc_from, &di) && di.dli_sname) {
-                    len = snprintf(line, sizeof(line), "FROM_SYM: %s+%lld\n",
-                        di.dli_sname, (long long)((unsigned long long)_last_realloc_from -
-                        (unsigned long long)di.dli_saddr));
-                    _w2(line, len);
-                }
-#endif
-            /* Walk the frame chain upward from the faulted fp and resolve each
-             * caller's saved lr via dladdr — reveals the recursion cycle on a
-             * stack overflow. Garbage fp chain → nested fault → clean exit. */
-            {
-                unsigned long long cur_fp = x29;
-                int depth = 0;
-                while (cur_fp >= 0x100000000LL && cur_fp < 0x2000000000LL && depth < 64) {
-                    unsigned long long *frm = (unsigned long long *)cur_fp;
-                    unsigned long long rlr = frm[1];
-                    unsigned long long nfp = frm[0];
-                    Dl_info di2;
-                    if (dladdr((void *)rlr, &di2) && di2.dli_sname)
-                        len = snprintf(line, sizeof(line), "FRAME %d: %s+%lld\n",
-                            depth, di2.dli_sname,
-                            (long long)(rlr - (unsigned long long)di2.dli_saddr));
-                    else
-                        len = snprintf(line, sizeof(line), "FRAME %d: %llx\n", depth, rlr);
-                    _w2(line, len);
-                    if (nfp <= cur_fp || nfp >= 0x2000000000LL) break;
-                    cur_fp = nfp;
-                    depth++;
-                }
-            }
-            }
-            /* _parse frame locals: [fp-8] tokens, [fp-16] filename,
-             * [fp-24] ps, [fp-32] stmts, [fp-40] flag, [fp-48] tok. */
-            if (x29 > 0x100000000LL && x29 < 0x2000000000LL) {
-                unsigned long long *f = (unsigned long long *)x29;
-                len = snprintf(line, sizeof(line),
-                    "PARSE: tokens=%llx filename=%llx ps=%llx stmts=%llx flag=%llx tok=%llx saved_fp=%llx saved_lr=%llx\n",
-                    f[-1], f[-2], f[-3], f[-4], f[-5], f[-6], f[0], f[1]);
-                _w2(line, len);
-                if (df) fputs(line, df);
-                unsigned long long ps = f[-3];
-                if (ps > 0x100000000LL && ps < 0x2000000000LL) {
-                    unsigned long long *p = (unsigned long long *)ps;
-                    len = snprintf(line, sizeof(line),
-                        "PS: tokens=%llx pos=%lld filename=%llx comp_counter=%lld\n",
-                        p[0], (long long)p[1], p[2], (long long)p[3]);
-                    _w2(line, len);
-                    if (df) fputs(line, df);
-                    unsigned long long tk = p[0];
-                    if (tk > 0x100000000LL && tk < 0x2000000000LL) {
-                        unsigned int cnt = *(unsigned int *)(tk + 0);
-                        unsigned int cap = *(unsigned int *)(tk + 4);
-                        unsigned long long data = *(unsigned long long *)(tk + 8);
-                        long long pos = (long long)p[1];
-                        unsigned long long el = 0;
-                        if (pos >= 0 && pos < (long long)cnt && cnt < 100000000 &&
-                            data > 0x100000000LL && data < 0x2000000000LL)
-                            el = ((unsigned long long *)data)[pos];
-                        len = snprintf(line, sizeof(line),
-                            "TOKENS: count=%u cap=%u data=%llx pos=%lld elem=%llx\n",
-                            cnt, cap, data, pos, el);
-                        _w2(line, len);
-                        if (df) fputs(line, df);
-                        if (el > 0x100000000LL && el < 0x2000000000LL) {
-                            len = snprintf(line, sizeof(line),
-                                "ELEM: kind=%llx v2=%llx v3=%llx v4=%llx\n",
-                                ((unsigned long long *)el)[0], ((unsigned long long *)el)[1],
-                                ((unsigned long long *)el)[2], ((unsigned long long *)el)[3]);
-                            _w2(line, len);
-                            if (df) fputs(line, df);
-                        }
-                        /* Heap hexdump around the tokens header: covers the
-                         * header chunk, data buffer, ps/stmts overlap. */
-                        if (df) {
-                            unsigned char *tkh = (unsigned char *)tk - 0x40;
-                            fprintf(df, "HEAP@tk-0x40 (%p):\n", tkh);
-                            for (int i = 0; i < 0x200; i += 16) {
-                                char hl4[64];
-                                int l4 = snprintf(hl4, sizeof(hl4), "%03x:", i);
-                                for (int j = 0; j < 16; j++)
-                                    l4 += snprintf(hl4 + l4, sizeof(hl4) - l4, " %02x", tkh[i + j]);
-                                fprintf(df, "%s\n", hl4);
-                            }
-                        }
-                    }
-                }
-            }
-            /* REGS to stderr via raw write (heap-safe). */
-            len = snprintf(line, sizeof(line),
-                "REGS: x1=%llx x2=%llx x3=%llx x4=%llx x5=%llx x6=%llx x7=%llx x8=%llx x9=%llx\n",
-                ((unsigned long long *)ts)[1], ((unsigned long long *)ts)[2],
-                ((unsigned long long *)ts)[3], ((unsigned long long *)ts)[4],
-                ((unsigned long long *)ts)[5], ((unsigned long long *)ts)[6],
-                ((unsigned long long *)ts)[7], ((unsigned long long *)ts)[8],
-                ((unsigned long long *)ts)[9]);
-            _w2(line, len);
-            len = snprintf(line, sizeof(line),
-                "REGS: x10=%llx x11=%llx x12=%llx x13=%llx x14=%llx x15=%llx x16=%llx x17=%llx x18=%llx\n",
-                ((unsigned long long *)ts)[10], ((unsigned long long *)ts)[11],
-                ((unsigned long long *)ts)[12], ((unsigned long long *)ts)[13],
-                ((unsigned long long *)ts)[14], ((unsigned long long *)ts)[15],
-                ((unsigned long long *)ts)[16], ((unsigned long long *)ts)[17],
-                ((unsigned long long *)ts)[18]);
-            _w2(line, len);
-            len = snprintf(line, sizeof(line),
-                "REGS: x19=%llx x20=%llx x21=%llx x22=%llx x23=%llx x24=%llx x25=%llx x26=%llx x27=%llx x28=%llx\n",
-                ((unsigned long long *)ts)[19], ((unsigned long long *)ts)[20],
-                ((unsigned long long *)ts)[21], ((unsigned long long *)ts)[22],
-                ((unsigned long long *)ts)[23], ((unsigned long long *)ts)[24],
-                ((unsigned long long *)ts)[25], ((unsigned long long *)ts)[26],
-                ((unsigned long long *)ts)[27], ((unsigned long long *)ts)[28]);
-            _w2(line, len);
-            /* Hexdumps: file only (best-effort; fopen/malloc may crash on a
-             * corrupted heap — critical lines are already on stderr). */
-            df = fopen("nova_diag.txt", "a");
-            if (df) {
-                if (x31 > 0x100000000LL && x31 < 0x2000000000LL) {
-                    unsigned char *spb = (unsigned char *)x31;
-                    fprintf(df, "STACK@sp=%llx fp=%llx:\n", x31, x29);
-                    for (int i = -0x60; i < 0x160; i += 16) {
-                        char hl2[64];
-                        int l2 = snprintf(hl2, sizeof(hl2), "%s%03x:", i < 0 ? "-" : "+", i < 0 ? -i : i);
-                        for (int j = 0; j < 16; j++)
-                            l2 += snprintf(hl2 + l2, sizeof(hl2) - l2, " %02x", spb[i + j]);
-                        fprintf(df, "%s\n", hl2);
-                    }
-                }
-                if (x29 > 0x100000000LL && x29 < 0x2000000000LL) {
-                    unsigned char *fpb = (unsigned char *)x29;
-                    fprintf(df, "STACK@fp=%llx (caller frame):\n", x29);
-                    for (int i = 0; i < 0x200; i += 16) {
-                        char hl3[64];
-                        int l3 = snprintf(hl3, sizeof(hl3), "+%03x:", i);
-                        for (int j = 0; j < 16; j++)
-                            l3 += snprintf(hl3 + l3, sizeof(hl3) - l3, " %02x", fpb[i + j]);
-                        fprintf(df, "%s\n", hl3);
-                    }
-                }
-            }
-        }
-    }
-    len = snprintf(line, sizeof(line),
-                   "FAULT: addr=%p bt_pc=%p\n", info->si_addr, buf[2]);
-    _w2(line, len);
-    if (df) { fputs(line, df); fclose(df); }
-    backtrace_symbols_fd(buf, n, 1);
-    backtrace_symbols_fd(buf, n, 2);
+  void *buf[64];
+  if (_in_handler) {
+    _w2("NESTED-FAULT-EXIT\n", 17);
     _exit(139);
+  }
+  _in_handler = 1;
+  /* Raw-write the marker FIRST — a corrupted heap can crash fopen/fprintf
+   * inside the handler, so everything critical goes to stderr via write(). */
+  _w2(sig == 11 ? "SIGNAL:SIGSEGV\n" : "SIGNAL:SIGBUS\n", 16);
+  int n = backtrace(buf, 64);
+  char line[512];
+  int len;
+  FILE *df = NULL;
+  /* Darwin arm64: mcontext64 = __es (16: far 0, esr 8, exception 12)
+   * + thread state64 at +0x10 (x0..x28, fp 232, lr 240, sp 248, pc 256,
+   * cpsr 264, pad 268). uc_mcontext pointer read at uctx+0x30. */
+  if (uctx) {
+    void *mctx = *(void **)((char *)uctx + 0x30);
+    unsigned char *mb = (unsigned char *)mctx;
+    char hdr[64];
+    int hl = snprintf(hdr, sizeof(hdr), "UCTX=%p UC_MCONTEXT=%p\n", uctx, mctx);
+    _w2(hdr, hl);
+    if (df)
+      fputs(hdr, df);
+    if (mb) {
+      unsigned long long far = *(unsigned long long *)(mb + 0);
+      unsigned int esr = *(unsigned int *)(mb + 8);
+      unsigned char *ts = mb + 16;
+      unsigned long long x0 = *(unsigned long long *)(ts + 0);
+      unsigned long long x29 = *(unsigned long long *)(ts + 232);
+      unsigned long long x30 = *(unsigned long long *)(ts + 240);
+      unsigned long long x31 = *(unsigned long long *)(ts + 248);
+      unsigned long long pc = *(unsigned long long *)(ts + 256);
+      unsigned int cpsr = *(unsigned int *)(ts + 264);
+      len = snprintf(line, sizeof(line),
+                     "SIG: far=%llx esr=%x x0=%llx fp=%llx lr=%llx sp=%llx "
+                     "pc=%llx cpsr=%x\n",
+                     far, esr, x0, x29, x30, x31, pc, cpsr);
+      _w2(line, len);
+      if (df)
+        fputs(line, df);
+      /* Resolve the faulting instruction and its caller via dladdr —
+       * identifies the exact function + offset without needing the
+       * PIE slide (dladdr returns running addresses). */
+      {
+        Dl_info di;
+        if (dladdr((void *)pc, &di) && di.dli_sname) {
+          len = snprintf(line, sizeof(line), "PC_SYM: %s+%lld\n", di.dli_sname,
+                         (long long)((unsigned long long)pc -
+                                     (unsigned long long)di.dli_saddr));
+          _w2(line, len);
+        }
+        if (dladdr((void *)x30, &di) && di.dli_sname) {
+          len = snprintf(line, sizeof(line), "LR_SYM: %s+%lld\n", di.dli_sname,
+                         (long long)((unsigned long long)x30 -
+                                     (unsigned long long)di.dli_saddr));
+          _w2(line, len);
+        }
+#if defined(MACOS)
+        if (_last_realloc_from && dladdr(_last_realloc_from, &di) &&
+            di.dli_sname) {
+          len =
+              snprintf(line, sizeof(line), "FROM_SYM: %s+%lld\n", di.dli_sname,
+                       (long long)((unsigned long long)_last_realloc_from -
+                                   (unsigned long long)di.dli_saddr));
+          _w2(line, len);
+        }
+#endif
+        /* Walk the frame chain upward from the faulted fp and resolve each
+         * caller's saved lr via dladdr — reveals the recursion cycle on a
+         * stack overflow. Garbage fp chain → nested fault → clean exit. */
+        {
+          unsigned long long cur_fp = x29;
+          int depth = 0;
+          while (cur_fp >= 0x100000000LL && cur_fp < 0x2000000000LL &&
+                 depth < 64) {
+            unsigned long long *frm = (unsigned long long *)cur_fp;
+            unsigned long long rlr = frm[1];
+            unsigned long long nfp = frm[0];
+            Dl_info di2;
+            if (dladdr((void *)rlr, &di2) && di2.dli_sname)
+              len = snprintf(
+                  line, sizeof(line), "FRAME %d: %s+%lld\n", depth,
+                  di2.dli_sname,
+                  (long long)(rlr - (unsigned long long)di2.dli_saddr));
+            else
+              len =
+                  snprintf(line, sizeof(line), "FRAME %d: %llx\n", depth, rlr);
+            _w2(line, len);
+            if (nfp <= cur_fp || nfp >= 0x2000000000LL)
+              break;
+            cur_fp = nfp;
+            depth++;
+          }
+        }
+      }
+      /* _parse frame locals: [fp-8] tokens, [fp-16] filename,
+       * [fp-24] ps, [fp-32] stmts, [fp-40] flag, [fp-48] tok. */
+      if (x29 > 0x100000000LL && x29 < 0x2000000000LL) {
+        unsigned long long *f = (unsigned long long *)x29;
+        len = snprintf(line, sizeof(line),
+                       "PARSE: tokens=%llx filename=%llx ps=%llx stmts=%llx "
+                       "flag=%llx tok=%llx saved_fp=%llx saved_lr=%llx\n",
+                       f[-1], f[-2], f[-3], f[-4], f[-5], f[-6], f[0], f[1]);
+        _w2(line, len);
+        if (df)
+          fputs(line, df);
+        unsigned long long ps = f[-3];
+        if (ps > 0x100000000LL && ps < 0x2000000000LL) {
+          unsigned long long *p = (unsigned long long *)ps;
+          len = snprintf(
+              line, sizeof(line),
+              "PS: tokens=%llx pos=%lld filename=%llx comp_counter=%lld\n",
+              p[0], (long long)p[1], p[2], (long long)p[3]);
+          _w2(line, len);
+          if (df)
+            fputs(line, df);
+          unsigned long long tk = p[0];
+          if (tk > 0x100000000LL && tk < 0x2000000000LL) {
+            unsigned int cnt = *(unsigned int *)(tk + 0);
+            unsigned int cap = *(unsigned int *)(tk + 4);
+            unsigned long long data = *(unsigned long long *)(tk + 8);
+            long long pos = (long long)p[1];
+            unsigned long long el = 0;
+            if (pos >= 0 && pos < (long long)cnt && cnt < 100000000 &&
+                data > 0x100000000LL && data < 0x2000000000LL)
+              el = ((unsigned long long *)data)[pos];
+            len = snprintf(
+                line, sizeof(line),
+                "TOKENS: count=%u cap=%u data=%llx pos=%lld elem=%llx\n", cnt,
+                cap, data, pos, el);
+            _w2(line, len);
+            if (df)
+              fputs(line, df);
+            if (el > 0x100000000LL && el < 0x2000000000LL) {
+              len = snprintf(
+                  line, sizeof(line),
+                  "ELEM: kind=%llx v2=%llx v3=%llx v4=%llx\n",
+                  ((unsigned long long *)el)[0], ((unsigned long long *)el)[1],
+                  ((unsigned long long *)el)[2], ((unsigned long long *)el)[3]);
+              _w2(line, len);
+              if (df)
+                fputs(line, df);
+            }
+            /* Heap hexdump around the tokens header: covers the
+             * header chunk, data buffer, ps/stmts overlap. */
+            if (df) {
+              unsigned char *tkh = (unsigned char *)tk - 0x40;
+              fprintf(df, "HEAP@tk-0x40 (%p):\n", tkh);
+              for (int i = 0; i < 0x200; i += 16) {
+                char hl4[64];
+                int l4 = snprintf(hl4, sizeof(hl4), "%03x:", i);
+                for (int j = 0; j < 16; j++)
+                  l4 +=
+                      snprintf(hl4 + l4, sizeof(hl4) - l4, " %02x", tkh[i + j]);
+                fprintf(df, "%s\n", hl4);
+              }
+            }
+          }
+        }
+      }
+      /* REGS to stderr via raw write (heap-safe). */
+      len =
+          snprintf(line, sizeof(line),
+                   "REGS: x1=%llx x2=%llx x3=%llx x4=%llx x5=%llx x6=%llx "
+                   "x7=%llx x8=%llx x9=%llx\n",
+                   ((unsigned long long *)ts)[1], ((unsigned long long *)ts)[2],
+                   ((unsigned long long *)ts)[3], ((unsigned long long *)ts)[4],
+                   ((unsigned long long *)ts)[5], ((unsigned long long *)ts)[6],
+                   ((unsigned long long *)ts)[7], ((unsigned long long *)ts)[8],
+                   ((unsigned long long *)ts)[9]);
+      _w2(line, len);
+      len = snprintf(
+          line, sizeof(line),
+          "REGS: x10=%llx x11=%llx x12=%llx x13=%llx x14=%llx x15=%llx "
+          "x16=%llx x17=%llx x18=%llx\n",
+          ((unsigned long long *)ts)[10], ((unsigned long long *)ts)[11],
+          ((unsigned long long *)ts)[12], ((unsigned long long *)ts)[13],
+          ((unsigned long long *)ts)[14], ((unsigned long long *)ts)[15],
+          ((unsigned long long *)ts)[16], ((unsigned long long *)ts)[17],
+          ((unsigned long long *)ts)[18]);
+      _w2(line, len);
+      len = snprintf(
+          line, sizeof(line),
+          "REGS: x19=%llx x20=%llx x21=%llx x22=%llx x23=%llx x24=%llx "
+          "x25=%llx x26=%llx x27=%llx x28=%llx\n",
+          ((unsigned long long *)ts)[19], ((unsigned long long *)ts)[20],
+          ((unsigned long long *)ts)[21], ((unsigned long long *)ts)[22],
+          ((unsigned long long *)ts)[23], ((unsigned long long *)ts)[24],
+          ((unsigned long long *)ts)[25], ((unsigned long long *)ts)[26],
+          ((unsigned long long *)ts)[27], ((unsigned long long *)ts)[28]);
+      _w2(line, len);
+      /* Hexdumps: file only (best-effort; fopen/malloc may crash on a
+       * corrupted heap — critical lines are already on stderr). */
+      df = fopen("nova_diag.txt", "a");
+      if (df) {
+        if (x31 > 0x100000000LL && x31 < 0x2000000000LL) {
+          unsigned char *spb = (unsigned char *)x31;
+          fprintf(df, "STACK@sp=%llx fp=%llx:\n", x31, x29);
+          for (int i = -0x60; i < 0x160; i += 16) {
+            char hl2[64];
+            int l2 = snprintf(hl2, sizeof(hl2), "%s%03x:", i < 0 ? "-" : "+",
+                              i < 0 ? -i : i);
+            for (int j = 0; j < 16; j++)
+              l2 += snprintf(hl2 + l2, sizeof(hl2) - l2, " %02x", spb[i + j]);
+            fprintf(df, "%s\n", hl2);
+          }
+        }
+        if (x29 > 0x100000000LL && x29 < 0x2000000000LL) {
+          unsigned char *fpb = (unsigned char *)x29;
+          fprintf(df, "STACK@fp=%llx (caller frame):\n", x29);
+          for (int i = 0; i < 0x200; i += 16) {
+            char hl3[64];
+            int l3 = snprintf(hl3, sizeof(hl3), "+%03x:", i);
+            for (int j = 0; j < 16; j++)
+              l3 += snprintf(hl3 + l3, sizeof(hl3) - l3, " %02x", fpb[i + j]);
+            fprintf(df, "%s\n", hl3);
+          }
+        }
+      }
+    }
+  }
+  len = snprintf(line, sizeof(line), "FAULT: addr=%p bt_pc=%p\n", info->si_addr,
+                 buf[2]);
+  _w2(line, len);
+  if (df) {
+    fputs(line, df);
+    fclose(df);
+  }
+  backtrace_symbols_fd(buf, n, 1);
+  backtrace_symbols_fd(buf, n, 2);
+  _exit(139);
 }
 /* Alt stack: if the faulting sp is garbage/guard-page, the kernel can't set
  * up a signal frame on it — the handler silently never runs. SA_ONSTACK +
  * sigaltstack lets the handler run regardless of the corrupted sp. */
 static char _alt_stack[65536];
-__attribute__((constructor))
-static void _init_sig(void) {
-    struct sigaction sa;
-    stack_t ss;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_sigaction = _sigsegv;
-    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGBUS, &sa, NULL);
-    memset(&ss, 0, sizeof(ss));
-    ss.ss_sp = _alt_stack;
-    ss.ss_size = sizeof(_alt_stack);
-    sigaltstack(&ss, NULL);
+__attribute__((constructor)) static void _init_sig(void) {
+  struct sigaction sa;
+  stack_t ss;
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_sigaction = _sigsegv;
+  sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+  sigemptyset(&sa.sa_mask);
+  sigaction(SIGSEGV, &sa, NULL);
+  sigaction(SIGBUS, &sa, NULL);
+  memset(&ss, 0, sizeof(ss));
+  ss.ss_sp = _alt_stack;
+  ss.ss_size = sizeof(_alt_stack);
+  sigaltstack(&ss, NULL);
 }
 #endif /* defined(_WIN32) */
 
@@ -1117,19 +1355,20 @@ static void _init_sig(void) {
 long long _oob_file_ptr;
 long long _oob_line;
 SYSCALL void _out_of_bounds(void) {
-    if (_oob_file_ptr) {
-        _printf("error: Index Out Of Bounds at ", 0);
-        _printf("%s", _oob_file_ptr);
-        _printf(" line %d\n", _oob_line);
-    } else {
-        _printf("error: Index Out Of Bounds\n", 0);
-    }
-    exit(1);
+  if (_oob_file_ptr) {
+    _printf("error: Index Out Of Bounds at ", 0);
+    _printf("%s", _oob_file_ptr);
+    _printf(" line %d\n", _oob_line);
+  } else {
+    _printf("error: Index Out Of Bounds\n", 0);
+  }
+  exit(1);
 }
 
 #endif /* defined(_WIN32) / defined(LINUX_WRAP) / MACOS */
 
-/* ==================== Assembly alias for Mach-O (macOS ARM64) ==================== */
+/* ==================== Assembly alias for Mach-O (macOS ARM64)
+ * ==================== */
 /* On ARM64 Mach-O, Clang prepends an underscore to all C symbols.
  * So C function `_abs` exports as Mach-O `__abs`, while assembly
  * references `_abs` (single underscore). These aliases bridge the gap. */
@@ -1162,7 +1401,8 @@ __asm__(".globl _sys_exit_c\n.set _sys_exit_c, __sys_exit_c");
 __asm__(".globl _sys_flush_c\n.set _sys_flush_c, __sys_flush_c");
 __asm__(".globl _sys_free_c\n.set _sys_free_c, __sys_free_c");
 __asm__(".globl _sys_get_args_c\n.set _sys_get_args_c, __sys_get_args_c");
-__asm__(".globl _sys_get_tick_count_c\n.set _sys_get_tick_count_c, __sys_get_tick_count_c");
+__asm__(".globl _sys_get_tick_count_c\n.set _sys_get_tick_count_c, "
+        "__sys_get_tick_count_c");
 __asm__(".globl _sys_exe_path_c\n.set _sys_exe_path_c, __sys_exe_path_c");
 __asm__(".globl _sys_open_c\n.set _sys_open_c, __sys_open_c");
 __asm__(".globl _sys_platform_c\n.set _sys_platform_c, __sys_platform_c");
@@ -1175,7 +1415,8 @@ __asm__(".globl _list_clear\n.set _list_clear, __list_clear");
 __asm__(".globl _random\n.set _random, __random");
 __asm__(".globl _random_range\n.set _random_range, __random_range");
 __asm__(".globl _chacha20_init\n.set _chacha20_init, __chacha20_init");
-__asm__(".globl _api_open_internal\n.set _api_open_internal, __api_open_internal");
+__asm__(
+    ".globl _api_open_internal\n.set _api_open_internal, __api_open_internal");
 /* Non-variadic printf/sprintf — must be aliased or assembly calls resolve
  * to the system's variadic printf (which reads garbage from the register
  * save area on ARM64 AAPCS64). Only these two are aliased; other libc
@@ -1200,7 +1441,8 @@ __asm__(".globl _slice_eq\n.set _slice_eq, __slice_eq");
 __asm__(".globl _slice_find\n.set _slice_find, __slice_find");
 __asm__(".globl _slice_to_str\n.set _slice_to_str, __slice_to_str");
 __asm__(".globl _slice_from_str\n.set _slice_from_str, __slice_from_str");
-__asm__(".globl _slice_from_list_data\n.set _slice_from_list_data, __slice_from_list_data");
+__asm__(".globl _slice_from_list_data\n.set _slice_from_list_data, "
+        "__slice_from_list_data");
 __asm__(".globl _slice_byte_at\n.set _slice_byte_at, __slice_byte_at");
 __asm__(".globl _ffi_open\n.set _ffi_open, __ffi_open");
 __asm__(".globl _ffi_sym\n.set _ffi_sym, __ffi_sym");
@@ -1216,9 +1458,11 @@ __asm__(".globl _gui_poll_char\n.set _gui_poll_char, __gui_poll_char");
 __asm__(".globl _gui_char_to_str\n.set _gui_char_to_str, __gui_char_to_str");
 #endif
 
-/* ==================== Dict & ARC runtime functions (all platforms) ==================== */
-/* Forward declarations for dict & ARC functions (Linux/macOS need these since malloc/free/memset
- * aren't defined yet. On Windows they're already defined above.) */
+/* ==================== Dict & ARC runtime functions (all platforms)
+ * ==================== */
+/* Forward declarations for dict & ARC functions (Linux/macOS need these since
+ * malloc/free/memset aren't defined yet. On Windows they're already defined
+ * above.) */
 #if !defined(_WIN32)
 SYSCALL void *malloc(size_t);
 SYSCALL void free(void *);
@@ -1227,27 +1471,28 @@ SYSCALL void *memset(void *, int, size_t);
 #endif
 #endif
 
-/* ==================== Automatic Reference Counting (ARC) Engine ==================== */
+/* ==================== Automatic Reference Counting (ARC) Engine
+ * ==================== */
 #define NOVA_ARC_MAGIC 0x4E4F5641 /* "NOVA" */
 
 /* Stable value-kind IDs used by the future shared VM/native value ABI.
  * Existing ARC tags are kept numerically compatible: lists, dictionaries,
  * and strings already use these IDs in allocations emitted by codegen. */
 typedef enum {
-    NOVA_VALUE_NONE   = 0,
-    NOVA_VALUE_LIST   = 1,
-    NOVA_VALUE_DICT   = 2,
-    NOVA_VALUE_STRING = 3,
-    NOVA_VALUE_BOOL   = 4,
-    NOVA_VALUE_INT    = 5,
-    NOVA_VALUE_FLOAT  = 6
+  NOVA_VALUE_NONE = 0,
+  NOVA_VALUE_LIST = 1,
+  NOVA_VALUE_DICT = 2,
+  NOVA_VALUE_STRING = 3,
+  NOVA_VALUE_BOOL = 4,
+  NOVA_VALUE_INT = 5,
+  NOVA_VALUE_FLOAT = 6
 } NovaValueKind;
 
 typedef struct {
-    uint32_t magic;      /* Magic identifier 0x4E4F5641 */
-    int32_t  ref_count;  /* Active reference count */
-    uint32_t type_tag;   /* NovaValueKind for heap-backed values */
-    uint32_t pad;        /* 16-byte alignment pad */
+  uint32_t magic;    /* Magic identifier 0x4E4F5641 */
+  int32_t ref_count; /* Active reference count */
+  uint32_t type_tag; /* NovaValueKind for heap-backed values */
+  uint32_t pad;      /* 16-byte alignment pad */
 } NovaARCHeader;
 
 SYSCALL void *_nova_arc_alloc(unsigned int size, uint32_t type_tag);
@@ -1257,141 +1502,160 @@ SYSCALL void _nova_dec_ref(void *ptr);
 /* Internal ABI probe. It is intentionally limited to heap-backed values:
  * immediate integers and booleans do not carry a pointer header yet. */
 SYSCALL int _nova_value_kind(void *ptr) {
-    NovaARCHeader *hdr;
-    if (!ptr) return NOVA_VALUE_NONE;
-    /* Immediate Nova scalars are passed through pointer-shaped ABI slots. */
-    if ((uintptr_t)ptr < 4096u) return NOVA_VALUE_NONE;
-    hdr = ((NovaARCHeader*)ptr) - 1;
-    if (hdr->magic != NOVA_ARC_MAGIC) return NOVA_VALUE_NONE;
-    return (int)hdr->type_tag;
+  NovaARCHeader *hdr;
+  if (!ptr)
+    return NOVA_VALUE_NONE;
+  /* Immediate Nova scalars are passed through pointer-shaped ABI slots. */
+  if ((uintptr_t)ptr < 4096u)
+    return NOVA_VALUE_NONE;
+  hdr = ((NovaARCHeader *)ptr) - 1;
+  if (hdr->magic != NOVA_ARC_MAGIC)
+    return NOVA_VALUE_NONE;
+  return (int)hdr->type_tag;
 }
 
 static void *_nova_box_alloc(uint32_t kind, size_t size) {
-    return _nova_arc_alloc((unsigned int)size, kind);
+  return _nova_arc_alloc((unsigned int)size, kind);
 }
 
 SYSCALL void *_value_box_none(void) {
-    return _nova_box_alloc(NOVA_VALUE_NONE, sizeof(intptr_t));
+  return _nova_box_alloc(NOVA_VALUE_NONE, sizeof(intptr_t));
 }
 
 SYSCALL void *_value_box_string(const char *value) {
-    size_t length;
-    char *boxed;
-    if (!value) value = "";
-    length = strlen(value) + 1;
-    boxed = (char*)_nova_box_alloc(NOVA_VALUE_STRING, length);
-    if (boxed) strcpy(boxed, value);
-    return boxed;
+  size_t length;
+  char *boxed;
+  if (!value)
+    value = "";
+  length = strlen(value) + 1;
+  boxed = (char *)_nova_box_alloc(NOVA_VALUE_STRING, length);
+  if (boxed)
+    strcpy(boxed, value);
+  return boxed;
 }
 
 SYSCALL void *_value_box_list(void *value) {
-    if (_nova_value_kind(value) != NOVA_VALUE_LIST) return 0;
-    return _nova_value_retain(value);
+  if (_nova_value_kind(value) != NOVA_VALUE_LIST)
+    return 0;
+  return _nova_value_retain(value);
 }
 
 SYSCALL void *_value_box_dict(void *value) {
-    if (_nova_value_kind(value) != NOVA_VALUE_DICT) return 0;
-    return _nova_value_retain(value);
+  if (_nova_value_kind(value) != NOVA_VALUE_DICT)
+    return 0;
+  return _nova_value_retain(value);
 }
 
 SYSCALL void *_value_box_bool(int value) {
-    intptr_t *boxed = (intptr_t*)_nova_box_alloc(NOVA_VALUE_BOOL, sizeof(intptr_t));
-    if (boxed) *boxed = value ? 1 : 0;
-    return boxed;
+  intptr_t *boxed =
+      (intptr_t *)_nova_box_alloc(NOVA_VALUE_BOOL, sizeof(intptr_t));
+  if (boxed)
+    *boxed = value ? 1 : 0;
+  return boxed;
 }
 
 SYSCALL void *_value_box_int(long long value) {
-    intptr_t *boxed = (intptr_t*)_nova_box_alloc(NOVA_VALUE_INT, sizeof(intptr_t));
-    if (boxed) *boxed = (intptr_t)value;
-    return boxed;
+  intptr_t *boxed =
+      (intptr_t *)_nova_box_alloc(NOVA_VALUE_INT, sizeof(intptr_t));
+  if (boxed)
+    *boxed = (intptr_t)value;
+  return boxed;
 }
 
 SYSCALL void *_value_box_float(double value) {
-    double *boxed = (double*)_nova_box_alloc(NOVA_VALUE_FLOAT, sizeof(double));
-    if (boxed) *boxed = value;
-    return boxed;
+  double *boxed = (double *)_nova_box_alloc(NOVA_VALUE_FLOAT, sizeof(double));
+  if (boxed)
+    *boxed = value;
+  return boxed;
 }
 
 SYSCALL int _value_unbox_bool(void *ptr) {
-    if (_nova_value_kind(ptr) != NOVA_VALUE_BOOL) return 0;
-    return *(intptr_t*)ptr ? 1 : 0;
+  if (_nova_value_kind(ptr) != NOVA_VALUE_BOOL)
+    return 0;
+  return *(intptr_t *)ptr ? 1 : 0;
 }
 
 SYSCALL long long _value_unbox_int(void *ptr) {
-    if (_nova_value_kind(ptr) != NOVA_VALUE_INT) return 0;
-    return (long long)*(intptr_t*)ptr;
+  if (_nova_value_kind(ptr) != NOVA_VALUE_INT)
+    return 0;
+  return (long long)*(intptr_t *)ptr;
 }
 
 SYSCALL double _value_unbox_float(void *ptr) {
-    if (_nova_value_kind(ptr) != NOVA_VALUE_FLOAT) return 0.0;
-    return *(double*)ptr;
+  if (_nova_value_kind(ptr) != NOVA_VALUE_FLOAT)
+    return 0.0;
+  return *(double *)ptr;
 }
 
 SYSCALL const char *_value_unbox_string(void *ptr) {
-    if (_nova_value_kind(ptr) != NOVA_VALUE_STRING) return "";
-    return (const char*)ptr;
+  if (_nova_value_kind(ptr) != NOVA_VALUE_STRING)
+    return "";
+  return (const char *)ptr;
 }
 
-
 SYSCALL void *_nova_arc_alloc(unsigned int size, uint32_t type_tag) {
-    unsigned int total_size = size + (unsigned int)sizeof(NovaARCHeader);
+  unsigned int total_size = size + (unsigned int)sizeof(NovaARCHeader);
 #if defined(_WIN32)
-    NovaARCHeader *hdr = (NovaARCHeader*)STR_PFX(malloc)(total_size);
+  NovaARCHeader *hdr = (NovaARCHeader *)STR_PFX(malloc)(total_size);
 #else
-    NovaARCHeader *hdr = (NovaARCHeader*)malloc(total_size);
+  NovaARCHeader *hdr = (NovaARCHeader *)malloc(total_size);
 #endif
-    if (!hdr) return 0;
-    hdr->magic = NOVA_ARC_MAGIC;
-    hdr->ref_count = 1;
-    hdr->type_tag = type_tag;
-    hdr->pad = 0;
-    return (void*)(hdr + 1);
+  if (!hdr)
+    return 0;
+  hdr->magic = NOVA_ARC_MAGIC;
+  hdr->ref_count = 1;
+  hdr->type_tag = type_tag;
+  hdr->pad = 0;
+  return (void *)(hdr + 1);
 }
 
 SYSCALL void _nova_inc_ref(void *ptr) {
-    if (!ptr) return;
-    NovaARCHeader *hdr = ((NovaARCHeader*)ptr) - 1;
-    if (hdr->magic == NOVA_ARC_MAGIC) {
-        hdr->ref_count++;
-    }
+  if (!ptr)
+    return;
+  NovaARCHeader *hdr = ((NovaARCHeader *)ptr) - 1;
+  if (hdr->magic == NOVA_ARC_MAGIC) {
+    hdr->ref_count++;
+  }
 }
 
 SYSCALL void dict_free(void *d);
 
 SYSCALL void _nova_dec_ref(void *ptr) {
-    if (!ptr) return;
-    NovaARCHeader *hdr = ((NovaARCHeader*)ptr) - 1;
-    if (hdr->magic == NOVA_ARC_MAGIC) {
-        hdr->ref_count--;
-        if (hdr->ref_count <= 0) {
-            if (hdr->type_tag == 1) { /* LIST */
-                /* pad == 1 marks a .as_list()-wrapped view over caller-owned memory
-                 * (see _list_wrap) -- the wrapper is ours to free, the buffer it points
-                 * at is not. */
-                if (!hdr->pad) {
-                    void *data = *(void**)((char*)ptr + 8);
-                    if (data) {
+  if (!ptr)
+    return;
+  NovaARCHeader *hdr = ((NovaARCHeader *)ptr) - 1;
+  if (hdr->magic == NOVA_ARC_MAGIC) {
+    hdr->ref_count--;
+    if (hdr->ref_count <= 0) {
+      if (hdr->type_tag == 1) { /* LIST */
+        /* pad == 1 marks a .as_list()-wrapped view over caller-owned memory
+         * (see _list_wrap) -- the wrapper is ours to free, the buffer it points
+         * at is not. */
+        if (!hdr->pad) {
+          void *data = *(void **)((char *)ptr + 8);
+          if (data) {
 #if defined(_WIN32)
-                        STR_PFX(free)(data);
+            STR_PFX(free)(data);
 #else
-                        free(data);
+            free(data);
 #endif
-                    }
-                }
-            } else if (hdr->type_tag == 2) { /* DICT */
-                dict_free(ptr);
-                return;
-            }
-#if defined(_WIN32)
-            STR_PFX(free)(hdr);
-#else
-            free(hdr);
-#endif
+          }
         }
+      } else if (hdr->type_tag == 2) { /* DICT */
+        dict_free(ptr);
+        return;
+      }
+#if defined(_WIN32)
+      STR_PFX(free)(hdr);
+#else
+      free(hdr);
+#endif
     }
+  }
 }
 
-/* strcmp, strlen, strcpy are defined above on Windows, in <string.h> on macOS/Linux */
+/* strcmp, strlen, strcpy are defined above on Windows, in <string.h> on
+ * macOS/Linux */
 /* Dict layout (open addressing, single flat entry array):
  * struct NovaDict {
  *   int count;       // offset 0
@@ -1403,9 +1667,9 @@ SYSCALL void _nova_dec_ref(void *ptr) {
  */
 
 typedef struct {
-    uint64_t hash;
-    char *key;
-    intptr_t value;
+  uint64_t hash;
+  char *key;
+  intptr_t value;
 } DictEntry;
 
 #if defined(_WIN32)
@@ -1417,854 +1681,1019 @@ typedef struct {
 #endif
 
 static uint64_t _dh64(const char *s) {
-    uint64_t h = 14695981039346656037ULL;
-    while (*s) {
-        h ^= (unsigned char)(*s++);
-        h *= 1099511628211ULL;
-    }
-    return h;
+  uint64_t h = 14695981039346656037ULL;
+  while (*s) {
+    h ^= (unsigned char)(*s++);
+    h *= 1099511628211ULL;
+  }
+  return h;
 }
 
-#define TOMBSTONE_KEY ((char*)1)
-#define IS_EMPTY(e)   ((e)->key == NULL)
+#define TOMBSTONE_KEY ((char *)1)
+#define IS_EMPTY(e) ((e)->key == NULL)
 #define IS_TOMBSTONE(e) ((e)->key == TOMBSTONE_KEY)
 #define IS_OCCUPIED(e) (!IS_EMPTY(e) && !IS_TOMBSTONE(e))
 
 static DictEntry *_dict_entries(void *d) {
-    return *(DictEntry**)((char*)d + 8);
+  return *(DictEntry **)((char *)d + 8);
 }
 
 static int _df_idx(void *d, const char *key, uint64_t hash) {
-    int cap = *(int*)((char*)d + 4);
-    if (cap < 1) return -1;
-    DictEntry *entries = _dict_entries(d);
-    if (!entries) return -1;
-    uint64_t mask = (uint64_t)(cap - 1);
-    int idx = (int)(hash & mask);
-    for (int i = 0; i < cap; i++) {
-        int probe = (idx + i) & (int)mask;
-        DictEntry *e = &entries[probe];
-        if (IS_EMPTY(e)) return -1;
-        if (IS_TOMBSTONE(e)) continue;
-        if (e->hash == hash && strcmp(e->key, key) == 0) return probe;
-    }
+  int cap = *(int *)((char *)d + 4);
+  if (cap < 1)
     return -1;
+  DictEntry *entries = _dict_entries(d);
+  if (!entries)
+    return -1;
+  uint64_t mask = (uint64_t)(cap - 1);
+  int idx = (int)(hash & mask);
+  for (int i = 0; i < cap; i++) {
+    int probe = (idx + i) & (int)mask;
+    DictEntry *e = &entries[probe];
+    if (IS_EMPTY(e))
+      return -1;
+    if (IS_TOMBSTONE(e))
+      continue;
+    if (e->hash == hash && strcmp(e->key, key) == 0)
+      return probe;
+  }
+  return -1;
 }
 
 static int _df_find_or_insert(void *d, const char *key, uint64_t hash) {
-    int cap = *(int*)((char*)d + 4);
-    DictEntry *entries = _dict_entries(d);
-    if (!entries) return -1;
-    uint64_t mask = (uint64_t)(cap - 1);
-    int idx = (int)(hash & mask);
-    int first_tombstone = -1;
-    for (int i = 0; i < cap; i++) {
-        int probe = (idx + i) & (int)mask;
-        DictEntry *e = &entries[probe];
-        if (IS_EMPTY(e)) {
-            if (first_tombstone >= 0) return first_tombstone;
-            return probe;
-        }
-        if (IS_TOMBSTONE(e)) {
-            if (first_tombstone < 0) first_tombstone = probe;
-            continue;
-        }
-        if (e->hash == hash && strcmp(e->key, key) == 0) return probe;
-    }
-    if (first_tombstone >= 0) return first_tombstone;
+  int cap = *(int *)((char *)d + 4);
+  DictEntry *entries = _dict_entries(d);
+  if (!entries)
     return -1;
+  uint64_t mask = (uint64_t)(cap - 1);
+  int idx = (int)(hash & mask);
+  int first_tombstone = -1;
+  for (int i = 0; i < cap; i++) {
+    int probe = (idx + i) & (int)mask;
+    DictEntry *e = &entries[probe];
+    if (IS_EMPTY(e)) {
+      if (first_tombstone >= 0)
+        return first_tombstone;
+      return probe;
+    }
+    if (IS_TOMBSTONE(e)) {
+      if (first_tombstone < 0)
+        first_tombstone = probe;
+      continue;
+    }
+    if (e->hash == hash && strcmp(e->key, key) == 0)
+      return probe;
+  }
+  if (first_tombstone >= 0)
+    return first_tombstone;
+  return -1;
 }
 
 static void _dg(void *d) {
-    int old_cap = *(int*)((char*)d + 4);
-    DictEntry *old_entries = _dict_entries(d);
-    int new_cap = old_cap * 2;
-    size_t entry_size = (size_t)new_cap * sizeof(DictEntry);
-    DictEntry *new_entries = (DictEntry*)DICT_MALLOC(entry_size);
-    if (!new_entries) return;
-    memset(new_entries, 0, entry_size);
-    if (old_entries) {
-        for (int i = 0; i < old_cap; i++) {
-            DictEntry *e = &old_entries[i];
-            if (IS_OCCUPIED(e)) {
-                uint64_t mask = (uint64_t)(new_cap - 1);
-                int idx = (int)(e->hash & mask);
-                for (int j = 0; j < new_cap; j++) {
-                    int probe = (idx + j) & (int)mask;
-                    if (IS_EMPTY(&new_entries[probe])) {
-                        new_entries[probe] = *e;
-                        break;
-                    }
-                }
-            }
+  int old_cap = *(int *)((char *)d + 4);
+  DictEntry *old_entries = _dict_entries(d);
+  int new_cap = old_cap * 2;
+  size_t entry_size = (size_t)new_cap * sizeof(DictEntry);
+  DictEntry *new_entries = (DictEntry *)DICT_MALLOC(entry_size);
+  if (!new_entries)
+    return;
+  memset(new_entries, 0, entry_size);
+  if (old_entries) {
+    for (int i = 0; i < old_cap; i++) {
+      DictEntry *e = &old_entries[i];
+      if (IS_OCCUPIED(e)) {
+        uint64_t mask = (uint64_t)(new_cap - 1);
+        int idx = (int)(e->hash & mask);
+        for (int j = 0; j < new_cap; j++) {
+          int probe = (idx + j) & (int)mask;
+          if (IS_EMPTY(&new_entries[probe])) {
+            new_entries[probe] = *e;
+            break;
+          }
         }
-        DICT_FREE(old_entries);
+      }
     }
-    *(DictEntry**)((char*)d + 8) = new_entries;
-    *(int*)((char*)d + 4) = new_cap;
+    DICT_FREE(old_entries);
+  }
+  *(DictEntry **)((char *)d + 8) = new_entries;
+  *(int *)((char *)d + 4) = new_cap;
 }
 
 SYSCALL void *dict_new(void) {
-    int cap = 8;
-    void *d = _nova_arc_alloc(16, 2);
-    if (!d) return 0;
-    DictEntry *entries = (DictEntry*)DICT_MALLOC((size_t)cap * sizeof(DictEntry));
-    if (!entries) { _nova_dec_ref(d); return 0; }
-    memset(entries, 0, (size_t)cap * sizeof(DictEntry));
-    *(int*)d = 0;
-    *(int*)((char*)d + 4) = cap;
-    *(DictEntry**)((char*)d + 8) = entries;
-    return d;
+  int cap = 8;
+  void *d = _nova_arc_alloc(16, 2);
+  if (!d)
+    return 0;
+  DictEntry *entries =
+      (DictEntry *)DICT_MALLOC((size_t)cap * sizeof(DictEntry));
+  if (!entries) {
+    _nova_dec_ref(d);
+    return 0;
+  }
+  memset(entries, 0, (size_t)cap * sizeof(DictEntry));
+  *(int *)d = 0;
+  *(int *)((char *)d + 4) = cap;
+  *(DictEntry **)((char *)d + 8) = entries;
+  return d;
 }
 
 SYSCALL int dict_has(void *d, const char *key) {
-    if (!d || !key) return 0;
-    uint64_t hash = _dh64(key);
-    return _df_idx(d, key, hash) >= 0 ? 1 : 0;
+  if (!d || !key)
+    return 0;
+  uint64_t hash = _dh64(key);
+  return _df_idx(d, key, hash) >= 0 ? 1 : 0;
 }
 
 SYSCALL intptr_t dict_get(void *d, const char *key) {
-    if (!d || !key) return 0;
-    uint64_t hash = _dh64(key);
-    int idx = _df_idx(d, key, hash);
-    if (idx < 0) return 0;
-    DictEntry *entries = _dict_entries(d);
-    return entries[idx].value;
+  if (!d || !key)
+    return 0;
+  uint64_t hash = _dh64(key);
+  int idx = _df_idx(d, key, hash);
+  if (idx < 0)
+    return 0;
+  DictEntry *entries = _dict_entries(d);
+  return entries[idx].value;
 }
 
 SYSCALL void dict_set(void *d, const char *key, intptr_t value) {
-    if (!d || !key) return;
-    int count = *(int*)d;
-    int cap = *(int*)((char*)d + 4);
-    uint64_t hash = _dh64(key);
-    int idx = _df_find_or_insert(d, key, hash);
-    if (idx < 0) {
-        _dg(d);
-        cap = *(int*)((char*)d + 4);
-        idx = _df_find_or_insert(d, key, hash);
-        if (idx < 0) return;
-    }
-    DictEntry *entries = _dict_entries(d);
-    DictEntry *e = &entries[idx];
-    if (IS_OCCUPIED(e)) {
-        e->value = value;
-        return;
-    }
-    size_t len = strlen(key) + 1;
-    char *key_copy = (char*)DICT_MALLOC(len);
-    if (!key_copy) return;
-    strcpy(key_copy, key);
-    e->hash = hash;
-    e->key = key_copy;
+  if (!d || !key)
+    return;
+  int count = *(int *)d;
+  int cap = *(int *)((char *)d + 4);
+  uint64_t hash = _dh64(key);
+  int idx = _df_find_or_insert(d, key, hash);
+  if (idx < 0) {
+    _dg(d);
+    cap = *(int *)((char *)d + 4);
+    idx = _df_find_or_insert(d, key, hash);
+    if (idx < 0)
+      return;
+  }
+  DictEntry *entries = _dict_entries(d);
+  DictEntry *e = &entries[idx];
+  if (IS_OCCUPIED(e)) {
     e->value = value;
-    *(int*)d = count + 1;
-    if (*(int*)d * 10 >= cap * 7) {
-        _dg(d);
-    }
+    return;
+  }
+  size_t len = strlen(key) + 1;
+  char *key_copy = (char *)DICT_MALLOC(len);
+  if (!key_copy)
+    return;
+  strcpy(key_copy, key);
+  e->hash = hash;
+  e->key = key_copy;
+  e->value = value;
+  *(int *)d = count + 1;
+  if (*(int *)d * 10 >= cap * 7) {
+    _dg(d);
+  }
 }
 
 SYSCALL void dict_remove(void *d, const char *key) {
-    if (!d || !key) return;
-    uint64_t hash = _dh64(key);
-    int idx = _df_idx(d, key, hash);
-    if (idx < 0) return;
-    DictEntry *entries = _dict_entries(d);
-    DictEntry *e = &entries[idx];
-    DICT_FREE(e->key);
-    e->key = TOMBSTONE_KEY;
-    e->value = 0;
-    e->hash = 0;
-    *(int*)d = *(int*)d - 1;
+  if (!d || !key)
+    return;
+  uint64_t hash = _dh64(key);
+  int idx = _df_idx(d, key, hash);
+  if (idx < 0)
+    return;
+  DictEntry *entries = _dict_entries(d);
+  DictEntry *e = &entries[idx];
+  DICT_FREE(e->key);
+  e->key = TOMBSTONE_KEY;
+  e->value = 0;
+  e->hash = 0;
+  *(int *)d = *(int *)d - 1;
 }
 
 SYSCALL void dict_free(void *d) {
-    if (!d) return;
-    int cap = *(int*)((char*)d + 4);
-    DictEntry *entries = _dict_entries(d);
-    if (entries) {
-        for (int i = 0; i < cap; i++) {
-            if (IS_OCCUPIED(&entries[i])) {
-                DICT_FREE(entries[i].key);
-            }
-        }
-        DICT_FREE(entries);
+  if (!d)
+    return;
+  int cap = *(int *)((char *)d + 4);
+  DictEntry *entries = _dict_entries(d);
+  if (entries) {
+    for (int i = 0; i < cap; i++) {
+      if (IS_OCCUPIED(&entries[i])) {
+        DICT_FREE(entries[i].key);
+      }
     }
-    NovaARCHeader *hdr = ((NovaARCHeader*)d) - 1;
-    if (hdr->magic == NOVA_ARC_MAGIC) {
+    DICT_FREE(entries);
+  }
+  NovaARCHeader *hdr = ((NovaARCHeader *)d) - 1;
+  if (hdr->magic == NOVA_ARC_MAGIC) {
 #if defined(_WIN32)
-        STR_PFX(free)(hdr);
+    STR_PFX(free)(hdr);
 #else
-        free(hdr);
+    free(hdr);
 #endif
-    } else {
+  } else {
 #if defined(_WIN32)
-        STR_PFX(free)(d);
+    STR_PFX(free)(d);
 #else
-        free(d);
+    free(d);
 #endif
-    }
+  }
 }
 
-/* Count actual entries in dict (handles tombstones from dict_remove on full table) */
+/* Count actual entries in dict (handles tombstones from dict_remove on full
+ * table) */
 static int _dc(void *d) {
-    int count = *(int*)d;
-    return count < 0 ? 0 : count;
+  int count = *(int *)d;
+  return count < 0 ? 0 : count;
 }
 
 /* Return Nova list of key strings (deep-copied).
  * Nova list header: [count:4][capacity:4][data_ptr:4] (12 bytes total)
  * Data is a separate malloc'd buffer at [data_ptr]. */
 SYSCALL void *dict_keys(void *d) {
-    int cap = *(int*)((char*)d + 4);
-    DictEntry *entries = _dict_entries(d);
-    int n = _dc(d);
-    void *list = malloc(16);
-    if (!list) return 0;
-    void *data = malloc((size_t)(n ? n : 1) * sizeof(intptr_t));
-    if (!data) { free(list); return 0; }
-    *(int*)list = n;
-    *(int*)((char*)list + 4) = n;
-    *(intptr_t*)((char*)list + 8) = (intptr_t)data;
-    int out = 0;
-    for (int i = 0; i < cap; i++) {
-        if (IS_OCCUPIED(&entries[i])) {
-            size_t sl = strlen(entries[i].key) + 1;
-            char *copy = (char*)malloc(sl);
-            if (copy) { strcpy(copy, entries[i].key); }
-            *(intptr_t*)((char*)data + out * sizeof(intptr_t)) = (intptr_t)(copy ? copy : entries[i].key);
-            out++;
-        }
+  int cap = *(int *)((char *)d + 4);
+  DictEntry *entries = _dict_entries(d);
+  int n = _dc(d);
+  void *list = malloc(16);
+  if (!list)
+    return 0;
+  void *data = malloc((size_t)(n ? n : 1) * sizeof(intptr_t));
+  if (!data) {
+    free(list);
+    return 0;
+  }
+  *(int *)list = n;
+  *(int *)((char *)list + 4) = n;
+  *(intptr_t *)((char *)list + 8) = (intptr_t)data;
+  int out = 0;
+  for (int i = 0; i < cap; i++) {
+    if (IS_OCCUPIED(&entries[i])) {
+      size_t sl = strlen(entries[i].key) + 1;
+      char *copy = (char *)malloc(sl);
+      if (copy) {
+        strcpy(copy, entries[i].key);
+      }
+      *(intptr_t *)((char *)data + out * sizeof(intptr_t)) =
+          (intptr_t)(copy ? copy : entries[i].key);
+      out++;
     }
-    return list;
+  }
+  return list;
 }
 
 SYSCALL void *dict_values(void *d) {
-    int cap = *(int*)((char*)d + 4);
-    DictEntry *entries = _dict_entries(d);
-    int n = _dc(d);
-    void *list = malloc(16);
-    if (!list) return 0;
-    void *data = malloc((size_t)(n ? n : 1) * sizeof(intptr_t));
-    if (!data) { free(list); return 0; }
-    *(int*)list = n;
-    *(int*)((char*)list + 4) = n;
-    *(intptr_t*)((char*)list + 8) = (intptr_t)data;
-    int out = 0;
-    for (int i = 0; i < cap; i++) {
-        if (IS_OCCUPIED(&entries[i])) {
-            *(intptr_t*)((char*)data + out * sizeof(intptr_t)) = (intptr_t)entries[i].value;
-            out++;
-        }
+  int cap = *(int *)((char *)d + 4);
+  DictEntry *entries = _dict_entries(d);
+  int n = _dc(d);
+  void *list = malloc(16);
+  if (!list)
+    return 0;
+  void *data = malloc((size_t)(n ? n : 1) * sizeof(intptr_t));
+  if (!data) {
+    free(list);
+    return 0;
+  }
+  *(int *)list = n;
+  *(int *)((char *)list + 4) = n;
+  *(intptr_t *)((char *)list + 8) = (intptr_t)data;
+  int out = 0;
+  for (int i = 0; i < cap; i++) {
+    if (IS_OCCUPIED(&entries[i])) {
+      *(intptr_t *)((char *)data + out * sizeof(intptr_t)) =
+          (intptr_t)entries[i].value;
+      out++;
     }
-    return list;
+  }
+  return list;
 }
 
 SYSCALL void *dict_items(void *d) {
-    int cap = *(int*)((char*)d + 4);
-    DictEntry *entries = _dict_entries(d);
-    int n = _dc(d);
-    void *list = _nova_arc_alloc(16, NOVA_VALUE_LIST);
-    if (!list) return 0;
-    void *data = malloc((size_t)(n ? n : 1) * 2 * sizeof(intptr_t));
-    if (!data) { _nova_dec_ref(list); return 0; }
-    *(int*)list = n * 2;
-    *(int*)((char*)list + 4) = n * 2;
-    *(intptr_t*)((char*)list + 8) = (intptr_t)data;
-    int out = 0;
-    for (int i = 0; i < cap; i++) {
-        if (IS_OCCUPIED(&entries[i])) {
-            size_t sl = strlen(entries[i].key) + 1;
-            char *copy = (char*)malloc(sl);
-            if (copy) { strcpy(copy, entries[i].key); }
-            *(intptr_t*)((char*)data + out * sizeof(intptr_t)) = (intptr_t)(copy ? copy : entries[i].key);
-            out++;
-            *(intptr_t*)((char*)data + out * sizeof(intptr_t)) = (intptr_t)entries[i].value;
-            out++;
-        }
+  int cap = *(int *)((char *)d + 4);
+  DictEntry *entries = _dict_entries(d);
+  int n = _dc(d);
+  void *list = _nova_arc_alloc(16, NOVA_VALUE_LIST);
+  if (!list)
+    return 0;
+  void *data = malloc((size_t)(n ? n : 1) * 2 * sizeof(intptr_t));
+  if (!data) {
+    _nova_dec_ref(list);
+    return 0;
+  }
+  *(int *)list = n * 2;
+  *(int *)((char *)list + 4) = n * 2;
+  *(intptr_t *)((char *)list + 8) = (intptr_t)data;
+  int out = 0;
+  for (int i = 0; i < cap; i++) {
+    if (IS_OCCUPIED(&entries[i])) {
+      size_t sl = strlen(entries[i].key) + 1;
+      char *copy = (char *)malloc(sl);
+      if (copy) {
+        strcpy(copy, entries[i].key);
+      }
+      *(intptr_t *)((char *)data + out * sizeof(intptr_t)) =
+          (intptr_t)(copy ? copy : entries[i].key);
+      out++;
+      *(intptr_t *)((char *)data + out * sizeof(intptr_t)) =
+          (intptr_t)entries[i].value;
+      out++;
     }
-    return list;
+  }
+  return list;
 }
 
 /* ===== Dict wrappers (shared, identical on all platforms) ===== */
 SYSCALL void *_dict_new(void) { return dict_new(); }
 SYSCALL int _dict_has(void *d, const char *k) { return dict_has(d, k); }
 SYSCALL intptr_t _dict_get(void *d, const char *k) { return dict_get(d, k); }
-SYSCALL void _dict_set(void *d, const char *k, intptr_t v) { dict_set(d, k, v); }
+SYSCALL void _dict_set(void *d, const char *k, intptr_t v) {
+  dict_set(d, k, v);
+}
 SYSCALL void _dict_remove(void *d, const char *k) { dict_remove(d, k); }
 SYSCALL void *_dict_keys(void *d) { return dict_keys(d); }
 SYSCALL void *_dict_values(void *d) { return dict_values(d); }
 SYSCALL void *_dict_items(void *d) { return dict_items(d); }
 
 typedef struct {
-    char *data;
-    size_t length;
-    size_t capacity;
+  char *data;
+  size_t length;
+  size_t capacity;
 } NovaJsonBuffer;
 
 static int _json_put(NovaJsonBuffer *out, const char *text) {
-    size_t size = strlen(text);
-    if (out->length + size + 1 > out->capacity) {
-        size_t capacity = out->capacity ? out->capacity : 32;
-        while (capacity < out->length + size + 1) capacity *= 2;
-        char *replacement = (char*)DICT_MALLOC(capacity);
-        if (!replacement) return 0;
-        if (out->data) {
-            strcpy(replacement, out->data);
-            DICT_FREE(out->data);
-        } else {
-            replacement[0] = '\0';
-        }
-        out->data = replacement;
-        out->capacity = capacity;
+  size_t size = strlen(text);
+  if (out->length + size + 1 > out->capacity) {
+    size_t capacity = out->capacity ? out->capacity : 32;
+    while (capacity < out->length + size + 1)
+      capacity *= 2;
+    char *replacement = (char *)DICT_MALLOC(capacity);
+    if (!replacement)
+      return 0;
+    if (out->data) {
+      strcpy(replacement, out->data);
+      DICT_FREE(out->data);
+    } else {
+      replacement[0] = '\0';
     }
-    strcpy(out->data + out->length, text);
-    out->length += size;
-    return 1;
+    out->data = replacement;
+    out->capacity = capacity;
+  }
+  strcpy(out->data + out->length, text);
+  out->length += size;
+  return 1;
 }
 
 static int _json_put_int(NovaJsonBuffer *out, intptr_t value) {
-    char digits[32];
-    int end = 31;
-    int negative = value < 0;
-    uint64_t magnitude = negative ? (uint64_t)(-(value + 1)) + 1 : (uint64_t)value;
-    digits[end] = '\0';
-    do {
-        digits[--end] = (char)('0' + (magnitude % 10));
-        magnitude /= 10;
-    } while (magnitude);
-    if (negative) digits[--end] = '-';
-    return _json_put(out, digits + end);
+  char digits[32];
+  int end = 31;
+  int negative = value < 0;
+  uint64_t magnitude =
+      negative ? (uint64_t)(-(value + 1)) + 1 : (uint64_t)value;
+  digits[end] = '\0';
+  do {
+    digits[--end] = (char)('0' + (magnitude % 10));
+    magnitude /= 10;
+  } while (magnitude);
+  if (negative)
+    digits[--end] = '-';
+  return _json_put(out, digits + end);
 }
 
 static int _json_put_string(NovaJsonBuffer *out, const char *value) {
-    const unsigned char *p = (const unsigned char*)(value ? value : "");
-    if (!_json_put(out, "\"")) return 0;
-    while (*p) {
-        if (*p == '"' || *p == '\\') {
-            char escaped[2] = {'\\', (char)*p};
-            escaped[1] = '\0';
-            if (!_json_put(out, escaped)) return 0;
-        } else if (*p == '\n') {
-            if (!_json_put(out, "\\n")) return 0;
-        } else if (*p == '\r') {
-            if (!_json_put(out, "\\r")) return 0;
-        } else if (*p == '\t') {
-            if (!_json_put(out, "\\t")) return 0;
-        } else {
-            char one[2] = {(char)*p, '\0'};
-            if (!_json_put(out, one)) return 0;
-        }
-        p++;
+  const unsigned char *p = (const unsigned char *)(value ? value : "");
+  if (!_json_put(out, "\""))
+    return 0;
+  while (*p) {
+    if (*p == '"' || *p == '\\') {
+      char escaped[2] = {'\\', (char)*p};
+      escaped[1] = '\0';
+      if (!_json_put(out, escaped))
+        return 0;
+    } else if (*p == '\n') {
+      if (!_json_put(out, "\\n"))
+        return 0;
+    } else if (*p == '\r') {
+      if (!_json_put(out, "\\r"))
+        return 0;
+    } else if (*p == '\t') {
+      if (!_json_put(out, "\\t"))
+        return 0;
+    } else {
+      char one[2] = {(char)*p, '\0'};
+      if (!_json_put(out, one))
+        return 0;
     }
-    return _json_put(out, "\"");
+    p++;
+  }
+  return _json_put(out, "\"");
 }
 
 static int _nova_json_emit(void *value, NovaJsonBuffer *out) {
-    int kind = _nova_value_kind(value);
-    if (kind == NOVA_VALUE_NONE) {
-        if ((uintptr_t)value >= 4096u &&
-            ((NovaARCHeader*)value - 1)->magic == NOVA_ARC_MAGIC) {
-            return _json_put(out, "null");
-        }
-        if ((uintptr_t)value < 4096u) return _json_put_int(out, (intptr_t)value);
-        return _json_put_string(out, (const char*)value);
+  int kind = _nova_value_kind(value);
+  if (kind == NOVA_VALUE_NONE) {
+    if ((uintptr_t)value >= 4096u &&
+        ((NovaARCHeader *)value - 1)->magic == NOVA_ARC_MAGIC) {
+      return _json_put(out, "null");
     }
-    if (kind == NOVA_VALUE_STRING) return _json_put_string(out, (const char*)value);
-    if (kind == NOVA_VALUE_BOOL) return _json_put(out, *(intptr_t*)value ? "true" : "false");
-    if (kind == NOVA_VALUE_INT) return _json_put_int(out, *(intptr_t*)value);
-    if (kind == NOVA_VALUE_LIST) {
-        int count = *(int*)value;
-        intptr_t *data = (intptr_t*)(*(intptr_t*)((char*)value + 8));
-        if (!_json_put(out, "[")) return 0;
-        for (int i = 0; i < count; i++) {
-            if (i && !_json_put(out, ",")) return 0;
-            if (!_nova_json_emit((void*)data[i], out)) return 0;
-        }
-        return _json_put(out, "]");
+    if ((uintptr_t)value < 4096u)
+      return _json_put_int(out, (intptr_t)value);
+    return _json_put_string(out, (const char *)value);
+  }
+  if (kind == NOVA_VALUE_STRING)
+    return _json_put_string(out, (const char *)value);
+  if (kind == NOVA_VALUE_BOOL)
+    return _json_put(out, *(intptr_t *)value ? "true" : "false");
+  if (kind == NOVA_VALUE_INT)
+    return _json_put_int(out, *(intptr_t *)value);
+  if (kind == NOVA_VALUE_LIST) {
+    int count = *(int *)value;
+    intptr_t *data = (intptr_t *)(*(intptr_t *)((char *)value + 8));
+    if (!_json_put(out, "["))
+      return 0;
+    for (int i = 0; i < count; i++) {
+      if (i && !_json_put(out, ","))
+        return 0;
+      if (!_nova_json_emit((void *)data[i], out))
+        return 0;
     }
-    if (kind == NOVA_VALUE_DICT) {
-        int cap = *(int*)((char*)value + 4);
-        DictEntry *entries = _dict_entries(value);
-        int emitted = 0;
-        if (!_json_put(out, "{")) return 0;
-        for (int i = 0; i < cap; i++) {
-            if (IS_OCCUPIED(&entries[i])) {
-                if (emitted++ && !_json_put(out, ",")) return 0;
-                if (!_json_put_string(out, entries[i].key) ||
-                    !_json_put(out, ":") ||
-                    !_nova_json_emit((void*)entries[i].value, out)) return 0;
-            }
-        }
-        return _json_put(out, "}");
+    return _json_put(out, "]");
+  }
+  if (kind == NOVA_VALUE_DICT) {
+    int cap = *(int *)((char *)value + 4);
+    DictEntry *entries = _dict_entries(value);
+    int emitted = 0;
+    if (!_json_put(out, "{"))
+      return 0;
+    for (int i = 0; i < cap; i++) {
+      if (IS_OCCUPIED(&entries[i])) {
+        if (emitted++ && !_json_put(out, ","))
+          return 0;
+        if (!_json_put_string(out, entries[i].key) || !_json_put(out, ":") ||
+            !_nova_json_emit((void *)entries[i].value, out))
+          return 0;
+      }
     }
-    return _json_put(out, "null");
+    return _json_put(out, "}");
+  }
+  return _json_put(out, "null");
 }
 
 SYSCALL char *_nova_json_stringify(void *value) {
-    NovaJsonBuffer out = {0, 0, 0};
-    if (!_nova_json_emit(value, &out)) {
-        if (out.data) DICT_FREE(out.data);
-        return 0;
-    }
-    return out.data;
+  NovaJsonBuffer out = {0, 0, 0};
+  if (!_nova_json_emit(value, &out)) {
+    if (out.data)
+      DICT_FREE(out.data);
+    return 0;
+  }
+  return out.data;
 }
 
 SYSCALL int _nova_value_list_count(void *list) {
-    if (_nova_value_kind(list) != NOVA_VALUE_LIST) return 0;
-    return *(int*)list;
+  if (_nova_value_kind(list) != NOVA_VALUE_LIST)
+    return 0;
+  return *(int *)list;
 }
 
 SYSCALL intptr_t _nova_value_list_item(void *list, int index) {
-    int count;
-    intptr_t *data;
-    if (_nova_value_kind(list) != NOVA_VALUE_LIST) return 0;
-    count = *(int*)list;
-    if (index < 0 || index >= count) return 0;
-    data = (intptr_t*)(*(intptr_t*)((char*)list + 8));
-    return data ? data[index] : 0;
+  int count;
+  intptr_t *data;
+  if (_nova_value_kind(list) != NOVA_VALUE_LIST)
+    return 0;
+  count = *(int *)list;
+  if (index < 0 || index >= count)
+    return 0;
+  data = (intptr_t *)(*(intptr_t *)((char *)list + 8));
+  return data ? data[index] : 0;
 }
 
 SYSCALL int _nova_value_dict_count(void *dict) {
-    if (_nova_value_kind(dict) != NOVA_VALUE_DICT) return 0;
-    return _dc(dict);
+  if (_nova_value_kind(dict) != NOVA_VALUE_DICT)
+    return 0;
+  return _dc(dict);
 }
 
 SYSCALL void *_nova_value_retain(void *ptr) {
-    if (!ptr || _nova_value_kind(ptr) == NOVA_VALUE_NONE) return 0;
-    _nova_inc_ref(ptr);
-    return ptr;
+  if (!ptr || _nova_value_kind(ptr) == NOVA_VALUE_NONE)
+    return 0;
+  _nova_inc_ref(ptr);
+  return ptr;
 }
 
 SYSCALL void _nova_value_release(void *ptr) {
-    if (!ptr || _nova_value_kind(ptr) == NOVA_VALUE_NONE) return;
-    _nova_dec_ref(ptr);
+  if (!ptr || _nova_value_kind(ptr) == NOVA_VALUE_NONE)
+    return;
+  _nova_dec_ref(ptr);
 }
 
 SYSCALL int _nova_value_is_list(void *ptr) {
-    return _nova_value_kind(ptr) == NOVA_VALUE_LIST ? 1 : 0;
+  return _nova_value_kind(ptr) == NOVA_VALUE_LIST ? 1 : 0;
 }
 
 SYSCALL int _nova_value_is_dict(void *ptr) {
-    return _nova_value_kind(ptr) == NOVA_VALUE_DICT ? 1 : 0;
+  return _nova_value_kind(ptr) == NOVA_VALUE_DICT ? 1 : 0;
 }
 
 SYSCALL int _nova_value_is_string(void *ptr) {
-    return _nova_value_kind(ptr) == NOVA_VALUE_STRING ? 1 : 0;
+  return _nova_value_kind(ptr) == NOVA_VALUE_STRING ? 1 : 0;
 }
 
 SYSCALL void *_nova_value_dict_keys(void *dict) {
-    if (_nova_value_kind(dict) != NOVA_VALUE_DICT) return 0;
-    return dict_keys(dict);
+  if (_nova_value_kind(dict) != NOVA_VALUE_DICT)
+    return 0;
+  return dict_keys(dict);
 }
 
 SYSCALL void *_nova_value_dict_values(void *dict) {
-    if (_nova_value_kind(dict) != NOVA_VALUE_DICT) return 0;
-    return dict_values(dict);
+  if (_nova_value_kind(dict) != NOVA_VALUE_DICT)
+    return 0;
+  return dict_values(dict);
 }
 
 SYSCALL void *_nova_value_dict_items(void *dict) {
-    if (_nova_value_kind(dict) != NOVA_VALUE_DICT) return 0;
-    return dict_items(dict);
+  if (_nova_value_kind(dict) != NOVA_VALUE_DICT)
+    return 0;
+  return dict_items(dict);
 }
 
 /* ===== Pointer/alloc bridge helpers ===== */
 SYSCALL void *_list_wrap(void *ptr, intptr_t count) {
-    /* Allocated via _nova_arc_alloc (not a plain malloc(16)) so the returned list is a
-     * real ARC-managed value like any other list literal: _nova_value_retain/_release/
-     * _nova_value_kind walk back from the pointer looking for a NovaARCHeader, and a
-     * plain malloc(16) block has no such header -- anything that generically retained or
-     * released a .as_list() result (storing it as a dict value, for instance) was a
-     * heap-buffer-underflow read of whatever memory happened to precede that block.
-     *
-     * `pad` is repurposed as a "borrowed" flag (normally always 0/unused): .as_list()
-     * wraps foreign memory as a VIEW, not a transfer of ownership (docs/internals/
-     * ownership.md), so _nova_dec_ref must not free `ptr` itself when this wrapper's
-     * refcount reaches zero -- only the 16-byte wrapper. Without this flag, giving it a
-     * real ARC header would silently turn every .as_list() into an ownership transfer:
-     * the buffer would get freed out from under the caller (or double-freed, if the same
-     * buffer were ever wrapped more than once, or still aliased by its original owner)
-     * the first time the wrapped list's refcount happened to drop to zero. */
-    void *list = _nova_arc_alloc(16, NOVA_VALUE_LIST);
-    if (!list) return 0;
-    ((NovaARCHeader*)list - 1)->pad = 1;
-    *(int*)list = (int)count;
-    *(int*)((char*)list + 4) = (int)count;
-    *(intptr_t*)((char*)list + 8) = (intptr_t)ptr;
-    return list;
+  /* Allocated via _nova_arc_alloc (not a plain malloc(16)) so the returned list
+   * is a real ARC-managed value like any other list literal:
+   * _nova_value_retain/_release/ _nova_value_kind walk back from the pointer
+   * looking for a NovaARCHeader, and a plain malloc(16) block has no such
+   * header -- anything that generically retained or released a .as_list()
+   * result (storing it as a dict value, for instance) was a
+   * heap-buffer-underflow read of whatever memory happened to precede that
+   * block.
+   *
+   * `pad` is repurposed as a "borrowed" flag (normally always 0/unused):
+   * .as_list() wraps foreign memory as a VIEW, not a transfer of ownership
+   * (docs/internals/ ownership.md), so _nova_dec_ref must not free `ptr` itself
+   * when this wrapper's refcount reaches zero -- only the 16-byte wrapper.
+   * Without this flag, giving it a real ARC header would silently turn every
+   * .as_list() into an ownership transfer: the buffer would get freed out from
+   * under the caller (or double-freed, if the same buffer were ever wrapped
+   * more than once, or still aliased by its original owner) the first time the
+   * wrapped list's refcount happened to drop to zero. */
+  void *list = _nova_arc_alloc(16, NOVA_VALUE_LIST);
+  if (!list)
+    return 0;
+  ((NovaARCHeader *)list - 1)->pad = 1;
+  *(int *)list = (int)count;
+  *(int *)((char *)list + 4) = (int)count;
+  *(intptr_t *)((char *)list + 8) = (intptr_t)ptr;
+  return list;
 }
 
 SYSCALL void *_as_list(void *ptr, intptr_t count) {
-    return _list_wrap(ptr, count);
+  return _list_wrap(ptr, count);
 }
 
 /* ===== Platform-specific helpers ===== */
 #if defined(LINUX_WRAP)
 SYSCALL const char *_sys_platform_c(void) { return "linux"; }
 SYSCALL char *_sys_exe_path_c(void) {
-    char *buf = (char*)malloc(4096);
-    if (!buf) return 0;
-    ssize_t n = readlink("/proc/self/exe", buf, 4095);
-    if (n <= 0) { buf[0] = '\0'; } else { buf[n] = '\0'; }
-    return buf;
+  char *buf = (char *)malloc(4096);
+  if (!buf)
+    return 0;
+  ssize_t n = readlink("/proc/self/exe", buf, 4095);
+  if (n <= 0) {
+    buf[0] = '\0';
+  } else {
+    buf[n] = '\0';
+  }
+  return buf;
 }
 SYSCALL void *_sys_get_args_c(void) {
-    extern int __nova_argc;
-    extern char **__nova_argv;
-    int n = __nova_argc;
-    void *list = _nova_arc_alloc(16, NOVA_VALUE_LIST);
-    if (!list) return 0;
-    void *data = malloc((size_t)n * sizeof(intptr_t));
-    if (!data) { _nova_dec_ref(list); return 0; }
-    *(int*)list = n;
-    *(int*)((char*)list + 4) = n;
-    *(intptr_t*)((char*)list + 8) = (intptr_t)data;
-    for (int i = 0; i < n; i++) {
-        size_t sl = strlen(__nova_argv[i]) + 1;
-        char *copy = (char*)malloc(sl);
-        if (copy) strcpy(copy, __nova_argv[i]);
-        *(intptr_t*)((char*)data + i * sizeof(intptr_t)) = (intptr_t)(copy ? copy : __nova_argv[i]);
-    }
-    return list;
+  extern int __nova_argc;
+  extern char **__nova_argv;
+  int n = __nova_argc;
+  void *list = _nova_arc_alloc(16, NOVA_VALUE_LIST);
+  if (!list)
+    return 0;
+  void *data = malloc((size_t)n * sizeof(intptr_t));
+  if (!data) {
+    _nova_dec_ref(list);
+    return 0;
+  }
+  *(int *)list = n;
+  *(int *)((char *)list + 4) = n;
+  *(intptr_t *)((char *)list + 8) = (intptr_t)data;
+  for (int i = 0; i < n; i++) {
+    size_t sl = strlen(__nova_argv[i]) + 1;
+    char *copy = (char *)malloc(sl);
+    if (copy)
+      strcpy(copy, __nova_argv[i]);
+    *(intptr_t *)((char *)data + i * sizeof(intptr_t)) =
+        (intptr_t)(copy ? copy : __nova_argv[i]);
+  }
+  return list;
 }
 #elif defined(_WIN64)
 SYSCALL void *_sys_get_args_c(void) {
-    extern int __argc;
-    extern char **__argv;
-    int n = __argc;
-    void *list = _nova_arc_alloc(16, NOVA_VALUE_LIST);
-    if (!list) return 0;
-    void *data = malloc((size_t)n * sizeof(intptr_t));
-    if (!data) { _nova_dec_ref(list); return 0; }
-    *(int*)list = n;
-    *(int*)((char*)list + 4) = n;
-    *(intptr_t*)((char*)list + 8) = (intptr_t)data;
-    for (int i = 0; i < n; i++) {
-        size_t sl = strlen(__argv[i]) + 1;
-        char *copy = (char*)malloc(sl);
-        if (copy) strcpy(copy, __argv[i]);
-        *(intptr_t*)((char*)data + i * sizeof(intptr_t)) = (intptr_t)(copy ? copy : __argv[i]);
-    }
-    return list;
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
+#endif
+  extern int __argc;
+  extern char **__argv;
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+  int n = __argc;
+  void *list = _nova_arc_alloc(16, NOVA_VALUE_LIST);
+  if (!list)
+    return 0;
+  void *data = malloc((size_t)n * sizeof(intptr_t));
+  if (!data) {
+    _nova_dec_ref(list);
+    return 0;
+  }
+  *(int *)list = n;
+  *(int *)((char *)list + 4) = n;
+  *(intptr_t *)((char *)list + 8) = (intptr_t)data;
+  for (int i = 0; i < n; i++) {
+    size_t sl = strlen(__argv[i]) + 1;
+    char *copy = (char *)malloc(sl);
+    if (copy)
+      strcpy(copy, __argv[i]);
+    *(intptr_t *)((char *)data + i * sizeof(intptr_t)) =
+        (intptr_t)(copy ? copy : __argv[i]);
+  }
+  return list;
 }
 #elif defined(MACOS)
 #include <crt_externs.h>
 #include <mach-o/dyld.h>
 SYSCALL const char *_sys_platform_c(void) { return "macos"; }
 SYSCALL char *_sys_exe_path_c(void) {
-    char *buf = (char*)malloc(4096);
-    uint32_t size = 4096;
-    if (!buf) return 0;
-    if (_NSGetExecutablePath(buf, &size) != 0) { buf[0] = '\0'; }
-    return buf;
+  char *buf = (char *)malloc(4096);
+  uint32_t size = 4096;
+  if (!buf)
+    return 0;
+  if (_NSGetExecutablePath(buf, &size) != 0) {
+    buf[0] = '\0';
+  }
+  return buf;
 }
 SYSCALL void *_sys_get_args_c(void) {
-    int n = *_NSGetArgc();
-    char **argv = *_NSGetArgv();
-    void *list = _nova_arc_alloc(16, NOVA_VALUE_LIST);
-    if (!list) return 0;
-    void *data = malloc((size_t)n * sizeof(intptr_t));
-    if (!data) { _nova_dec_ref(list); return 0; }
-    *(int*)list = n;
-    *(int*)((char*)list + 4) = n;
-    *(intptr_t*)((char*)list + 8) = (intptr_t)data;
-    for (int i = 0; i < n; i++) {
-        size_t sl = strlen(argv[i]) + 1;
-        char *copy = (char*)malloc(sl);
-        if (copy) strcpy(copy, argv[i]);
-        *(intptr_t*)((char*)data + i * sizeof(intptr_t)) = (intptr_t)(copy ? copy : argv[i]);
-    }
-    return list;
+  int n = *_NSGetArgc();
+  char **argv = *_NSGetArgv();
+  void *list = _nova_arc_alloc(16, NOVA_VALUE_LIST);
+  if (!list)
+    return 0;
+  void *data = malloc((size_t)n * sizeof(intptr_t));
+  if (!data) {
+    _nova_dec_ref(list);
+    return 0;
+  }
+  *(int *)list = n;
+  *(int *)((char *)list + 4) = n;
+  *(intptr_t *)((char *)list + 8) = (intptr_t)data;
+  for (int i = 0; i < n; i++) {
+    size_t sl = strlen(argv[i]) + 1;
+    char *copy = (char *)malloc(sl);
+    if (copy)
+      strcpy(copy, argv[i]);
+    *(intptr_t *)((char *)data + i * sizeof(intptr_t)) =
+        (intptr_t)(copy ? copy : argv[i]);
+  }
+  return list;
 }
 #endif
 
 #if defined(LINUX_WRAP) || defined(MACOS)
 SYSCALL const char *_sys_env_get_c(const char *name) {
-    const char *value = getenv(name);
-    return value ? value : "";
+  const char *value = getenv(name);
+  return value ? value : "";
 }
 SYSCALL int _sys_env_set_c(const char *name, const char *value) {
-    return setenv(name, value, 1) == 0 ? 1 : 0;
+  return setenv(name, value, 1) == 0 ? 1 : 0;
 }
 SYSCALL int _sys_process_run_c(void *args) {
-    int count;
-    intptr_t *values;
-    char **argv;
-    pid_t child;
-    int status;
-    int i;
-    if (!args) return -1;
-    count = *(int*)args;
-    values = (intptr_t*)(*(intptr_t*)((char*)args + 8));
-    if (count <= 0) return -1;
-    argv = (char**)malloc((size_t)(count + 1) * sizeof(char*));
-    if (!argv) return -1;
-    for (i = 0; i < count; i++) argv[i] = (char*)values[i];
-    argv[count] = NULL;
-    child = fork();
-    if (child < 0) { free(argv); return -1; }
-    if (child == 0) {
-        execvp(argv[0], argv);
-        _exit(127);
-    }
-    if (waitpid(child, &status, 0) < 0) { free(argv); return -1; }
-    free(argv);
-    if (WIFEXITED(status)) return WEXITSTATUS(status);
-    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+  int count;
+  intptr_t *values;
+  char **argv;
+  pid_t child;
+  int status;
+  int i;
+  if (!args)
     return -1;
+  count = *(int *)args;
+  values = (intptr_t *)(*(intptr_t *)((char *)args + 8));
+  if (count <= 0)
+    return -1;
+  argv = (char **)malloc((size_t)(count + 1) * sizeof(char *));
+  if (!argv)
+    return -1;
+  for (i = 0; i < count; i++)
+    argv[i] = (char *)values[i];
+  argv[count] = NULL;
+  child = fork();
+  if (child < 0) {
+    free(argv);
+    return -1;
+  }
+  if (child == 0) {
+    execvp(argv[0], argv);
+    _exit(127);
+  }
+  if (waitpid(child, &status, 0) < 0) {
+    free(argv);
+    return -1;
+  }
+  free(argv);
+  if (WIFEXITED(status))
+    return WEXITSTATUS(status);
+  if (WIFSIGNALED(status))
+    return 128 + WTERMSIG(status);
+  return -1;
 }
-/* Same contract as the Windows version above: malloc'd "<exit_code>\n<captured stdout>",
- * split by the Nova-level wrapper in stdlib/process.nv. */
+/* Same contract as the Windows version above: malloc'd "<exit_code>\n<captured
+ * stdout>", split by the Nova-level wrapper in stdlib/process.nv. */
 SYSCALL void *_sys_process_capture_c(const char *command) {
-    FILE *p;
-    size_t cap, len;
-    char *buf;
-    char *result;
-    char prefix[16];
-    int plen;
-    int status;
-    int exit_code;
-    if (!command) return 0;
-    p = popen(command, "r");
-    if (!p) return 0;
-    cap = 4096;
-    len = 0;
-    buf = (char*)malloc(cap);
-    if (!buf) { pclose(p); return 0; }
-    for (;;) {
-        size_t n;
-        if (len + 4096 + 1 > cap) {
-            size_t new_cap = cap * 2;
-            char *nb = (char*)realloc(buf, new_cap);
-            if (!nb) break;
-            buf = nb;
-            cap = new_cap;
-        }
-        n = fread(buf + len, 1, 4096, p);
-        if (n == 0) break;
-        len += n;
+  FILE *p;
+  size_t cap, len;
+  char *buf;
+  char *result;
+  char prefix[16];
+  int plen;
+  int status;
+  int exit_code;
+  if (!command)
+    return 0;
+  p = popen(command, "r");
+  if (!p)
+    return 0;
+  cap = 4096;
+  len = 0;
+  buf = (char *)malloc(cap);
+  if (!buf) {
+    pclose(p);
+    return 0;
+  }
+  for (;;) {
+    size_t n;
+    if (len + 4096 + 1 > cap) {
+      size_t new_cap = cap * 2;
+      char *nb = (char *)realloc(buf, new_cap);
+      if (!nb)
+        break;
+      buf = nb;
+      cap = new_cap;
     }
-    status = pclose(p);
-    if (WIFEXITED(status)) exit_code = WEXITSTATUS(status);
-    else if (WIFSIGNALED(status)) exit_code = 128 + WTERMSIG(status);
-    else exit_code = -1;
-    buf[len] = 0;
-    plen = snprintf(prefix, sizeof(prefix), "%d\n", exit_code);
-    result = (char*)malloc((size_t)plen + len + 1);
-    if (result) {
-        memcpy(result, prefix, (size_t)plen);
-        memcpy(result + plen, buf, len);
-        result[(size_t)plen + len] = 0;
-    }
-    free(buf);
-    return result;
+    n = fread(buf + len, 1, 4096, p);
+    if (n == 0)
+      break;
+    len += n;
+  }
+  status = pclose(p);
+  if (WIFEXITED(status))
+    exit_code = WEXITSTATUS(status);
+  else if (WIFSIGNALED(status))
+    exit_code = 128 + WTERMSIG(status);
+  else
+    exit_code = -1;
+  buf[len] = 0;
+  plen = snprintf(prefix, sizeof(prefix), "%d\n", exit_code);
+  result = (char *)malloc((size_t)plen + len + 1);
+  if (result) {
+    memcpy(result, prefix, (size_t)plen);
+    memcpy(result + plen, buf, len);
+    result[(size_t)plen + len] = 0;
+  }
+  free(buf);
+  return result;
 }
 #endif
 
-/* ==================== File read + get_args for Linux/macOS (no Win32 API) ==================== */
+/* ==================== File read + get_args for Linux/macOS (no Win32 API)
+ * ==================== */
 #if defined(LINUX_WRAP) || defined(MACOS)
-#include <fcntl.h>
-#include <unistd.h>
-#include <sys/wait.h>
-#include <sys/mman.h>
-#include <dlfcn.h>
 #include <dirent.h>
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 SYSCALL char *_nova_read_file(int fd) {
-    off_t len = lseek(fd, 0, SEEK_END);
-    lseek(fd, 0, SEEK_SET);
-    char *buf = malloc((size_t)len + 1);
-    if (!buf) return 0;
-    ssize_t n = read(fd, buf, (size_t)len);
-    if (n < 0) { free(buf); return 0; }
-    buf[n] = '\0';
-    return buf;
+  off_t len = lseek(fd, 0, SEEK_END);
+  lseek(fd, 0, SEEK_SET);
+  char *buf = malloc((size_t)len + 1);
+  if (!buf)
+    return 0;
+  ssize_t n = read(fd, buf, (size_t)len);
+  if (n < 0) {
+    free(buf);
+    return 0;
+  }
+  buf[n] = '\0';
+  return buf;
 }
 
 SYSCALL int _sys_get_tick_count_c(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (int)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 }
 
-/* ===== Unix syscall helpers (_c suffix for Nova codegen naming compatibility) ===== */
+/* ===== Unix syscall helpers (_c suffix for Nova codegen naming compatibility)
+ * ===== */
 SYSCALL long long _sys_open_c(const char *path, const char *mode) {
-    int flags;
-    int fd;
-    if (*mode == 'w' || *mode == 'a') {
-        flags = O_WRONLY | O_CREAT;
-        if (*mode == 'a') flags |= O_APPEND;
-        else flags |= O_TRUNC;
-        fd = open(path, flags, 0666);
-    } else {
-        fd = open(path, O_RDONLY);
-    }
-    if (fd < 0) return 0;
-    return fd;
+  int flags;
+  int fd;
+  if (*mode == 'w' || *mode == 'a') {
+    flags = O_WRONLY | O_CREAT;
+    if (*mode == 'a')
+      flags |= O_APPEND;
+    else
+      flags |= O_TRUNC;
+    fd = open(path, flags, 0666);
+  } else {
+    fd = open(path, O_RDONLY);
+  }
+  if (fd < 0)
+    return 0;
+  return fd;
 }
 
 SYSCALL int _sys_mkdir_c(const char *path) {
-    if (!path) return 0;
-    return mkdir(path, 0777) == 0 ? 1 : 0;
+  if (!path)
+    return 0;
+  return mkdir(path, 0777) == 0 ? 1 : 0;
 }
 SYSCALL int _sys_delete_c(const char *path) {
-    if (!path) return 0;
-    return remove(path) == 0 ? 1 : 0;
+  if (!path)
+    return 0;
+  return remove(path) == 0 ? 1 : 0;
 }
 SYSCALL int _sys_copy_c(const char *source, const char *destination) {
-    FILE *input;
-    FILE *output;
-    char buffer[8192];
-    size_t count;
-    if (!source || !destination || strcmp(source, destination) == 0) return 0;
-    input = fopen(source, "rb");
-    if (!input) return 0;
-    output = fopen(destination, "wb");
-    if (!output) { fclose(input); return 0; }
-    while ((count = fread(buffer, 1, sizeof(buffer), input)) > 0) {
-        if (fwrite(buffer, 1, count, output) != count) {
-            fclose(input);
-            fclose(output);
-            remove(destination);
-            return 0;
-        }
+  FILE *input;
+  FILE *output;
+  char buffer[8192];
+  size_t count;
+  if (!source || !destination || strcmp(source, destination) == 0)
+    return 0;
+  input = fopen(source, "rb");
+  if (!input)
+    return 0;
+  output = fopen(destination, "wb");
+  if (!output) {
+    fclose(input);
+    return 0;
+  }
+  while ((count = fread(buffer, 1, sizeof(buffer), input)) > 0) {
+    if (fwrite(buffer, 1, count, output) != count) {
+      fclose(input);
+      fclose(output);
+      remove(destination);
+      return 0;
     }
-    if (ferror(input) || fclose(input) != 0 || fclose(output) != 0) {
-        remove(destination);
-        return 0;
-    }
-    return 1;
+  }
+  if (ferror(input) || fclose(input) != 0 || fclose(output) != 0) {
+    remove(destination);
+    return 0;
+  }
+  return 1;
 }
 SYSCALL int _sys_move_c(const char *source, const char *destination) {
-    if (!source || !destination) return 0;
-    return rename(source, destination) == 0 ? 1 : 0;
+  if (!source || !destination)
+    return 0;
+  return rename(source, destination) == 0 ? 1 : 0;
 }
 
 SYSCALL void *_sys_listdir_c(const char *path) {
-    if (!path) return 0;
-    DIR *dir = opendir(path);
-    void *list = _nova_arc_alloc(16, NOVA_VALUE_LIST);
-    if (!list) return 0;
-    int cap = 8;
-    void *data = malloc((size_t)cap * sizeof(intptr_t));
-    if (!data) { _nova_dec_ref(list); return 0; }
-    int n = 0;
-    if (dir) {
-        struct dirent *ent;
-        while ((ent = readdir(dir)) != NULL) {
-            if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
-            if (n >= cap) {
-                cap *= 2;
-                void *bigger = realloc(data, (size_t)cap * sizeof(intptr_t));
-                if (!bigger) break;
-                data = bigger;
-            }
-            size_t sl = strlen(ent->d_name) + 1;
-            char *copy = (char*)malloc(sl);
-            if (copy) strcpy(copy, ent->d_name);
-            *(intptr_t*)((char*)data + n * sizeof(intptr_t)) = (intptr_t)(copy ? copy : "");
-            n++;
-        }
-        closedir(dir);
+  if (!path)
+    return 0;
+  DIR *dir = opendir(path);
+  void *list = _nova_arc_alloc(16, NOVA_VALUE_LIST);
+  if (!list)
+    return 0;
+  int cap = 8;
+  void *data = malloc((size_t)cap * sizeof(intptr_t));
+  if (!data) {
+    _nova_dec_ref(list);
+    return 0;
+  }
+  int n = 0;
+  if (dir) {
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL) {
+      if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+        continue;
+      if (n >= cap) {
+        cap *= 2;
+        void *bigger = realloc(data, (size_t)cap * sizeof(intptr_t));
+        if (!bigger)
+          break;
+        data = bigger;
+      }
+      size_t sl = strlen(ent->d_name) + 1;
+      char *copy = (char *)malloc(sl);
+      if (copy)
+        strcpy(copy, ent->d_name);
+      *(intptr_t *)((char *)data + n * sizeof(intptr_t)) =
+          (intptr_t)(copy ? copy : "");
+      n++;
     }
-    *(int*)list = n;
-    *(int*)((char*)list + 4) = n;
-    *(intptr_t*)((char*)list + 8) = (intptr_t)data;
-    return list;
+    closedir(dir);
+  }
+  *(int *)list = n;
+  *(int *)((char *)list + 4) = n;
+  *(intptr_t *)((char *)list + 8) = (intptr_t)data;
+  return list;
 }
 
-SYSCALL void _sys_close_c(long long fd) {
-    close(fd);
-}
+SYSCALL void _sys_close_c(long long fd) { close(fd); }
 
 SYSCALL char *_sys_read_c(long long fd) {
-    off_t len = lseek(fd, 0, SEEK_END);
-    lseek(fd, 0, SEEK_SET);
-    char *buf = (char*)malloc((size_t)len + 1);
-    if (!buf) return 0;
-    ssize_t n = read(fd, buf, (size_t)len);
-    if (n < 0) { free(buf); return 0; }
-    buf[n] = '\0';
-    return buf;
+  off_t len = lseek(fd, 0, SEEK_END);
+  lseek(fd, 0, SEEK_SET);
+  char *buf = (char *)malloc((size_t)len + 1);
+  if (!buf)
+    return 0;
+  ssize_t n = read(fd, buf, (size_t)len);
+  if (n < 0) {
+    free(buf);
+    return 0;
+  }
+  buf[n] = '\0';
+  return buf;
 }
 
 /* Streaming stdin: one read of up to `count` bytes, "" at EOF. */
 SYSCALL char *_sys_read_stdin_c(int count) {
-    char *buf;
-    ssize_t n;
-    if (count <= 0) return "";
-    buf = (char*)malloc((size_t)count + 1);
-    if (!buf) return "";
-    n = read(0, buf, (size_t)count);
-    if (n < 0) n = 0;
-    buf[n] = '\0';
-    return buf;
+  char *buf;
+  ssize_t n;
+  if (count <= 0)
+    return "";
+  buf = (char *)malloc((size_t)count + 1);
+  if (!buf)
+    return "";
+  n = read(0, buf, (size_t)count);
+  if (n < 0)
+    n = 0;
+  buf[n] = '\0';
+  return buf;
 }
 
 /* One line from stdin, newline included, CR removed. "" means EOF. */
 SYSCALL char *_sys_read_line_c(void) {
-    unsigned int cap = 128;
-    unsigned int len = 0;
-    char *buf = (char*)malloc(cap);
-    if (!buf) return "";
-    for (;;) {
-        char ch;
-        ssize_t n = read(0, &ch, 1);
-        if (n <= 0) break;
-        if (ch == '\r') continue;
-        if (len + 2 > cap) {
-            unsigned int bigger = cap * 2;
-            char *next = (char*)realloc(buf, bigger);
-            if (!next) break;
-            buf = next;
-            cap = bigger;
-        }
-        buf[len++] = ch;
-        if (ch == '\n') break;
+  unsigned int cap = 128;
+  unsigned int len = 0;
+  char *buf = (char *)malloc(cap);
+  if (!buf)
+    return "";
+  for (;;) {
+    char ch;
+    ssize_t n = read(0, &ch, 1);
+    if (n <= 0)
+      break;
+    if (ch == '\r')
+      continue;
+    if (len + 2 > cap) {
+      unsigned int bigger = cap * 2;
+      char *next = (char *)realloc(buf, bigger);
+      if (!next)
+        break;
+      buf = next;
+      cap = bigger;
     }
-    buf[len] = '\0';
-    return buf;
+    buf[len++] = ch;
+    if (ch == '\n')
+      break;
+  }
+  buf[len] = '\0';
+  return buf;
 }
 
 SYSCALL void _sys_write_c(long long fd, const char *str) {
-    int len = strlen(str);
-    write(fd, str, (size_t)len);
+  int len = strlen(str);
+  write(fd, str, (size_t)len);
 }
 
 SYSCALL void _sys_write_raw_c(int fd, void *list) {
-    int len = *(int*)list;
-    char *data = (char*)list + 16;
-    write(fd, data, (size_t)len);
+  int len = *(int *)list;
+  char *data = (char *)list + 16;
+  write(fd, data, (size_t)len);
 }
 
-SYSCALL void *_sys_alloc_c(int sz) {
-    return malloc((size_t)sz);
-}
+SYSCALL void *_sys_alloc_c(int sz) { return malloc((size_t)sz); }
 
-SYSCALL void _sys_free_c(void *p) {
-    free(p);
-}
+SYSCALL void _sys_free_c(void *p) { free(p); }
 
-SYSCALL void _sys_flush_c(int fd) {
-    fsync(fd);
-}
+SYSCALL void _sys_flush_c(int fd) { fsync(fd); }
 
-SYSCALL void _sys_exit_c(int code) {
-    _exit(code);
-}
+SYSCALL void _sys_exit_c(int code) { _exit(code); }
 #endif
 
-/* ==================== Exception handling (manual stack unwind) ====================
- * _try_catch_sp/_catch_ip are a LIFO stack of handlers indexed by _try_depth, not a
- * single slot -- a try nested inside a called function, or a second try later in the
- * same function, must not clobber an outer try's still-active handler. With a single
- * slot, the inner try's normal exit zeroed it out (or a third try overwrote it), so a
- * later throw reachable from an outer try either crashed (rsp set to 0) or landed on a
- * stale catch_ip from an unrelated try block. Found via the differential fuzzer running
- * try/catch across nested function calls (seeds 1005/1016: native output diverged from
- * the VM with a plain wrong value, not a crash -- the stale catch_ip executed the wrong
- * catch body). 256 nesting levels (recursion depth included, since each active call
- * frame with its own live try consumes one slot) comfortably exceeds any real program's
- * native call-stack depth.
+/* ==================== Exception handling (manual stack unwind)
+ * ==================== _try_catch_sp/_catch_ip are a LIFO stack of handlers
+ * indexed by _try_depth, not a single slot -- a try nested inside a called
+ * function, or a second try later in the same function, must not clobber an
+ * outer try's still-active handler. With a single slot, the inner try's normal
+ * exit zeroed it out (or a third try overwrote it), so a later throw reachable
+ * from an outer try either crashed (rsp set to 0) or landed on a stale catch_ip
+ * from an unrelated try block. Found via the differential fuzzer running
+ * try/catch across nested function calls (seeds 1005/1016: native output
+ * diverged from the VM with a plain wrong value, not a crash -- the stale
+ * catch_ip executed the wrong catch body). 256 nesting levels (recursion depth
+ * included, since each active call frame with its own live try consumes one
+ * slot) comfortably exceeds any real program's native call-stack depth.
  */
 #define NOVA_MAX_TRY_DEPTH 256
 long long _try_catch_sp[NOVA_MAX_TRY_DEPTH];
@@ -2274,98 +2703,111 @@ long long _exception_val;
 
 /* ==================== String helper functions ==================== */
 SYSCALL int _char_code(const char *s, int i) {
-    if (!s) return 0;
-    return (unsigned char)s[i];
+  if (!s)
+    return 0;
+  return (unsigned char)s[i];
 }
 
 static char _str_empty[1] = {0};
 
 #define NOVA_STR_MAGIC 0x53545231U
 typedef struct {
-    uint32_t magic;
-    uint32_t len;
-    uint32_t cap;
-    uint32_t pad;
+  uint32_t magic;
+  uint32_t len;
+  uint32_t cap;
+  uint32_t pad;
 } NovaStrHeader;
 
 static inline int _is_dyn_str(const char *s, NovaStrHeader **out_hdr) {
-    if (!s || (uintptr_t)s < 4096u) return 0;
-    if (((uintptr_t)s & 0xFFF) < sizeof(NovaStrHeader)) return 0;
-    NovaStrHeader *h = (NovaStrHeader*)s - 1;
-    if (h->magic == NOVA_STR_MAGIC) {
-        if (h->len <= h->cap && h->cap < 0x7FFFFFFF && s[h->len] == '\0') {
-            *out_hdr = h;
-            return 1;
-        }
-    }
+  if (!s || (uintptr_t)s < 4096u)
     return 0;
+  if (((uintptr_t)s & 0xFFF) < sizeof(NovaStrHeader))
+    return 0;
+  NovaStrHeader *h = (NovaStrHeader *)s - 1;
+  if (h->magic == NOVA_STR_MAGIC) {
+    if (h->len <= h->cap && h->cap < 0x7FFFFFFF && s[h->len] == '\0') {
+      *out_hdr = h;
+      return 1;
+    }
+  }
+  return 0;
 }
 
 /* Fast amortized in-place string append for s = s + ... accumulator loops */
 SYSCALL char *_nova_str_append(char *a, const char *b) {
-    size_t lb = b ? strlen(b) : 0;
-    if (lb == 0) return a ? a : "";
-    NovaStrHeader *hdr = NULL;
-    if (_is_dyn_str(a, &hdr)) {
-        size_t la = hdr->len;
-        size_t new_len = la + lb;
-        if (new_len <= hdr->cap) {
-            memcpy(a + la, b, lb);
-            a[new_len] = '\0';
-            hdr->len = (uint32_t)new_len;
-            return a;
-        }
-        size_t new_cap = hdr->cap * 2;
-        if (new_cap < new_len + 32) new_cap = new_len + 32;
-        size_t total = sizeof(NovaStrHeader) + new_cap + 1;
-#if defined(_WIN32)
-        NovaStrHeader *new_hdr = (NovaStrHeader*)STR_PFX(realloc)(hdr, (unsigned int)total);
-#else
-        NovaStrHeader *new_hdr = (NovaStrHeader*)realloc(hdr, total);
-#endif
-        if (!new_hdr) return a;
-        char *data = (char*)(new_hdr + 1);
-        memcpy(data + la, b, lb);
-        data[new_len] = '\0';
-        new_hdr->len = (uint32_t)new_len;
-        new_hdr->cap = (uint32_t)new_cap;
-        return data;
-    }
-    size_t la = a ? strlen(a) : 0;
+  size_t lb = b ? strlen(b) : 0;
+  if (lb == 0)
+    return a ? a : "";
+  NovaStrHeader *hdr = NULL;
+  if (_is_dyn_str(a, &hdr)) {
+    size_t la = hdr->len;
     size_t new_len = la + lb;
-    size_t new_cap = (new_len < 32 ? 64 : new_len * 2);
+    if (new_len <= hdr->cap) {
+      memcpy(a + la, b, lb);
+      a[new_len] = '\0';
+      hdr->len = (uint32_t)new_len;
+      return a;
+    }
+    size_t new_cap = hdr->cap * 2;
+    if (new_cap < new_len + 32)
+      new_cap = new_len + 32;
     size_t total = sizeof(NovaStrHeader) + new_cap + 1;
 #if defined(_WIN32)
-    NovaStrHeader *new_hdr = (NovaStrHeader*)_nova_alloc_raw((unsigned int)total);
+    NovaStrHeader *new_hdr =
+        (NovaStrHeader *)STR_PFX(realloc)(hdr, (unsigned int)total);
 #else
-    NovaStrHeader *new_hdr = (NovaStrHeader*)malloc(total);
+    NovaStrHeader *new_hdr = (NovaStrHeader *)realloc(hdr, total);
 #endif
-    if (!new_hdr) return a;
-    new_hdr->magic = NOVA_STR_MAGIC;
-    new_hdr->len = (uint32_t)new_len;
-    new_hdr->cap = (uint32_t)new_cap;
-    new_hdr->pad = 0;
-    char *data = (char*)(new_hdr + 1);
-    if (la) memcpy(data, a, la);
+    if (!new_hdr)
+      return a;
+    char *data = (char *)(new_hdr + 1);
     memcpy(data + la, b, lb);
     data[new_len] = '\0';
+    new_hdr->len = (uint32_t)new_len;
+    new_hdr->cap = (uint32_t)new_cap;
     return data;
+  }
+  size_t la = a ? strlen(a) : 0;
+  size_t new_len = la + lb;
+  size_t new_cap = (new_len < 32 ? 64 : new_len * 2);
+  size_t total = sizeof(NovaStrHeader) + new_cap + 1;
+#if defined(_WIN32)
+  NovaStrHeader *new_hdr =
+      (NovaStrHeader *)_nova_alloc_raw((unsigned int)total);
+#else
+  NovaStrHeader *new_hdr = (NovaStrHeader *)malloc(total);
+#endif
+  if (!new_hdr)
+    return a;
+  new_hdr->magic = NOVA_STR_MAGIC;
+  new_hdr->len = (uint32_t)new_len;
+  new_hdr->cap = (uint32_t)new_cap;
+  new_hdr->pad = 0;
+  char *data = (char *)(new_hdr + 1);
+  if (la)
+    memcpy(data, a, la);
+  memcpy(data + la, b, lb);
+  data[new_len] = '\0';
+  return data;
 }
 
 /* Standard string concatenation */
 SYSCALL char *_nova_str_concat(const char *a, const char *b) {
-    size_t la = a ? strlen(a) : 0;
-    size_t lb = b ? strlen(b) : 0;
+  size_t la = a ? strlen(a) : 0;
+  size_t lb = b ? strlen(b) : 0;
 #if defined(_WIN32)
-    char *res = (char*)_nova_alloc_raw((unsigned int)(la + lb + 1));
+  char *res = (char *)_nova_alloc_raw((unsigned int)(la + lb + 1));
 #else
-    char *res = (char*)malloc(la + lb + 1);
+  char *res = (char *)malloc(la + lb + 1);
 #endif
-    if (!res) return 0;
-    if (la) memcpy(res, a, la);
-    if (lb) memcpy(res + la, b, lb);
-    res[la + lb] = '\0';
-    return res;
+  if (!res)
+    return 0;
+  if (la)
+    memcpy(res, a, la);
+  if (lb)
+    memcpy(res + la, b, lb);
+  res[la + lb] = '\0';
+  return res;
 }
 
 /* ==================== JSON string decoding ====================
@@ -2374,432 +2816,514 @@ SYSCALL char *_nova_str_concat(const char *a, const char *b) {
  * decodes a JSON string body in one pass and one allocation. The input is the
  * raw, still-escaped text between the quotes. */
 static int _nova_json_hex4(const char *s, int i) {
-    int value = 0;
-    int k;
-    for (k = 0; k < 4; k++) {
-        char h = s[i + k];
-        int digit;
-        if (h >= '0' && h <= '9') digit = h - '0';
-        else if (h >= 'a' && h <= 'f') digit = h - 'a' + 10;
-        else if (h >= 'A' && h <= 'F') digit = h - 'A' + 10;
-        else return -1;
-        value = value * 16 + digit;
-    }
-    return value;
+  int value = 0;
+  int k;
+  for (k = 0; k < 4; k++) {
+    char h = s[i + k];
+    int digit;
+    if (h >= '0' && h <= '9')
+      digit = h - '0';
+    else if (h >= 'a' && h <= 'f')
+      digit = h - 'a' + 10;
+    else if (h >= 'A' && h <= 'F')
+      digit = h - 'A' + 10;
+    else
+      return -1;
+    value = value * 16 + digit;
+  }
+  return value;
 }
 
 static void _nova_json_utf8(char *out, size_t *used, unsigned int cp) {
-    if (cp <= 0x7F) {
-        out[(*used)++] = (char)cp;
-    } else if (cp <= 0x7FF) {
-        out[(*used)++] = (char)(0xC0 | (cp >> 6));
-        out[(*used)++] = (char)(0x80 | (cp & 0x3F));
-    } else if (cp <= 0xFFFF) {
-        /* Unpaired surrogates are not valid UTF-8; use U+FFFD. */
-        if (cp >= 0xD800 && cp <= 0xDFFF) cp = 0xFFFD;
-        out[(*used)++] = (char)(0xE0 | (cp >> 12));
-        out[(*used)++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-        out[(*used)++] = (char)(0x80 | (cp & 0x3F));
-    } else {
-        out[(*used)++] = (char)(0xF0 | (cp >> 18));
-        out[(*used)++] = (char)(0x80 | ((cp >> 12) & 0x3F));
-        out[(*used)++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-        out[(*used)++] = (char)(0x80 | (cp & 0x3F));
-    }
+  if (cp <= 0x7F) {
+    out[(*used)++] = (char)cp;
+  } else if (cp <= 0x7FF) {
+    out[(*used)++] = (char)(0xC0 | (cp >> 6));
+    out[(*used)++] = (char)(0x80 | (cp & 0x3F));
+  } else if (cp <= 0xFFFF) {
+    /* Unpaired surrogates are not valid UTF-8; use U+FFFD. */
+    if (cp >= 0xD800 && cp <= 0xDFFF)
+      cp = 0xFFFD;
+    out[(*used)++] = (char)(0xE0 | (cp >> 12));
+    out[(*used)++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    out[(*used)++] = (char)(0x80 | (cp & 0x3F));
+  } else {
+    out[(*used)++] = (char)(0xF0 | (cp >> 18));
+    out[(*used)++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+    out[(*used)++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    out[(*used)++] = (char)(0x80 | (cp & 0x3F));
+  }
 }
 
 SYSCALL char *_nova_json_decode_string(const char *s, int start, int end) {
-    int i = start;
-    size_t used = 0;
-    size_t cap;
-    char *out;
-    if (!s) return "";
-    if (end < start) end = start;
-    cap = (size_t)(end - start) + 1;
+  int i = start;
+  size_t used = 0;
+  size_t cap;
+  char *out;
+  if (!s)
+    return "";
+  if (end < start)
+    end = start;
+  cap = (size_t)(end - start) + 1;
 #if defined(_WIN32)
-    out = (char*)_nova_alloc_raw((unsigned int)cap);
+  out = (char *)_nova_alloc_raw((unsigned int)cap);
 #else
-    out = (char*)malloc(cap);
+  out = (char *)malloc(cap);
 #endif
-    if (!out) return "";
-    while (i < end) {
-        char ch = s[i];
-        if (ch == '\\' && i + 1 < end) {
-            char esc = s[i + 1];
-            i += 2;
-            if (esc == 'n') out[used++] = '\n';
-            else if (esc == 't') out[used++] = '\t';
-            else if (esc == 'r') out[used++] = '\r';
-            else if (esc == 'b') out[used++] = '\b';
-            else if (esc == 'f') out[used++] = '\f';
-            else if (esc == 'u' && i + 4 <= end) {
-                int cp = _nova_json_hex4(s, i);
-                i += 4;
-                if (cp < 0) {
-                    out[used++] = '?';
-                } else {
-                    if (cp >= 0xD800 && cp <= 0xDBFF &&
-                        i + 6 <= end && s[i] == '\\' && s[i + 1] == 'u') {
-                        int low = _nova_json_hex4(s, i + 2);
-                        if (low >= 0xDC00 && low <= 0xDFFF) {
-                            cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
-                            i += 6;
-                        }
-                    }
-                    _nova_json_utf8(out, &used, (unsigned int)cp);
-                }
-            } else {
-                /* \" \\ \/ and unrecognised escapes decode to the literal byte. */
-                out[used++] = esc;
-            }
+  if (!out)
+    return "";
+  while (i < end) {
+    char ch = s[i];
+    if (ch == '\\' && i + 1 < end) {
+      char esc = s[i + 1];
+      i += 2;
+      if (esc == 'n')
+        out[used++] = '\n';
+      else if (esc == 't')
+        out[used++] = '\t';
+      else if (esc == 'r')
+        out[used++] = '\r';
+      else if (esc == 'b')
+        out[used++] = '\b';
+      else if (esc == 'f')
+        out[used++] = '\f';
+      else if (esc == 'u' && i + 4 <= end) {
+        int cp = _nova_json_hex4(s, i);
+        i += 4;
+        if (cp < 0) {
+          out[used++] = '?';
         } else {
-            out[used++] = ch;
-            i++;
+          if (cp >= 0xD800 && cp <= 0xDBFF && i + 6 <= end && s[i] == '\\' &&
+              s[i + 1] == 'u') {
+            int low = _nova_json_hex4(s, i + 2);
+            if (low >= 0xDC00 && low <= 0xDFFF) {
+              cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+              i += 6;
+            }
+          }
+          _nova_json_utf8(out, &used, (unsigned int)cp);
         }
+      } else {
+        /* \" \\ \/ and unrecognised escapes decode to the literal byte. */
+        out[used++] = esc;
+      }
+    } else {
+      out[used++] = ch;
+      i++;
     }
-    out[used] = '\0';
-    return out;
+  }
+  out[used] = '\0';
+  return out;
 }
 
 SYSCALL char *_str_sub(const char *s, int start, int end) {
-    if (!s) return 0;
-    int actual_len = (int)strlen(s);
-    if (start < 0) start = 0;
-    if (end > actual_len) end = actual_len;
-    int len = end - start;
-    if (len < 0) len = 0;
-    if (len == 0) {
-        return _str_empty;
-    }
-    if (len == actual_len) {
-        return (char*)s;
-    }
+  if (!s)
+    return 0;
+  int actual_len = (int)strlen(s);
+  if (start < 0)
+    start = 0;
+  if (end > actual_len)
+    end = actual_len;
+  int len = end - start;
+  if (len < 0)
+    len = 0;
+  if (len == 0) {
+    return _str_empty;
+  }
+  if (len == actual_len) {
+    return (char *)s;
+  }
 #if defined(_WIN32)
-    char *res = (char*)_nova_alloc_raw((unsigned int)(len + 1));
+  char *res = (char *)_nova_alloc_raw((unsigned int)(len + 1));
 #else
-    char *res = (char*)malloc(len + 1);
+  char *res = (char *)malloc(len + 1);
 #endif
-    if (!res) return 0;
-    memcpy(res, s + start, (size_t)len);
-    res[len] = '\0';
-    return res;
+  if (!res)
+    return 0;
+  memcpy(res, s + start, (size_t)len);
+  res[len] = '\0';
+  return res;
 }
 
 /* ==================== List slice function ==================== */
 /* List struct: [0..3]=len(int), [4..7]=cap_bytes(int), [8..15]=data(void*)
  * Capacity at offset 4 is in BYTES to match the codegen's append handler. */
 SYSCALL void *_slice_list(void *list, int start, int end) {
-    if (!list) return 0;
-    int len = *(int*)list;
-    if (end > len) end = len;
-    if (start < 0) start = 0;
-    if (start > len) start = len;
-    int new_len = end - start;
-    if (new_len < 0) new_len = 0;
-    int cap_bytes = (new_len ? new_len : 1) * (int)sizeof(intptr_t);
+  if (!list)
+    return 0;
+  int len = *(int *)list;
+  if (end > len)
+    end = len;
+  if (start < 0)
+    start = 0;
+  if (start > len)
+    start = len;
+  int new_len = end - start;
+  if (new_len < 0)
+    new_len = 0;
+  int cap_bytes = (new_len ? new_len : 1) * (int)sizeof(intptr_t);
 #if defined(_WIN32)
-    void *result = STR_PFX(malloc)(16);
+  void *result = STR_PFX(malloc)(16);
 #else
-    void *result = malloc(16);
+  void *result = malloc(16);
 #endif
-    if (!result) return 0;
+  if (!result)
+    return 0;
 #if defined(_WIN32)
-    void *new_data = STR_PFX(malloc)((size_t)cap_bytes);
+  void *new_data = STR_PFX(malloc)((size_t)cap_bytes);
 #else
-    void *new_data = malloc((size_t)cap_bytes);
+  void *new_data = malloc((size_t)cap_bytes);
 #endif
-    if (!new_data) {
+  if (!new_data) {
 #if defined(_WIN32)
-        STR_PFX(free)(result);
+    STR_PFX(free)(result);
 #else
-        free(result);
+    free(result);
 #endif
-        return 0;
-    }
-    *(int*)result = new_len;
-    *(int*)((char*)result + 4) = cap_bytes;
-    *(intptr_t*)((char*)result + 8) = (intptr_t)new_data;
-    intptr_t *src = (intptr_t*)(*(intptr_t*)((char*)list + 8));
-    intptr_t *dst = (intptr_t*)new_data;
-    for (int i = 0; i < new_len; i++) {
-        dst[i] = src[start + i];
-    }
-    return result;
+    return 0;
+  }
+  *(int *)result = new_len;
+  *(int *)((char *)result + 4) = cap_bytes;
+  *(intptr_t *)((char *)result + 8) = (intptr_t)new_data;
+  intptr_t *src = (intptr_t *)(*(intptr_t *)((char *)list + 8));
+  intptr_t *dst = (intptr_t *)new_data;
+  for (int i = 0; i < new_len; i++) {
+    dst[i] = src[start + i];
+  }
+  return result;
 }
 
 /* ==================== Zero-copy Slice Helpers ==================== */
-SYSCALL intptr_t _slice_from_str(const char *s) {
-    return (intptr_t)s;
-}
+SYSCALL intptr_t _slice_from_str(const char *s) { return (intptr_t)s; }
 
 SYSCALL intptr_t _slice_from_list_data(void *list) {
-    if (!list) return 0;
-    return *(intptr_t*)((char*)list + 8);
+  if (!list)
+    return 0;
+  return *(intptr_t *)((char *)list + 8);
 }
 
 SYSCALL int _slice_byte_at(const char *ptr, int len, int idx) {
-    if (!ptr || idx < 0 || idx >= len) return -1;
-    return (unsigned char)ptr[idx];
+  if (!ptr || idx < 0 || idx >= len)
+    return -1;
+  return (unsigned char)ptr[idx];
 }
 
 SYSCALL int _slice_eq(const char *p1, int l1, const char *p2, int l2) {
-    if (l1 != l2) return 0;
-    if (l1 == 0) return 1;
-    if (p1 == p2) return 1;
-    if (!p1 || !p2) return 0;
-    for (int i = 0; i < l1; i++) {
-        if (p1[i] != p2[i]) return 0;
-    }
+  if (l1 != l2)
+    return 0;
+  if (l1 == 0)
     return 1;
+  if (p1 == p2)
+    return 1;
+  if (!p1 || !p2)
+    return 0;
+  for (int i = 0; i < l1; i++) {
+    if (p1[i] != p2[i])
+      return 0;
+  }
+  return 1;
 }
 
 SYSCALL int _slice_cmp(const char *p1, int l1, const char *p2, int l2) {
-    if (!p1 && !p2) return 0;
-    if (!p1) return -1;
-    if (!p2) return 1;
-    int min_len = (l1 < l2) ? l1 : l2;
-    for (int i = 0; i < min_len; i++) {
-        unsigned char c1 = (unsigned char)p1[i];
-        unsigned char c2 = (unsigned char)p2[i];
-        if (c1 < c2) return -1;
-        if (c1 > c2) return 1;
-    }
-    if (l1 < l2) return -1;
-    if (l1 > l2) return 1;
+  if (!p1 && !p2)
     return 0;
+  if (!p1)
+    return -1;
+  if (!p2)
+    return 1;
+  int min_len = (l1 < l2) ? l1 : l2;
+  for (int i = 0; i < min_len; i++) {
+    unsigned char c1 = (unsigned char)p1[i];
+    unsigned char c2 = (unsigned char)p2[i];
+    if (c1 < c2)
+      return -1;
+    if (c1 > c2)
+      return 1;
+  }
+  if (l1 < l2)
+    return -1;
+  if (l1 > l2)
+    return 1;
+  return 0;
 }
 
-SYSCALL int _slice_find(const char *haystack, int hlen, const char *needle, int nlen) {
-    if (!haystack || !needle || nlen <= 0) return -1;
-    if (nlen > hlen) return -1;
-    int max_i = hlen - nlen;
-    for (int i = 0; i <= max_i; i++) {
-        int match = 1;
-        for (int j = 0; j < nlen; j++) {
-            if (haystack[i + j] != needle[j]) {
-                match = 0;
-                break;
-            }
-        }
-        if (match) return i;
-    }
+SYSCALL int _slice_find(const char *haystack, int hlen, const char *needle,
+                        int nlen) {
+  if (!haystack || !needle || nlen <= 0)
     return -1;
+  if (nlen > hlen)
+    return -1;
+  int max_i = hlen - nlen;
+  for (int i = 0; i <= max_i; i++) {
+    int match = 1;
+    for (int j = 0; j < nlen; j++) {
+      if (haystack[i + j] != needle[j]) {
+        match = 0;
+        break;
+      }
+    }
+    if (match)
+      return i;
+  }
+  return -1;
 }
 
 SYSCALL char *_slice_to_str(const char *ptr, int len) {
-    if (!ptr || len <= 0) return _str_empty;
+  if (!ptr || len <= 0)
+    return _str_empty;
 #if defined(_WIN32)
-    char *res = (char*)STR_PFX(malloc)(len + 1);
+  char *res = (char *)STR_PFX(malloc)(len + 1);
 #else
-    char *res = (char*)malloc(len + 1);
+  char *res = (char *)malloc(len + 1);
 #endif
-    if (!res) return 0;
-    for (int i = 0; i < len; i++) {
-        res[i] = ptr[i];
-    }
-    res[len] = '\0';
-    return res;
+  if (!res)
+    return 0;
+  for (int i = 0; i < len; i++) {
+    res[i] = ptr[i];
+  }
+  res[len] = '\0';
+  return res;
 }
 
 /* ==================== Advanced C FFI Helpers ==================== */
 SYSCALL intptr_t _ffi_open(const char *name) {
-    if (!name || !*name) return 0;
+  if (!name || !*name)
+    return 0;
 #if defined(_WIN32)
-    HMODULE h = LoadLibraryA(name);
-    return (intptr_t)h;
+  HMODULE h = LoadLibraryA(name);
+  return (intptr_t)h;
 #else
-    void *h = dlopen(name, RTLD_LAZY | RTLD_GLOBAL);
-    return (intptr_t)h;
+  void *h = dlopen(name, RTLD_LAZY | RTLD_GLOBAL);
+  return (intptr_t)h;
 #endif
 }
 
 SYSCALL intptr_t _ffi_sym(intptr_t handle, const char *name) {
-    if (!handle || !name) return 0;
+  if (!handle || !name)
+    return 0;
 #if defined(_WIN32)
-    FARPROC p = GetProcAddress((HMODULE)handle, name);
-    return (intptr_t)p;
+  FARPROC p = GetProcAddress((HMODULE)handle, name);
+  return (intptr_t)p;
 #else
-    void *p = dlsym((void*)handle, name);
-    return (intptr_t)p;
+  void *p = dlsym((void *)handle, name);
+  return (intptr_t)p;
 #endif
 }
 
 SYSCALL int _ffi_close(intptr_t handle) {
-    if (!handle) return 0;
+  if (!handle)
+    return 0;
 #if defined(_WIN32)
-    return FreeLibrary((HMODULE)handle) ? 1 : 0;
+  return FreeLibrary((HMODULE)handle) ? 1 : 0;
 #else
-    return dlclose((void*)handle) == 0 ? 1 : 0;
+  return dlclose((void *)handle) == 0 ? 1 : 0;
 #endif
 }
 
 SYSCALL intptr_t _ffi_call0(intptr_t fn) {
-    if (!fn) return 0;
-    typedef intptr_t (*c_fn0)(void);
-    return ((c_fn0)fn)();
+  if (!fn)
+    return 0;
+  typedef intptr_t (*c_fn0)(void);
+  return ((c_fn0)fn)();
 }
 
 SYSCALL intptr_t _ffi_call1(intptr_t fn, intptr_t a1) {
-    if (!fn) return 0;
-    typedef intptr_t (*c_fn1)(intptr_t);
-    return ((c_fn1)fn)(a1);
+  if (!fn)
+    return 0;
+  typedef intptr_t (*c_fn1)(intptr_t);
+  return ((c_fn1)fn)(a1);
 }
 
 SYSCALL intptr_t _ffi_call2(intptr_t fn, intptr_t a1, intptr_t a2) {
-    if (!fn) return 0;
-    typedef intptr_t (*c_fn2)(intptr_t, intptr_t);
-    return ((c_fn2)fn)(a1, a2);
+  if (!fn)
+    return 0;
+  typedef intptr_t (*c_fn2)(intptr_t, intptr_t);
+  return ((c_fn2)fn)(a1, a2);
 }
 
-SYSCALL intptr_t _ffi_call3(intptr_t fn, intptr_t a1, intptr_t a2, intptr_t a3) {
-    if (!fn) return 0;
-    typedef intptr_t (*c_fn3)(intptr_t, intptr_t, intptr_t);
-    return ((c_fn3)fn)(a1, a2, a3);
+SYSCALL intptr_t _ffi_call3(intptr_t fn, intptr_t a1, intptr_t a2,
+                            intptr_t a3) {
+  if (!fn)
+    return 0;
+  typedef intptr_t (*c_fn3)(intptr_t, intptr_t, intptr_t);
+  return ((c_fn3)fn)(a1, a2, a3);
 }
 
-SYSCALL intptr_t _ffi_call4(intptr_t fn, intptr_t a1, intptr_t a2, intptr_t a3, intptr_t a4) {
-    if (!fn) return 0;
-    typedef intptr_t (*c_fn4)(intptr_t, intptr_t, intptr_t, intptr_t);
-    return ((c_fn4)fn)(a1, a2, a3, a4);
+SYSCALL intptr_t _ffi_call4(intptr_t fn, intptr_t a1, intptr_t a2, intptr_t a3,
+                            intptr_t a4) {
+  if (!fn)
+    return 0;
+  typedef intptr_t (*c_fn4)(intptr_t, intptr_t, intptr_t, intptr_t);
+  return ((c_fn4)fn)(a1, a2, a3, a4);
 }
 
-SYSCALL intptr_t _ffi_call5(intptr_t fn, intptr_t a1, intptr_t a2, intptr_t a3, intptr_t a4, intptr_t a5) {
-    if (!fn) return 0;
-    typedef intptr_t (*c_fn5)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t);
-    return ((c_fn5)fn)(a1, a2, a3, a4, a5);
+SYSCALL intptr_t _ffi_call5(intptr_t fn, intptr_t a1, intptr_t a2, intptr_t a3,
+                            intptr_t a4, intptr_t a5) {
+  if (!fn)
+    return 0;
+  typedef intptr_t (*c_fn5)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t);
+  return ((c_fn5)fn)(a1, a2, a3, a4, a5);
 }
 
-SYSCALL intptr_t _ffi_call6(intptr_t fn, intptr_t a1, intptr_t a2, intptr_t a3, intptr_t a4, intptr_t a5, intptr_t a6) {
-    if (!fn) return 0;
-    typedef intptr_t (*c_fn6)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t);
-    return ((c_fn6)fn)(a1, a2, a3, a4, a5, a6);
+SYSCALL intptr_t _ffi_call6(intptr_t fn, intptr_t a1, intptr_t a2, intptr_t a3,
+                            intptr_t a4, intptr_t a5, intptr_t a6) {
+  if (!fn)
+    return 0;
+  typedef intptr_t (*c_fn6)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t,
+                            intptr_t);
+  return ((c_fn6)fn)(a1, a2, a3, a4, a5, a6);
 }
 
 /* ==================== List helpers ==================== */
 SYSCALL void _list_insert(void *list, long long idx, long long val) {
-    if (!list) return;
-    int count = *(int*)list;
-    int cap_bytes = *(int*)((char*)list + 4);
-    void *data = *(void**)((char*)list + 8);
-    if (idx < 0) idx = 0;
-    if (idx > count) idx = count;
-    int need = (count + 1) * (int)sizeof(intptr_t);
-    if (need > cap_bytes) {
-        int new_cap = cap_bytes * 2;
-        if (new_cap < need) new_cap = need;
+  if (!list)
+    return;
+  int count = *(int *)list;
+  int cap_bytes = *(int *)((char *)list + 4);
+  void *data = *(void **)((char *)list + 8);
+  if (idx < 0)
+    idx = 0;
+  if (idx > count)
+    idx = count;
+  int need = (count + 1) * (int)sizeof(intptr_t);
+  if (need > cap_bytes) {
+    int new_cap = cap_bytes * 2;
+    if (new_cap < need)
+      new_cap = need;
 #if defined(_WIN32)
-        void *nd = STR_PFX(realloc)(data, (unsigned int)new_cap);
+    void *nd = STR_PFX(realloc)(data, (unsigned int)new_cap);
 #else
-        void *nd = realloc(data, (size_t)new_cap);
+    void *nd = realloc(data, (size_t)new_cap);
 #endif
-        if (!nd) return;
-        data = nd;
-        *(void**)((char*)list + 8) = data;
-        *(int*)((char*)list + 4) = new_cap;
-    }
-    intptr_t *arr = (intptr_t*)data;
-    for (int i = count; i > idx; i--) arr[i] = arr[i - 1];
-    arr[idx] = (intptr_t)val;
-    *(int*)list = count + 1;
+    if (!nd)
+      return;
+    data = nd;
+    *(void **)((char *)list + 8) = data;
+    *(int *)((char *)list + 4) = new_cap;
+  }
+  intptr_t *arr = (intptr_t *)data;
+  for (int i = count; i > idx; i--)
+    arr[i] = arr[i - 1];
+  arr[idx] = (intptr_t)val;
+  *(int *)list = count + 1;
 }
 
 SYSCALL void _list_clear(void *list) {
-    if (!list) return;
-    *(int*)list = 0;
+  if (!list)
+    return;
+  *(int *)list = 0;
 }
 
 SYSCALL void _sys_awrite_c(long long fd, const char *str) {
-    _sys_write_c(fd, str);
+  _sys_write_c(fd, str);
 }
 
 /* ==================== Built-in math and file functions ==================== */
-SYSCALL int _abs(int n) {
-    return n < 0 ? -n : n;
-}
+SYSCALL int _abs(int n) { return n < 0 ? -n : n; }
 
-SYSCALL int _min(int a, int b) {
-    return a < b ? a : b;
-}
+SYSCALL int _min(int a, int b) { return a < b ? a : b; }
 
-SYSCALL int _max(int a, int b) {
-    return a > b ? a : b;
-}
+SYSCALL int _max(int a, int b) { return a > b ? a : b; }
 
 SYSCALL int _file_exists(const char *path) {
 #if defined(_WIN32)
-    DWORD attrs = GetFileAttributesA(path);
-    return (attrs != INVALID_FILE_ATTRIBUTES) ? 1 : 0;
+  DWORD attrs = GetFileAttributesA(path);
+  return (attrs != INVALID_FILE_ATTRIBUTES) ? 1 : 0;
 #else
-    FILE *f = fopen(path, "r");
-    if (f) { fclose(f); return 1; }
-    return 0;
+  FILE *f = fopen(path, "r");
+  if (f) {
+    fclose(f);
+    return 1;
+  }
+  return 0;
 #endif
 }
 
 SYSCALL int _file_size(const char *path) {
 #if defined(_WIN32)
-    HANDLE h = CreateFileA(path, 0x80000000, 0, 0, 3, 0x80, 0);
-    if (h == INVALID_HANDLE_VALUE) return 0;
-    DWORD sz = GetFileSize(h, NULL);
-    CloseHandle(h);
-    return (int)sz;
+  HANDLE h = CreateFileA(path, 0x80000000, 0, 0, 3, 0x80, 0);
+  if (h == INVALID_HANDLE_VALUE)
+    return 0;
+  DWORD sz = GetFileSize(h, NULL);
+  CloseHandle(h);
+  return (int)sz;
 #else
-    FILE *f = fopen(path, "rb");
-    if (!f) return 0;
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fclose(f);
-    return (int)sz;
+  FILE *f = fopen(path, "rb");
+  if (!f)
+    return 0;
+  fseek(f, 0, SEEK_END);
+  long sz = ftell(f);
+  fclose(f);
+  return (int)sz;
 #endif
 }
 
 SYSCALL const char *_file_type(const char *path) {
 #if defined(_WIN32)
-    DWORD attrs = GetFileAttributesA(path);
-    if (attrs == INVALID_FILE_ATTRIBUTES) return "";
-    if (attrs & FILE_ATTRIBUTE_DIRECTORY) return "dir";
-    return "file";
+  DWORD attrs = GetFileAttributesA(path);
+  if (attrs == INVALID_FILE_ATTRIBUTES)
+    return "";
+  if (attrs & FILE_ATTRIBUTE_DIRECTORY)
+    return "dir";
+  return "file";
 #else
-    struct stat st;
-    if (stat(path, &st) != 0) return "";
-    if (S_ISDIR(st.st_mode)) return "dir";
-    return "file";
+  struct stat st;
+  if (stat(path, &st) != 0)
+    return "";
+  if (S_ISDIR(st.st_mode))
+    return "dir";
+  return "file";
 #endif
 }
 
 SYSCALL char *_now(void) {
 #if defined(_WIN32)
-    SYSTEMTIME st;
-    GetLocalTime(&st);
+  SYSTEMTIME st;
+  GetLocalTime(&st);
 #else
-    time_t t = time(NULL);
-    struct tm *lt = localtime(&t);
+  time_t t = time(NULL);
+  struct tm *lt = localtime(&t);
 #endif
-    char *buf;
+  char *buf;
 #if defined(_WIN32)
-    buf = (char*)STR_PFX(malloc)(32);
+  buf = (char *)STR_PFX(malloc)(32);
 #else
-    buf = (char*)malloc(32);
+  buf = (char *)malloc(32);
 #endif
-    if (!buf) return 0;
+  if (!buf)
+    return 0;
 #if defined(_WIN32)
-    int pos = 0, v;
-    v = st.wYear;   buf[pos++] = '0' + v / 1000; buf[pos++] = '0' + (v / 100) % 10; buf[pos++] = '0' + (v / 10) % 10; buf[pos++] = '0' + v % 10;
-    buf[pos++] = '-';
-    v = st.wMonth;  buf[pos++] = '0' + v / 10; buf[pos++] = '0' + v % 10;
-    buf[pos++] = '-';
-    v = st.wDay;    buf[pos++] = '0' + v / 10; buf[pos++] = '0' + v % 10;
-    buf[pos++] = ' ';
-    v = st.wHour;   buf[pos++] = '0' + v / 10; buf[pos++] = '0' + v % 10;
-    buf[pos++] = ':';
-    v = st.wMinute; buf[pos++] = '0' + v / 10; buf[pos++] = '0' + v % 10;
-    buf[pos++] = ':';
-    v = st.wSecond; buf[pos++] = '0' + v / 10; buf[pos++] = '0' + v % 10;
-    buf[pos] = '\0';
+  int pos = 0, v;
+  v = st.wYear;
+  buf[pos++] = '0' + v / 1000;
+  buf[pos++] = '0' + (v / 100) % 10;
+  buf[pos++] = '0' + (v / 10) % 10;
+  buf[pos++] = '0' + v % 10;
+  buf[pos++] = '-';
+  v = st.wMonth;
+  buf[pos++] = '0' + v / 10;
+  buf[pos++] = '0' + v % 10;
+  buf[pos++] = '-';
+  v = st.wDay;
+  buf[pos++] = '0' + v / 10;
+  buf[pos++] = '0' + v % 10;
+  buf[pos++] = ' ';
+  v = st.wHour;
+  buf[pos++] = '0' + v / 10;
+  buf[pos++] = '0' + v % 10;
+  buf[pos++] = ':';
+  v = st.wMinute;
+  buf[pos++] = '0' + v / 10;
+  buf[pos++] = '0' + v % 10;
+  buf[pos++] = ':';
+  v = st.wSecond;
+  buf[pos++] = '0' + v / 10;
+  buf[pos++] = '0' + v % 10;
+  buf[pos] = '\0';
 #else
-    strftime(buf, 32, "%Y-%m-%d %H:%M:%S", lt);
+  strftime(buf, 32, "%Y-%m-%d %H:%M:%S", lt);
 #endif
-    return buf;
+  return buf;
 }
 
 /* ==================== PRNG (xorshift64) ==================== */
@@ -2807,45 +3331,53 @@ static unsigned long long _rng_state = 0;
 static int _rng_seeded = 0;
 
 static unsigned long long _rng_next(void) {
-    if (!_rng_seeded) {
-        _rng_state = (unsigned long long)_sys_get_tick_count_c();
-        if (_rng_state == 0) _rng_state = 88172645463325252ULL;
-        _rng_seeded = 1;
-    }
-    unsigned long long x = _rng_state;
-    x ^= x >> 12;
-    x ^= x << 25;
-    x ^= x >> 27;
-    _rng_state = x;
-    return x * 2685821657736338717ULL;
+  if (!_rng_seeded) {
+    _rng_state = (unsigned long long)_sys_get_tick_count_c();
+    if (_rng_state == 0)
+      _rng_state = 88172645463325252ULL;
+    _rng_seeded = 1;
+  }
+  unsigned long long x = _rng_state;
+  x ^= x >> 12;
+  x ^= x << 25;
+  x ^= x >> 27;
+  _rng_state = x;
+  return x * 2685821657736338717ULL;
 }
 
-SYSCALL int _random(void) {
-    return (int)(_rng_next() & 0x7fffffff);
-}
+SYSCALL int _random(void) { return (int)(_rng_next() & 0x7fffffff); }
 
 SYSCALL int _random_range(int lo, int hi) {
-    if (hi < lo) { int t = lo; lo = hi; hi = t; }
-    unsigned long long r = _rng_next();
-    unsigned long long range = (unsigned long long)(hi - lo + 1);
-    return lo + (int)(r % range);
+  if (hi < lo) {
+    int t = lo;
+    lo = hi;
+    hi = t;
+  }
+  unsigned long long r = _rng_next();
+  unsigned long long range = (unsigned long long)(hi - lo + 1);
+  return lo + (int)(r % range);
 }
 
 SYSCALL void _chacha20_init(int seed1, int seed2) {
-    _rng_state = ((unsigned long long)(unsigned int)seed1 << 32) | (unsigned int)seed2;
-    if (_rng_state == 0) _rng_state = 88172645463325252ULL;
-    _rng_seeded = 1;
+  _rng_state =
+      ((unsigned long long)(unsigned int)seed1 << 32) | (unsigned int)seed2;
+  if (_rng_state == 0)
+    _rng_state = 88172645463325252ULL;
+  _rng_seeded = 1;
 }
 
 SYSCALL void *_api_open_internal(const char *url) {
-    (void)url;
-    return 0;
+  (void)url;
+  return 0;
 }
 
-/* _call(name, args, num_args) — dynamic dispatch stub; native codegen never emits this */
+/* _call(name, args, num_args) — dynamic dispatch stub; native codegen never
+ * emits this */
 SYSCALL long long _call(const char *name, long long *args, long long num_args) {
-    (void)name; (void)args; (void)num_args;
-    return 0;
+  (void)name;
+  (void)args;
+  (void)num_args;
+  return 0;
 }
 
 /* ========================================================================= */
@@ -2855,57 +3387,63 @@ SYSCALL long long _call(const char *name, long long *args, long long num_args) {
 
 /* DPI-aware rendering support */
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
-#define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((HANDLE)-4)
+#define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((HANDLE) - 4)
 #endif
-typedef BOOL (WINAPI *PFN_SetProcessDpiAwarenessContext)(HANDLE);
-typedef UINT (WINAPI *PFN_GetDpiForWindow)(HWND);
+typedef BOOL(WINAPI *PFN_SetProcessDpiAwarenessContext)(HANDLE);
+typedef UINT(WINAPI *PFN_GetDpiForWindow)(HWND);
 
-static HWND   g_gui_hwnd          = NULL;
-static HDC    g_gui_mem_dc        = NULL;
-static HBITMAP g_gui_mem_bm       = NULL;
-static HBITMAP g_gui_old_bm       = NULL;
-static int    g_gui_win_w         = 0;  /* logical width  (Nova coordinate space) */
-static int    g_gui_win_h         = 0;  /* logical height (Nova coordinate space) */
-static int    g_gui_phys_w        = 0;  /* physical backbuffer width  (DPI-scaled) */
-static int    g_gui_phys_h        = 0;  /* physical backbuffer height (DPI-scaled) */
-static float  g_gui_dpi_scale     = 1.0f; /* physical / logical pixel ratio        */
-static int    g_gui_mouse_x       = 0;
-static int    g_gui_mouse_y       = 0;
-static int    g_gui_mouse_down    = 0;
-static int    g_gui_mouse_clicked = 0;
-static int    g_gui_is_closed     = 0;
+static HWND g_gui_hwnd = NULL;
+static HDC g_gui_mem_dc = NULL;
+static HBITMAP g_gui_mem_bm = NULL;
+static HBITMAP g_gui_old_bm = NULL;
+static int g_gui_win_w = 0;  /* logical width  (Nova coordinate space) */
+static int g_gui_win_h = 0;  /* logical height (Nova coordinate space) */
+static int g_gui_phys_w = 0; /* physical backbuffer width  (DPI-scaled) */
+static int g_gui_phys_h = 0; /* physical backbuffer height (DPI-scaled) */
+static float g_gui_dpi_scale = 1.0f; /* physical / logical pixel ratio        */
+static int g_gui_mouse_x = 0;
+static int g_gui_mouse_y = 0;
+static int g_gui_mouse_down = 0;
+static int g_gui_mouse_clicked = 0;
+static int g_gui_is_closed = 0;
 
 static void _gui_update_mouse_position(HWND hwnd) {
-    POINT point;
-    if (!GetCursorPos(&point) || !ScreenToClient(hwnd, &point)) return;
-    g_gui_mouse_x = (int)(point.x / g_gui_dpi_scale);
-    g_gui_mouse_y = (int)(point.y / g_gui_dpi_scale);
+  POINT point;
+  if (!GetCursorPos(&point) || !ScreenToClient(hwnd, &point))
+    return;
+  g_gui_mouse_x = (int)(point.x / g_gui_dpi_scale);
+  g_gui_mouse_y = (int)(point.y / g_gui_dpi_scale);
 }
 
 /* Rebuild the off-screen DC at the current physical pixel size */
 static void _gui_rebuild_backbuffer(int phys_w, int phys_h) {
-    if (phys_w <= 0 || phys_h <= 0) return;
-    HDC screen_dc = GetDC(g_gui_hwnd);
-    HBITMAP new_bm = CreateCompatibleBitmap(screen_dc, phys_w, phys_h);
-    ReleaseDC(g_gui_hwnd, screen_dc);
-    if (!new_bm) return;
-    if (g_gui_mem_dc) {
-        HBITMAP previous = (HBITMAP)SelectObject(g_gui_mem_dc, new_bm);
-        if (!g_gui_old_bm) g_gui_old_bm = previous;
-    }
-    if (g_gui_mem_bm) DeleteObject(g_gui_mem_bm);
-    g_gui_mem_bm  = new_bm;
-    g_gui_phys_w  = phys_w;
-    g_gui_phys_h  = phys_h;
-    /* Enable GDI font smoothing on this DC */
-    SetStretchBltMode(g_gui_mem_dc, HALFTONE);
+  if (phys_w <= 0 || phys_h <= 0)
+    return;
+  HDC screen_dc = GetDC(g_gui_hwnd);
+  HBITMAP new_bm = CreateCompatibleBitmap(screen_dc, phys_w, phys_h);
+  ReleaseDC(g_gui_hwnd, screen_dc);
+  if (!new_bm)
+    return;
+  if (g_gui_mem_dc) {
+    HBITMAP previous = (HBITMAP)SelectObject(g_gui_mem_dc, new_bm);
+    if (!g_gui_old_bm)
+      g_gui_old_bm = previous;
+  }
+  if (g_gui_mem_bm)
+    DeleteObject(g_gui_mem_bm);
+  g_gui_mem_bm = new_bm;
+  g_gui_phys_w = phys_w;
+  g_gui_phys_h = phys_h;
+  /* Enable GDI font smoothing on this DC */
+  SetStretchBltMode(g_gui_mem_dc, HALFTONE);
 }
 
-/* Auto-incrementing click ID — lets Nova's new btn() API avoid manual integer IDs */
+/* Auto-incrementing click ID — lets Nova's new btn() API avoid manual integer
+ * IDs */
 static int g_gui_next_click_id = 0;
 SYSCALL int STR_PFX(gui_next_click_id)(void) {
-    g_gui_next_click_id += 1;
-    return g_gui_next_click_id;
+  g_gui_next_click_id += 1;
+  return g_gui_next_click_id;
 }
 
 /* Keyboard FIFO Queue */
@@ -2915,227 +3453,288 @@ static int g_gui_key_head = 0;
 static int g_gui_key_tail = 0;
 
 static void _gui_push_key(int key) {
-    int next = (g_gui_key_head + 1) % GUI_KEY_QUEUE_SIZE;
-    if (next != g_gui_key_tail) {
-        g_gui_key_queue[g_gui_key_head] = key;
-        g_gui_key_head = next;
-    }
+  int next = (g_gui_key_head + 1) % GUI_KEY_QUEUE_SIZE;
+  if (next != g_gui_key_tail) {
+    g_gui_key_queue[g_gui_key_head] = key;
+    g_gui_key_head = next;
+  }
 }
 
 SYSCALL int STR_PFX(gui_poll_char)(void) {
-    if (g_gui_key_head == g_gui_key_tail) return 0;
-    int k = g_gui_key_queue[g_gui_key_tail];
-    g_gui_key_tail = (g_gui_key_tail + 1) % GUI_KEY_QUEUE_SIZE;
-    return k;
+  if (g_gui_key_head == g_gui_key_tail)
+    return 0;
+  int k = g_gui_key_queue[g_gui_key_tail];
+  g_gui_key_tail = (g_gui_key_tail + 1) % GUI_KEY_QUEUE_SIZE;
+  return k;
 }
 
 SYSCALL const char *STR_PFX(gui_char_to_str)(int c) {
-    if (c <= 0) return _str_empty;
+  if (c <= 0)
+    return _str_empty;
 #if defined(_WIN32)
-    char *res = (char*)STR_PFX(malloc)(2);
+  char *res = (char *)STR_PFX(malloc)(2);
 #else
-    char *res = (char*)malloc(2);
+  char *res = (char *)malloc(2);
 #endif
-    if (!res) return _str_empty;
-    res[0] = (char)c;
-    res[1] = '\0';
-    return res;
+  if (!res)
+    return _str_empty;
+  res[0] = (char)c;
+  res[1] = '\0';
+  return res;
 }
 
-static LRESULT CALLBACK _NovaWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    switch (msg) {
-        case WM_MOUSEMOVE:
-            /* lParam is in physical pixels when DPI-aware; convert to logical so
-               Nova's hit-test (which uses logical widget bounds) stays in sync. */
-            g_gui_mouse_x = (int)((short)LOWORD(lParam) / g_gui_dpi_scale);
-            g_gui_mouse_y = (int)((short)HIWORD(lParam) / g_gui_dpi_scale);
-            return 0;
-        case WM_LBUTTONDOWN:
-            _gui_update_mouse_position(hwnd);
-            g_gui_mouse_down = 1;
-            return 0;
-        case WM_LBUTTONUP:
-            _gui_update_mouse_position(hwnd);
-            g_gui_mouse_down = 0;
-            g_gui_mouse_clicked = 1;
-            return 0;
-        case WM_CHAR: {
-            int ch = (int)wParam;
-            if (ch > 0) {
-                _gui_push_key(ch);
-            }
-            return 0;
-        }
-        case WM_KEYDOWN: {
-            int vk = (int)wParam;
-            if (vk == VK_DELETE) {
-                _gui_push_key(127);
-            } else if (vk == VK_LEFT) {
-                _gui_push_key(1001);
-            } else if (vk == VK_RIGHT) {
-                _gui_push_key(1002);
-            }
-            break;
-        }
-        case WM_PAINT: {
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hwnd, &ps);
-            if (g_gui_mem_dc && g_gui_phys_w > 0) {
-                /* Blit the full-resolution backbuffer directly — no stretch needed
-                   because the window client area is already the physical pixel size. */
-                BitBlt(hdc, 0, 0, g_gui_phys_w, g_gui_phys_h,
-                       g_gui_mem_dc, 0, 0, SRCCOPY);
-            }
-            EndPaint(hwnd, &ps);
-            return 0;
-        }
-        case WM_SIZE: {
-            /* lParam carries physical pixel size when DPI-aware */
-            int new_phys_w = LOWORD(lParam);
-            int new_phys_h = HIWORD(lParam);
-            if (new_phys_w > 0 && new_phys_h > 0) {
-                g_gui_win_w = (int)(new_phys_w / g_gui_dpi_scale);
-                g_gui_win_h = (int)(new_phys_h / g_gui_dpi_scale);
-                if (g_gui_mem_dc)
-                    _gui_rebuild_backbuffer(new_phys_w, new_phys_h);
-            }
-            return 0;
-        }
-        case WM_DPICHANGED: {
-            /* Monitor DPI changed (user moved window / display settings changed) */
-            UINT new_dpi = HIWORD(wParam);
-            g_gui_dpi_scale = new_dpi / 96.0f;
-            RECT *r = (RECT *)lParam;
-            SetWindowPos(hwnd, NULL,
-                r->left, r->top,
-                r->right - r->left, r->bottom - r->top,
-                SWP_NOZORDER | SWP_NOACTIVATE);
-            return 0;
-        }
-        case WM_ERASEBKGND:
-            return 1;
-        case WM_DESTROY:
-            g_gui_is_closed = 1;
-            PostQuitMessage(0);
-            return 0;
+typedef struct {
+  int type; /* 1=LBUTTONDOWN, 2=LBUTTONUP, 3=RBUTTONDOWN, 4=RBUTTONUP,
+               5=KEYDOWN, 6=KEYUP */
+  int code;
+  int x;
+  int y;
+} NovaGuiEvent;
+
+#define GUI_EVENT_RING_CAP 128
+static NovaGuiEvent g_gui_events[GUI_EVENT_RING_CAP];
+static int g_gui_evt_head = 0;
+static int g_gui_evt_tail = 0;
+
+static void _gui_enqueue_event(int type, int code, int x, int y) {
+  int next = (g_gui_evt_head + 1) % GUI_EVENT_RING_CAP;
+  if (next != g_gui_evt_tail) {
+    g_gui_events[g_gui_evt_head].type = type;
+    g_gui_events[g_gui_evt_head].code = code;
+    g_gui_events[g_gui_evt_head].x = x;
+    g_gui_events[g_gui_evt_head].y = y;
+    g_gui_evt_head = next;
+  }
+}
+
+SYSCALL int STR_PFX(gui_poll_event_raw)(int64_t out_buf) {
+  if (g_gui_evt_head == g_gui_evt_tail)
+    return 0;
+  NovaGuiEvent ev = g_gui_events[g_gui_evt_tail];
+  g_gui_evt_tail = (g_gui_evt_tail + 1) % GUI_EVENT_RING_CAP;
+  if (out_buf) {
+    int32_t *d = (int32_t *)(uintptr_t)out_buf;
+    d[0] = ev.type;
+    d[1] = ev.code;
+    d[2] = ev.x;
+    d[3] = ev.y;
+  }
+  return 1;
+}
+
+static LRESULT CALLBACK _NovaWndProc(HWND hwnd, UINT msg, WPARAM wParam,
+                                     LPARAM lParam) {
+  switch (msg) {
+  case WM_MOUSEMOVE:
+    /* lParam is in physical pixels when DPI-aware; convert to logical so
+       Nova's hit-test (which uses logical widget bounds) stays in sync. */
+    g_gui_mouse_x = (int)((short)LOWORD(lParam) / g_gui_dpi_scale);
+    g_gui_mouse_y = (int)((short)HIWORD(lParam) / g_gui_dpi_scale);
+    return 0;
+  case WM_LBUTTONDOWN:
+    _gui_update_mouse_position(hwnd);
+    g_gui_mouse_down = 1;
+    _gui_enqueue_event(1, 0, g_gui_mouse_x, g_gui_mouse_y);
+    return 0;
+  case WM_LBUTTONUP:
+    _gui_update_mouse_position(hwnd);
+    g_gui_mouse_down = 0;
+    g_gui_mouse_clicked = 1;
+    _gui_enqueue_event(2, 0, g_gui_mouse_x, g_gui_mouse_y);
+    return 0;
+  case WM_RBUTTONDOWN:
+    _gui_update_mouse_position(hwnd);
+    _gui_enqueue_event(3, 1, g_gui_mouse_x, g_gui_mouse_y);
+    return 0;
+  case WM_RBUTTONUP:
+    _gui_update_mouse_position(hwnd);
+    _gui_enqueue_event(4, 1, g_gui_mouse_x, g_gui_mouse_y);
+    return 0;
+  case WM_CHAR: {
+    int ch = (int)wParam;
+    if (ch > 0) {
+      _gui_push_key(ch);
     }
-    return DefWindowProcA(hwnd, msg, wParam, lParam);
+    return 0;
+  }
+  case WM_KEYDOWN: {
+    int vk = (int)wParam;
+    _gui_enqueue_event(5, vk, g_gui_mouse_x, g_gui_mouse_y);
+    if (vk == VK_DELETE) {
+      _gui_push_key(127);
+    } else if (vk == VK_LEFT) {
+      _gui_push_key(1001);
+    } else if (vk == VK_RIGHT) {
+      _gui_push_key(1002);
+    }
+    break;
+  }
+  case WM_KEYUP: {
+    int vk = (int)wParam;
+    _gui_enqueue_event(6, vk, g_gui_mouse_x, g_gui_mouse_y);
+    break;
+  }
+  case WM_PAINT: {
+    PAINTSTRUCT ps;
+    HDC hdc = BeginPaint(hwnd, &ps);
+    if (g_gui_mem_dc && g_gui_phys_w > 0) {
+      /* Blit the full-resolution backbuffer directly — no stretch needed
+         because the window client area is already the physical pixel size. */
+      BitBlt(hdc, 0, 0, g_gui_phys_w, g_gui_phys_h, g_gui_mem_dc, 0, 0,
+             SRCCOPY);
+    }
+    EndPaint(hwnd, &ps);
+    return 0;
+  }
+  case WM_SIZE: {
+    /* lParam carries physical pixel size when DPI-aware */
+    int new_phys_w = LOWORD(lParam);
+    int new_phys_h = HIWORD(lParam);
+    if (new_phys_w > 0 && new_phys_h > 0) {
+      g_gui_win_w = (int)(new_phys_w / g_gui_dpi_scale);
+      g_gui_win_h = (int)(new_phys_h / g_gui_dpi_scale);
+      if (g_gui_mem_dc)
+        _gui_rebuild_backbuffer(new_phys_w, new_phys_h);
+    }
+    return 0;
+  }
+  case WM_DPICHANGED: {
+    /* Monitor DPI changed (user moved window / display settings changed) */
+    UINT new_dpi = HIWORD(wParam);
+    g_gui_dpi_scale = new_dpi / 96.0f;
+    RECT *r = (RECT *)lParam;
+    SetWindowPos(hwnd, NULL, r->left, r->top, r->right - r->left,
+                 r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
+    return 0;
+  }
+  case WM_ERASEBKGND:
+    return 1;
+  case WM_DESTROY:
+    g_gui_is_closed = 1;
+    PostQuitMessage(0);
+    return 0;
+  }
+  return DefWindowProcA(hwnd, msg, wParam, lParam);
 }
 
 static COLORREF _hex_to_rgb(int hex) {
-    int r = (hex >> 16) & 0xFF;
-    int g = (hex >> 8) & 0xFF;
-    int b = hex & 0xFF;
-    return RGB(r, g, b);
+  int r = (hex >> 16) & 0xFF;
+  int g = (hex >> 8) & 0xFF;
+  int b = hex & 0xFF;
+  return RGB(r, g, b);
 }
 
 SYSCALL int STR_PFX(gui_init_window)(const char *title, int width, int height) {
-    /* --- Step 1: Enable Per-Monitor DPI Awareness v2 (Windows 10 1703+) ---
-       This must happen before any HWND or metric query. We load dynamically
-       so the binary still runs on older Windows without a hard import error. */
-    {
-        HMODULE hUser = GetModuleHandleA("user32.dll");
-        if (hUser) {
-            PFN_SetProcessDpiAwarenessContext fn =
-                (PFN_SetProcessDpiAwarenessContext)
-                GetProcAddress(hUser, "SetProcessDpiAwarenessContext");
-            if (fn) fn(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        }
+  /* --- Step 1: Enable Per-Monitor DPI Awareness v2 (Windows 10 1703+) ---
+     This must happen before any HWND or metric query. We load dynamically
+     so the binary still runs on older Windows without a hard import error. */
+  {
+    HMODULE hUser = GetModuleHandleA("user32.dll");
+    if (hUser) {
+      PFN_SetProcessDpiAwarenessContext fn =
+          (PFN_SetProcessDpiAwarenessContext)GetProcAddress(
+              hUser, "SetProcessDpiAwarenessContext");
+      if (fn)
+        fn(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
+  }
 
-    HINSTANCE hInstance = GetModuleHandleA(NULL);
-    WNDCLASSEXA wc;
-    memset(&wc, 0, sizeof(wc));
-    wc.cbSize        = sizeof(WNDCLASSEXA);
-    wc.style         = CS_HREDRAW | CS_VREDRAW;
-    wc.lpfnWndProc   = _NovaWndProc;
-    wc.hInstance     = hInstance;
-    wc.hCursor       = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
-    wc.lpszClassName = "NovaWindowClass";
-    RegisterClassExA(&wc);
+  HINSTANCE hInstance = GetModuleHandleA(NULL);
+  WNDCLASSEXA wc;
+  memset(&wc, 0, sizeof(wc));
+  wc.cbSize = sizeof(WNDCLASSEXA);
+  wc.style = CS_HREDRAW | CS_VREDRAW;
+  wc.lpfnWndProc = _NovaWndProc;
+  wc.hInstance = hInstance;
+  wc.hCursor = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
+  wc.lpszClassName = "NovaWindowClass";
+  RegisterClassExA(&wc);
 
-    /* --- Step 2: Detect DPI of the primary monitor --- */
-    HDC ref_dc = GetDC(NULL);
-    int raw_dpi = GetDeviceCaps(ref_dc, LOGPIXELSX);
-    ReleaseDC(NULL, ref_dc);
-    if (raw_dpi < 96) raw_dpi = 96;
-    g_gui_dpi_scale = raw_dpi / 96.0f;
+  /* --- Step 2: Detect DPI of the primary monitor --- */
+  HDC ref_dc = GetDC(NULL);
+  int raw_dpi = GetDeviceCaps(ref_dc, LOGPIXELSX);
+  ReleaseDC(NULL, ref_dc);
+  if (raw_dpi < 96)
+    raw_dpi = 96;
+  g_gui_dpi_scale = raw_dpi / 96.0f;
 
-    /* --- Step 3: Compute physical pixel dimensions --- */
-    int phys_w = (int)(width  * g_gui_dpi_scale);
-    int phys_h = (int)(height * g_gui_dpi_scale);
+  /* --- Step 3: Compute physical pixel dimensions --- */
+  int phys_w = (int)(width * g_gui_dpi_scale);
+  int phys_h = (int)(height * g_gui_dpi_scale);
 
-    g_gui_win_w         = width;   /* logical */
-    g_gui_win_h         = height;  /* logical */
-    g_gui_is_closed     = 0;
-    g_gui_mouse_clicked = 0;
-    g_gui_mouse_down    = 0;
-    g_gui_old_bm        = NULL;
+  g_gui_win_w = width;  /* logical */
+  g_gui_win_h = height; /* logical */
+  g_gui_is_closed = 0;
+  g_gui_mouse_clicked = 0;
+  g_gui_mouse_down = 0;
+  g_gui_old_bm = NULL;
 
-    /* --- Step 4: Size the OS window at physical pixels --- */
-    RECT rc = {0, 0, phys_w, phys_h};
-    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
-    int frame_w = rc.right  - rc.left;
-    int frame_h = rc.bottom - rc.top;
+  /* --- Step 4: Size the OS window at physical pixels --- */
+  RECT rc = {0, 0, phys_w, phys_h};
+  AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+  int frame_w = rc.right - rc.left;
+  int frame_h = rc.bottom - rc.top;
 
-    int screen_w = GetSystemMetrics(SM_CXSCREEN);
-    int screen_h = GetSystemMetrics(SM_CYSCREEN);
-    int posX = (screen_w - frame_w) / 2;
-    int posY = (screen_h - frame_h) / 2;
-    if (posX < 0) posX = 0;
-    if (posY < 0) posY = 0;
+  int screen_w = GetSystemMetrics(SM_CXSCREEN);
+  int screen_h = GetSystemMetrics(SM_CYSCREEN);
+  int posX = (screen_w - frame_w) / 2;
+  int posY = (screen_h - frame_h) / 2;
+  if (posX < 0)
+    posX = 0;
+  if (posY < 0)
+    posY = 0;
 
-    g_gui_hwnd = CreateWindowExA(
-        0,
-        "NovaWindowClass",
-        title ? title : "Nova Application",
-        WS_OVERLAPPEDWINDOW,
-        posX, posY, frame_w, frame_h,
-        NULL, NULL, hInstance, NULL
-    );
-    if (!g_gui_hwnd) return 0;
+  g_gui_hwnd =
+      CreateWindowExA(0, "NovaWindowClass", title ? title : "Nova Application",
+                      WS_OVERLAPPEDWINDOW, posX, posY, frame_w, frame_h, NULL,
+                      NULL, hInstance, NULL);
+  if (!g_gui_hwnd)
+    return 0;
 
-    /* --- Step 5: Create off-screen DC at the physical resolution --- */
-    g_gui_mem_dc  = CreateCompatibleDC(NULL);
-    if (!g_gui_mem_dc) {
-        DestroyWindow(g_gui_hwnd);
-        g_gui_hwnd = NULL;
-        return 0;
-    }
-    _gui_rebuild_backbuffer(phys_w, phys_h);
-    if (!g_gui_mem_bm) {
-        DeleteDC(g_gui_mem_dc);
-        g_gui_mem_dc = NULL;
-        DestroyWindow(g_gui_hwnd);
-        g_gui_hwnd = NULL;
-        return 0;
-    }
+  /* --- Step 5: Create off-screen DC at the physical resolution --- */
+  g_gui_mem_dc = CreateCompatibleDC(NULL);
+  if (!g_gui_mem_dc) {
+    DestroyWindow(g_gui_hwnd);
+    g_gui_hwnd = NULL;
+    return 0;
+  }
+  _gui_rebuild_backbuffer(phys_w, phys_h);
+  if (!g_gui_mem_bm) {
+    DeleteDC(g_gui_mem_dc);
+    g_gui_mem_dc = NULL;
+    DestroyWindow(g_gui_hwnd);
+    g_gui_hwnd = NULL;
+    return 0;
+  }
 
-    /* Enable ClearType-quality text on the memory DC */
-    UINT ct_flags = FE_FONTSMOOTHINGCLEARTYPE;
-    SystemParametersInfoA(SPI_SETFONTSMOOTHING,    TRUE,  NULL, 0);
-    SystemParametersInfoA(SPI_SETFONTSMOOTHINGTYPE, 0, (PVOID)(ULONG_PTR)ct_flags, 0);
+  /* Enable ClearType-quality text on the memory DC */
+  UINT ct_flags = FE_FONTSMOOTHINGCLEARTYPE;
+  SystemParametersInfoA(SPI_SETFONTSMOOTHING, TRUE, NULL, 0);
+  SystemParametersInfoA(SPI_SETFONTSMOOTHINGTYPE, 0, (PVOID)(ULONG_PTR)ct_flags,
+                        0);
 
-    ShowWindow(g_gui_hwnd, SW_SHOW);
-    UpdateWindow(g_gui_hwnd);
-    return 1;
+  ShowWindow(g_gui_hwnd, SW_SHOW);
+  UpdateWindow(g_gui_hwnd);
+  return 1;
 }
 
 SYSCALL int STR_PFX(gui_poll_events)(void) {
-    if (g_gui_is_closed || !g_gui_hwnd) return -1;
-    g_gui_mouse_clicked = 0;
+  if (g_gui_is_closed || !g_gui_hwnd)
+    return -1;
+  g_gui_mouse_clicked = 0;
 
-    MSG msg;
-    while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
-        if (msg.message == WM_QUIT) {
-            g_gui_is_closed = 1;
-            return -1;
-        }
-        TranslateMessage(&msg);
-        DispatchMessageA(&msg);
+  MSG msg;
+  while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
+    if (msg.message == WM_QUIT) {
+      g_gui_is_closed = 1;
+      return -1;
     }
-    if (g_gui_is_closed) return -1;
-    return g_gui_mouse_clicked ? 2 : 1;
+    TranslateMessage(&msg);
+    DispatchMessageA(&msg);
+  }
+  if (g_gui_is_closed)
+    return -1;
+  return g_gui_mouse_clicked ? 2 : 1;
 }
 
 SYSCALL int STR_PFX(gui_get_mouse_x)(void) { return g_gui_mouse_x; }
@@ -3144,430 +3743,792 @@ SYSCALL int STR_PFX(gui_get_mouse_down)(void) { return g_gui_mouse_down; }
 SYSCALL int STR_PFX(gui_get_mouse_clicked)(void) { return g_gui_mouse_clicked; }
 
 SYSCALL void STR_PFX(gui_clear)(int color_hex) {
-    if (!g_gui_mem_dc) return;
-    /* Clear at physical resolution */
-    RECT r = {0, 0, g_gui_phys_w, g_gui_phys_h};
+  if (!g_gui_mem_dc)
+    return;
+  /* Clear at physical resolution */
+  RECT r = {0, 0, g_gui_phys_w, g_gui_phys_h};
+  HBRUSH br = CreateSolidBrush(_hex_to_rgb(color_hex));
+  FillRect(g_gui_mem_dc, &r, br);
+  DeleteObject(br);
+}
+
+SYSCALL void STR_PFX(gui_draw_rect)(int x, int y, int w, int h, int color_hex,
+                                    int radius) {
+  if (!g_gui_mem_dc)
+    return;
+  /* Scale logical coords → physical pixels */
+  int px = (int)(x * g_gui_dpi_scale);
+  int py = (int)(y * g_gui_dpi_scale);
+  int pw = (int)(w * g_gui_dpi_scale);
+  int ph = (int)(h * g_gui_dpi_scale);
+  int pr = (int)(radius * g_gui_dpi_scale);
+  if (pw <= 0 || ph <= 0)
+    return;
+  if (pr <= 0) {
+    RECT r = {px, py, px + pw, py + ph};
     HBRUSH br = CreateSolidBrush(_hex_to_rgb(color_hex));
     FillRect(g_gui_mem_dc, &r, br);
     DeleteObject(br);
-}
-
-SYSCALL void STR_PFX(gui_draw_rect)(int x, int y, int w, int h, int color_hex, int radius) {
-    if (!g_gui_mem_dc) return;
-    /* Scale logical coords → physical pixels */
-    int px = (int)(x * g_gui_dpi_scale);
-    int py = (int)(y * g_gui_dpi_scale);
-    int pw = (int)(w * g_gui_dpi_scale);
-    int ph = (int)(h * g_gui_dpi_scale);
-    int pr = (int)(radius * g_gui_dpi_scale);
-    if (pw <= 0 || ph <= 0) return;
-    if (pr <= 0) {
-        RECT r = {px, py, px + pw, py + ph};
-        HBRUSH br = CreateSolidBrush(_hex_to_rgb(color_hex));
-        FillRect(g_gui_mem_dc, &r, br);
-        DeleteObject(br);
-    } else {
-        HBRUSH br  = CreateSolidBrush(_hex_to_rgb(color_hex));
-        HPEN   pen = CreatePen(PS_NULL, 0, 0);
-        HGDIOBJ old_br  = SelectObject(g_gui_mem_dc, br);
-        HGDIOBJ old_pen = SelectObject(g_gui_mem_dc, pen);
-        RoundRect(g_gui_mem_dc, px, py, px + pw, py + ph, pr * 2, pr * 2);
-        SelectObject(g_gui_mem_dc, old_br);
-        SelectObject(g_gui_mem_dc, old_pen);
-        DeleteObject(br);
-        DeleteObject(pen);
-    }
-}
-
-SYSCALL void STR_PFX(gui_draw_border)(int x, int y, int w, int h, int border_w, int color_hex) {
-    if (!g_gui_mem_dc) return;
-    int px = (int)(x * g_gui_dpi_scale);
-    int py = (int)(y * g_gui_dpi_scale);
-    int pw = (int)(w * g_gui_dpi_scale);
-    int ph = (int)(h * g_gui_dpi_scale);
-    int pbw = (int)(border_w * g_gui_dpi_scale); if (pbw < 1) pbw = 1;
-    HPEN    pen    = CreatePen(PS_SOLID, pbw, _hex_to_rgb(color_hex));
+  } else {
+    HBRUSH br = CreateSolidBrush(_hex_to_rgb(color_hex));
+    HPEN pen = CreatePen(PS_NULL, 0, 0);
+    HGDIOBJ old_br = SelectObject(g_gui_mem_dc, br);
     HGDIOBJ old_pen = SelectObject(g_gui_mem_dc, pen);
-    HGDIOBJ old_br  = SelectObject(g_gui_mem_dc, GetStockObject(NULL_BRUSH));
-    Rectangle(g_gui_mem_dc, px, py, px + pw, py + ph);
-    SelectObject(g_gui_mem_dc, old_pen);
+    RoundRect(g_gui_mem_dc, px, py, px + pw, py + ph, pr * 2, pr * 2);
     SelectObject(g_gui_mem_dc, old_br);
+    SelectObject(g_gui_mem_dc, old_pen);
+    DeleteObject(br);
     DeleteObject(pen);
+  }
 }
 
-SYSCALL void STR_PFX(gui_draw_text)(const char *text, int x, int y, int font_size, int color_hex, int font_weight) {
-    if (!g_gui_mem_dc || !text) return;
-    /* Scale logical → physical */
-    int px        = (int)(x         * g_gui_dpi_scale);
-    int py        = (int)(y         * g_gui_dpi_scale);
-    int phys_size = (int)(font_size * g_gui_dpi_scale);
-    if (phys_size < 1) phys_size = 1;
+SYSCALL void STR_PFX(gui_draw_border)(int x, int y, int w, int h, int border_w,
+                                      int color_hex) {
+  if (!g_gui_mem_dc)
+    return;
+  int px = (int)(x * g_gui_dpi_scale);
+  int py = (int)(y * g_gui_dpi_scale);
+  int pw = (int)(w * g_gui_dpi_scale);
+  int ph = (int)(h * g_gui_dpi_scale);
+  int pbw = (int)(border_w * g_gui_dpi_scale);
+  if (pbw < 1)
+    pbw = 1;
+  HPEN pen = CreatePen(PS_SOLID, pbw, _hex_to_rgb(color_hex));
+  HGDIOBJ old_pen = SelectObject(g_gui_mem_dc, pen);
+  HGDIOBJ old_br = SelectObject(g_gui_mem_dc, GetStockObject(NULL_BRUSH));
+  Rectangle(g_gui_mem_dc, px, py, px + pw, py + ph);
+  SelectObject(g_gui_mem_dc, old_pen);
+  SelectObject(g_gui_mem_dc, old_br);
+  DeleteObject(pen);
+}
 
-    SetBkMode(g_gui_mem_dc, TRANSPARENT);
-    SetTextColor(g_gui_mem_dc, _hex_to_rgb(color_hex));
+static void _draw_text_u8_w(HDC hdc, const char *text, RECT *rc) {
+  if (!text)
+    return;
+  int wlen = MultiByteToWideChar(CP_UTF8, 0, text, -1, NULL, 0);
+  if (wlen > 0) {
+    wchar_t *wbuf = (wchar_t *)_alloca(wlen * sizeof(wchar_t));
+    MultiByteToWideChar(CP_UTF8, 0, text, -1, wbuf, wlen);
+    DrawTextW(hdc, wbuf, -1, rc, DT_LEFT | DT_TOP | DT_NOCLIP | DT_NOPREFIX);
+  }
+}
 
-    int weight = (font_weight > 0) ? FW_BOLD : FW_NORMAL;
-    HFONT font = CreateFontA(
-        -phys_size, 0, 0, 0,
-        weight, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_TT_PRECIS,
-        CLIP_DEFAULT_PRECIS, CLEARTYPE_NATURAL_QUALITY,
-        DEFAULT_PITCH | FF_DONTCARE,
-        "Segoe UI"
-    );
+SYSCALL void STR_PFX(gui_draw_text)(const char *text, int x, int y,
+                                    int font_size, int color_hex,
+                                    int font_weight) {
+  if (!g_gui_mem_dc || !text)
+    return;
+  /* Scale logical → physical */
+  /* Scale logical -> physical */
+  int px = (int)(x * g_gui_dpi_scale);
+  int py = (int)(y * g_gui_dpi_scale);
+  int phys_size = (int)(font_size * g_gui_dpi_scale);
+  if (phys_size < 1)
+    phys_size = 1;
 
-    HGDIOBJ old_font = SelectObject(g_gui_mem_dc, font);
-    RECT rc = {px, py, g_gui_phys_w, g_gui_phys_h};
-    DrawTextA(g_gui_mem_dc, text, -1, &rc, DT_LEFT | DT_TOP | DT_NOCLIP | DT_NOPREFIX);
-    SelectObject(g_gui_mem_dc, old_font);
-    DeleteObject(font);
+  SetBkMode(g_gui_mem_dc, TRANSPARENT);
+  SetTextColor(g_gui_mem_dc, _hex_to_rgb(color_hex));
+
+  const wchar_t *face = L"Segoe UI";
+  int weight = FW_NORMAL;
+  if (font_weight > 0) {
+    weight = FW_BOLD;
+  } else if (font_weight == -1) {
+    face = L"Consolas";
+    weight = FW_NORMAL;
+  } else if (font_weight == -2) {
+    face = L"Consolas";
+    weight = FW_BOLD;
+  }
+
+  HFONT font = CreateFontW(
+      -phys_size, 0, 0, 0,
+      weight, FALSE, FALSE, FALSE,
+      DEFAULT_CHARSET, OUT_TT_PRECIS,
+      CLIP_DEFAULT_PRECIS, CLEARTYPE_NATURAL_QUALITY,
+      DEFAULT_PITCH | FF_DONTCARE,
+      face
+  );
+
+  HGDIOBJ old_font = SelectObject(g_gui_mem_dc, font);
+  RECT rc = {px, py, g_gui_phys_w, g_gui_phys_h};
+  _draw_text_u8_w(g_gui_mem_dc, text, &rc);
+  SelectObject(g_gui_mem_dc, old_font);
+  DeleteObject(font);
+}
+
+SYSCALL void STR_PFX(gui_draw_mono_text)(const char *text, int x, int y,
+                                         int font_size, int color_hex,
+                                         int font_weight) {
+  if (!g_gui_mem_dc || !text)
+    return;
+  int px = (int)(x * g_gui_dpi_scale);
+  int py = (int)(y * g_gui_dpi_scale);
+  int sz = (font_size > 0) ? font_size : 11;
+  int font_h = (int)(sz * 1.35f * g_gui_dpi_scale);
+  int font_w = (int)(7.0f * g_gui_dpi_scale);
+  if (font_h < 1)
+    font_h = 1;
+  if (font_w < 1)
+    font_w = 1;
+
+  SetBkMode(g_gui_mem_dc, TRANSPARENT);
+  SetTextColor(g_gui_mem_dc, _hex_to_rgb(color_hex));
+
+  HFONT font = CreateFontW(
+      font_h, 0, 0, 0,
+      (font_weight > 0) ? FW_BOLD : FW_NORMAL, FALSE, FALSE, FALSE,
+      DEFAULT_CHARSET, OUT_TT_PRECIS,
+      CLIP_DEFAULT_PRECIS, CLEARTYPE_NATURAL_QUALITY,
+      FIXED_PITCH | FF_MODERN,
+      L"Consolas"
+  );
+
+  HGDIOBJ old_font = SelectObject(g_gui_mem_dc, font);
+  RECT rc = {px, py, g_gui_phys_w, g_gui_phys_h};
+  _draw_text_u8_w(g_gui_mem_dc, text, &rc);
+  SelectObject(g_gui_mem_dc, old_font);
+  DeleteObject(font);
+}
+
+SYSCALL void STR_PFX(gui_draw_mono_cell)(const char *text, int start_x, int y,
+                                         int col_idx, int color_hex,
+                                         int font_weight) {
+  if (!g_gui_mem_dc || !text)
+    return;
+  int sz = 11;
+  int font_h = (int)(sz * 1.35f * g_gui_dpi_scale);
+  if (font_h < 1)
+    font_h = 1;
+
+  SetBkMode(g_gui_mem_dc, TRANSPARENT);
+  SetTextColor(g_gui_mem_dc, _hex_to_rgb(color_hex));
+
+  HFONT font = CreateFontW(
+      font_h, 0, 0, 0, (font_weight > 0) ? FW_BOLD : FW_NORMAL, FALSE, FALSE,
+      FALSE, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+      CLEARTYPE_NATURAL_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
+
+  HGDIOBJ old_font = SelectObject(g_gui_mem_dc, font);
+  SIZE char_sz;
+  GetTextExtentPoint32W(g_gui_mem_dc, L"A", 1, &char_sz);
+
+  int px = (int)(start_x * g_gui_dpi_scale) + col_idx * char_sz.cx;
+  int py = (int)(y * g_gui_dpi_scale);
+
+  RECT rc = {px, py, g_gui_phys_w, g_gui_phys_h};
+  _draw_text_u8_w(g_gui_mem_dc, text, &rc);
+  SelectObject(g_gui_mem_dc, old_font);
+  DeleteObject(font);
+}
+
+SYSCALL int STR_PFX(gui_mono_char_w)(void) {
+  if (!g_gui_mem_dc)
+    return 7;
+  int sz = 11;
+  int font_h = (int)(sz * 1.35f * g_gui_dpi_scale);
+  if (font_h < 1)
+    font_h = 1;
+
+  HFONT font = CreateFontW(font_h, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                           DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+                           CLEARTYPE_NATURAL_QUALITY, FIXED_PITCH | FF_MODERN,
+                           L"Consolas");
+
+  HGDIOBJ old_font = SelectObject(g_gui_mem_dc, font);
+  SIZE char_sz;
+  GetTextExtentPoint32W(g_gui_mem_dc, L"A", 1, &char_sz);
+  SelectObject(g_gui_mem_dc, old_font);
+  DeleteObject(font);
+  return (int)((float)char_sz.cx / g_gui_dpi_scale + 0.5f);
 }
 
 SYSCALL void STR_PFX(gui_present)(void) {
-    if (!g_gui_hwnd || !g_gui_mem_dc || g_gui_phys_w <= 0) return;
-    HDC screen_dc = GetDC(g_gui_hwnd);
-    /* Direct 1:1 copy — no scaling, we drew at native resolution */
-    BitBlt(screen_dc, 0, 0, g_gui_phys_w, g_gui_phys_h,
-           g_gui_mem_dc, 0, 0, SRCCOPY);
-    ReleaseDC(g_gui_hwnd, screen_dc);
+  if (!g_gui_hwnd || !g_gui_mem_dc || g_gui_phys_w <= 0)
+    return;
+  HDC screen_dc = GetDC(g_gui_hwnd);
+  /* Direct 1:1 copy — no scaling, we drew at native resolution */
+  BitBlt(screen_dc, 0, 0, g_gui_phys_w, g_gui_phys_h, g_gui_mem_dc, 0, 0,
+         SRCCOPY);
+  ReleaseDC(g_gui_hwnd, screen_dc);
 }
 
-SYSCALL void STR_PFX(gui_sleep)(int ms) {
-    Sleep(ms);
-}
+SYSCALL void STR_PFX(gui_sleep)(int ms) { Sleep(ms); }
 
 SYSCALL int STR_PFX(gui_save_screenshot)(const char *path) {
-    if (!g_gui_mem_dc || !g_gui_mem_bm || !path) return 0;
-    int w = g_gui_win_w;
-    int h = g_gui_win_h;
+  if (!g_gui_mem_dc || !g_gui_mem_bm || !path)
+    return 0;
+  int w = g_gui_win_w;
+  int h = g_gui_win_h;
 
-    BITMAPINFO bi;
-    memset(&bi, 0, sizeof(bi));
-    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bi.bmiHeader.biWidth = w;
-    bi.bmiHeader.biHeight = -h;
-    bi.bmiHeader.biPlanes = 1;
-    bi.bmiHeader.biBitCount = 32;
-    bi.bmiHeader.biCompression = BI_RGB;
+  BITMAPINFO bi;
+  memset(&bi, 0, sizeof(bi));
+  bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  bi.bmiHeader.biWidth = w;
+  bi.bmiHeader.biHeight = -h;
+  bi.bmiHeader.biPlanes = 1;
+  bi.bmiHeader.biBitCount = 32;
+  bi.bmiHeader.biCompression = BI_RGB;
 
-    int data_size = w * 4 * h;
-    void *pixels = STR_PFX(malloc)(data_size);
-    if (!pixels) return 0;
+  int data_size = w * 4 * h;
+  void *pixels = STR_PFX(malloc)(data_size);
+  if (!pixels)
+    return 0;
 
-    GetDIBits(g_gui_mem_dc, g_gui_mem_bm, 0, h, pixels, &bi, DIB_RGB_COLORS);
+  GetDIBits(g_gui_mem_dc, g_gui_mem_bm, 0, h, pixels, &bi, DIB_RGB_COLORS);
 
-    BITMAPFILEHEADER bfh;
-    memset(&bfh, 0, sizeof(bfh));
-    bfh.bfType = 0x4D42;
-    bfh.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
-    bfh.bfSize = bfh.bfOffBits + data_size;
+  BITMAPFILEHEADER bfh;
+  memset(&bfh, 0, sizeof(bfh));
+  bfh.bfType = 0x4D42;
+  bfh.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+  bfh.bfSize = bfh.bfOffBits + data_size;
 
-    HANDLE hFile = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hFile == INVALID_HANDLE_VALUE) {
-        STR_PFX(free)(pixels);
-        return 0;
-    }
-
-    DWORD written = 0;
-    WriteFile(hFile, &bfh, sizeof(bfh), &written, NULL);
-    WriteFile(hFile, &bi.bmiHeader, sizeof(BITMAPINFOHEADER), &written, NULL);
-    WriteFile(hFile, pixels, data_size, &written, NULL);
-    CloseHandle(hFile);
-
+  HANDLE hFile = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                             FILE_ATTRIBUTE_NORMAL, NULL);
+  if (hFile == INVALID_HANDLE_VALUE) {
     STR_PFX(free)(pixels);
-    return 1;
+    return 0;
+  }
+
+  DWORD written = 0;
+  WriteFile(hFile, &bfh, sizeof(bfh), &written, NULL);
+  WriteFile(hFile, &bi.bmiHeader, sizeof(BITMAPINFOHEADER), &written, NULL);
+  WriteFile(hFile, pixels, data_size, &written, NULL);
+  CloseHandle(hFile);
+
+  STR_PFX(free)(pixels);
+  return 1;
 }
 
-SYSCALL int STR_PFX(gui_get_window_w)(void) {
-    return g_gui_win_w;
-}
+SYSCALL int STR_PFX(gui_get_window_w)(void) { return g_gui_win_w; }
 
-SYSCALL int STR_PFX(gui_get_window_h)(void) {
-    return g_gui_win_h;
-}
+SYSCALL int STR_PFX(gui_get_window_h)(void) { return g_gui_win_h; }
 
 SYSCALL void STR_PFX(gui_close)(void) {
-    if (g_gui_mem_dc && g_gui_old_bm) {
-        SelectObject(g_gui_mem_dc, g_gui_old_bm);
-    }
-    if (g_gui_mem_bm) {
-        DeleteObject(g_gui_mem_bm);
-        g_gui_mem_bm = NULL;
-    }
-    if (g_gui_mem_dc) {
-        DeleteDC(g_gui_mem_dc);
-        g_gui_mem_dc = NULL;
-    }
-    if (g_gui_hwnd) {
-        DestroyWindow(g_gui_hwnd);
-        g_gui_hwnd = NULL;
-    }
-    g_gui_old_bm = NULL;
-    g_gui_is_closed = 1;
+  if (g_gui_mem_dc && g_gui_old_bm) {
+    SelectObject(g_gui_mem_dc, g_gui_old_bm);
+  }
+  if (g_gui_mem_bm) {
+    DeleteObject(g_gui_mem_bm);
+    g_gui_mem_bm = NULL;
+  }
+  if (g_gui_mem_dc) {
+    DeleteDC(g_gui_mem_dc);
+    g_gui_mem_dc = NULL;
+  }
+  if (g_gui_hwnd) {
+    DestroyWindow(g_gui_hwnd);
+    g_gui_hwnd = NULL;
+  }
+  g_gui_old_bm = NULL;
+  g_gui_is_closed = 1;
 }
 
 /* === Nova High-Speed Buffers, Networking, Timers & Framebuffer === */
+typedef struct {
+  uint32_t magic; /* 0x42554631 = 'BUF1' */
+  uint32_t flags;
+  int64_t capacity;
+} NovaBufferHeader;
+
+static inline NovaBufferHeader *_nova_get_buf_hdr(int64_t buf) {
+  if (!buf)
+    return NULL;
+  NovaBufferHeader *hdr = ((NovaBufferHeader *)(uintptr_t)buf) - 1;
+  if (hdr->magic == 0x42554631)
+    return hdr;
+  return NULL;
+}
+
+static void _nova_buf_panic(const char *op, int64_t offset, int64_t required,
+                            int64_t capacity) {
+  fprintf(stderr,
+          "\n[Nova Runtime Panic] Buffer boundary violation during %s:\n"
+          "  Attempted access at index/offset %lld (requires %lld bytes), "
+          "capacity is %lld bytes\n",
+          op, (long long)offset, (long long)required, (long long)capacity);
+  fflush(stderr);
+  ExitProcess(1);
+}
+
 SYSCALL int64_t STR_PFX(buf_new)(int64_t size_bytes) {
-    if (size_bytes <= 0) return 0;
-    void *ptr = STR_PFX(malloc)((size_t)size_bytes);
-    if (ptr) memset(ptr, 0, (size_t)size_bytes);
-    return (int64_t)(uintptr_t)ptr;
+  if (size_bytes < 0)
+    return 0;
+  size_t total = sizeof(NovaBufferHeader) + (size_t)size_bytes;
+  NovaBufferHeader *hdr = (NovaBufferHeader *)STR_PFX(malloc)(total);
+  if (!hdr)
+    return 0;
+  hdr->magic = 0x42554631;
+  hdr->flags = 0;
+  hdr->capacity = size_bytes;
+  void *ptr = (void *)(hdr + 1);
+  if (size_bytes > 0)
+    memset(ptr, 0, (size_t)size_bytes);
+  return (int64_t)(uintptr_t)ptr;
 }
 
 SYSCALL void STR_PFX(buf_free)(int64_t buf) {
-    if (buf) STR_PFX(free)((void *)(uintptr_t)buf);
+  if (!buf)
+    return;
+  NovaBufferHeader *hdr = _nova_get_buf_hdr(buf);
+  if (hdr) {
+    hdr->magic = 0;
+    STR_PFX(free)((void *)hdr);
+  } else {
+    STR_PFX(free)((void *)(uintptr_t)buf);
+  }
 }
 
 SYSCALL int64_t STR_PFX(buf_get_u8)(int64_t buf, int64_t offset) {
-    if (!buf) return 0;
-    return (int64_t)(((uint8_t *)(uintptr_t)buf)[offset]);
+  if (!buf)
+    return 0;
+  NovaBufferHeader *hdr = _nova_get_buf_hdr(buf);
+  if (hdr) {
+    if (offset < 0 || offset >= hdr->capacity) {
+      _nova_buf_panic("buf_get_u8", offset, 1, hdr->capacity);
+    }
+  }
+  return (int64_t)(((uint8_t *)(uintptr_t)buf)[offset]);
 }
 
 SYSCALL void STR_PFX(buf_set_u8)(int64_t buf, int64_t offset, int64_t val) {
-    if (!buf) return;
-    ((uint8_t *)(uintptr_t)buf)[offset] = (uint8_t)(val & 0xFF);
+  if (!buf)
+    return;
+  NovaBufferHeader *hdr = _nova_get_buf_hdr(buf);
+  if (hdr) {
+    if (offset < 0 || offset >= hdr->capacity) {
+      _nova_buf_panic("buf_set_u8", offset, 1, hdr->capacity);
+    }
+  }
+  ((uint8_t *)(uintptr_t)buf)[offset] = (uint8_t)(val & 0xFF);
 }
 
 SYSCALL int64_t STR_PFX(buf_get_i32)(int64_t buf, int64_t offset) {
-    if (!buf) return 0;
-    return (int64_t)(((int32_t *)(uintptr_t)buf)[offset]);
+  if (!buf)
+    return 0;
+  NovaBufferHeader *hdr = _nova_get_buf_hdr(buf);
+  if (hdr) {
+    if (offset < 0 || (offset + 1) * 4 > hdr->capacity) {
+      _nova_buf_panic("buf_get_i32", offset, 4, hdr->capacity);
+    }
+  }
+  return (int64_t)(((int32_t *)(uintptr_t)buf)[offset]);
 }
 
 SYSCALL void STR_PFX(buf_set_i32)(int64_t buf, int64_t offset, int64_t val) {
-    if (!buf) return;
-    ((int32_t *)(uintptr_t)buf)[offset] = (int32_t)val;
+  if (!buf)
+    return;
+  NovaBufferHeader *hdr = _nova_get_buf_hdr(buf);
+  if (hdr) {
+    if (offset < 0 || (offset + 1) * 4 > hdr->capacity) {
+      _nova_buf_panic("buf_set_i32", offset, 4, hdr->capacity);
+    }
+  }
+  ((int32_t *)(uintptr_t)buf)[offset] = (int32_t)val;
+}
+
+SYSCALL int64_t STR_PFX(buf_get_u16)(int64_t buf, int64_t byte_offset) {
+  if (!buf)
+    return 0;
+  NovaBufferHeader *hdr = _nova_get_buf_hdr(buf);
+  if (hdr) {
+    if (byte_offset < 0 || byte_offset + 2 > hdr->capacity) {
+      _nova_buf_panic("buf_get_u16", byte_offset, 2, hdr->capacity);
+    }
+  }
+  uint16_t v = 0;
+  memcpy(&v, (const void *)((uintptr_t)buf + (size_t)byte_offset), 2);
+  return (int64_t)v;
+}
+
+SYSCALL void STR_PFX(buf_set_u16)(int64_t buf, int64_t byte_offset,
+                                  int64_t val) {
+  if (!buf)
+    return;
+  NovaBufferHeader *hdr = _nova_get_buf_hdr(buf);
+  if (hdr) {
+    if (byte_offset < 0 || byte_offset + 2 > hdr->capacity) {
+      _nova_buf_panic("buf_set_u16", byte_offset, 2, hdr->capacity);
+    }
+  }
+  uint16_t v = (uint16_t)(val & 0xFFFF);
+  memcpy((void *)((uintptr_t)buf + (size_t)byte_offset), &v, 2);
+}
+
+SYSCALL int64_t STR_PFX(buf_get_i32_unaligned)(int64_t buf,
+                                               int64_t byte_offset) {
+  if (!buf)
+    return 0;
+  NovaBufferHeader *hdr = _nova_get_buf_hdr(buf);
+  if (hdr) {
+    if (byte_offset < 0 || byte_offset + 4 > hdr->capacity) {
+      _nova_buf_panic("buf_get_i32_unaligned", byte_offset, 4, hdr->capacity);
+    }
+  }
+  int32_t v = 0;
+  memcpy(&v, (const void *)((uintptr_t)buf + (size_t)byte_offset), 4);
+  return (int64_t)v;
+}
+
+SYSCALL void STR_PFX(buf_set_i32_unaligned)(int64_t buf, int64_t byte_offset,
+                                            int64_t val) {
+  if (!buf)
+    return;
+  NovaBufferHeader *hdr = _nova_get_buf_hdr(buf);
+  if (hdr) {
+    if (byte_offset < 0 || byte_offset + 4 > hdr->capacity) {
+      _nova_buf_panic("buf_set_i32_unaligned", byte_offset, 4, hdr->capacity);
+    }
+  }
+  int32_t v = (int32_t)val;
+  memcpy((void *)((uintptr_t)buf + (size_t)byte_offset), &v, 4);
+}
+
+SYSCALL int64_t STR_PFX(buf_slice)(int64_t buf, int64_t byte_offset,
+                                   int64_t len) {
+  if (!buf || len <= 0)
+    return STR_PFX(buf_new)(0);
+  NovaBufferHeader *hdr = _nova_get_buf_hdr(buf);
+  if (hdr) {
+    if (byte_offset < 0 || len < 0 || byte_offset + len > hdr->capacity) {
+      _nova_buf_panic("buf_slice", byte_offset, len, hdr->capacity);
+    }
+  }
+  int64_t new_buf = STR_PFX(buf_new)(len);
+  if (!new_buf)
+    return 0;
+  memcpy((void *)(uintptr_t)new_buf,
+         (const void *)((uintptr_t)buf + (size_t)byte_offset), (size_t)len);
+  return new_buf;
 }
 
 SYSCALL void STR_PFX(buf_fill_i32)(int64_t buf, int64_t count, int64_t val) {
-    if (!buf || count <= 0) return;
-    int32_t *dst = (int32_t *)(uintptr_t)buf;
-    int32_t v = (int32_t)val;
-    for (int64_t i = 0; i < count; i++) {
-        dst[i] = v;
+  if (!buf || count <= 0)
+    return;
+  NovaBufferHeader *hdr = _nova_get_buf_hdr(buf);
+  if (hdr) {
+    if (count * 4 > hdr->capacity) {
+      _nova_buf_panic("buf_fill_i32", 0, count * 4, hdr->capacity);
     }
+  }
+  int32_t *dst = (int32_t *)(uintptr_t)buf;
+  int32_t v = (int32_t)val;
+  for (int64_t i = 0; i < count; i++) {
+    dst[i] = v;
+  }
 }
 
 SYSCALL void STR_PFX(buf_copy)(int64_t dst, int64_t src, int64_t len) {
-    if (!dst || !src || len <= 0) return;
-    memmove((void *)(uintptr_t)dst, (const void *)(uintptr_t)src, (size_t)len);
+  if (!dst || !src || len <= 0)
+    return;
+  NovaBufferHeader *hdr_dst = _nova_get_buf_hdr(dst);
+  if (hdr_dst && len > hdr_dst->capacity) {
+    _nova_buf_panic("buf_copy (dst overflow)", 0, len, hdr_dst->capacity);
+  }
+  NovaBufferHeader *hdr_src = _nova_get_buf_hdr(src);
+  if (hdr_src && len > hdr_src->capacity) {
+    _nova_buf_panic("buf_copy (src overrun)", 0, len, hdr_src->capacity);
+  }
+  memmove((void *)(uintptr_t)dst, (const void *)(uintptr_t)src, (size_t)len);
 }
 
 /* High-Resolution Monotonic Timers */
 static int64_t g_qpc_freq = 0;
 SYSCALL int64_t STR_PFX(time_now_us)(void) {
 #if defined(_WIN32)
-    if (g_qpc_freq == 0) {
-        LARGE_INTEGER freq;
-        QueryPerformanceFrequency(&freq);
-        g_qpc_freq = freq.QuadPart;
-    }
-    LARGE_INTEGER count;
-    QueryPerformanceCounter(&count);
-    return (int64_t)((count.QuadPart * 1000000LL) / g_qpc_freq);
+  if (g_qpc_freq == 0) {
+    LARGE_INTEGER freq;
+    QueryPerformanceFrequency(&freq);
+    g_qpc_freq = freq.QuadPart;
+  }
+  LARGE_INTEGER count;
+  QueryPerformanceCounter(&count);
+  return (int64_t)((count.QuadPart * 1000000LL) / g_qpc_freq);
 #else
-    return 0;
+  return 0;
 #endif
 }
 
 SYSCALL int64_t STR_PFX(time_now_ms)(void) {
-    return STR_PFX(time_now_us)() / 1000LL;
+  return STR_PFX(time_now_us)() / 1000LL;
 }
 
 SYSCALL void STR_PFX(sleep_ms)(int64_t ms) {
 #if defined(_WIN32)
-    Sleep((DWORD)ms);
+  Sleep((DWORD)ms);
 #endif
 }
 
 /* Direct Framebuffer Blit & Input State */
-SYSCALL void STR_PFX(gui_present_framebuffer)(int64_t buffer_ptr, int width, int height) {
+SYSCALL void STR_PFX(gui_present_framebuffer)(int64_t buffer_ptr, int width,
+                                              int height) {
 #if defined(_WIN32)
-    if (!g_gui_hwnd || !buffer_ptr || width <= 0 || height <= 0) return;
-    HDC screen_dc = GetDC(g_gui_hwnd);
-    if (!screen_dc) return;
+  if (!g_gui_hwnd || !buffer_ptr || width <= 0 || height <= 0)
+    return;
+  HDC screen_dc = GetDC(g_gui_hwnd);
+  if (!screen_dc)
+    return;
 
-    BITMAPINFO bi;
-    memset(&bi, 0, sizeof(bi));
-    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bi.bmiHeader.biWidth = width;
-    bi.bmiHeader.biHeight = -height;
-    bi.bmiHeader.biPlanes = 1;
-    bi.bmiHeader.biBitCount = 32;
-    bi.bmiHeader.biCompression = BI_RGB;
+  BITMAPINFO bi;
+  memset(&bi, 0, sizeof(bi));
+  bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  bi.bmiHeader.biWidth = width;
+  bi.bmiHeader.biHeight = -height;
+  bi.bmiHeader.biPlanes = 1;
+  bi.bmiHeader.biBitCount = 32;
+  bi.bmiHeader.biCompression = BI_RGB;
 
-    StretchDIBits(screen_dc,
-                  0, 0, g_gui_phys_w > 0 ? g_gui_phys_w : width,
-                  g_gui_phys_h > 0 ? g_gui_phys_h : height,
-                  0, 0, width, height,
-                  (const void *)(uintptr_t)buffer_ptr,
-                  &bi, DIB_RGB_COLORS, SRCCOPY);
-    ReleaseDC(g_gui_hwnd, screen_dc);
+  StretchDIBits(screen_dc, 0, 0, g_gui_phys_w > 0 ? g_gui_phys_w : width,
+                g_gui_phys_h > 0 ? g_gui_phys_h : height, 0, 0, width, height,
+                (const void *)(uintptr_t)buffer_ptr, &bi, DIB_RGB_COLORS,
+                SRCCOPY);
+  ReleaseDC(g_gui_hwnd, screen_dc);
+#endif
+}
+
+SYSCALL void STR_PFX(gui_draw_framebuffer)(int64_t buffer_ptr, int x, int y,
+                                           int width, int height, int unused) {
+  (void)unused;
+#if defined(_WIN32)
+  if (!g_gui_mem_dc || !buffer_ptr || width <= 0 || height <= 0)
+    return;
+  BITMAPINFO bi;
+  memset(&bi, 0, sizeof(bi));
+  bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  bi.bmiHeader.biWidth = width;
+  bi.bmiHeader.biHeight = -height;
+  bi.bmiHeader.biPlanes = 1;
+  bi.bmiHeader.biBitCount = 32;
+  bi.bmiHeader.biCompression = BI_RGB;
+
+  int px = (int)(x * g_gui_dpi_scale);
+  int py = (int)(y * g_gui_dpi_scale);
+  int pw = (int)(width * g_gui_dpi_scale);
+  int ph = (int)(height * g_gui_dpi_scale);
+
+  StretchDIBits(g_gui_mem_dc, px, py, pw, ph, 0, 0, width, height,
+                (const void *)(uintptr_t)buffer_ptr, &bi, DIB_RGB_COLORS,
+                SRCCOPY);
 #endif
 }
 
 SYSCALL int STR_PFX(gui_key_down)(int keycode) {
 #if defined(_WIN32)
-    SHORT s = GetAsyncKeyState(keycode);
-    return (s & 0x8000) ? 1 : 0;
+  SHORT s = GetAsyncKeyState(keycode);
+  return (s & 0x8000) ? 1 : 0;
 #else
-    return 0;
+  return 0;
 #endif
 }
 
 SYSCALL int STR_PFX(gui_mouse_down_btn)(int button) {
 #if defined(_WIN32)
-    int vk = (button == 1) ? VK_RBUTTON : ((button == 2) ? VK_MBUTTON : VK_LBUTTON);
-    SHORT s = GetAsyncKeyState(vk);
-    return (s & 0x8000) ? 1 : 0;
+  int vk =
+      (button == 1) ? VK_RBUTTON : ((button == 2) ? VK_MBUTTON : VK_LBUTTON);
+  SHORT s = GetAsyncKeyState(vk);
+  return (s & 0x8000) ? 1 : 0;
 #else
-    return 0;
+  return 0;
 #endif
 }
 
 /* Dynamic Winsock2 Networking Primitives */
-struct nova_in_addr { unsigned long s_addr; };
+struct nova_in_addr {
+  unsigned long s_addr;
+};
 struct nova_sockaddr_in {
-    short sin_family;
-    unsigned short sin_port;
-    struct nova_in_addr sin_addr;
-    char sin_zero[8];
+  short sin_family;
+  unsigned short sin_port;
+  struct nova_in_addr sin_addr;
+  char sin_zero[8];
 };
 
 typedef struct {
-    int initialized;
-    int (__stdcall *pfn_WSAStartup)(WORD, void *);
-    int (__stdcall *pfn_WSACleanup)(void);
-    int (__stdcall *pfn_WSAGetLastError)(void);
-    uintptr_t (__stdcall *pfn_socket)(int, int, int);
-    int (__stdcall *pfn_bind)(uintptr_t, const void *, int);
-    int (__stdcall *pfn_listen)(uintptr_t, int);
-    uintptr_t (__stdcall *pfn_accept)(uintptr_t, void *, int *);
-    int (__stdcall *pfn_connect)(uintptr_t, const void *, int);
-    int (__stdcall *pfn_send)(uintptr_t, const char *, int, int);
-    int (__stdcall *pfn_recv)(uintptr_t, char *, int, int);
-    int (__stdcall *pfn_closesocket)(uintptr_t);
-    int (__stdcall *pfn_ioctlsocket)(uintptr_t, long, unsigned long *);
-    unsigned short (__stdcall *pfn_htons)(unsigned short);
-    unsigned long (__stdcall *pfn_inet_addr)(const char *);
+  int initialized;
+  int(__stdcall *pfn_WSAStartup)(WORD, void *);
+  int(__stdcall *pfn_WSACleanup)(void);
+  int(__stdcall *pfn_WSAGetLastError)(void);
+  uintptr_t(__stdcall *pfn_socket)(int, int, int);
+  int(__stdcall *pfn_bind)(uintptr_t, const void *, int);
+  int(__stdcall *pfn_listen)(uintptr_t, int);
+  uintptr_t(__stdcall *pfn_accept)(uintptr_t, void *, int *);
+  int(__stdcall *pfn_connect)(uintptr_t, const void *, int);
+  int(__stdcall *pfn_send)(uintptr_t, const char *, int, int);
+  int(__stdcall *pfn_recv)(uintptr_t, char *, int, int);
+  int(__stdcall *pfn_closesocket)(uintptr_t);
+  int(__stdcall *pfn_ioctlsocket)(uintptr_t, long, unsigned long *);
+  unsigned short(__stdcall *pfn_htons)(unsigned short);
+  unsigned long(__stdcall *pfn_inet_addr)(const char *);
+  int(__stdcall *pfn_setsockopt)(uintptr_t, int, int, const char *, int);
 } NovaNetContext;
 static NovaNetContext g_net = {0};
 
 static int _init_net(void) {
 #if defined(_WIN32)
-    if (g_net.initialized) return 1;
-    HMODULE hWs2 = LoadLibraryA("ws2_32.dll");
-    if (!hWs2) return 0;
-    g_net.pfn_WSAStartup = (int (__stdcall *)(WORD, void *))GetProcAddress(hWs2, "WSAStartup");
-    g_net.pfn_WSACleanup = (int (__stdcall *)(void))GetProcAddress(hWs2, "WSACleanup");
-    g_net.pfn_WSAGetLastError = (int (__stdcall *)(void))GetProcAddress(hWs2, "WSAGetLastError");
-    g_net.pfn_socket = (uintptr_t (__stdcall *)(int, int, int))GetProcAddress(hWs2, "socket");
-    g_net.pfn_bind = (int (__stdcall *)(uintptr_t, const void *, int))GetProcAddress(hWs2, "bind");
-    g_net.pfn_listen = (int (__stdcall *)(uintptr_t, int))GetProcAddress(hWs2, "listen");
-    g_net.pfn_accept = (uintptr_t (__stdcall *)(uintptr_t, void *, int *))GetProcAddress(hWs2, "accept");
-    g_net.pfn_connect = (int (__stdcall *)(uintptr_t, const void *, int))GetProcAddress(hWs2, "connect");
-    g_net.pfn_send = (int (__stdcall *)(uintptr_t, const char *, int, int))GetProcAddress(hWs2, "send");
-    g_net.pfn_recv = (int (__stdcall *)(uintptr_t, char *, int, int))GetProcAddress(hWs2, "recv");
-    g_net.pfn_closesocket = (int (__stdcall *)(uintptr_t))GetProcAddress(hWs2, "closesocket");
-    g_net.pfn_ioctlsocket = (int (__stdcall *)(uintptr_t, long, unsigned long *))GetProcAddress(hWs2, "ioctlsocket");
-    g_net.pfn_htons = (unsigned short (__stdcall *)(unsigned short))GetProcAddress(hWs2, "htons");
-    g_net.pfn_inet_addr = (unsigned long (__stdcall *)(const char *))GetProcAddress(hWs2, "inet_addr");
-    if (!g_net.pfn_WSAStartup || !g_net.pfn_socket) return 0;
-    char wsa_buf[512];
-    if (g_net.pfn_WSAStartup(0x0202, wsa_buf) != 0) return 0;
-    g_net.initialized = 1;
+  if (g_net.initialized)
     return 1;
+  HMODULE hWs2 = LoadLibraryA("ws2_32.dll");
+  if (!hWs2)
+    return 0;
+  g_net.pfn_WSAStartup =
+      (int(__stdcall *)(WORD, void *))GetProcAddress(hWs2, "WSAStartup");
+  g_net.pfn_WSACleanup =
+      (int(__stdcall *)(void))GetProcAddress(hWs2, "WSACleanup");
+  g_net.pfn_WSAGetLastError =
+      (int(__stdcall *)(void))GetProcAddress(hWs2, "WSAGetLastError");
+  g_net.pfn_socket =
+      (uintptr_t(__stdcall *)(int, int, int))GetProcAddress(hWs2, "socket");
+  g_net.pfn_bind = (int(__stdcall *)(uintptr_t, const void *,
+                                     int))GetProcAddress(hWs2, "bind");
+  g_net.pfn_listen =
+      (int(__stdcall *)(uintptr_t, int))GetProcAddress(hWs2, "listen");
+  g_net.pfn_accept = (uintptr_t(__stdcall *)(
+      uintptr_t, void *, int *))GetProcAddress(hWs2, "accept");
+  g_net.pfn_connect = (int(__stdcall *)(uintptr_t, const void *,
+                                        int))GetProcAddress(hWs2, "connect");
+  g_net.pfn_send = (int(__stdcall *)(uintptr_t, const char *, int,
+                                     int))GetProcAddress(hWs2, "send");
+  g_net.pfn_recv = (int(__stdcall *)(uintptr_t, char *, int,
+                                     int))GetProcAddress(hWs2, "recv");
+  g_net.pfn_closesocket =
+      (int(__stdcall *)(uintptr_t))GetProcAddress(hWs2, "closesocket");
+  g_net.pfn_ioctlsocket = (int(__stdcall *)(
+      uintptr_t, long, unsigned long *))GetProcAddress(hWs2, "ioctlsocket");
+  g_net.pfn_htons = (unsigned short(__stdcall *)(unsigned short))GetProcAddress(
+      hWs2, "htons");
+  g_net.pfn_inet_addr =
+      (unsigned long(__stdcall *)(const char *))GetProcAddress(hWs2,
+                                                               "inet_addr");
+  g_net.pfn_setsockopt =
+      (int(__stdcall *)(uintptr_t, int, int, const char *, int))GetProcAddress(
+          hWs2, "setsockopt");
+  if (!g_net.pfn_WSAStartup || !g_net.pfn_socket)
+    return 0;
+  char wsa_buf[512];
+  if (g_net.pfn_WSAStartup(0x0202, wsa_buf) != 0)
+    return 0;
+  g_net.initialized = 1;
+  return 1;
 #else
-    return 1;
+  return 1;
 #endif
 }
 
-SYSCALL int64_t STR_PFX(nova_net_init)(void) {
-    return _init_net() ? 1 : 0;
-}
+SYSCALL int64_t STR_PFX(nova_net_init)(void) { return _init_net() ? 1 : 0; }
 
 SYSCALL int64_t STR_PFX(nova_tcp_listen)(int64_t port, int64_t backlog) {
 #if defined(_WIN32)
-    if (!_init_net()) return -1;
-    uintptr_t s = g_net.pfn_socket(2 /* AF_INET */, 1 /* SOCK_STREAM */, 6 /* IPPROTO_TCP */);
-    if (s == (uintptr_t)(~0)) return -1;
-    struct nova_sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = 2;
-    addr.sin_port = g_net.pfn_htons((unsigned short)port);
-    addr.sin_addr.s_addr = 0; /* INADDR_ANY */
-    if (g_net.pfn_bind(s, &addr, sizeof(addr)) != 0) {
-        g_net.pfn_closesocket(s);
-        return -1;
-    }
-    if (g_net.pfn_listen(s, backlog > 0 ? (int)backlog : 128) != 0) {
-        g_net.pfn_closesocket(s);
-        return -1;
-    }
-    return (int64_t)s;
-#else
+  if (!_init_net())
     return -1;
+  uintptr_t s = g_net.pfn_socket(2 /* AF_INET */, 1 /* SOCK_STREAM */,
+                                 6 /* IPPROTO_TCP */);
+  if (s == (uintptr_t)(~0))
+    return -1;
+  struct nova_sockaddr_in addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = 2;
+  addr.sin_port = g_net.pfn_htons((unsigned short)port);
+  addr.sin_addr.s_addr = 0; /* INADDR_ANY */
+  if (g_net.pfn_bind(s, &addr, sizeof(addr)) != 0) {
+    g_net.pfn_closesocket(s);
+    return -1;
+  }
+  if (g_net.pfn_listen(s, backlog > 0 ? (int)backlog : 128) != 0) {
+    g_net.pfn_closesocket(s);
+    return -1;
+  }
+  return (int64_t)s;
+#else
+  return -1;
 #endif
 }
 
 SYSCALL int64_t STR_PFX(nova_tcp_accept)(int64_t listen_sock) {
 #if defined(_WIN32)
-    if (!_init_net() || listen_sock <= 0) return -1;
-    struct nova_sockaddr_in client_addr;
-    int addr_len = sizeof(client_addr);
-    uintptr_t client = g_net.pfn_accept((uintptr_t)listen_sock, &client_addr, &addr_len);
-    if (client == (uintptr_t)(~0)) return -1;
-    return (int64_t)client;
-#else
+  if (!_init_net() || listen_sock <= 0)
     return -1;
+  struct nova_sockaddr_in client_addr;
+  int addr_len = sizeof(client_addr);
+  uintptr_t client =
+      g_net.pfn_accept((uintptr_t)listen_sock, &client_addr, &addr_len);
+  if (client == (uintptr_t)(~0))
+    return -1;
+  return (int64_t)client;
+#else
+  return -1;
 #endif
 }
 
 SYSCALL int64_t STR_PFX(nova_tcp_connect)(const char *ip, int64_t port) {
 #if defined(_WIN32)
-    if (!_init_net() || !ip) return -1;
-    uintptr_t s = g_net.pfn_socket(2, 1, 6);
-    if (s == (uintptr_t)(~0)) return -1;
-    struct nova_sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = 2;
-    addr.sin_port = g_net.pfn_htons((unsigned short)port);
-    addr.sin_addr.s_addr = g_net.pfn_inet_addr(ip);
-    if (g_net.pfn_connect(s, &addr, sizeof(addr)) != 0) {
-        g_net.pfn_closesocket(s);
-        return -1;
-    }
-    return (int64_t)s;
-#else
+  if (!_init_net() || !ip)
     return -1;
+  uintptr_t s = g_net.pfn_socket(2, 1, 6);
+  if (s == (uintptr_t)(~0))
+    return -1;
+  struct nova_sockaddr_in addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = 2;
+  addr.sin_port = g_net.pfn_htons((unsigned short)port);
+  addr.sin_addr.s_addr = g_net.pfn_inet_addr(ip);
+  if (g_net.pfn_connect(s, &addr, sizeof(addr)) != 0) {
+    g_net.pfn_closesocket(s);
+    return -1;
+  }
+  return (int64_t)s;
+#else
+  return -1;
 #endif
 }
 
 SYSCALL int64_t STR_PFX(nova_net_send)(int64_t sock, int64_t buf, int64_t len) {
 #if defined(_WIN32)
-    if (!_init_net() || sock <= 0 || !buf || len <= 0) return -1;
-    int sent = g_net.pfn_send((uintptr_t)sock, (const char *)(uintptr_t)buf, (int)len, 0);
-    return (int64_t)sent;
-#else
+  if (!_init_net() || sock <= 0 || !buf || len <= 0)
     return -1;
+  int sent = g_net.pfn_send((uintptr_t)sock, (const char *)(uintptr_t)buf,
+                            (int)len, 0);
+  return (int64_t)sent;
+#else
+  return -1;
 #endif
 }
 
-SYSCALL int64_t STR_PFX(nova_net_recv)(int64_t sock, int64_t buf, int64_t max_len) {
+SYSCALL int64_t STR_PFX(nova_net_recv)(int64_t sock, int64_t buf,
+                                       int64_t max_len) {
 #if defined(_WIN32)
-    if (!_init_net() || sock <= 0 || !buf || max_len <= 0) return -1;
-    int recvd = g_net.pfn_recv((uintptr_t)sock, (char *)(uintptr_t)buf, (int)max_len, 0);
-    if (recvd < 0 && g_net.pfn_WSAGetLastError) printf("[net_recv err=%d]\n", g_net.pfn_WSAGetLastError());
-    return (int64_t)recvd;
-#else
+  if (!_init_net() || sock <= 0 || !buf || max_len <= 0)
     return -1;
+  int recvd =
+      g_net.pfn_recv((uintptr_t)sock, (char *)(uintptr_t)buf, (int)max_len, 0);
+  if (recvd < 0 && g_net.pfn_WSAGetLastError)
+    printf("[net_recv err=%d]\n", g_net.pfn_WSAGetLastError());
+  return (int64_t)recvd;
+#else
+  return -1;
+#endif
+}
+
+SYSCALL int64_t STR_PFX(nova_socket_set_timeout)(int64_t sock,
+                                                 int64_t timeout_ms) {
+#if defined(_WIN32)
+  if (!_init_net() || !g_net.pfn_setsockopt)
+    return -1;
+  DWORD tv = (DWORD)timeout_ms;
+  int r1 = g_net.pfn_setsockopt((uintptr_t)sock, 0xffff, 0x1006,
+                                (const char *)&tv, sizeof(tv));
+  int r2 = g_net.pfn_setsockopt((uintptr_t)sock, 0xffff, 0x1005,
+                                (const char *)&tv, sizeof(tv));
+  return (r1 == 0 && r2 == 0) ? 0 : -1;
+#else
+  return 0;
 #endif
 }
 
 SYSCALL void STR_PFX(nova_net_close)(int64_t sock) {
 #if defined(_WIN32)
-    if (g_net.initialized && sock > 0) {
-        g_net.pfn_closesocket((uintptr_t)sock);
-    }
+  if (g_net.initialized && sock > 0) {
+    g_net.pfn_closesocket((uintptr_t)sock);
+  }
 #endif
 }
 
@@ -3575,38 +4536,103 @@ SYSCALL void STR_PFX(nova_net_close)(int64_t sock) {
 int gui_next_click_id(void) { return _gui_next_click_id(); }
 int64_t buf_new(int64_t size_bytes) { return _buf_new(size_bytes); }
 void buf_free(int64_t buf) { _buf_free(buf); }
-int64_t buf_get_u8(int64_t buf, int64_t offset) { return _buf_get_u8(buf, offset); }
-void buf_set_u8(int64_t buf, int64_t offset, int64_t val) { _buf_set_u8(buf, offset, val); }
-int64_t buf_get_i32(int64_t buf, int64_t offset) { return _buf_get_i32(buf, offset); }
-void buf_set_i32(int64_t buf, int64_t offset, int64_t val) { _buf_set_i32(buf, offset, val); }
-void buf_fill_i32(int64_t buf, int64_t count, int64_t val) { _buf_fill_i32(buf, count, val); }
-void buf_copy(int64_t dst, int64_t src, int64_t len) { _buf_copy(dst, src, len); }
+int64_t buf_get_u8(int64_t buf, int64_t offset) {
+  return _buf_get_u8(buf, offset);
+}
+void buf_set_u8(int64_t buf, int64_t offset, int64_t val) {
+  _buf_set_u8(buf, offset, val);
+}
+int64_t buf_get_i32(int64_t buf, int64_t offset) {
+  return _buf_get_i32(buf, offset);
+}
+void buf_set_i32(int64_t buf, int64_t offset, int64_t val) {
+  _buf_set_i32(buf, offset, val);
+}
+void buf_fill_i32(int64_t buf, int64_t count, int64_t val) {
+  _buf_fill_i32(buf, count, val);
+}
+void buf_copy(int64_t dst, int64_t src, int64_t len) {
+  _buf_copy(dst, src, len);
+}
 int64_t time_now_us(void) { return _time_now_us(); }
 int64_t time_now_ms(void) { return _time_now_ms(); }
 void sleep_ms(int64_t ms) { _sleep_ms(ms); }
-void gui_present_framebuffer(int64_t buffer_ptr, int width, int height) { _gui_present_framebuffer(buffer_ptr, width, height); }
+void gui_present_framebuffer(int64_t buffer_ptr, int width, int height) {
+  _gui_present_framebuffer(buffer_ptr, width, height);
+}
+void gui_draw_framebuffer(int64_t buffer_ptr, int x, int y, int width,
+                          int height, int unused) {
+  _gui_draw_framebuffer(buffer_ptr, x, y, width, height, unused);
+}
 int gui_key_down(int keycode) { return _gui_key_down(keycode); }
 int gui_mouse_down_btn(int button) { return _gui_mouse_down_btn(button); }
 int64_t nova_net_init(void) { return _nova_net_init(); }
-int64_t nova_tcp_listen(int64_t port, int64_t backlog) { return _nova_tcp_listen(port, backlog); }
-int64_t nova_tcp_accept(int64_t listen_sock) { return _nova_tcp_accept(listen_sock); }
-int64_t nova_tcp_connect(const char *ip, int64_t port) { return _nova_tcp_connect(ip, port); }
-int64_t nova_net_send(int64_t sock, int64_t buf, int64_t len) { return _nova_net_send(sock, buf, len); }
-int64_t nova_net_recv(int64_t sock, int64_t buf, int64_t max_len) { return _nova_net_recv(sock, buf, max_len); }
+int64_t nova_tcp_listen(int64_t port, int64_t backlog) {
+  return _nova_tcp_listen(port, backlog);
+}
+int64_t nova_tcp_accept(int64_t listen_sock) {
+  return _nova_tcp_accept(listen_sock);
+}
+int64_t buf_get_u16(int64_t buf, int64_t offset) {
+  return _buf_get_u16(buf, offset);
+}
+void buf_set_u16(int64_t buf, int64_t offset, int64_t val) {
+  _buf_set_u16(buf, offset, val);
+}
+int64_t buf_get_i32_unaligned(int64_t buf, int64_t offset) {
+  return _buf_get_i32_unaligned(buf, offset);
+}
+void buf_set_i32_unaligned(int64_t buf, int64_t offset, int64_t val) {
+  _buf_set_i32_unaligned(buf, offset, val);
+}
+int64_t buf_slice(int64_t buf, int64_t offset, int64_t len) {
+  return _buf_slice(buf, offset, len);
+}
+int64_t nova_socket_set_timeout(int64_t sock, int64_t ms) {
+  return _nova_socket_set_timeout(sock, ms);
+}
+int gui_poll_event_raw(int64_t out_buf) { return _gui_poll_event_raw(out_buf); }
+int64_t nova_tcp_connect(const char *ip, int64_t port) {
+  return _nova_tcp_connect(ip, port);
+}
+int64_t nova_net_send(int64_t sock, int64_t buf, int64_t len) {
+  return _nova_net_send(sock, buf, len);
+}
+int64_t nova_net_recv(int64_t sock, int64_t buf, int64_t max_len) {
+  return _nova_net_recv(sock, buf, max_len);
+}
 void nova_net_close(int64_t sock) { _nova_net_close(sock); }
 
 int gui_poll_char(void) { return _gui_poll_char(); }
 const char *gui_char_to_str(int c) { return _gui_char_to_str(c); }
-int gui_init_window(const char *title, int width, int height) { return _gui_init_window(title, width, height); }
+int gui_init_window(const char *title, int width, int height) {
+  return _gui_init_window(title, width, height);
+}
 int gui_poll_events(void) { return _gui_poll_events(); }
 int gui_get_mouse_x(void) { return _gui_get_mouse_x(); }
 int gui_get_mouse_y(void) { return _gui_get_mouse_y(); }
 int gui_get_mouse_down(void) { return _gui_get_mouse_down(); }
 int gui_get_mouse_clicked(void) { return _gui_get_mouse_clicked(); }
 void gui_clear(int color_hex) { _gui_clear(color_hex); }
-void gui_draw_rect(int x, int y, int w, int h, int color_hex, int radius) { _gui_draw_rect(x, y, w, h, color_hex, radius); }
-void gui_draw_border(int x, int y, int w, int h, int border_w, int color_hex) { _gui_draw_border(x, y, w, h, border_w, color_hex); }
-void gui_draw_text(const char *text, int x, int y, int font_size, int color_hex, int font_weight) { _gui_draw_text(text, x, y, font_size, color_hex, font_weight); }
+void gui_draw_rect(int x, int y, int w, int h, int color_hex, int radius) {
+  _gui_draw_rect(x, y, w, h, color_hex, radius);
+}
+void gui_draw_border(int x, int y, int w, int h, int border_w, int color_hex) {
+  _gui_draw_border(x, y, w, h, border_w, color_hex);
+}
+void gui_draw_text(const char *text, int x, int y, int font_size, int color_hex,
+                   int font_weight) {
+  _gui_draw_text(text, x, y, font_size, color_hex, font_weight);
+}
+void gui_draw_mono_text(const char *text, int x, int y, int font_size,
+                        int color_hex, int font_weight) {
+  _gui_draw_mono_text(text, x, y, font_size, color_hex, font_weight);
+}
+void gui_draw_mono_cell(const char *text, int start_x, int y, int col_idx,
+                        int color_hex, int font_weight) {
+  _gui_draw_mono_cell(text, start_x, y, col_idx, color_hex, font_weight);
+}
+int gui_mono_char_w(void) { return _gui_mono_char_w(); }
 void gui_present(void) { _gui_present(); }
 void gui_sleep(int ms) { _gui_sleep(ms); }
 int gui_save_screenshot(const char *path) { return _gui_save_screenshot(path); }
@@ -3618,20 +4644,27 @@ void gui_close(void) { _gui_close(); }
 #else
 /* Non-Windows stubs.
  *
- * These used to wrap every name in STR_PFX(...), copied from the real Windows GUI
- * implementation just above -- but STR_PFX's own #define (top of this file) is itself
- * nested inside `#if defined(_WIN32)`, specifically to bridge a MinGW x64 naming quirk
- * (see that comment). It is never defined when this #else branch is the one being
- * compiled (by definition: you only reach a `#else` when the `#if` was false), so using
- * it here always failed to compile on any non-Windows target -- confirmed by actually
- * cross-compiling runtime.c for aarch64-linux-gnu, something this project had apparently
- * never done before. Hardcoded to a plain `_` prefix instead, matching what every target
- * this backend actually emits expects: `extern def`-declared functions like these always
- * get called as `bl _name` regardless of target_os (bootstrap/compiler/backend/arm64/
- * codegen.py's ExternDef case emits `.extern _{name}` unconditionally) -- there is no
- * OS-conditional naming to bridge here the way STR_PFX bridges a *libc* function's name
- * against MinGW's x64 behavior. */
-SYSCALL int _gui_init_window(const char *title, int width, int height) { (void)title; (void)width; (void)height; return 0; }
+ * These used to wrap every name in STR_PFX(...), copied from the real Windows
+ * GUI implementation just above -- but STR_PFX's own #define (top of this file)
+ * is itself nested inside `#if defined(_WIN32)`, specifically to bridge a MinGW
+ * x64 naming quirk (see that comment). It is never defined when this #else
+ * branch is the one being compiled (by definition: you only reach a `#else`
+ * when the `#if` was false), so using it here always failed to compile on any
+ * non-Windows target -- confirmed by actually cross-compiling runtime.c for
+ * aarch64-linux-gnu, something this project had apparently never done before.
+ * Hardcoded to a plain `_` prefix instead, matching what every target this
+ * backend actually emits expects: `extern def`-declared functions like these
+ * always get called as `bl _name` regardless of target_os
+ * (bootstrap/compiler/backend/arm64/ codegen.py's ExternDef case emits `.extern
+ * _{name}` unconditionally) -- there is no OS-conditional naming to bridge here
+ * the way STR_PFX bridges a *libc* function's name against MinGW's x64
+ * behavior. */
+SYSCALL int _gui_init_window(const char *title, int width, int height) {
+  (void)title;
+  (void)width;
+  (void)height;
+  return 0;
+}
 SYSCALL int _gui_poll_events(void) { return -1; }
 SYSCALL int _gui_get_mouse_x(void) { return 0; }
 SYSCALL int _gui_get_mouse_y(void) { return 0; }
@@ -3640,13 +4673,71 @@ SYSCALL int _gui_get_mouse_clicked(void) { return 0; }
 SYSCALL int _gui_get_window_w(void) { return 0; }
 SYSCALL int _gui_get_window_h(void) { return 0; }
 SYSCALL void _gui_clear(int color_hex) { (void)color_hex; }
-SYSCALL void _gui_draw_rect(int x, int y, int w, int h, int color_hex, int radius) { (void)x; (void)y; (void)w; (void)h; (void)color_hex; (void)radius; }
-SYSCALL void _gui_draw_border(int x, int y, int w, int h, int border_w, int color_hex) { (void)x; (void)y; (void)w; (void)h; (void)border_w; (void)color_hex; }
-SYSCALL void _gui_draw_text(const char *text, int x, int y, int font_size, int color_hex, int font_weight) { (void)text; (void)x; (void)y; (void)font_size; (void)color_hex; (void)font_weight; }
+SYSCALL void _gui_draw_rect(int x, int y, int w, int h, int color_hex,
+                            int radius) {
+  (void)x;
+  (void)y;
+  (void)w;
+  (void)h;
+  (void)color_hex;
+  (void)radius;
+}
+SYSCALL void _gui_draw_border(int x, int y, int w, int h, int border_w,
+                              int color_hex) {
+  (void)x;
+  (void)y;
+  (void)w;
+  (void)h;
+  (void)border_w;
+  (void)color_hex;
+}
+SYSCALL void _gui_draw_text(const char *text, int x, int y, int font_size,
+                            int color_hex, int font_weight) {
+  (void)text;
+  (void)x;
+  (void)y;
+  (void)font_size;
+  (void)color_hex;
+  (void)font_weight;
+}
+SYSCALL void _gui_draw_mono_text(const char *text, int x, int y, int font_size,
+                                 int color_hex, int font_weight) {
+  (void)text;
+  (void)x;
+  (void)y;
+  (void)font_size;
+  (void)color_hex;
+  (void)font_weight;
+}
+SYSCALL void _gui_draw_mono_cell(const char *text, int start_x, int y,
+                                 int col_idx, int color_hex, int font_weight) {
+  (void)text;
+  (void)start_x;
+  (void)y;
+  (void)col_idx;
+  (void)color_hex;
+  (void)font_weight;
+}
+SYSCALL int _gui_mono_char_w(void) { return 7; }
 SYSCALL void _gui_present(void) {}
 SYSCALL void _gui_sleep(int ms) { (void)ms; }
-SYSCALL int _gui_save_screenshot(const char *path) { (void)path; return 0; }
+SYSCALL int _gui_save_screenshot(const char *path) {
+  (void)path;
+  return 0;
+}
 SYSCALL void _gui_close(void) {}
 SYSCALL int _gui_poll_char(void) { return 0; }
-SYSCALL const char *_gui_char_to_str(int c) { (void)c; return ""; }
+SYSCALL const char *_gui_char_to_str(int c) {
+  (void)c;
+  return "";
+}
+SYSCALL void _gui_draw_framebuffer(int64_t buffer_ptr, int x, int y, int width,
+                                   int height, int unused) {
+  (void)buffer_ptr;
+  (void)x;
+  (void)y;
+  (void)width;
+  (void)height;
+  (void)unused;
+}
 #endif

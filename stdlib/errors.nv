@@ -119,6 +119,15 @@ def err(err_type: string, filename: string, line: int, msg: string, suggestion: 
         } else {
             print("ERROR [line " + str(line) + ":" + str(col) + "] (" + err_type + "): " + msg)
         }
+        if col > 0 {
+            caret_pad = ""
+            k = 1
+            while k < col {
+                caret_pad = caret_pad + " "
+                k = k + 1
+            }
+            print("    " + caret_pad + "^~~~")
+        }
         print("  -> " + suggestion)
         sys_flush()
     }

@@ -238,3 +238,13 @@ def text_capitalize(s: string) -> string {
     if len(s) == 0 { return s }
     return text_upper(str_sub(s, 0, 1)) + text_lower(str_sub(s, 1, len(s)))
 }
+
+# Safe string slice view helper with clamped boundaries
+def str_slice(s: string, start: int, length: int) -> string {
+    total = len(s)
+    if start < 0 { start = 0 }
+    if start >= total or length <= 0 { return "" }
+    end = start + length
+    if end > total { end = total }
+    return str_sub(s, start, end)
+}

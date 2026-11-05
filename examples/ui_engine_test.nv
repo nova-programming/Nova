@@ -1,0 +1,143 @@
+# =============================================================================
+# Nova Declarative UI Engine Showcase (examples/ui_engine_test.nv)
+# Pure Declarative Layout with Zero Absolute Coordinates
+# =============================================================================
+import gui
+import time
+
+def dump_tree(w: Widget, indent: string) {
+    print(indent + w.tag + " pos: (" + str(w.pos_x) + ", " + str(w.pos_y) + ") size: " + str(w.width) + "x" + str(w.height))
+    ci = 0
+    while ci < len(w.children) {
+        dump_tree(w.children[ci], indent + "  ")
+        ci = ci + 1
+    }
+}
+
+def run_demo() -> int {
+    status_msg = Text("Status: Declarative Flexbox Layout Active (60 FPS)", {
+        "size": 12,
+        "color": "#a6e3a1",
+        "mono": 1,
+        "padding": 8
+    })
+
+    app_root = Column([
+        # Header Section
+        Column([
+            Text("Nova Declarative UI Engine", {
+                "size": 24,
+                "color": "#cdd6f4",
+                "bold": 1
+            }),
+            Text("Automatic Two-Pass Flexbox Reflow & Native GDI Rasterization", {
+                "size": 13,
+                "color": "#6c7086"
+            })
+        ], {
+            "align": "center",
+            "gap": 6,
+            "padding": 12
+        }),
+
+        # Action Card Container
+        Column([
+            Text("Interactive Component Cluster", {
+                "size": 15,
+                "color": "#89b4fa",
+                "bold": 1
+            }),
+            Text("Buttons and text compute intrinsic sizes and flex boundaries dynamically.", {
+                "size": 12,
+                "color": "#a6adc8"
+            }),
+            Row([
+                Button("Run Compilation", 1, {
+                    "bg": "#a6e3a1",
+                    "hover": "#94e2d5",
+                    "color": "#11111b",
+                    "r": 6,
+                    "padding-left": 18,
+                    "padding-right": 18,
+                    "padding-top": 8,
+                    "padding-bottom": 8,
+                    "font-size": 13,
+                    "font-weight": "bold"
+                }),
+                Button("Inspect AST", 2, {
+                    "bg": "#313244",
+                    "hover": "#45475a",
+                    "color": "#cdd6f4",
+                    "r": 6,
+                    "padding-left": 18,
+                    "padding-right": 18,
+                    "padding-top": 8,
+                    "padding-bottom": 8,
+                    "font-size": 13
+                }),
+                Button("Reset Layout", 3, {
+                    "bg": "#181825",
+                    "hover": "#313244",
+                    "color": "#f38ba8",
+                    "border": 1,
+                    "border_color": "#f38ba8",
+                    "r": 6,
+                    "padding-left": 18,
+                    "padding-right": 18,
+                    "padding-top": 8,
+                    "padding-bottom": 8,
+                    "font-size": 13
+                })
+            ], {
+                "gap": 12,
+                "align": "center",
+                "justify": "center"
+            })
+        ], {
+            "bg": "#181825",
+            "border": 1,
+            "border_color": "#313244",
+            "r": 10,
+            "padding": 20,
+            "gap": 14,
+            "align": "center"
+        }),
+
+        Spacer({"flex": 1}),
+
+        # Status Bar Footer
+        Row([
+            status_msg,
+            Spacer({"flex": 1}),
+            Text("Reflow: OK", {
+                "size": 12,
+                "color": "#89b4fa",
+                "mono": 1,
+                "padding": 8
+            })
+        ], {
+            "bg": "#11111b",
+            "border": 1,
+            "border_color": "#24273a",
+            "r": 6,
+            "padding-left": 12,
+            "padding-right": 12,
+            "align": "center"
+        })
+    ], {
+        "padding": 24,
+        "gap": 16,
+        "bg": "#1e1e2e"
+    })
+
+    gui_measure(app_root)
+    gui_layout(app_root, 0, 0, 680, 420)
+    dump_tree(app_root, "")
+
+    gui_run("Nova Declarative UI Showcase", 680, 420, app_root, {
+        "bg": "#1e1e2e"
+    })
+    return 0
+}
+
+run_demo()

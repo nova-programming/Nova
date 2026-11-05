@@ -1,0 +1,1036 @@
+# =============================================================================
+# Nova Studio Architecture (examples/nova_studio.nv)
+# Pure Native Standalone IDE with In-Process Diagnostics, Process Execution,
+# and 60 FPS Software Framebuffer & Audio Sandbox Viewport
+# =============================================================================
+import system
+import buffer
+import gui
+import time
+import audio
+import process
+import fs
+
+# --- Helper Functions ---
+
+def is_alpha_num(ch: string) -> int {
+    if ch >= "a" and ch <= "z" { return 1 }
+    if ch >= "A" and ch <= "Z" { return 1 }
+    if ch >= "0" and ch <= "9" { return 1 }
+    if ch == "_" { return 1 }
+    return 0
+}
+
+def is_digit(ch: string) -> int {
+    if ch >= "0" and ch <= "9" { return 1 }
+    return 0
+}
+
+def is_kw(t: string) -> int {
+    if t == "def" or t == "return" or t == "if" or t == "elif" or t == "else" or t == "while" or t == "for" or t == "in" or t == "import" { return 1 }
+    return 0
+}
+
+def is_type(t: string) -> int {
+    if t == "int" or t == "string" or t == "list" or t == "dict" or t == "print" or t == "str" or t == "len" or t == "range" { return 1 }
+    return 0
+}
+
+def render_highlighted_code(line: string, start_x: int, y: int) {
+    if len(line) == 0 { return }
+
+    # Fast-path for comment line
+    k = 0
+    while k < len(line) and line[k] == " " { k = k + 1 }
+    if k < len(line) and line[k] == "#" {
+        drawMonoText(line, start_x, y, 11, 0x006c7086, 0)
+        return
+    }
+
+    curr_x = start_x
+    i = 0
+    n = len(line)
+    while i < n {
+        ch = line[i]
+        if ch == " " {
+            s_cnt = 0
+            while i < n and line[i] == " " {
+                s_cnt = s_cnt + 1
+                i = i + 1
+            }
+            curr_x = curr_x + s_cnt * 7
+        } elif ch == "\t" {
+            curr_x = curr_x + 28
+            i = i + 1
+        } elif ch == "\"" {
+            str_start = i
+            i = i + 1
+            while i < n and line[i] != "\"" {
+                if line[i] == "\\" and i + 1 < n {
+                    i = i + 1
+                }
+                i = i + 1
+            }
+            if i < n and line[i] == "\"" { i = i + 1 }
+            tok = str_sub(line, str_start, i)
+            drawMonoText(tok, curr_x, y, 11, 0x00a6e3a1, 0)
+            curr_x = curr_x + len(tok) * 7
+        } elif is_alpha_num(ch) == 1 {
+            tok_start = i
+            is_num = 1
+            while i < n and is_alpha_num(line[i]) == 1 {
+                if is_digit(line[i]) == 0 { is_num = 0 }
+                i = i + 1
+            }
+            tok = str_sub(line, tok_start, i)
+            col = 0x00cdd6f4
+            weight = 0
+            if is_num == 1 {
+                col = 0x00fab387
+            } elif is_kw(tok) == 1 {
+                col = 0x00cba6f7
+                weight = 1
+            } elif is_type(tok) == 1 {
+                col = 0x0089b4fa
+                weight = 1
+            }
+            drawMonoText(tok, curr_x, y, 11, col, weight)
+            curr_x = curr_x + len(tok) * 7
+        } else {
+            # Check 2-character operators
+            is_two = 0
+            if i + 1 < n {
+                c2 = str_sub(line, i, i + 2)
+                if c2 == "->" or c2 == "==" or c2 == "!=" or c2 == "<=" or c2 == ">=" or c2 == "+=" {
+                    tok = c2
+                    i = i + 2
+                    is_two = 1
+                }
+            }
+            if is_two == 0 {
+                tok = str_sub(line, i, i + 1)
+                i = i + 1
+            }
+            col = 0x0089dceb
+            if tok == "(" or tok == ")" or tok == "[" or tok == "]" or tok == "{" or tok == "}" {
+                col = 0x0094e2d5
+            }
+            drawMonoText(tok, curr_x, y, 11, col, 0)
+            curr_x = curr_x + len(tok) * 7
+        }
+    }
+}
+
+def str_to_int(s: string) -> int {
+    result = 0
+    i = 0
+    neg = 0
+    if len(s) > 0 and s[0] == "-" {
+        neg = 1
+        i = 1
+    }
+    while i < len(s) {
+        c = char_code(s[i])
+        if c >= 48 and c <= 57 {
+            result = result * 10 + (c - 48)
+        }
+        i = i + 1
+    }
+    if neg == 1 { return 0 - result }
+    return result
+}
+
+def find_nova_cli() -> string {
+    if file_exists("nova.exe") == 1 { return "nova.exe" }
+    if file_exists("nova\\nova.exe") == 1 { return "nova\\nova.exe" }
+    if file_exists("..\\nova.exe") == 1 { return "..\\nova.exe" }
+    return "nova.exe"
+}
+
+def in_rect(mx: int, my: int, x: int, y: int, w: int, h: int) -> int {
+    if mx >= x and mx <= x + w and my >= y and my <= y + h { return 1 }
+    return 0
+}
+
+# --- Action Dispatch Identifiers ---
+ACTION_RUN = 101
+ACTION_CHECK = 102
+ACTION_RESET = 103
+ACTION_SOUND = 104
+ACTION_MAX = 105
+ACTION_FILE_0 = 110
+ACTION_FILE_1 = 111
+ACTION_FILE_2 = 112
+ACTION_TAB_TERM = 120
+ACTION_TAB_PROB = 121
+ACTION_CLEAR = 122
+ACTION_MODE_TOGGLE = 130
+ACTION_TEMPLATE_HELLO = 131
+ACTION_TEMPLATE_COUNTER = 132
+ACTION_TEMPLATE_SANDBOX = 133
+
+def split_lines(content: string) -> list {
+    lines = []
+    start = 0
+    i = 0
+    n = len(content)
+    while i < n {
+        ch = content[i]
+        if ch == "\n" {
+            end = i
+            if end > start and content[end - 1] == "\r" {
+                end = end - 1
+            }
+            lines.append(str_sub(content, start, end))
+            start = i + 1
+        }
+        i = i + 1
+    }
+    if start < n {
+        lines.append(str_sub(content, start, n))
+    }
+    if len(lines) == 0 {
+        lines.append("")
+    }
+    return lines
+}
+
+def join_lines(lines: list) -> string {
+    res = ""
+    i = 0
+    while i < len(lines) {
+        res = res + lines[i] + "\n"
+        i = i + 1
+    }
+    return res
+}
+
+def parse_diagnostic_output(raw_out: string) -> list {
+    lines = split_lines(raw_out)
+    status = 0
+    err_line = 0
+    err_col = 0
+    msg = "All checks passed cleanly"
+    caret = ""
+    hint = ""
+
+    i = 0
+    while i < len(lines) {
+        ln = lines[i]
+        if len(ln) >= 5 and (str_sub(ln, 0, 5) == "ERROR" or (len(ln) >= 7 and str_sub(ln, 0, 7) == "WARNING")) {
+            status = 1
+            if str_sub(ln, 0, 7) == "WARNING" { status = 2 }
+            msg = ln
+
+            p1 = 0
+            while p1 < len(ln) and ln[p1] != ":" { p1 = p1 + 1 }
+            if p1 < len(ln) {
+                p2 = p1 + 1
+                while p2 < len(ln) and ln[p2] != ":" { p2 = p2 + 1 }
+                if p2 < len(ln) {
+                    p3 = p2 + 1
+                    while p3 < len(ln) and ln[p3] != "]" and ln[p3] != ":" and ln[p3] != " " { p3 = p3 + 1 }
+                    err_line = str_to_int(str_sub(ln, p1 + 1, p2))
+                    err_col = str_to_int(str_sub(ln, p2 + 1, p3))
+                }
+            }
+
+            if i + 1 < len(lines) and len(lines[i + 1]) > 0 and lines[i + 1][0] == " " {
+                caret = lines[i + 1]
+                i = i + 1
+            }
+            if i + 1 < len(lines) and len(lines[i + 1]) >= 4 and str_sub(lines[i + 1], 0, 4) == "  ->" {
+                hint = lines[i + 1]
+            }
+            break
+        }
+        i = i + 1
+    }
+
+    return [status, err_line, err_col, msg, caret, hint]
+}
+
+# --- Physics & Particle Simulation for 60 FPS Viewport ---
+
+def init_particles(p_h: int, num: int, vw: int, vh: int) {
+    i = 0
+    palette = [0x0089b4fa, 0x00cba6f7, 0x00a6e3a1, 0x00fab387, 0x00f38ba8]
+    while i < num {
+        offset = i * 6
+        # Distribute particles across entire viewport with margin
+        px = ((i * 37 + 19) % (vw - 40) + 20) * 100
+        py = ((i * 53 + 31) % (vh - 90) + 20) * 100
+        buf_set_i32(p_h, offset, px)
+        buf_set_i32(p_h, offset + 1, py)
+
+        # Initial orbital swirling velocity around center
+        cx = (vw / 2) * 100
+        cy = (vh / 2) * 100
+        dx = px - cx
+        dy = py - cy
+        vx = (0 - dy) / 45
+        vy = dx / 45
+        if vx == 0 and vy == 0 {
+            vx = 25
+            vy = -20
+        }
+        buf_set_i32(p_h, offset + 2, vx)
+        buf_set_i32(p_h, offset + 3, vy)
+
+        col = palette[i % 5]
+        buf_set_i32(p_h, offset + 4, col)
+        buf_set_i32(p_h, offset + 5, 0)
+        i = i + 1
+    }
+}
+
+def step_and_render_viewport(fb_h: int, p_h: int, num_particles: int, vw: int, vh: int, target_x: int, target_y: int, shock: int, tick: int) {
+    pixel_count = vw * vh
+    buf_fill_i32(fb_h, pixel_count, 0x00181825)
+
+    # Ambient cosmic grid dots (32px pitch)
+    col_dot = 0x00232438
+    gy = 16
+    while gy < vh - 60 {
+        gx = 16
+        while gx < vw - 16 {
+            buf_set_i32(fb_h, gy * vw + gx, col_dot)
+            gx = gx + 32
+        }
+        gy = gy + 32
+    }
+
+    p = 0
+    while p < num_particles {
+        off = p * 6
+        x = buf_get_i32(p_h, off)
+        y = buf_get_i32(p_h, off + 1)
+        vx = buf_get_i32(p_h, off + 2)
+        vy = buf_get_i32(p_h, off + 3)
+        col = buf_get_i32(p_h, off + 4)
+
+        if shock == 1 {
+            dx = x - target_x * 100
+            dy = y - target_y * 100
+            if dx == 0 and dy == 0 {
+                dx = 60
+                dy = 60
+            }
+            vx = (dx * 15) / 100
+            vy = (dy * 15) / 100
+        } else {
+            dx = target_x * 100 - x
+            dy = target_y * 100 - y
+            dist_sq = (dx / 100) * (dx / 100) + (dy / 100) * (dy / 100)
+            
+            # Orbital curl force + gentle gravity prevents single-point collapse
+            if dist_sq > 25 and dist_sq < 360000 {
+                ax = dx / 220
+                ay = dy / 220
+                tang_x = (0 - dy) / 450
+                tang_y = dx / 450
+                vx = vx + ax + tang_x
+                vy = vy + ay + tang_y
+            }
+            
+            # Balanced drag
+            vx = (vx * 197) / 200
+            vy = (vy * 197) / 200
+
+            # Ambient kinetic wander floor so particles remain an active swarm
+            spd_sq = (vx / 10) * (vx / 10) + (vy / 10) * (vy / 10)
+            if spd_sq < 10 {
+                vx = vx + (((p * 7 + tick) % 11) - 5) * 4
+                vy = vy + (((p * 13 + tick) % 11) - 5) * 4
+            }
+        }
+
+        x = x + vx
+        y = y + vy
+
+        min_x = 400
+        max_x = (vw - 4) * 100
+        min_y = 400
+        max_y = (vh - 65) * 100
+
+        if x < min_x {
+            x = min_x
+            vx = 0 - vx
+        } elif x > max_x {
+            x = max_x
+            vx = 0 - vx
+        }
+        if y < min_y {
+            y = min_y
+            vy = 0 - vy
+        } elif y > max_y {
+            y = max_y
+            vy = 0 - vy
+        }
+
+        buf_set_i32(p_h, off, x)
+        buf_set_i32(p_h, off + 1, y)
+        buf_set_i32(p_h, off + 2, vx)
+        buf_set_i32(p_h, off + 3, vy)
+
+        px = x / 100
+        py = y / 100
+        if px >= 2 and px < vw - 2 and py >= 2 and py < vh - 62 {
+            base = py * vw + px
+            buf_set_i32(fb_h, base, col)
+            buf_set_i32(fb_h, base - 1, col)
+            buf_set_i32(fb_h, base + 1, col)
+            buf_set_i32(fb_h, base - vw, col)
+            buf_set_i32(fb_h, base + vw, col)
+        }
+        p = p + 1
+    }
+
+    baseline_y = vh - 30
+    col_wave = 0x00a6e3a1
+    col_axis = 0x00313244
+    col_div = 0x0024273a
+    
+    div_y = vh - 58
+    ax_x = 4
+    while ax_x < vw - 4 {
+        buf_set_i32(fb_h, div_y * vw + ax_x, col_div)
+        buf_set_i32(fb_h, baseline_y * vw + ax_x, col_axis)
+        ax_x = ax_x + 1
+    }
+
+    wx = 6
+    while wx < vw - 6 {
+        phase = (tick * 4 + wx * 2) % 360
+        amp = audio_sample_sine(phase)
+        wy = baseline_y - (amp * 16) / 100
+        if wy < vh - 54 { wy = vh - 54 }
+        if wy > vh - 8 { wy = vh - 8 }
+        if wy >= 0 and wy < vh - 1 {
+            buf_set_i32(fb_h, wy * vw + wx, col_wave)
+            buf_set_i32(fb_h, (wy + 1) * vw + wx, col_wave)
+        }
+        wx = wx + 1
+    }
+}
+
+# --- Headless Benchmark Mode ---
+
+def run_headless_bench(frames: int) {
+    print("==================================================")
+    print("NOVA STUDIO HEADLESS BENCHMARK")
+    print("==================================================")
+
+    print("[1/3] Testing Compiler Diagnostics Pipeline...")
+    sample_code = "def main() -> int \{\n    return 100\n\}\n"
+    tmp_path = ".nova_studio_bench_probe.nv"
+    fs_write_atomic(tmp_path, sample_code)
+    nova_bin = find_nova_cli()
+    cmd_bench = "\"\"" + nova_bin + "\" check \"" + tmp_path + "\" 2>&1\""
+    out_raw = process_capture(cmd_bench)
+    diag = parse_diagnostic_output(out_raw)
+    status_code = diag[0]
+    if status_code == 0 {
+        print("      Diagnostic Check: PASS (0 errors, Clean)")
+    } else {
+        print("      Diagnostic Check: WARN (Code: " + str(status_code) + ")")
+    }
+    fs_delete(tmp_path)
+
+    print("[2/3] Benchmarking Physics & Software Framebuffer (" + str(frames) + " frames)...")
+    vw = 460
+    vh = 380
+    num_particles = 300
+    fb_h = buf_new(vw * vh * 4)
+    p_h = buf_new(num_particles * 24)
+    init_particles(p_h, num_particles, vw, vh)
+
+    t0 = time_now_us()
+    f = 0
+    while f < frames {
+        step_and_render_viewport(fb_h, p_h, num_particles, vw, vh, vw / 2, vh / 2, 0, f)
+        f = f + 1
+    }
+    t1 = time_now_us()
+    elapsed_us = t1 - t0
+    if elapsed_us <= 0 { elapsed_us = 1 }
+    fps = (frames * 1000000) / elapsed_us
+
+    buf_free(fb_h)
+    buf_free(p_h)
+
+    elapsed_ms = elapsed_us / 1000
+    print("[3/3] Benchmark Results:")
+    print("      Frames Rendered : " + str(frames))
+    print("      Particles Count : " + str(num_particles))
+    print("      Total Time (ms) : " + str(elapsed_ms))
+    print("      Throughput (FPS): " + str(fps) + " (Target: > 60 FPS)")
+    print("==================================================")
+    print("STATUS: BENCHMARK COMPLETED SUCCESSFULLY")
+}
+
+def list_splice(lines: list, idx: int, ins: int) -> list {
+    res = []
+    i = 0
+    while i < len(lines) {
+        if ins == 0 and i == idx { }
+        else { res.append(lines[i]) }
+        if ins == 1 and i == idx { res.append("") }
+        i = i + 1
+    }
+    return res
+}
+
+def s_pane(tab: Widget, can: Widget, w: int, h: int, bg: string, bc: string) -> Widget {
+    return Column([tab, can], {"w": w, "h": h, "bg": bg, "border": 1, "border_color": bc})
+}
+
+def s_btn(lbl: string, act: int, col: string, bg: string) -> Widget {
+    return Button(lbl, act, {"bg": bg, "hover": "#313244", "color": col, "bold": 1, "r": 4, "size": 9, "px": 8, "py": 3})
+}
+
+def s_lbl(lbl: string, col: string) -> Widget {
+    return Text(lbl, {"color": col, "size": 9})
+}
+
+def build_studio_tree(studio_mode: int, active_file: int, active_tab: int, file_names: list, curr_fname: string) -> list {
+    # 1. Top Bar Elements
+    mode_text = "Simple Mode"
+    mode_col = "#a6e3a1"
+    if studio_mode == 1 {
+        mode_text = "Advanced Mode"
+        mode_col = "#89b4fa"
+    }
+    brand_pill = Row([
+        Text("◆ NOVA", {"color": "#89b4fa", "bold": 1, "size": 10, "bg": "#181825", "r": 4, "px": 8, "py": 3}),
+        Text(mode_text, {"color": mode_col, "bold": 1, "size": 9, "bg": "#1e1e2e", "r": 4, "px": 6, "py": 2, "pl": 6})
+    ], {"align": "center"})
+
+    b_run = Button("▶ Run", ACTION_RUN, {"bg": "#a6e3a1", "hover": "#94e2d5", "color": "#11111b", "bold": 1, "r": 6, "size": 10, "px": 12, "py": 3})
+    b_chk = s_btn("✓ Check", ACTION_CHECK, "#89b4fa", "#181825")
+    b_mode = s_btn("⚙ Mode", ACTION_MODE_TOGGLE, "#cdd6f4", "#313244")
+    b_rst = s_btn("↺ Reset", ACTION_RESET, "#cdd6f4", "#181825")
+    b_snd = s_btn("🔊 Sound", ACTION_SOUND, "#cba6f7", "#181825")
+    b_max = s_btn("⛶ Max", ACTION_MAX, "#fab387", "#181825")
+    fps_badge = s_lbl("60 FPS", "#6c7086")
+
+    t_hello = s_btn("📄 Hello", ACTION_TEMPLATE_HELLO, "#89b4fa", "#181825")
+    t_counter = s_btn("🔢 Counter", ACTION_TEMPLATE_COUNTER, "#a6e3a1", "#181825")
+    t_engine = s_btn("🌌 Engine", ACTION_TEMPLATE_SANDBOX, "#fab387", "#181825")
+    tmpl_pill = Row([t_hello, t_counter, t_engine], {"align": "center", "gap": 4})
+
+    top_bar = Row([], {"w": 1040, "h": 36, "bg": "#11111b", "align": "center", "px": 8, "border": 1, "border_color": "#24273a"})
+    if studio_mode == 0 {
+        top_bar.children = [brand_pill, Spacer({}), tmpl_pill, Spacer({}), Row([b_run, b_chk, b_mode], {"align": "center", "gap": 6})]
+    } else {
+        cmd_pill = Row([b_run, b_chk], {"align": "center", "gap": 6, "bg": "#181825", "r": 13, "border": 1, "border_color": "#313244", "p": 2})
+        act_cluster = Row([b_mode, b_rst, b_snd, b_max, fps_badge], {"align": "center", "gap": 6})
+        top_bar.children = [brand_pill, Spacer({}), cmd_pill, Spacer({}), act_cluster]
+    }
+
+    # 2. Workspace Elements
+    ed_w = 516
+    ed_h = 640
+    if studio_mode == 1 {
+        ed_w = 480
+        ed_h = 420
+    }
+    t_file = s_btn("📄 " + curr_fname, 0, "#cdd6f4", "#1e1e2e")
+    t_file.props.set("border", 1)
+    t_file.props.set("border-color", "#89b4fa")
+    ed_tab = Row([t_file, s_lbl("×", "#6c7086"), Spacer({})], {"w": ed_w, "h": 26, "bg": "#14141e", "align": "center"})
+    ed_canvas = Canvas(0, {"w": ed_w, "h": ed_h - 26, "bg": "#1e1e2e"})
+    ed_pane = s_pane(ed_tab, ed_canvas, ed_w, ed_h, "#1e1e2e", "#2b2d42")
+
+    # Bottom / Side Panel
+    bot_w = 516
+    bot_h = 640
+    if studio_mode == 1 {
+        bot_w = 1040
+        bot_h = 220
+    }
+    t_col = "#6c7086"
+    t_bg = "#181825"
+    if active_tab == 1 { t_col = "#a6e3a1"  t_bg = "#11111b" }
+    p_col = "#6c7086"
+    p_bg = "#181825"
+    if active_tab == 0 { p_col = "#89b4fa"  p_bg = "#11111b" }
+    tab_t = s_btn("TERMINAL", ACTION_TAB_TERM, t_col, t_bg)
+    tab_p = s_btn("PROBLEMS", ACTION_TAB_PROB, p_col, p_bg)
+    btn_clr = s_btn("⊘ Clear", ACTION_CLEAR, "#6c7086", "#181825")
+    bot_tab_bar = Row([tab_t, tab_p, Spacer({}), btn_clr], {"w": bot_w, "h": 26, "bg": "#181825", "align": "center", "px": 8, "border": 1, "border_color": "#24273a"})
+    bot_canvas = Canvas(0, {"w": bot_w, "h": bot_h - 26, "bg": "#11111b"})
+    bot_panel = s_pane(bot_tab_bar, bot_canvas, bot_w, bot_h, "#11111b", "#313244")
+
+    sb_canvas = Canvas(0, {"w": 375, "h": 394, "bg": "#181825"})
+    stat_bar = Row([
+        Text("⊞ Nova v1.0", {"color": "#89b4fa", "bold": 1, "size": 9}),
+        Spacer({})
+    ], {"w": 1040, "h": 26, "bg": "#181825", "px": 12, "align": "center", "border": 1, "border_color": "#24273a"})
+
+    if studio_mode == 0 {
+        main_area = Row([ed_pane, bot_panel], {"w": 1040, "h": 640, "gap": 8})
+        root = Column([top_bar, main_area, stat_bar], {"w": 1040, "h": 702, "bg": "#181825"})
+        return [root, ed_canvas, sb_canvas, bot_canvas, stat_bar]
+    }
+
+    # Advanced Mode panels: Activity Bar & Explorer & Sandbox
+    act_bar = Column([
+        s_lbl("📁", "#89b4fa"),
+        s_lbl("⚡", "#6c7086"),
+        s_lbl("🌌", "#6c7086")
+    ], {"w": 42, "h": 420, "bg": "#11111b", "align": "center", "pt": 10, "gap": 18, "border": 1, "border_color": "#24273a"})
+
+    f_btns = []
+    fi = 0
+    while fi < 3 {
+        col = "#a6adc8"
+        bg = "#181825"
+        if active_file == fi { col = "#cdd6f4"  bg = "#313244" }
+        f_btns.append(s_btn("📄 " + file_names[fi], ACTION_FILE_0 + fi, col, bg))
+        fi = fi + 1
+    }
+
+    explorer = Column([
+        s_lbl("EXPLORER", "#6c7086"),
+        s_lbl("v examples", "#89b4fa"),
+        f_btns[0], f_btns[1], f_btns[2],
+        s_lbl("> stdlib", "#585b70"),
+        s_lbl("> tests", "#585b70")
+    ], {"w": 143, "h": 420, "bg": "#181825", "px": 8, "py": 8, "gap": 6, "border": 1, "border_color": "#2b2d42"})
+
+    sb_tab = Row([
+        Text("🌌 PARTICLE SANDBOX", {"color": "#cba6f7", "bold": 1, "size": 9, "bg": "#1e1e2e", "px": 10, "py": 6, "border": 1, "border_color": "#cba6f7"}),
+        Spacer({}),
+        s_lbl("Click to Shock", "#6c7086")
+    ], {"w": 375, "h": 26, "bg": "#14141e", "align": "center"})
+    sb_pane = Column([sb_tab, sb_canvas], {"w": 375, "h": 420, "bg": "#181825"})
+
+    main_area = Row([act_bar, explorer, ed_pane, sb_pane], {"w": 1040, "h": 420})
+    root = Column([top_bar, main_area, bot_panel, stat_bar], {"w": 1040, "h": 702, "bg": "#181825"})
+    return [root, ed_canvas, sb_canvas, bot_canvas, stat_bar]
+}
+
+# --- Main Interactive IDE Window ---
+
+def run_studio() -> int {
+    args = system.get_args()
+    if len(args) >= 3 and args[1] == "--headless-bench" {
+        cnt = str_to_int(args[2])
+        if cnt <= 0 { cnt = 300 }
+        run_headless_bench(cnt)
+        return 0
+    }
+
+    screenshot_path = ""
+    max_frames = 0
+    studio_mode = 0
+    ai = 1
+    while ai < len(args) {
+        if args[ai] == "--test" { max_frames = 30 }
+        if args[ai] == "--advanced" { studio_mode = 1 }
+        if args[ai] == "--screenshot" and ai + 1 < len(args) {
+            screenshot_path = args[ai + 1]
+            max_frames = 5
+        }
+        ai = ai + 1
+    }
+
+    win_w = 1040
+    win_h = 710
+    ok = initWindow("Nova Studio - Professional IDE & Creative Sandbox", win_w, win_h)
+    if ok == 0 {
+        print("Error: Could not initialize native Win32 window.")
+        return 1
+    }
+
+    file_names = ["hello_app.nv", "counter_app.nv", "engine_demo.nv"]
+    active_file = 0
+
+    code_template_0 = split_lines("# Hello Nova App\nimport gui\n\ndef run() \{\n    t = gui.Title(\"Hello Nova!\", \{\})\n    b = gui.Button(\"Click Me\", 1, \{\"bold\": 1\})\n    r = gui.Column([t, b], \{\"p\": 20, \"gap\": 10\})\n    gui.App(\"Hello\", r, 400, 240, \{\})\n\}\nrun()")
+
+    code_template_1 = split_lines("# Reactive Counter\nimport gui\n\ndef run() \{\n    c = gui.StateInt(0)\n    t = gui.Text(\"0\", \{\"bind\": c, \"prefix\": \"Count: \"\})\n    b = gui.Button(\"+1\", 1, \{\"action\": \"increment\", \"state\": c\})\n    r = gui.Column([t, b], \{\"p\": 20, \"gap\": 10\})\n    gui.App(\"Counter\", r, 360, 220, \{\})\n\}\nrun()")
+
+    code_template_2 = split_lines("# Engine Demo\nimport system\n\ndef main() -> int \{\n    total = 0\n    for i in range(10) \{\n        total = total + i * i\n    \}\n    print(\"Total: \" + str(total))\n    return 0\n\}")
+
+    editor_lines = code_template_0
+    cursor_line = 0
+    active_tab = 1
+    console_text = "Nova Studio Terminal Ready.\nWorkspace: examples/hello_app.nv\nClick [Run App] to execute.\n"
+
+    diag_status = 0
+    diag_line = 0
+    diag_col = 0
+    diag_msg = "Clean: No syntax or type errors detected."
+    diag_caret = ""
+    diag_hint = ""
+
+    # Build initial declarative component hierarchy
+    tree_nodes = build_studio_tree(studio_mode, active_file, active_tab, file_names, file_names[active_file])
+    root = tree_nodes[0]
+    ed_canvas = tree_nodes[1]
+    sb_canvas = tree_nodes[2]
+    bot_canvas = tree_nodes[3]
+    stat_bar = tree_nodes[4]
+    gui_measure(root)
+    gui_layout(root, 0, 0, win_w, win_h)
+
+    vw = 375
+    vh = 394
+    num_particles = 320
+    fb_h = buf_new(vw * vh * 4)
+    p_h = buf_new(num_particles * 24)
+    init_particles(p_h, num_particles, vw, vh)
+
+    fullscreen_mode = 0
+    tick = 0
+    fps_display = 60
+    t_last_fps = time_now_ms()
+    frames_counted = 0
+    prev_m_down = 0
+
+    running = 1
+    while running == 1 {
+        ev = pollEvents()
+        if ev < 0 {
+            running = 0
+            break
+        }
+
+        mx = gui_mouse_x()
+        my = gui_mouse_y()
+        clicked = gui_get_mouse_clicked()
+        m_down = gui_get_mouse_down()
+        mouse_pressed = 0
+        if m_down == 1 and prev_m_down == 0 {
+            mouse_pressed = 1
+        }
+        prev_m_down = m_down
+
+        is_click = 0
+        if clicked == 1 or mouse_pressed == 1 {
+            is_click = 1
+        }
+        tick = tick + 1
+
+        frames_counted = frames_counted + 1
+        now_ms = time_now_ms()
+        if now_ms - t_last_fps >= 1000 {
+            fps_display = frames_counted
+            frames_counted = 0
+            t_last_fps = now_ms
+        }
+
+        ch = pollChar()
+        if ch > 0 {
+            if ch == 8 {
+                if cursor_line < len(editor_lines) {
+                    curr_ln = editor_lines[cursor_line]
+                    if len(curr_ln) > 0 {
+                        editor_lines[cursor_line] = str_sub(curr_ln, 0, len(curr_ln) - 1)
+                    } elif cursor_line > 0 {
+                        editor_lines = list_splice(editor_lines, cursor_line, 0)
+                        cursor_line = cursor_line - 1
+                    }
+                }
+            } elif ch == 9 {
+                # Tab indentation (4 spaces)
+                if cursor_line < len(editor_lines) {
+                    curr_ln = editor_lines[cursor_line]
+                    editor_lines[cursor_line] = curr_ln + "    "
+                }
+            } elif ch == 13 {
+                editor_lines = list_splice(editor_lines, cursor_line, 1)
+                cursor_line = cursor_line + 1
+            } elif ch >= 32 and ch <= 126 {
+                if cursor_line < len(editor_lines) {
+                    curr_ln = editor_lines[cursor_line]
+                    c_str = charToStr(ch)
+                    editor_lines[cursor_line] = curr_ln + c_str
+                }
+            }
+        }
+
+        if isKeyDown(38) == 1 {
+            if cursor_line > 0 {
+                cursor_line = cursor_line - 1
+                gui_sleep(60)
+            }
+        } elif isKeyDown(40) == 1 {
+            if cursor_line < len(editor_lines) - 1 {
+                cursor_line = cursor_line + 1
+                gui_sleep(60)
+            }
+        }
+
+        # Declarative Event Dispatch across widget tree
+        clicked_action = gui_dispatch_events(root, mx, my, is_click)
+        needs_rebuild = 0
+
+        if clicked_action == ACTION_RUN {
+            audio_click()
+            tmp_src = join_lines(editor_lines)
+            tmp_run_file = ".nova_studio_run.nv"
+            fs_write_atomic(tmp_run_file, tmp_src)
+            nova_bin = find_nova_cli()
+            cmd_run = "\"\"" + nova_bin + "\" run \"" + tmp_run_file + "\" 2>&1\""
+            run_raw = process_capture(cmd_run)
+            run_code = process_capture_code(run_raw)
+            run_out = process_capture_output(run_raw)
+            console_text = "[PROCESS: " + nova_bin + " run .nova_studio_run.nv]\n" + run_out + "\n[PROCESS EXITED WITH CODE " + str(run_code) + "]"
+            active_tab = 1
+            needs_rebuild = 1
+            if run_code == 0 { audio_success() }
+            else { audio_error() }
+        } elif clicked_action == ACTION_CHECK {
+            audio_click()
+            tmp_src = join_lines(editor_lines)
+            tmp_diag_file = ".nova_studio_diag.nv"
+            fs_write_atomic(tmp_diag_file, tmp_src)
+            nova_bin = find_nova_cli()
+            cmd_check = "\"\"" + nova_bin + "\" check \"" + tmp_diag_file + "\" 2>&1\""
+            out = process_capture(cmd_check)
+            diag_info = parse_diagnostic_output(out)
+            diag_status = diag_info[0]
+            diag_line = diag_info[1]
+            diag_col = diag_info[2]
+            diag_msg = diag_info[3]
+            diag_caret = diag_info[4]
+            diag_hint = diag_info[5]
+            active_tab = 0
+            needs_rebuild = 1
+            if diag_status == 0 { audio_success() }
+            else { audio_error() }
+        } elif clicked_action == ACTION_RESET {
+            audio_click()
+            init_particles(p_h, num_particles, vw, vh)
+        } elif clicked_action == ACTION_SOUND {
+            audio_play_note("C5", 60)
+            audio_play_note("G4", 60)
+        } elif clicked_action == ACTION_MAX {
+            audio_click()
+            fullscreen_mode = 1
+            gui_sleep(120)
+        } elif clicked_action == ACTION_TAB_TERM {
+            active_tab = 1
+            audio_click()
+            needs_rebuild = 1
+        } elif clicked_action == ACTION_TAB_PROB {
+            active_tab = 0
+            audio_click()
+            needs_rebuild = 1
+        } elif clicked_action == ACTION_CLEAR {
+            console_text = "Terminal Cleared.\n"
+            audio_click()
+        } elif clicked_action == ACTION_MODE_TOGGLE {
+            studio_mode = 1 - studio_mode
+            audio_click()
+            needs_rebuild = 1
+        } elif clicked_action == ACTION_TEMPLATE_HELLO {
+            editor_lines = code_template_0
+            active_file = 0
+            cursor_line = 0
+            audio_click()
+            needs_rebuild = 1
+        } elif clicked_action == ACTION_TEMPLATE_COUNTER {
+            editor_lines = code_template_1
+            active_file = 1
+            cursor_line = 0
+            audio_click()
+            needs_rebuild = 1
+        } elif clicked_action == ACTION_TEMPLATE_SANDBOX {
+            editor_lines = code_template_2
+            active_file = 2
+            cursor_line = 0
+            audio_click()
+            needs_rebuild = 1
+        } elif clicked_action == ACTION_FILE_0 or clicked_action == ACTION_FILE_1 or clicked_action == ACTION_FILE_2 {
+            sel_f = clicked_action - ACTION_FILE_0
+            active_file = sel_f
+            if sel_f == 0 { editor_lines = code_template_0 }
+            elif sel_f == 1 { editor_lines = code_template_1 }
+            else { editor_lines = code_template_2 }
+            cursor_line = 0
+            audio_click()
+            needs_rebuild = 1
+        }
+
+        # Click-to-seek line navigation inside Editor Canvas
+        if is_click == 1 and in_rect(mx, my, ed_canvas.pos_x, ed_canvas.pos_y, ed_canvas.width, ed_canvas.height) == 1 {
+            clicked_ln = (my - (ed_canvas.pos_y + 10)) / 20
+            if clicked_ln >= 0 and clicked_ln < len(editor_lines) {
+                cursor_line = clicked_ln
+            }
+        }
+
+        if needs_rebuild == 1 {
+            tree_nodes = build_studio_tree(studio_mode, active_file, active_tab, file_names, file_names[active_file])
+            root = tree_nodes[0]
+            ed_canvas = tree_nodes[1]
+            sb_canvas = tree_nodes[2]
+            bot_canvas = tree_nodes[3]
+            stat_bar = tree_nodes[4]
+            gui_measure(root)
+            gui_layout(root, 0, 0, win_w, win_h)
+        }
+
+        vp_mouse_x = vw / 2
+        vp_mouse_y = vh / 2
+        shockwave = 0
+        if studio_mode == 1 and in_rect(mx, my, sb_canvas.pos_x, sb_canvas.pos_y, sb_canvas.width, sb_canvas.height) == 1 {
+            vp_mouse_x = mx - sb_canvas.pos_x
+            vp_mouse_y = my - sb_canvas.pos_y
+            if is_click == 1 {
+                shockwave = 1
+                audio_beep(520, 18)
+            }
+        }
+
+        step_and_render_viewport(fb_h, p_h, num_particles, vw, vh, vp_mouse_x, vp_mouse_y, shockwave, tick)
+
+        if fullscreen_mode == 1 {
+            presentFramebuffer(fb_h, vw, vh)
+            if isKeyDown(27) == 1 {
+                fullscreen_mode = 0
+                gui_sleep(120)
+            } elif is_click == 1 {
+                fullscreen_mode = 0
+                gui_sleep(120)
+            }
+            gui_sleep(16)
+            continue
+        }
+
+        # Background Canvas & Declarative Layout Tree Render
+        gui_clear(0x00181825)
+        gui_render_tree(root)
+
+        # 1. Editor Canvas Content (Gutter, Line Numbers, Syntax Highlighted Code, Cursor)
+        ed_x = ed_canvas.pos_x
+        ed_y = ed_canvas.pos_y
+        drawRect(ed_x, ed_y, 39, ed_canvas.height, 0x00181825, 0)
+        drawRect(ed_x + 39, ed_y, 1, ed_canvas.height, 0x00313244, 0)
+
+        max_ed_lines = (ed_canvas.height - 20) / 20
+        line_y = ed_y + 10
+        li = 0
+        while li < len(editor_lines) and li < max_ed_lines {
+            if li == cursor_line {
+                drawRect(ed_x + 40, line_y - 2, ed_canvas.width - 40, 18, 0x0024273a, 0)
+            }
+            if diag_status == 1 and diag_line == li + 1 {
+                drawRect(ed_x + 40, line_y - 2, ed_canvas.width - 40, 18, 0x003b232e, 0)
+                drawRect(ed_x + 39, line_y - 2, 2, 18, 0x00f38ba8, 0)
+            }
+
+            ln_str = str(li + 1)
+            if len(ln_str) == 1 {
+                drawMonoText(" " + ln_str, ed_x + 11, line_y, 11, 0x00585b70, 0)
+            } else {
+                drawMonoText(ln_str, ed_x + 11, line_y, 11, 0x00585b70, 0)
+            }
+
+            text_str = editor_lines[li]
+            render_highlighted_code(text_str, ed_x + 49, line_y)
+
+            if li == cursor_line {
+                cursor_px = ed_x + 49 + len(text_str) * 7
+                if (tick / 20) % 2 == 0 {
+                    drawRect(cursor_px, line_y, 2, 15, 0x00f5e0dc, 0)
+                }
+            }
+
+            line_y = line_y + 20
+            li = li + 1
+        }
+
+        # 2. Celestial Particle Sandbox Framebuffer Blit (in Advanced Mode)
+        if studio_mode == 1 {
+            drawFramebuffer(fb_h, sb_canvas.pos_x, sb_canvas.pos_y, vw, vh)
+            drawBorder(sb_canvas.pos_x, sb_canvas.pos_y, vw, vh, 1, 0x00313244)
+        }
+
+        # 3. Bottom / Side Panel (Terminal / Problems)
+        bot_x = bot_canvas.pos_x
+        bot_y = bot_canvas.pos_y
+        if active_tab == 0 and studio_mode == 1 {
+            if diag_status == 0 {
+                drawText("✓  No problems have been detected in the workspace.", bot_x + 18, bot_y + 16, 11, 0x00a6e3a1, 0)
+                drawText("Ready to build and run native x86_64 binary.", bot_x + 18, bot_y + 38, 10, 0x006c7086, 0)
+            } else {
+                badge_col = 0x00f38ba8
+                badge_title = "COMPILATION ERROR"
+                if diag_status == 2 {
+                    badge_col = 0x00fab387
+                    badge_title = "COMPILER WARNING"
+                }
+                drawRect(bot_x + 18, bot_y + 16, 12, 12, badge_col, 6)
+                drawText(badge_title + " [Line " + str(diag_line) + ", Col " + str(diag_col) + "]: " + diag_msg, bot_x + 38, bot_y + 14, 11, badge_col, 1)
+                if len(diag_caret) > 0 {
+                    drawMonoText(diag_caret, bot_x + 38, bot_y + 36, 11, 0x00f38ba8, 1)
+                }
+                if len(diag_hint) > 0 {
+                    drawText(diag_hint, bot_x + 38, bot_y + 58, 11, 0x00fab387, 0)
+                }
+            }
+        } else {
+            c_lines = split_lines(console_text)
+            max_lines = (bot_canvas.height - 24) / 18
+            if max_lines < 8 { max_lines = 8 }
+            start_ci = 0
+            if len(c_lines) > max_lines {
+                start_ci = len(c_lines) - max_lines
+            }
+            ci = start_ci
+            cy = bot_y + 12
+            while ci < len(c_lines) and cy < bot_y + bot_canvas.height - 10 {
+                ln = c_lines[ci]
+                col = 0x00cdd6f4
+                wgt = 0
+                if len(ln) > 0 and str_sub(ln, 0, 1) == "[" {
+                    col = 0x0089b4fa
+                    wgt = 1
+                    if len(ln) >= 26 and str_sub(ln, 0, 26) == "[PROCESS EXITED WITH CODE 0" {
+                        col = 0x00a6e3a1
+                    }
+                } elif len(ln) >= 5 and str_sub(ln, 0, 5) == "ERROR" {
+                    col = 0x00f38ba8
+                    wgt = 1
+                } else {
+                    col = 0x0094e2d5
+                }
+                drawMonoText(ln, bot_x + 18, cy, 10, col, wgt)
+                cy = cy + 18
+                ci = ci + 1
+            }
+        }
+
+        # 4. Status Bar Dynamic Info
+        stat_y = stat_bar.pos_y + 6
+        curr_text = ""
+        if cursor_line < len(editor_lines) { curr_text = editor_lines[cursor_line] }
+        drawText("Ln " + str(cursor_line + 1) + ", Col " + str(len(curr_text) + 1), 110, stat_y, 9, 0x00a6adc8, 0)
+        drawText("UTF-8", 230, stat_y, 9, 0x006c7086, 0)
+        drawText("Consolas 11pt", 295, stat_y, 9, 0x006c7086, 0)
+        drawText("x86_64 Native | 320 Particles | " + str(fps_display) + " FPS", win_w - 240, stat_y, 9, 0x00a6adc8, 0)
+
+        gui_present()
+
+        if len(screenshot_path) > 0 and tick == 3 {
+            saveScreenshot(screenshot_path)
+        }
+        if max_frames > 0 and tick >= max_frames {
+            running = 0
+            break
+        }
+
+        gui_sleep(12)
+    }
+
+    buf_free(fb_h)
+    buf_free(p_h)
+    closeWindow()
+    return 0
+}
+
+run_studio()

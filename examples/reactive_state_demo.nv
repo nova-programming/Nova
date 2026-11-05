@@ -1,0 +1,69 @@
+import gui
+
+def run_reactive_demo() {
+    # 1. First-Class Reactive State Primitives
+    user_state = gui.StateStr("Nova Creator")
+    counter_state = gui.StateInt(5)
+    save_state = gui.StateInt(1)
+
+    # 2. Components bound reactively to state
+    greeting_label = gui.Text("Welcome", {
+        "bind": user_state,
+        "prefix": "Hello, ",
+        "suffix": "! (Live Reactive Binding)",
+        "size": 16,
+        "bold": 1,
+        "color": "#a6e3a1"
+    })
+
+    user_input = gui.Input("Enter creator name...", {
+        "bind": user_state,
+        "w": 320
+    })
+
+    count_badge = gui.Text("5", {
+        "bind": counter_state,
+        "prefix": "Current Value: ",
+        "suffix": " units",
+        "size": 18,
+        "bold": 1,
+        "color": "#89b4fa"
+    })
+
+    auto_toggle = gui.Toggle("Auto-Sync State", 1, 301, {
+        "bind": save_state
+    })
+
+    state_card = gui.Card([
+        gui.Heading("Shared Reactive State", {}),
+        gui.Text("Two components bound to the same StateStr variable:", {}),
+        user_input,
+        greeting_label,
+        gui.Divider({}),
+        gui.Heading("Reactive Counter with Multiple Observers", {}),
+        gui.Row([
+            gui.Button("Increment (+1)", 101, {"action": "increment", "state": counter_state}),
+            gui.Button("Reset (0)", 102, {"action": "reset", "state": counter_state})
+        ], {"gap": 8}),
+        count_badge,
+        gui.Divider({}),
+        gui.Heading("Boolean Toggle State Binding", {}),
+        gui.Row([
+            auto_toggle,
+            gui.Spacer({"width": 12}),
+            gui.Text("State Active", {"size": 13, "color": "#cdd6f4"})
+        ], {"align": "center"})
+    ], {"padding": 20, "gap": 10})
+
+    root = gui.Column([
+        gui.Title("Nova Reactive State Architecture", {}),
+        gui.Text("Automatic Two-Way Binding with Zero Full-Tree Reconstruction", {"color": "#6c7086"}),
+        gui.Spacer({"height": 8}),
+        state_card
+    ], {"padding": 24, "gap": 10, "bg": "#11111b", "w": 680, "h": 620})
+
+    gui.App("Nova Reactive State Architecture", root, 720, 680, {})
+}
+
+run_reactive_demo()
+

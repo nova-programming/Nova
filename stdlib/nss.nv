@@ -445,11 +445,24 @@ def nss_parse(src: string) -> dict {
     return styles
 }
 
+# --- Global pre-compiled stylesheet cache ---
+g_nss_cache = {}
+
 # --- Load NSS from file ---
 def nss_load(path: string) -> dict {
     content = nss_read_file(path)
     if len(content) == 0 { return {} }
     return nss_parse(content)
+}
+
+# Returns cached pre-parsed stylesheet AST to avoid redundant disk I/O and re-parsing
+def nss_get_cached(path: string) -> dict {
+    if g_nss_cache.has(path) == 1 {
+        return g_nss_cache.get(path)
+    }
+    sheet = nss_load(path)
+    g_nss_cache.set(path, sheet)
+    return sheet
 }
 
 # --- Prefix properties for pseudo-classes (e.g. hover-*, pressed-*) ---

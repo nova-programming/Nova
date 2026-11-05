@@ -1,0 +1,83 @@
+# =============================================================================
+# Nova Native Audio & Sound Synthesis Engine (stdlib/audio.nv)
+# Pure native hardware beeps, sound effects, and PCM waveform synthesis
+# =============================================================================
+import system
+
+# Native Win32 kernel32 hardware sound extern
+extern def Beep(dwFreq: int, dwDuration: int) -> int
+
+def audio_beep(freq: int, duration_ms: int) {
+    if freq < 37 { freq = 37 }
+    if freq > 32767 { freq = 32767 }
+    if duration_ms <= 0 { return }
+    Beep(freq, duration_ms)
+}
+
+def audio_click() {
+    audio_beep(1200, 12)
+}
+
+def audio_success() {
+    audio_beep(880, 30)
+    audio_beep(1320, 45)
+}
+
+def audio_error() {
+    audio_beep(220, 80)
+}
+
+def audio_play_note(note: string, duration_ms: int) {
+    freq = 440
+    if note == "C4" { freq = 261 }
+    elif note == "D4" { freq = 293 }
+    elif note == "E4" { freq = 329 }
+    elif note == "F4" { freq = 349 }
+    elif note == "G4" { freq = 392 }
+    elif note == "A4" { freq = 440 }
+    elif note == "B4" { freq = 493 }
+    elif note == "C5" { freq = 523 }
+    elif note == "D5" { freq = 587 }
+    elif note == "E5" { freq = 659 }
+    audio_beep(freq, duration_ms)
+}
+
+# --- Waveform Sample Generation for Visualizer & Particle Oscillators ---
+
+# Sine approximation: phase in 0..359 degrees, returns -100..100
+def audio_sample_sine(phase_deg: int) -> int {
+    deg = phase_deg % 360
+    if deg < 0 { deg = deg + 360 }
+    if deg < 180 {
+        return (deg * (180 - deg)) / 81
+    }
+    d2 = deg - 180
+    return 0 - ((d2 * (180 - d2)) / 81)
+}
+
+# Square wave: returns 100 or -100
+def audio_sample_square(phase_deg: int) -> int {
+    deg = phase_deg % 360
+    if deg < 0 { deg = deg + 360 }
+    if deg < 180 { return 100 }
+    return -100
+}
+
+# Triangle wave: returns -100..100
+def audio_sample_triangle(phase_deg: int) -> int {
+    deg = phase_deg % 360
+    if deg < 0 { deg = deg + 360 }
+    if deg < 90 {
+        return (deg * 100) / 90
+    } elif deg < 270 {
+        return 100 - ((deg - 90) * 200) / 180
+    }
+    return -100 + ((deg - 270) * 100) / 90
+}
+
+# Pseudo-random noise sample: returns -100..100
+def audio_sample_noise(seed: int) -> int {
+    n = (seed * 1103515245 + 12345) % 201
+    return n - 100
+}
+

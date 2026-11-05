@@ -1,0 +1,53 @@
+import gui
+
+def run_demo() {
+    # Declarative demonstration of Nova's Unified High-Level Component Suite
+    status_msg = gui.Text("System Status: Operational", {"color": "#a6e3a1", "size": 13})
+    counter_label = gui.Text("0", {"size": 24, "bold": 1, "color": "#89b4fa"})
+
+    card_content = gui.Card([
+        gui.Heading("Quick Actions", {}),
+        gui.Text("Test interactive controls with zero configuration:", {}),
+        gui.Spacer({"height": 4}),
+        gui.Row([
+            gui.Button("Count Up", 101, {"action": "increment", "target": counter_label, "suffix": " clicks"}),
+            gui.Button("Reset", 102, {"action": "reset", "target": counter_label}),
+            gui.Button("Set Ready", 103, {"action": "set_text", "target": status_msg, "value": "System Status: Ready to Launch"})
+        ], {"gap": 8}),
+        gui.Spacer({"height": 6}),
+        gui.Row([
+            gui.Text("Recorded Clicks:", {"size": 14}),
+            counter_label
+        ], {"align": "center", "gap": 10})
+    ], {"padding": 16, "gap": 10})
+
+    form_card = gui.Card([
+        gui.Heading("Form & Input Controls", {}),
+        gui.Input("Enter project title...", {}),
+        gui.Spacer({"height": 4}),
+        gui.Row([
+            gui.Toggle("Auto-Save", 1, 201, {}),
+            gui.Spacer({"width": 20}),
+            gui.Checkbox("Verbose Logging", 1, 202, {})
+        ], {"align": "center"}),
+        gui.Spacer({"height": 4}),
+        gui.Slider(65, 0, 100, 203, {}),
+        gui.Spacer({"height": 4}),
+        gui.Dropdown(["Debug Mode", "Release Mode", "Profile Mode"], 0, 204, {})
+    ], {"padding": 16, "gap": 8})
+
+    root = gui.Column([
+        gui.Title("Nova Native GUI Suite", {}),
+        gui.Text("Declarative native UI engine running on Windows Win32 & GDI.", {}),
+        gui.Divider({}),
+        card_content,
+        gui.Spacer({"height": 8}),
+        form_card,
+        gui.Spacer({"height": 8}),
+        status_msg
+    ], {"padding": 20, "gap": 6, "bg": "#11111b", "w": 680, "h": 700})
+
+    gui.App("Nova Native GUI Suite", root, 720, 750, {})
+}
+
+run_demo()

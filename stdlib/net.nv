@@ -10,9 +10,14 @@ extern def nova_tcp_connect(ip: string, port: int) -> int
 extern def nova_net_send(sock: int, buf: int, length: int) -> int
 extern def nova_net_recv(sock: int, buf: int, max_len: int) -> int
 extern def nova_net_close(sock: int)
+extern def nova_socket_set_timeout(sock: int, timeout_ms: int) -> int
 
 def net_init() -> int {
     return nova_net_init()
+}
+
+def socket_set_timeout(sock: int, timeout_ms: int) -> int {
+    return nova_socket_set_timeout(sock, timeout_ms)
 }
 
 class TcpStream {
@@ -24,6 +29,10 @@ class TcpStream {
 
     def recv(self, data_ptr: int, max_len: int) -> int {
         return nova_net_recv(self.sock, data_ptr, max_len)
+    }
+
+    def set_timeout(self, timeout_ms: int) -> int {
+        return nova_socket_set_timeout(self.sock, timeout_ms)
     }
 
     def close(self) {

@@ -159,3 +159,34 @@ Nova is a programming language designed to bridge Python-like readability and ea
 - Standalone executable footprint: **187.5 KB** (well within `< 250 KB` requirement).
 - Verified in `tests/test_sandbox.py`.
 
+---
+
+## 12. Standard Library Modular Hardening & Systems Upgrade (Sprint 6)
+
+### Phase 1: Memory, Bytes & Text (`buffer.nv`, `text.nv`, `runtime.c`)
+- **`NovaBufferHeader` Metadata**: All raw heap allocations are prefixed with a 16-byte metadata header tracking `magic (0x42554631)` and `capacity`.
+- **Strict Boundary Guards**: Out-of-bounds `buf_get_*` or `buf_set_*` calls trigger a clean panic (`_nova_buf_panic`) printing telemetry (offset, required bytes, capacity) to stderr and exiting cleanly with code 1 instead of unrecoverable memory access violations.
+- **Unaligned Word Reads/Writes**: `buf_get_u16`, `buf_set_u16`, `buf_get_i32_unaligned`, and `buf_set_i32_unaligned` use safe memory copy primitives for strict-alignment architectures.
+- **Safe Buffer Slicing**: `buf.slice(offset, length)` creates sub-buffers bounds-checked against capacity.
+- **String View Helpers**: `text.str_slice(s, start, length)` performs bounds-clamped substring extractions.
+- Verified in `tests/test_buffer.py` and `tests/test_std_extensions.py`.
+
+### Phase 2: File System & Paths (`fs.nv`, `path.nv`)
+- **Deterministic Path Normalization**: `path_to_forward(path)` unifies Windows backslashes (`\`) to POSIX forward slashes (`/`).
+- **Atomic File Writes**: `fs_write_atomic(path, content)` writes data to `<path>.tmp` and atomically renames via `fs_move`, preventing data corruption during crashes or partial writes.
+- Verified in `tests/test_std_extensions.py`.
+
+### Phase 3: Networking & Time (`net.nv`, `time.nv`)
+- **Socket Timeouts**: Dynamic Winsock2 `setsockopt` integration (`SO_RCVTIMEO` and `SO_SNDTIMEO`) via `nova_socket_set_timeout(sock, ms)` and `stream.set_timeout(ms)`, preventing network operations from hanging indefinitely.
+- **Monotonic Clocks**: High-performance monotonic clocks on Windows (`QueryPerformanceCounter`) and POSIX (`clock_gettime(CLOCK_MONOTONIC)`).
+
+### Phase 4: Creative UI & Styling (`gui.nv`, `nss.nv`)
+- **GUI Event Ring Buffer**: Circular event queue (`g_gui_events` ring buffer of 128 slots) in `_NovaWndProc` and `gui_poll_event_raw`, guaranteeing mouse clicks and keystrokes are never dropped during heavy frame rasterization.
+- **Pre-Parsed NSS AST Cache**: `nss_get_cached(path)` caches stylesheet ASTs to eliminate repetitive disk I/O and re-parsing per frame.
+
+### Phase 5: Parsing & Diagnostic Isolation (`json.nv`, `errors.nv`)
+- **Streaming JSON Tokenizer**: `json_cursor_new(src)` and `json_next_token(c)` support token-by-token parsing in $O(1)$ memory without constructing complete recursive ASTs.
+- **Compiler Diagnostic Caret Pointers**: Emits exact source column pointing carets (`^~~~`) matching Clang/Rust diagnostics.
+- Verified in `tests/test_std_extensions.py`.
+
+

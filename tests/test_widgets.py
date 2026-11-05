@@ -162,3 +162,106 @@ if target.text == "" {
         if os.path.exists(exe):
             os.remove(exe)
 
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Win32 GDI GUI is Windows-specific")
+def test_declarative_app_demo_suite():
+    """Verify that the Stage 1 high-level declarative GUI suite demo compiles and executes cleanly."""
+    demo_src = os.path.join(REPO_ROOT, "examples", "declarative_app_demo.nv")
+    assert os.path.isfile(demo_src), f"Missing {demo_src}"
+
+    res = subprocess.run(
+        [NOVA_EXE, "run", demo_src, "--test"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=REPO_ROOT
+    )
+    assert res.returncode == 0, f"Declarative app suite execution failed:\n{res.stderr}\n{res.stdout}"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Win32 GDI GUI is Windows-specific")
+def test_reactive_state_demo_suite():
+    """Verify that the Stage 2 reactive state architecture demo compiles and runs in test mode."""
+    demo_src = os.path.join(REPO_ROOT, "examples", "reactive_state_demo.nv")
+    assert os.path.isfile(demo_src), f"Missing {demo_src}"
+
+    res = subprocess.run(
+        [NOVA_EXE, "run", demo_src, "--test"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=REPO_ROOT
+    )
+    assert res.returncode == 0, f"Reactive state demo execution failed:\n{res.stderr}\n{res.stdout}"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Win32 GDI GUI is Windows-specific")
+def test_reactive_state_unit():
+    """Verify StateInt, StateStr, two-way bindings, and increment/reset action handlers."""
+    test_nv = os.path.join(REPO_ROOT, "tests", "test_reactive_state_unit.nv")
+    with open(test_nv, "w", encoding="utf-8") as f:
+        f.write('''import gui
+
+# 1. StateInt and Observer binding
+count = gui.StateInt(10)
+label = gui.Text("", {"bind": count, "prefix": "Count: ", "suffix": " items"})
+if label.text == "Count: 10 items" {
+    print("INITIAL_INT_BIND_PASSED")
+}
+
+# 2. StateStr and Observer binding
+name = gui.StateStr("Nova")
+input_w = gui.Input("", {"bind": name})
+if input_w.text == "Nova" {
+    print("INITIAL_STR_BIND_PASSED")
+}
+
+# 3. Direct State Mutation
+gui.state_set_int(count, 42)
+if label.text == "Count: 42 items" {
+    print("SET_INT_PASSED")
+}
+
+gui.state_set_str(name, "SuperNova")
+if input_w.text == "SuperNova" {
+    print("SET_STR_PASSED")
+}
+
+# 4. Action Dispatch
+inc_btn = gui.Button("Add", 1, {"action": "increment", "state": count})
+reset_btn = gui.Button("Reset", 2, {"action": "reset", "state": count})
+
+gui.dispatchAction(inc_btn, 1)
+if count.val_int == 43 and label.text == "Count: 43 items" {
+    print("INCREMENT_ACTION_PASSED")
+}
+
+gui.dispatchAction(reset_btn, 2)
+if count.val_int == 0 and label.text == "Count: 0 items" {
+    print("RESET_ACTION_PASSED")
+}
+''')
+
+    try:
+        res = subprocess.run(
+            [NOVA_EXE, "run", test_nv],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=REPO_ROOT
+        )
+        assert res.returncode == 0, f"Reactive unit execution failed:\n{res.stderr}\n{res.stdout}"
+        assert "INITIAL_INT_BIND_PASSED" in res.stdout
+        assert "INITIAL_STR_BIND_PASSED" in res.stdout
+        assert "SET_INT_PASSED" in res.stdout
+        assert "SET_STR_PASSED" in res.stdout
+        assert "INCREMENT_ACTION_PASSED" in res.stdout
+        assert "RESET_ACTION_PASSED" in res.stdout
+    finally:
+        if os.path.exists(test_nv):
+            os.remove(test_nv)
+        exe = test_nv.replace(".nv", ".exe")
+        if os.path.exists(exe):
+            os.remove(exe)
+
+

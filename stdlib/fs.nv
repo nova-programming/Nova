@@ -55,6 +55,21 @@ def fs_write(path: string, content: string) -> int {
     return 1
 }
 
+# Atomic file write: writes payload to a temporary file then atomically renames to target
+def fs_write_atomic(path: string, content: string) -> int {
+    tmp_path = path + ".tmp"
+    ok = fs_write(tmp_path, content)
+    if ok == 0 {
+        return 0
+    }
+    res = fs_move(tmp_path, path)
+    if res == 0 {
+        fs_delete(path)
+        res = fs_move(tmp_path, path)
+    }
+    return res
+}
+
 # Descriptive aliases retained for readability and compatibility.
 def fs_read_text(path: string) -> string {
     return fs_read(path)

@@ -1334,8 +1334,9 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         pad = 16 - rem
         state.local_offset = state.local_offset + pad
     }
-    if state.local_offset > 0 {
-        emit(state, "    sub " + sp + ", " + str(state.local_offset))
+    sub_amount = state.local_offset - regs_size
+    if sub_amount > 0 {
+        emit(state, "    sub " + sp + ", " + str(sub_amount))
     }
     
     r = 0

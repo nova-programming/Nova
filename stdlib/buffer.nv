@@ -9,6 +9,11 @@ extern def buf_get_u8(buf: int, offset: int) -> int
 extern def buf_set_u8(buf: int, offset: int, val: int)
 extern def buf_get_i32(buf: int, offset: int) -> int
 extern def buf_set_i32(buf: int, offset: int, val: int)
+extern def buf_get_u16(buf: int, offset: int) -> int
+extern def buf_set_u16(buf: int, offset: int, val: int)
+extern def buf_get_i32_unaligned(buf: int, offset: int) -> int
+extern def buf_set_i32_unaligned(buf: int, offset: int, val: int)
+extern def buf_slice(buf: int, offset: int, length: int) -> int
 extern def buf_fill_i32(buf: int, count: int, val: int)
 extern def buf_copy(dst: int, src: int, length: int)
 
@@ -40,6 +45,30 @@ class Buffer {
         buf_set_i32(self.handle, offset, val)
     }
 
+    def get_u16(self, offset: int) -> int {
+        return buf_get_u16(self.handle, offset)
+    }
+
+    def set_u16(self, offset: int, val: int) {
+        buf_set_u16(self.handle, offset, val)
+    }
+
+    def get_i32_unaligned(self, offset: int) -> int {
+        return buf_get_i32_unaligned(self.handle, offset)
+    }
+
+    def set_i32_unaligned(self, offset: int, val: int) {
+        buf_set_i32_unaligned(self.handle, offset, val)
+    }
+
+    def slice(self, offset: int, length: int) -> Buffer {
+        h = buf_slice(self.handle, offset, length)
+        b = Buffer()
+        b.handle = h
+        b.size = length
+        return b
+    }
+
     def fill_i32(self, count: int, val: int) {
         buf_fill_i32(self.handle, count, val)
     }
@@ -51,5 +80,8 @@ class Buffer {
 
 def new_buffer(size_bytes: int) -> Buffer {
     h = buf_new(size_bytes)
-    return Buffer(h, size_bytes)
+    b = Buffer()
+    b.handle = h
+    b.size = size_bytes
+    return b
 }

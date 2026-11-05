@@ -62,6 +62,46 @@ buf.release()
     lines = res.stdout.strip().split()
     assert lines == ["65", "66", "67", "12345678"]
 
+def test_buffer_slicing_and_unaligned_words(tmp_path):
+    src = """import buffer
+
+buf = new_buffer(32)
+# Unaligned 16-bit word at byte offset 3
+buf.set_u16(3, 4660) # 0x1234
+w = buf.get_u16(3)
+print(w)
+
+# Unaligned 32-bit word at byte offset 5
+buf.set_i32_unaligned(5, 305419896) # 0x12345678
+dw = buf.get_i32_unaligned(5)
+print(dw)
+
+# Safe slice of 10 bytes starting at byte offset 3
+sub = buf.slice(3, 10)
+print(sub.size)
+w_sub = sub.get_u16(0)
+print(w_sub)
+
+sub.release()
+buf.release()
+"""
+    res = _run_build_and_exec(tmp_path, src, "test_buf_slice")
+    assert res.returncode == 0
+    lines = res.stdout.strip().split()
+    assert lines == ["4660", "305419896", "10", "4660"]
+
+def test_buffer_out_of_bounds_panic(tmp_path):
+    src = """import buffer
+
+buf = new_buffer(16)
+# Attempt to read past capacity (index 20 in 16-byte buffer)
+v = buf.get_u8(20)
+print(v)
+"""
+    res = _run_build_and_exec(tmp_path, src, "test_buf_oob")
+    assert res.returncode != 0
+    assert "[Nova Runtime Panic] Buffer boundary violation during buf_get_u8" in res.stderr
+
 def test_buffer_10m_writes_benchmark(tmp_path):
     """Benchmark 10 million 32-bit pixel/sample writes to verify C-speed throughput."""
     src = """import buffer

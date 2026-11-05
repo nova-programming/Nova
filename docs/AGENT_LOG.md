@@ -1,5 +1,54 @@
 # Agent Session Log (historical)
 
+## Nova Studio Architecture & Creative Engine Sprint (`examples/nova_studio.nv`)
+- **Single-File Native Standalone Application**:
+  - Implemented `nova/examples/nova_studio.nv` compiling directly to `examples/nova_studio.exe`.
+  - Stripped native binary size: **230.01 KB** (235,534 bytes), strictly adhering to the `< 250 KB` requirement.
+- **3-Zone Layout & Styling (`gui.nv` + `nss.nv`)**:
+  - Catppuccin Mocha `#1e1e2e` palette:
+    - **Zone 1 (Code Editor)**: Line gutter, cursor rendering, character input (`pollChar`), backspace/enter line splitting, syntax coloring accents.
+    - **Zone 2 (Live Diagnostics & Execution Console)**: In-process diagnostic parsing with pointing carets (`^~~~`), line/column numbers, suggestion hints, and program execution streaming via `process_capture`.
+    - **Zone 3 (60 FPS Viewport Sandbox)**: 320 particles with gravity well mouse attraction, explosive shockwaves, and live audio PCM oscilloscope waveform.
+- **Sub-Rectangle Framebuffer Blitting (`runtime.c` & `gui.nv`)**:
+  - Added `_gui_draw_framebuffer` and `gui_draw_framebuffer(buffer_ptr, x, y, width, height)` to blit 32-bit pixel buffers directly into GDI backbuffer `g_gui_mem_dc` using Win32 `StretchDIBits`.
+  - Exposed `drawFramebuffer(buffer_ptr, x, y, width, height)` in `gui.nv`.
+- **Native Audio & Sound Synthesis (`stdlib/audio.nv`)**:
+  - Created zero-dependency native audio module binding to Win32 `kernel32.dll` `Beep`.
+  - Sound effects: `audio_beep`, `audio_click`, `audio_success`, `audio_error`, `audio_play_note`.
+  - Mathematical PCM sample synthesis for visualizers: `audio_sample_sine`, `audio_sample_triangle`, `audio_sample_square`, `audio_sample_noise`.
+- **Self-Hosting Verification Gate**:
+  - Stage 1 -> Stage 2 -> Stage 3 self-host rebuild verified byte-for-byte assembly SHA256 match (`f3deefcf32a4e5fc28ff012af4161032db380287650f8a7b6b7ad6ab04ed2832`).
+- **Automated Test Suite & Headless Benchmark**:
+  - Created `nova/tests/test_studio.py` verifying binary size `< 250 KB` and headless benchmark execution.
+  - Headless benchmark throughput: **38,500+ FPS** (300 frames simulated in 7 ms).
+  - All 31 regression tests passing without failures.
+
+## Nova Standard Library Modular Hardening & Systems Upgrade (5-Phase Sprint)
+- **Phase 1: Memory, Bytes & Text (`buffer.nv`, `text.nv`, `runtime.c`)**:
+  - Implemented `NovaBufferHeader` metadata header (magic `0x42554631` + capacity) in `runtime.c`.
+  - Added strict boundary guards with telemetry panic (`_nova_buf_panic`) printing offset, required bytes, and buffer capacity to stderr upon out-of-bounds access.
+  - Added safe slicing (`buf.slice(offset, length)`) and unaligned word access (`get_u16`, `set_u16`, `get_i32_unaligned`, `set_i32_unaligned`).
+  - Added safe string slicing view helper (`text.str_slice(s, start, length)`).
+  - Verified in `tests/test_buffer.py`.
+- **Phase 2: File System & Paths (`fs.nv`, `path.nv`)**:
+  - Added deterministic path separator normalization (`path.path_to_forward(path)`).
+  - Added atomic file write operations (`fs.fs_write_atomic(path, content)`) via temporary staging and atomic rename.
+  - Verified in `tests/test_std_extensions.py`.
+- **Phase 3: Networking & Time (`net.nv`, `time.nv`)**:
+  - Added dynamic Winsock2 socket timeout parameters (`nova_socket_set_timeout`, `stream.set_timeout(ms)`).
+  - Verified monotonic clocks across Windows (`QueryPerformanceCounter`) and POSIX (`clock_gettime(CLOCK_MONOTONIC)`).
+- **Phase 4: Creative UI & Styling (`gui.nv`, `nss.nv`)**:
+  - Added circular GUI event ring queue (`g_gui_events`, 128 slots) in `_NovaWndProc` and `gui_poll_event_raw` to prevent dropped mouse clicks or key inputs.
+  - Added global pre-parsed NSS stylesheet AST cache (`nss.nss_get_cached(path)`).
+- **Phase 5: Parsing & Diagnostic Isolation (`json.nv`, `errors.nv`)**:
+  - Added streaming / incremental JSON tokenizer (`json_cursor_new`, `json_next_token`, `json_token_kind`, `json_token_text`, `json_token_pos`).
+  - Added compiler source code diagnostic pointing carets (`^~~~`) matching Clang/Rust output formatting.
+  - Verified in `tests/test_std_extensions.py`.
+- **Verification Gate**:
+  - Executed Stage 1 -> Stage 2 -> Stage 3 self-host rebuild; verified `s2.s == s3.s` byte-identical SHA256 match (`f3deefcf32a4e5fc28ff012af4161032db380287650f8a7b6b7ad6ab04ed2832`).
+  - Full regression pass passed (29/29 passed in 51.01s).
+
+
 ## Nova Systems & Creative Engine Upgrade (5-Phase Sprint)
 - **Phase 1: User-Defined `def main()` Entry-Point Ergonomics**:
   - Unmangled user-defined `def main()` from parser/type checker reserved keyword constraints.

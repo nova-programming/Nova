@@ -140,3 +140,20 @@ def path_extension(value: string) -> string {
     }
     return ""
 }
+
+# Normalizes all backslashes to forward slashes for deterministic cross-platform path handling
+def path_to_forward(value: string) -> string {
+    result = ""
+    i = 0
+    n = len(value)
+    while i < n {
+        ch = value[i]
+        if ch == "\\" {
+            result = result + "/"
+        } else {
+            result = result + ch
+        }
+        i = i + 1
+    }
+    return result
+}
