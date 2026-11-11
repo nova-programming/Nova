@@ -981,3 +981,63 @@ Comprehensive cleanup and optimization of the self-hosted compiler codebase, tes
   - Stripped `nova_studio.exe` footprint: **234.51 KB** (240,142 bytes, comfortably below the 250 KB ceiling).
   - Headless benchmark throughput: **35,000+ FPS**.
 - **Bootstrap Status**: `nova/bootstrap/*.py` remains completely frozen.
+
+---
+
+## 30. Bare-Metal Operating System Capabilities & Low-Level Hardware Primitives
+
+### Architectural Overview
+Equipped Nova with bare-metal operating system capabilities and hardware primitives using clean, beginner-friendly dot notation (`peek.u8`, `poke.u16`, `cpu.cli`, `cpu.outb`). Eliminated the need for developers to write inline assembly in user code by compiling high-level CPU/hardware constructs into single native machine instructions. Created freestanding compilation mode (`--os bare`) with zero libc or host OS dependencies, and built a bootable 64-bit Multiboot operating system kernel demo.
+
+### 1. Dotted Memory-Mapped I/O (MMIO) Primitives
+- **Reading Hardware Memory**:
+  - `peek.u8(addr)` -> `movzx eax, byte ptr [rdx]` / `ldrb w0, [x3]`
+  - `peek.u16(addr)` -> `movzx eax, word ptr [rdx]` / `ldrh w0, [x3]`
+  - `peek.u32(addr)` -> `mov eax, dword ptr [rdx]` / `ldr w0, [x3]`
+  - `peek.u64(addr)` -> `mov rax, qword ptr [rdx]` / `ldr x0, [x3]`
+- **Writing Hardware Memory**:
+  - `poke.u8(addr, val)` -> `mov byte ptr [rdx], al` / `strb w0, [x3]`
+  - `poke.u16(addr, val)` -> `mov word ptr [rdx], ax` / `strh w0, [x3]`
+  - `poke.u32(addr, val)` -> `mov dword ptr [rdx], eax` / `str w0, [x3]`
+  - `poke.u64(addr, val)` -> `mov qword ptr [rdx], rax` / `str x0, [x3]`
+- **Type Checker Ergonomics**: `peek` and `poke` address parameters accept `any` type, allowing direct indexing on raw addresses (`0xB8000`) and string/buffer pointers (`text.ptr + i`).
+
+### 2. Dotted CPU Hardware Intrinsics
+- **Privileged CPU Instructions**:
+  - `cpu.cli()` -> `cli` / `msr daifset, #2` (Clear interrupt flag)
+  - `cpu.sti()` -> `sti` / `msr daifclr, #2` (Set interrupt flag)
+  - `cpu.hlt()` -> `hlt` / `wfi` (Halt CPU / Wait for interrupt)
+  - `cpu.inb(port)` -> `in al, dx` (Read 8-bit port)
+  - `cpu.outb(port, val)` -> `out dx, al` (Write 8-bit port)
+  - `cpu.inw(port)`, `cpu.outw(port, val)` (16-bit ports)
+  - `cpu.ind(port)`, `cpu.outd(port, val)` (32-bit ports)
+  - `cpu.cr3.get()`, `cpu.cr3.set(val)` (Page table directory base)
+  - `cpu.invlpg(addr)` (Invalidate TLB entry)
+- **Ring 3 vs Ring 0 Isolation**: When compiling for desktop OS (`target_os != "bare"`), calls route to safe C wrappers in `runtime.c`, allowing the full test suite to execute in user space without triggering `STATUS_PRIVILEGED_INSTRUCTION` faults.
+
+### 3. Freestanding Bare-Metal Compilation Mode (`--os bare`)
+- Added `--os bare` support across `nova.nv` and `compiler.nv`.
+- When compiling for bare metal (`target_os == "bare"`):
+  - Inlines raw CPU silicon instructions directly into the assembly stream.
+  - Suppresses all `.extern` declarations for host C runtime functions (`_malloc`, `_printf`, `_oob_file_ptr`, `_nova_str_concat`, etc.).
+  - Emits pure, freestanding `.s` files suitable for linking with custom linker scripts (`ld -T linker.ld`).
+
+### 4. Flagship Bare-Metal 64-bit Kernel Demo (`nova/examples/baremetal_os/`)
+- **`kernel.nv`**: 100% pure Nova kernel with zero assembly and zero libc dependencies:
+  - Initializes VGA text mode video buffer at `0xB8000`.
+  - Clears screen with a rich navy blue background (`0x1F`) and draws stylized boot headers.
+  - Implements a COM1 UART serial driver (`0x3F8`) streaming telemetry over the serial bus.
+  - Enters a low-power idle halt loop (`cpu.hlt()`).
+- **`boot.s`**: 32-bit Multiboot 1 trampoline setting up 64-bit paging (identity-mapping the first 1 GB with 2 MB huge pages), enabling Long Mode (EFER.LME) and Paging (CR0.PG), and calling `kmain`.
+- **`linker.ld`**: Bare-metal ELF64 linker script positioning sections at the 1 MB mark (`0x100000`).
+- **`build.ps1`**: Automated build script generating both Multiboot `kernel.elf` (7.9 KB) and flat binary `kernel.bin` (41.0 KB), bootable in QEMU.
+
+### 5. Verification & Invariants
+- **Self-Hosting Invariant**: Bit-for-bit assembly byte identity verified:
+  `s2.s SHA256 == s3.s SHA256` (`1cbfe86c80205ec1d094c9909a4670bddf705cf84a638608529453714c65503e`).
+- **Regression Suite**: All **91/91 tests passed** in `nova/tests/test_check_all.py` (including the new `test_baremetal_hardware.nv`).
+- **GUI & Widget Tests**: All **7/7 tests passed** in `nova/tests/test_widgets.py` (20.65s).
+- **Studio Tests & Binary Footprint**: All **2/2 tests passed** in `nova/tests/test_studio.py`:
+  - Stripped `nova_studio.exe` footprint remains well below 250 KB ceiling.
+  - Headless benchmark throughput: **35,000+ FPS**.
+- **Bootstrap Status**: `nova/bootstrap/*.py` remains completely frozen.

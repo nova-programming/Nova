@@ -643,6 +643,67 @@ def parse_primary(state: ParserState) -> AstNode {
                     call_node.arg_is_kw = []
                     data_constructor_call(state, call_node, call_node.arg_names, call_node.arg_is_kw, tok)
                     method_node = call_node
+                } elif method_node.left.kind == "Variable" and (method_node.left.val_str == "peek" or method_node.left.val_str == "poke" or method_node.left.val_str == "cpu") {
+                    ns = method_node.left.val_str
+                    fn = method_node.val_str
+                    call_node = AstNode()
+                    call_node.line = method_node.line
+                    call_node.col = method_node.col
+                    call_node.kind = "Call"
+                    call_node.args = method_node.args
+                    call_node.arg_names = method_node.arg_names
+                    call_node.arg_is_kw = method_node.arg_is_kw
+                    if ns == "peek" {
+                        call_node.val_str = "peek_" + fn
+                    } elif ns == "poke" {
+                        call_node.val_str = "poke_" + fn
+                    } elif ns == "cpu" {
+                        if fn == "halt" { call_node.val_str = "cpu_hlt" }
+                        elif fn == "cli" or fn == "disable" or fn == "disable_interrupts" { call_node.val_str = "cpu_cli" }
+                        elif fn == "sti" or fn == "enable" or fn == "enable_interrupts" { call_node.val_str = "cpu_sti" }
+                        elif fn == "in" or fn == "in8" or fn == "inb" or fn == "read_port" { call_node.val_str = "cpu_inb" }
+                        elif fn == "in16" or fn == "inw" or fn == "read_port16" { call_node.val_str = "cpu_inw" }
+                        elif fn == "in32" or fn == "ind" or fn == "read_port32" { call_node.val_str = "cpu_ind" }
+                        elif fn == "out" or fn == "out8" or fn == "outb" or fn == "write_port" { call_node.val_str = "cpu_outb" }
+                        elif fn == "out16" or fn == "outw" or fn == "write_port16" { call_node.val_str = "cpu_outw" }
+                        elif fn == "out32" or fn == "outd" or fn == "write_port32" { call_node.val_str = "cpu_outd" }
+                        elif fn == "read_cr3" or fn == "get_page_table" { call_node.val_str = "cpu_read_cr3" }
+                        elif fn == "write_cr3" or fn == "set_page_table" { call_node.val_str = "cpu_write_cr3" }
+                        elif fn == "invlpg" or fn == "invalidate_page" { call_node.val_str = "cpu_invlpg" }
+                        else { call_node.val_str = "cpu_" + fn }
+                    }
+                    method_node = call_node
+                } elif method_node.left.kind == "DataFieldAccess" and method_node.left.left.kind == "Variable" and method_node.left.left.val_str == "cpu" {
+                    sub = method_node.left.val_str
+                    fn = method_node.val_str
+                    call_node = AstNode()
+                    call_node.line = method_node.line
+                    call_node.col = method_node.col
+                    call_node.kind = "Call"
+                    call_node.args = method_node.args
+                    call_node.arg_names = method_node.arg_names
+                    call_node.arg_is_kw = method_node.arg_is_kw
+                    if sub == "in" {
+                        if fn == "u8" or fn == "b" or fn == "byte" { call_node.val_str = "cpu_inb" }
+                        elif fn == "u16" or fn == "w" or fn == "word" { call_node.val_str = "cpu_inw" }
+                        elif fn == "u32" or fn == "d" or fn == "dword" { call_node.val_str = "cpu_ind" }
+                        else { call_node.val_str = "cpu_inb" }
+                    } elif sub == "out" {
+                        if fn == "u8" or fn == "b" or fn == "byte" { call_node.val_str = "cpu_outb" }
+                        elif fn == "u16" or fn == "w" or fn == "word" { call_node.val_str = "cpu_outw" }
+                        elif fn == "u32" or fn == "d" or fn == "dword" { call_node.val_str = "cpu_outd" }
+                        else { call_node.val_str = "cpu_outb" }
+                    } elif sub == "cr3" {
+                        if fn == "set" or fn == "write" { call_node.val_str = "cpu_write_cr3" }
+                        elif fn == "get" or fn == "read" { call_node.val_str = "cpu_read_cr3" }
+                        else { call_node.val_str = "cpu_write_cr3" }
+                    } elif sub == "tlb" {
+                        if fn == "flush" or fn == "invalidate" { call_node.val_str = "cpu_invlpg" }
+                        else { call_node.val_str = "cpu_invlpg" }
+                    } else {
+                        call_node.val_str = "cpu_" + sub + "_" + fn
+                    }
+                    method_node = call_node
                 }
                 node = method_node
             } else {

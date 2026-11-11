@@ -1379,6 +1379,244 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    str %a, [sp, #-16]!")
             return
         }
+
+        if node.val_str == "peek_u8" {
+            compile_expr(state, node.args[0])
+            emit(state, "    ldr %d, [sp], #16")
+            emit(state, "    ldrb w0, [%d]")
+            emit(state, "    str %a, [sp, #-16]!")
+            return
+        }
+        if node.val_str == "peek_u16" {
+            compile_expr(state, node.args[0])
+            emit(state, "    ldr %d, [sp], #16")
+            emit(state, "    ldrh w0, [%d]")
+            emit(state, "    str %a, [sp, #-16]!")
+            return
+        }
+        if node.val_str == "peek_u32" {
+            compile_expr(state, node.args[0])
+            emit(state, "    ldr %d, [sp], #16")
+            emit(state, "    ldr w0, [%d]")
+            emit(state, "    str %a, [sp, #-16]!")
+            return
+        }
+        if node.val_str == "peek_u64" {
+            compile_expr(state, node.args[0])
+            emit(state, "    ldr %d, [sp], #16")
+            emit(state, "    ldr x0, [%d]")
+            emit(state, "    str %a, [sp, #-16]!")
+            return
+        }
+        if node.val_str == "poke_u8" {
+            compile_expr(state, node.args[1])
+            compile_expr(state, node.args[0])
+            emit(state, "    ldr %d, [sp], #16")
+            emit(state, "    ldr %a, [sp], #16")
+            emit(state, "    strb w0, [%d]")
+            emit(state, "    mov %a, 0")
+            emit(state, "    str %a, [sp, #-16]!")
+            return
+        }
+        if node.val_str == "poke_u16" {
+            compile_expr(state, node.args[1])
+            compile_expr(state, node.args[0])
+            emit(state, "    ldr %d, [sp], #16")
+            emit(state, "    ldr %a, [sp], #16")
+            emit(state, "    strh w0, [%d]")
+            emit(state, "    mov %a, 0")
+            emit(state, "    str %a, [sp, #-16]!")
+            return
+        }
+        if node.val_str == "poke_u32" {
+            compile_expr(state, node.args[1])
+            compile_expr(state, node.args[0])
+            emit(state, "    ldr %d, [sp], #16")
+            emit(state, "    ldr %a, [sp], #16")
+            emit(state, "    str w0, [%d]")
+            emit(state, "    mov %a, 0")
+            emit(state, "    str %a, [sp, #-16]!")
+            return
+        }
+        if node.val_str == "poke_u64" {
+            compile_expr(state, node.args[1])
+            compile_expr(state, node.args[0])
+            emit(state, "    ldr %d, [sp], #16")
+            emit(state, "    ldr %a, [sp], #16")
+            emit(state, "    str x0, [%d]")
+            emit(state, "    mov %a, 0")
+            emit(state, "    str %a, [sp, #-16]!")
+            return
+        }
+        if node.val_str == "cpu_cli" {
+            if state.target_os == "bare" {
+                emit(state, "    msr daifset, #2")
+                emit(state, "    mov %a, 0")
+                emit(state, "    str %a, [sp, #-16]!")
+            } else {
+                emit_call(state, "_cpu_cli", 0)
+                emit(state, "    mov %a, 0")
+                emit(state, "    str %a, [sp, #-16]!")
+            }
+            return
+        }
+        if node.val_str == "cpu_sti" {
+            if state.target_os == "bare" {
+                emit(state, "    msr daifclr, #2")
+                emit(state, "    mov %a, 0")
+                emit(state, "    str %a, [sp, #-16]!")
+            } else {
+                emit_call(state, "_cpu_sti", 0)
+                emit(state, "    mov %a, 0")
+                emit(state, "    str %a, [sp, #-16]!")
+            }
+            return
+        }
+        if node.val_str == "cpu_hlt" {
+            if state.target_os == "bare" {
+                emit(state, "    wfi")
+                emit(state, "    mov %a, 0")
+                emit(state, "    str %a, [sp, #-16]!")
+            } else {
+                emit_call(state, "_cpu_hlt", 0)
+                emit(state, "    mov %a, 0")
+                emit(state, "    str %a, [sp, #-16]!")
+            }
+            return
+        }
+        if node.val_str == "cpu_inb" {
+            if state.target_os == "bare" {
+                compile_expr(state, node.args[0])
+                emit(state, "    ldr %d, [sp], #16")
+                emit(state, "    ldrb w0, [%d]")
+                emit(state, "    str %a, [sp, #-16]!")
+            } else {
+                compile_expr(state, node.args[0])
+                emit_call(state, "_cpu_inb", 1)
+                emit(state, "    str %a, [sp, #-16]!")
+            }
+            return
+        }
+        if node.val_str == "cpu_inw" {
+            if state.target_os == "bare" {
+                compile_expr(state, node.args[0])
+                emit(state, "    ldr %d, [sp], #16")
+                emit(state, "    ldrh w0, [%d]")
+                emit(state, "    str %a, [sp, #-16]!")
+            } else {
+                compile_expr(state, node.args[0])
+                emit_call(state, "_cpu_inw", 1)
+                emit(state, "    str %a, [sp, #-16]!")
+            }
+            return
+        }
+        if node.val_str == "cpu_ind" {
+            if state.target_os == "bare" {
+                compile_expr(state, node.args[0])
+                emit(state, "    ldr %d, [sp], #16")
+                emit(state, "    ldr w0, [%d]")
+                emit(state, "    str %a, [sp, #-16]!")
+            } else {
+                compile_expr(state, node.args[0])
+                emit_call(state, "_cpu_ind", 1)
+                emit(state, "    str %a, [sp, #-16]!")
+            }
+            return
+        }
+        if node.val_str == "cpu_outb" {
+            if state.target_os == "bare" {
+                compile_expr(state, node.args[1])
+                compile_expr(state, node.args[0])
+                emit(state, "    ldr %d, [sp], #16")
+                emit(state, "    ldr %a, [sp], #16")
+                emit(state, "    strb w0, [%d]")
+                emit(state, "    mov %a, 0")
+                emit(state, "    str %a, [sp, #-16]!")
+            } else {
+                compile_expr(state, node.args[1])
+                compile_expr(state, node.args[0])
+                emit_call(state, "_cpu_outb", 2)
+                emit(state, "    mov %a, 0")
+                emit(state, "    str %a, [sp, #-16]!")
+            }
+            return
+        }
+        if node.val_str == "cpu_outw" {
+            if state.target_os == "bare" {
+                compile_expr(state, node.args[1])
+                compile_expr(state, node.args[0])
+                emit(state, "    ldr %d, [sp], #16")
+                emit(state, "    ldr %a, [sp], #16")
+                emit(state, "    strh w0, [%d]")
+                emit(state, "    mov %a, 0")
+                emit(state, "    str %a, [sp, #-16]!")
+            } else {
+                compile_expr(state, node.args[1])
+                compile_expr(state, node.args[0])
+                emit_call(state, "_cpu_outw", 2)
+                emit(state, "    mov %a, 0")
+                emit(state, "    str %a, [sp, #-16]!")
+            }
+            return
+        }
+        if node.val_str == "cpu_outd" {
+            if state.target_os == "bare" {
+                compile_expr(state, node.args[1])
+                compile_expr(state, node.args[0])
+                emit(state, "    ldr %d, [sp], #16")
+                emit(state, "    ldr %a, [sp], #16")
+                emit(state, "    str w0, [%d]")
+                emit(state, "    mov %a, 0")
+                emit(state, "    str %a, [sp, #-16]!")
+            } else {
+                compile_expr(state, node.args[1])
+                compile_expr(state, node.args[0])
+                emit_call(state, "_cpu_outd", 2)
+                emit(state, "    mov %a, 0")
+                emit(state, "    str %a, [sp, #-16]!")
+            }
+            return
+        }
+        if node.val_str == "cpu_read_cr3" {
+            if state.target_os == "bare" {
+                emit(state, "    mrs x0, ttbr0_el1")
+                emit(state, "    str %a, [sp, #-16]!")
+            } else {
+                emit_call(state, "_cpu_read_cr3", 0)
+                emit(state, "    str %a, [sp, #-16]!")
+            }
+            return
+        }
+        if node.val_str == "cpu_write_cr3" {
+            if state.target_os == "bare" {
+                compile_expr(state, node.args[0])
+                emit(state, "    ldr %a, [sp], #16")
+                emit(state, "    msr ttbr0_el1, x0")
+                emit(state, "    mov %a, 0")
+                emit(state, "    str %a, [sp, #-16]!")
+            } else {
+                compile_expr(state, node.args[0])
+                emit_call(state, "_cpu_write_cr3", 1)
+                emit(state, "    mov %a, 0")
+                emit(state, "    str %a, [sp, #-16]!")
+            }
+            return
+        }
+        if node.val_str == "cpu_invlpg" {
+            if state.target_os == "bare" {
+                compile_expr(state, node.args[0])
+                emit(state, "    ldr %a, [sp], #16")
+                emit(state, "    tlbi vaae1is, x0")
+                emit(state, "    mov %a, 0")
+                emit(state, "    str %a, [sp, #-16]!")
+            } else {
+                compile_expr(state, node.args[0])
+                emit_call(state, "_cpu_invlpg", 1)
+                emit(state, "    mov %a, 0")
+                emit(state, "    str %a, [sp, #-16]!")
+            }
+            return
+        }
         
         is_struct = 0
         struct_size = 0

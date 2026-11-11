@@ -5048,3 +5048,47 @@ SYSCALL void _gui_draw_framebuffer(int64_t buffer_ptr, int x, int y, int width,
   (void)unused;
 }
 #endif
+
+/* Low-Level MMIO and Hardware Intrinsics */
+SYSCALL int64_t _peek_u8(int64_t addr) { return *(volatile uint8_t*)addr; }
+SYSCALL int64_t _peek_u16(int64_t addr) { return *(volatile uint16_t*)addr; }
+SYSCALL int64_t _peek_u32(int64_t addr) { return *(volatile uint32_t*)addr; }
+SYSCALL int64_t _peek_u64(int64_t addr) { return *(volatile uint64_t*)addr; }
+SYSCALL int64_t _poke_u8(int64_t addr, int64_t val) { *(volatile uint8_t*)addr = (uint8_t)val; return 0; }
+SYSCALL int64_t _poke_u16(int64_t addr, int64_t val) { *(volatile uint16_t*)addr = (uint16_t)val; return 0; }
+SYSCALL int64_t _poke_u32(int64_t addr, int64_t val) { *(volatile uint32_t*)addr = (uint32_t)val; return 0; }
+SYSCALL int64_t _poke_u64(int64_t addr, int64_t val) { *(volatile uint64_t*)addr = (uint64_t)val; return 0; }
+SYSCALL int64_t _cpu_cli(void) { return 0; }
+SYSCALL int64_t _cpu_sti(void) { return 0; }
+SYSCALL int64_t _cpu_hlt(void) { return 0; }
+SYSCALL int64_t _cpu_inb(int64_t port) { (void)port; return 0; }
+SYSCALL int64_t _cpu_inw(int64_t port) { (void)port; return 0; }
+SYSCALL int64_t _cpu_ind(int64_t port) { (void)port; return 0; }
+SYSCALL int64_t _cpu_outb(int64_t port, int64_t val) { (void)port; (void)val; return 0; }
+SYSCALL int64_t _cpu_outw(int64_t port, int64_t val) { (void)port; (void)val; return 0; }
+SYSCALL int64_t _cpu_outd(int64_t port, int64_t val) { (void)port; (void)val; return 0; }
+SYSCALL int64_t _cpu_read_cr3(void) { return 0; }
+SYSCALL int64_t _cpu_write_cr3(int64_t val) { (void)val; return 0; }
+SYSCALL int64_t _cpu_invlpg(int64_t addr) { (void)addr; return 0; }
+
+int64_t peek_u8(int64_t addr) { return _peek_u8(addr); }
+int64_t peek_u16(int64_t addr) { return _peek_u16(addr); }
+int64_t peek_u32(int64_t addr) { return _peek_u32(addr); }
+int64_t peek_u64(int64_t addr) { return _peek_u64(addr); }
+int64_t poke_u8(int64_t addr, int64_t val) { return _poke_u8(addr, val); }
+int64_t poke_u16(int64_t addr, int64_t val) { return _poke_u16(addr, val); }
+int64_t poke_u32(int64_t addr, int64_t val) { return _poke_u32(addr, val); }
+int64_t poke_u64(int64_t addr, int64_t val) { return _poke_u64(addr, val); }
+int64_t cpu_cli(void) { return _cpu_cli(); }
+int64_t cpu_sti(void) { return _cpu_sti(); }
+int64_t cpu_hlt(void) { return _cpu_hlt(); }
+int64_t cpu_inb(int64_t port) { return _cpu_inb(port); }
+int64_t cpu_inw(int64_t port) { return _cpu_inw(port); }
+int64_t cpu_ind(int64_t port) { return _cpu_ind(port); }
+int64_t cpu_outb(int64_t port, int64_t val) { return _cpu_outb(port, val); }
+int64_t cpu_outw(int64_t port, int64_t val) { return _cpu_outw(port, val); }
+int64_t cpu_outd(int64_t port, int64_t val) { return _cpu_outd(port, val); }
+int64_t cpu_read_cr3(void) { return _cpu_read_cr3(); }
+int64_t cpu_write_cr3(int64_t val) { return _cpu_write_cr3(val); }
+int64_t cpu_invlpg(int64_t addr) { return _cpu_invlpg(addr); }
+

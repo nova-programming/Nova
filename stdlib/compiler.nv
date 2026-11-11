@@ -672,6 +672,10 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
     asm = compile_file(input_path, debug_mode, target_arch, target_os)
     if len(asm) == 0 { return }
     write_lines(asm, input_path + ".s")
+    if target_os == "bare" {
+        print("Generated bare-metal assembly: " + input_path + ".s")
+        return
+    }
     
     compiler_dir = get_compiler_dir()
     gcc_name = _find_gcc(target_os, target_arch, compiler_dir)

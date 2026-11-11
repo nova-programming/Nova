@@ -164,6 +164,41 @@ def tc_init(tc: TypeChecker) {
     # call(name: string, args: list) -> any
     call_t = create_func_type([create_scalar_type("string"), create_list_type(create_any_type())], create_any_type())
     tc_add_func(tc, "call", call_t)
+
+    # Hardware MMIO & CPU Intrinsics
+    int_t = create_scalar_type("int")
+    any_t = create_any_type()
+    fn_addr_int = create_func_type([any_t], int_t)
+    fn_addr_int_int = create_func_type([any_t, int_t], int_t)
+    fn_int_int = create_func_type([int_t], int_t)
+    fn_int_int_int = create_func_type([int_t, int_t], int_t)
+    fn_void_int = create_func_type([], int_t)
+
+    tc_add_func(tc, "peek_u8", fn_addr_int)
+    tc_add_func(tc, "peek_u16", fn_addr_int)
+    tc_add_func(tc, "peek_u32", fn_addr_int)
+    tc_add_func(tc, "peek_u64", fn_addr_int)
+
+    tc_add_func(tc, "poke_u8", fn_addr_int_int)
+    tc_add_func(tc, "poke_u16", fn_addr_int_int)
+    tc_add_func(tc, "poke_u32", fn_addr_int_int)
+    tc_add_func(tc, "poke_u64", fn_addr_int_int)
+
+    tc_add_func(tc, "cpu_cli", fn_void_int)
+    tc_add_func(tc, "cpu_sti", fn_void_int)
+    tc_add_func(tc, "cpu_hlt", fn_void_int)
+
+    tc_add_func(tc, "cpu_inb", fn_int_int)
+    tc_add_func(tc, "cpu_inw", fn_int_int)
+    tc_add_func(tc, "cpu_ind", fn_int_int)
+
+    tc_add_func(tc, "cpu_outb", fn_int_int_int)
+    tc_add_func(tc, "cpu_outw", fn_int_int_int)
+    tc_add_func(tc, "cpu_outd", fn_int_int_int)
+
+    tc_add_func(tc, "cpu_read_cr3", fn_void_int)
+    tc_add_func(tc, "cpu_write_cr3", fn_int_int)
+    tc_add_func(tc, "cpu_invlpg", fn_int_int)
 }
 
 def tc_add_func(tc: TypeChecker, name: string, typ: Type) {

@@ -1893,6 +1893,226 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    push 0")
             return
         }
+
+        if node.val_str == "peek_u8" {
+            compile_expr(state, node.args[0])
+            emit(state, "    pop %d")
+            emit(state, "    movzx eax, byte ptr [%d]")
+            emit(state, "    push %a")
+            return
+        }
+        if node.val_str == "peek_u16" {
+            compile_expr(state, node.args[0])
+            emit(state, "    pop %d")
+            emit(state, "    movzx eax, word ptr [%d]")
+            emit(state, "    push %a")
+            return
+        }
+        if node.val_str == "peek_u32" {
+            compile_expr(state, node.args[0])
+            emit(state, "    pop %d")
+            emit(state, "    mov eax, dword ptr [%d]")
+            emit(state, "    push %a")
+            return
+        }
+        if node.val_str == "peek_u64" {
+            compile_expr(state, node.args[0])
+            emit(state, "    pop %d")
+            emit(state, "    mov rax, qword ptr [%d]")
+            emit(state, "    push %a")
+            return
+        }
+        if node.val_str == "poke_u8" {
+            compile_expr(state, node.args[1])
+            compile_expr(state, node.args[0])
+            emit(state, "    pop %d")
+            emit(state, "    pop %a")
+            emit(state, "    mov byte ptr [%d], al")
+            emit(state, "    push 0")
+            return
+        }
+        if node.val_str == "poke_u16" {
+            compile_expr(state, node.args[1])
+            compile_expr(state, node.args[0])
+            emit(state, "    pop %d")
+            emit(state, "    pop %a")
+            emit(state, "    mov word ptr [%d], ax")
+            emit(state, "    push 0")
+            return
+        }
+        if node.val_str == "poke_u32" {
+            compile_expr(state, node.args[1])
+            compile_expr(state, node.args[0])
+            emit(state, "    pop %d")
+            emit(state, "    pop %a")
+            emit(state, "    mov dword ptr [%d], eax")
+            emit(state, "    push 0")
+            return
+        }
+        if node.val_str == "poke_u64" {
+            compile_expr(state, node.args[1])
+            compile_expr(state, node.args[0])
+            emit(state, "    pop %d")
+            emit(state, "    pop %a")
+            emit(state, "    mov qword ptr [%d], rax")
+            emit(state, "    push 0")
+            return
+        }
+        if node.val_str == "cpu_cli" {
+            if state.target_os == "bare" {
+                emit(state, "    cli")
+                emit(state, "    push 0")
+            } else {
+                emit_call(state, "_cpu_cli", 0)
+                emit(state, "    push 0")
+            }
+            return
+        }
+        if node.val_str == "cpu_sti" {
+            if state.target_os == "bare" {
+                emit(state, "    sti")
+                emit(state, "    push 0")
+            } else {
+                emit_call(state, "_cpu_sti", 0)
+                emit(state, "    push 0")
+            }
+            return
+        }
+        if node.val_str == "cpu_hlt" {
+            if state.target_os == "bare" {
+                emit(state, "    hlt")
+                emit(state, "    push 0")
+            } else {
+                emit_call(state, "_cpu_hlt", 0)
+                emit(state, "    push 0")
+            }
+            return
+        }
+        if node.val_str == "cpu_inb" {
+            if state.target_os == "bare" {
+                compile_expr(state, node.args[0])
+                emit(state, "    pop %d")
+                emit(state, "    in al, dx")
+                emit(state, "    movzx rax, al")
+                emit(state, "    push %a")
+            } else {
+                compile_expr(state, node.args[0])
+                emit_call(state, "_cpu_inb", 1)
+                emit(state, "    push %a")
+            }
+            return
+        }
+        if node.val_str == "cpu_inw" {
+            if state.target_os == "bare" {
+                compile_expr(state, node.args[0])
+                emit(state, "    pop %d")
+                emit(state, "    in ax, dx")
+                emit(state, "    movzx rax, ax")
+                emit(state, "    push %a")
+            } else {
+                compile_expr(state, node.args[0])
+                emit_call(state, "_cpu_inw", 1)
+                emit(state, "    push %a")
+            }
+            return
+        }
+        if node.val_str == "cpu_ind" {
+            if state.target_os == "bare" {
+                compile_expr(state, node.args[0])
+                emit(state, "    pop %d")
+                emit(state, "    in eax, dx")
+                emit(state, "    push %a")
+            } else {
+                compile_expr(state, node.args[0])
+                emit_call(state, "_cpu_ind", 1)
+                emit(state, "    push %a")
+            }
+            return
+        }
+        if node.val_str == "cpu_outb" {
+            if state.target_os == "bare" {
+                compile_expr(state, node.args[1])
+                compile_expr(state, node.args[0])
+                emit(state, "    pop %d")
+                emit(state, "    pop %a")
+                emit(state, "    out dx, al")
+                emit(state, "    push 0")
+            } else {
+                compile_expr(state, node.args[1])
+                compile_expr(state, node.args[0])
+                emit_call(state, "_cpu_outb", 2)
+                emit(state, "    push 0")
+            }
+            return
+        }
+        if node.val_str == "cpu_outw" {
+            if state.target_os == "bare" {
+                compile_expr(state, node.args[1])
+                compile_expr(state, node.args[0])
+                emit(state, "    pop %d")
+                emit(state, "    pop %a")
+                emit(state, "    out dx, ax")
+                emit(state, "    push 0")
+            } else {
+                compile_expr(state, node.args[1])
+                compile_expr(state, node.args[0])
+                emit_call(state, "_cpu_outw", 2)
+                emit(state, "    push 0")
+            }
+            return
+        }
+        if node.val_str == "cpu_outd" {
+            if state.target_os == "bare" {
+                compile_expr(state, node.args[1])
+                compile_expr(state, node.args[0])
+                emit(state, "    pop %d")
+                emit(state, "    pop %a")
+                emit(state, "    out dx, eax")
+                emit(state, "    push 0")
+            } else {
+                compile_expr(state, node.args[1])
+                compile_expr(state, node.args[0])
+                emit_call(state, "_cpu_outd", 2)
+                emit(state, "    push 0")
+            }
+            return
+        }
+        if node.val_str == "cpu_read_cr3" {
+            if state.target_os == "bare" {
+                emit(state, "    mov rax, cr3")
+                emit(state, "    push %a")
+            } else {
+                emit_call(state, "_cpu_read_cr3", 0)
+                emit(state, "    push %a")
+            }
+            return
+        }
+        if node.val_str == "cpu_write_cr3" {
+            if state.target_os == "bare" {
+                compile_expr(state, node.args[0])
+                emit(state, "    pop %a")
+                emit(state, "    mov cr3, rax")
+                emit(state, "    push 0")
+            } else {
+                compile_expr(state, node.args[0])
+                emit_call(state, "_cpu_write_cr3", 1)
+                emit(state, "    push 0")
+            }
+            return
+        }
+        if node.val_str == "cpu_invlpg" {
+            if state.target_os == "bare" {
+                compile_expr(state, node.args[0])
+                emit(state, "    pop %a")
+                emit(state, "    invlpg [rax]")
+                emit(state, "    push 0")
+            } else {
+                compile_expr(state, node.args[0])
+                emit_call(state, "_cpu_invlpg", 1)
+                emit(state, "    push 0")
+            }
+            return
+        }
         
         is_struct = 0
         struct_size = 0

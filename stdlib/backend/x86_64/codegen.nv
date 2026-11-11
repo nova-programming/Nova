@@ -1174,11 +1174,13 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     emit(state, ".intel_syntax noprefix")
     entry = get_entry_name(target_os)
     emit(state, ".global " + entry)
-    externs = codegen_common.get_externs()
-    i = 0
-    while i < len(externs) {
-        emit(state, ".extern " + externs[i])
-        i = i + 1
+    if target_os != "bare" {
+        externs = codegen_common.get_externs()
+        i = 0
+        while i < len(externs) {
+            emit(state, ".extern " + externs[i])
+            i = i + 1
+        }
     }
 
     strings = codegen_common.get_data_strings()
@@ -1327,9 +1329,11 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     emit(state, "    mov [rax], rdi")
     emit(state, "    lea rax, [rip + __nova_argv]")
     emit(state, "    mov [rax], rsi")
-    emit(state, "    lea rax, [rip + L_oob_source]")
-    emit(state, "    lea rcx, [rip + _oob_file_ptr]")
-    emit(state, "    mov [rcx], rax")
+    if target_os != "bare" {
+        emit(state, "    lea rax, [rip + L_oob_source]")
+        emit(state, "    lea rcx, [rip + _oob_file_ptr]")
+        emit(state, "    mov [rcx], rax")
+    }
     if is_x64(state) == 1 {
         emit(state, "    and " + sp + ", -16")
     }
@@ -1370,44 +1374,46 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
     emit(state, "    mov rax, 0")
     emit(state, "    ret")
 
-    emit(state, "_concat_strings:")
-    emit(state, "    jmp _nova_str_concat")
+    if target_os != "bare" {
+        emit(state, "_concat_strings:")
+        emit(state, "    jmp _nova_str_concat")
 
-    emit(state, "_slice_string:")
-    emit(state, "    push rbp")
-    emit(state, "    mov rbp, rsp")
-    emit(state, "    push rbx")
-    emit(state, "    sub rsp, 40")
-    emit(state, "    mov rbx, rsi")
-    emit(state, "    mov rcx, rdx")
-    emit(state, "    sub rcx, rbx")
-    emit(state, "    cmp rcx, 0")
-    emit(state, "    jge L_slice_alloc_64")
-    emit(state, "    xor rcx, rcx")
-    emit(state, "L_slice_alloc_64:")
-    emit(state, "    mov [rsp + 32], rcx")
-    emit(state, "    mov [rsp + 24], rdi")
-    emit(state, "    inc rcx")
-    emit(state, "    mov rdi, rcx")
-    emit(state, "    call _malloc")
-    emit(state, "    mov rcx, [rsp + 32]")
-    emit(state, "    mov rsi, [rsp + 24]")
-    emit(state, "    mov rdi, rax")
-    emit(state, "    add rsi, rbx")
-    emit(state, "    mov [rsp + 16], rdi")
-    emit(state, "    cmp rcx, 0")
-    emit(state, "    jle L_slice_done_64")
-    emit(state, "    cld")
-    emit(state, "    rep movsb")
-    emit(state, "L_slice_done_64:")
-    emit(state, "    mov rcx, [rsp + 32]")
-    emit(state, "    mov rdi, [rsp + 16]")
-    emit(state, "    mov byte ptr [rdi + rcx], 0")
-    emit(state, "    mov rax, rdi")
-    emit(state, "    add rsp, 40")
-    emit(state, "    pop rbx")
-    emit(state, "    pop rbp")
-    emit(state, "    ret")
+        emit(state, "_slice_string:")
+        emit(state, "    push rbp")
+        emit(state, "    mov rbp, rsp")
+        emit(state, "    push rbx")
+        emit(state, "    sub rsp, 40")
+        emit(state, "    mov rbx, rsi")
+        emit(state, "    mov rcx, rdx")
+        emit(state, "    sub rcx, rbx")
+        emit(state, "    cmp rcx, 0")
+        emit(state, "    jge L_slice_alloc_64")
+        emit(state, "    xor rcx, rcx")
+        emit(state, "L_slice_alloc_64:")
+        emit(state, "    mov [rsp + 32], rcx")
+        emit(state, "    mov [rsp + 24], rdi")
+        emit(state, "    inc rcx")
+        emit(state, "    mov rdi, rcx")
+        emit(state, "    call _malloc")
+        emit(state, "    mov rcx, [rsp + 32]")
+        emit(state, "    mov rsi, [rsp + 24]")
+        emit(state, "    mov rdi, rax")
+        emit(state, "    add rsi, rbx")
+        emit(state, "    mov [rsp + 16], rdi")
+        emit(state, "    cmp rcx, 0")
+        emit(state, "    jle L_slice_done_64")
+        emit(state, "    cld")
+        emit(state, "    rep movsb")
+        emit(state, "L_slice_done_64:")
+        emit(state, "    mov rcx, [rsp + 32]")
+        emit(state, "    mov rdi, [rsp + 16]")
+        emit(state, "    mov byte ptr [rdi + rcx], 0")
+        emit(state, "    mov rax, rdi")
+        emit(state, "    add rsp, 40")
+        emit(state, "    pop rbx")
+        emit(state, "    pop rbp")
+        emit(state, "    ret")
+    }
 
     optimized = peephole.optimize(state.asm_lines)
     final_asm = []

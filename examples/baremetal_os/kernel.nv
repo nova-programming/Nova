@@ -1,0 +1,85 @@
+# Nova Bare-Metal Kernel
+# 100% Pure Nova Code - Zero Assembly & Zero Libc Dependencies
+
+def vga_clear(color_attr: int) {
+    let vga = 0xB8000
+    let space = (color_attr << 8) | 32
+    let i = 0
+    while i < 80 * 25 * 2 {
+        poke.u16(vga + i, space)
+        i = i + 2
+    }
+}
+
+def vga_print(x: int, y: int, text: string, color_attr: int) {
+    let vga = 0xB8000
+    let offset = (y * 80 + x) * 2
+    let p = text.ptr
+    let i = 0
+    let ch = peek.u8(p)
+    while ch != 0 {
+        let cell = (color_attr << 8) | ch
+        poke.u16(vga + offset + i * 2, cell)
+        i = i + 1
+        ch = peek.u8(p + i)
+    }
+}
+
+def serial_init() {
+    # Initialize COM1 (0x3F8) at 38400 baud
+    cpu.outb(0x3F8 + 1, 0)     # Disable all interrupts
+    cpu.outb(0x3F8 + 3, 0x80)  # Enable DLAB (set baud rate divisor)
+    cpu.outb(0x3F8 + 0, 3)     # Set divisor to 3 (lo byte) 38400 baud
+    cpu.outb(0x3F8 + 1, 0)     #                  (hi byte)
+    cpu.outb(0x3F8 + 3, 3)     # 8 bits, no parity, one stop bit
+    cpu.outb(0x3F8 + 2, 0xC7)  # Enable FIFO, clear them, with 14-byte threshold
+    cpu.outb(0x3F8 + 4, 0x0B)  # IRQs enabled, RTS/DSR set
+}
+
+def serial_write(text: string) {
+    let p = text.ptr
+    let i = 0
+    let ch = peek.u8(p)
+    while ch != 0 {
+        while (cpu.inb(0x3F8 + 5) & 0x20) == 0 {}
+        cpu.outb(0x3F8, ch)
+        i = i + 1
+        ch = peek.u8(p + i)
+    }
+}
+
+def kmain() {
+    # 1. Disable hardware interrupts during early kernel setup
+    cpu.cli()
+
+    # 2. Initialize serial logging on COM1
+    serial_init()
+    serial_write("[NOVA-OS] Serial COM1 logging online\r\n")
+    serial_write("[NOVA-OS] Booting Nova Bare-Metal Kernel...\r\n")
+
+    # 3. Clear VGA screen with Navy Blue background (0x1F)
+    vga_clear(0x1F)
+
+    # 4. Draw Header & Splash Box
+    vga_print(24, 4, "+--------------------------------+", 0x1E)
+    vga_print(24, 5, "|       NOVA OPERATING SYSTEM    |", 0x1F)
+    vga_print(24, 6, "|     Pure Native 64-bit Kernel  |", 0x1A)
+    vga_print(24, 7, "+--------------------------------+", 0x1E)
+
+    # 5. Diagnostic Outputs
+    vga_print(18, 10, "[OK] CPU Ring 0 Long Mode active", 0x1A)
+    vga_print(18, 11, "[OK] VGA Text Buffer active at 0xB8000", 0x1A)
+    vga_print(18, 12, "[OK] MMIO: peek.u8 / poke.u16 online", 0x1A)
+    vga_print(18, 13, "[OK] CPU: cpu.cli / cpu.sti / cpu.hlt online", 0x1A)
+    vga_print(18, 14, "[OK] Serial Port COM1 (0x3F8) streaming", 0x1A)
+
+    vga_print(20, 18, "Status: Kernel is idle. System is running.", 0x17)
+
+    serial_write("[NOVA-OS] All kernel subsystems verified. Halting in idle loop.\r\n")
+
+    # 6. Re-enable interrupts and halt in idle loop
+    cpu.sti()
+    while 1 == 1 {
+        cpu.hlt()
+    }
+}

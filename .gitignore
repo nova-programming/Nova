@@ -8,11 +8,13 @@ __pycache__/
 # Compiled files
 *.ll
 *.s
+!examples/baremetal_os/boot.s
 *.exe
 *.out
 *.obj
 *.o
 *.bin
+*.elf
 
 # IDE files
 .vscode/
