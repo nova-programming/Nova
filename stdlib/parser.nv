@@ -123,11 +123,7 @@ def make_var(name: string, line: int) -> AstNode {
 }
 
 def make_num(val: int, line: int) -> AstNode {
-    n = AstNode()
-    n.kind = "Number"
-    n.val_int = val
-    n.line = line
-    return n
+    return make_number_node(val, line, 0)
 }
 
 def parse_list_comprehension(state: ParserState, expr: AstNode) -> AstNode {

@@ -171,7 +171,7 @@ SYSCALL int STR_PFX(fputc)(int c, long long s) {
   return c;
 }
 SYSCALL int STR_PFX(fseek)(long long s, long o, int w) {
-  return SetFilePointer((HANDLE)(intptr_t)s, o, 0, w) == -1 ? -1 : 0;
+  return SetFilePointer((HANDLE)(intptr_t)s, o, 0, w) == INVALID_SET_FILE_POINTER ? -1 : 0;
 }
 SYSCALL long STR_PFX(ftell)(long long s) {
   return SetFilePointer((HANDLE)(intptr_t)s, 0, 0, 1);
@@ -4840,7 +4840,7 @@ SYSCALL void STR_PFX(nova_net_close)(int64_t sock) {
 }
 
 #if defined(_WIN64)
-int gui_next_click_id(void) { return _gui_next_click_id(); }
+int gui_next_click_id(void) { return ++g_gui_next_click_id; }
 int64_t buf_new(int64_t size_bytes) { return _buf_new(size_bytes); }
 void buf_free(int64_t buf) { _buf_free(buf); }
 int64_t buf_get_u8(int64_t buf, int64_t offset) {

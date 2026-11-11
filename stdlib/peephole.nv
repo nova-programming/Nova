@@ -33,10 +33,6 @@ def is_gp_reg(r: string) -> int {
     return 0
 }
 
-def gp_regs() -> dict {
-    return {"rax": 1, "rbx": 1, "rcx": 1, "rdx": 1, "rsi": 1, "rdi": 1, "r8": 1, "r9": 1, "r10": 1, "r11": 1, "r12": 1, "r13": 1, "r14": 1, "r15": 1}
-}
-
 # Decimal integer literal, with an optional leading "-" ("push <imm>" always emits one of these,
 # never hex/octal) -- used to fold `push <imm> ; pop <reg>` into `mov <reg>, <imm>` below. A bare
 # "-" is rejected (len(rest) > 0 check).
@@ -103,7 +99,7 @@ def is_stmt_exit_label(label: string) -> int {
     return 0
 }
 
-def optimize_pass(lines: list, regs: dict) -> list {
+def optimize_pass(lines: list) -> list {
     result = []
     n = len(lines)
     i = 0
@@ -217,8 +213,7 @@ def optimize_pass(lines: list, regs: dict) -> list {
 }
 
 def optimize(lines: list) -> list {
-    regs = {}
-    out = optimize_pass(lines, regs)
-    out = optimize_pass(out, regs)
+    out = optimize_pass(lines)
+    out = optimize_pass(out)
     return out
 }
