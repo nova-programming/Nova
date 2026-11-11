@@ -113,6 +113,7 @@ def match_keyword(word: string) -> string {
         case "in" { return "IN" }
         case "true" { return "TRUE" }
         case "false" { return "FALSE" }
+        case "null" { return "NULL" }
         case "int" { return "TYPE_INT" }
         case "float" { return "TYPE_FLOAT" }
         case "bool" { return "TYPE_BOOL" }

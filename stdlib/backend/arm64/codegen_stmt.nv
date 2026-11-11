@@ -163,6 +163,9 @@ def compile_stmt(state: CodegenState, node: AstNode, debug_mode: int) {
         if node.left.inferred_type != 0 and node.left.inferred_type.kind == "dict" {
             is_dict = 1
         }
+        if is_dict == 0 and is_string_expr(state, node.right) == 1 {
+            is_dict = 1
+        }
         if is_dict == 1 {
             emit(state, "    str %a, [sp, #-16]!")
             emit(state, "    str %c, [sp, #-16]!")

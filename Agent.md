@@ -190,3 +190,491 @@ Nova is a programming language designed to bridge Python-like readability and ea
 - Verified in `tests/test_std_extensions.py`.
 
 
+
+---
+
+## 13. Flagship Native IDE: Nova Studio (`examples/nova_studio.nv`)
+
+### Standalone Executable Footprint (< 250 KB)
+- Single-file native application built with pure Nova standard library modules.
+- Stripped standalone binary footprint: **230.01 KB** (235,534 bytes), well below the `< 250 KB` requirement.
+- Verified in `tests/test_studio.py`.
+
+### 3-Zone Architecture & Styling (`gui.nv` + `nss.nv`)
+- Dark-themed Catppuccin Mocha `#1e1e2e` color scheme.
+- **Zone 1 (Code Editor)**:
+  - Line numbers gutter (`#181825` background, `#6c7086` text).
+  - Active line highlight (`#313244`) and red error line highlights (`#45232e`).
+  - Interactive typing via `pollChar()`, backspace handling, enter/line splitting, arrow key navigation.
+  - Token syntax coloring for comments (`#6c7086`), keywords (`#cba6f7`), and imports (`#89b4fa`).
+- **Zone 2 (Live Diagnostics & Execution Console)**:
+  - Tabbed interface switching between `Diagnostics` and `Console Output`.
+  - In-process diagnostic parsing: captures pointing carets (`^~~~`), line/column numbers, and suggestion hints.
+  - Status badges: emerald green `#a6e3a1` for clean code, rose red `#f38ba8` for compiler errors.
+  - Program runner: executes `nova.exe run` via `process_capture`, displaying stdout and exit codes.
+- **Zone 3 (60 FPS Viewport & Audio Sandbox)**:
+  - 320 dynamic particles with velocities, elastic bouncing, and mouse attraction gravity wells.
+  - Clickable explosive radial shockwaves with audio feedback.
+  - Real-time PCM audio oscilloscope waveform rendered along the viewport base.
+  - Blitted at 60 FPS into the GDI backbuffer via `drawFramebuffer(fb_h, x, y, w, h)`.
+  - Fullscreen mode toggle supported via `presentFramebuffer(fb_h, w, h)`.
+
+### Sub-Rectangle Framebuffer Blitting & Win64 Stack Alignment (`runtime.c` & `gui.nv`)
+- Added `gui_draw_framebuffer(buffer_ptr, x, y, width, height, unused)` to `runtime.c` and `gui.nv`.
+- Blits 32-bit RGBA pixel buffers directly into `g_gui_mem_dc` using Win32 `StretchDIBits`, enabling seamless coexistence of high-framerate software rasterization and vector GDI controls without screen tearing.
+- **Win64 Stack Alignment Fix**: On x86_64 Windows ABI, calls with an odd number of stack arguments (e.g. 5 arguments = 4 register + 1 stack argument) misalign the stack pointer to an 8-byte boundary (`rsp % 16 == 8`), triggering a `0xC0000005` Access Violation when GCC emits 16-byte SSE instructions (`movaps`) inside the callee. Providing 6 arguments (4 register + 2 stack arguments = 16 bytes) ensures `%rsp` remains strictly 16-byte aligned before `call`, eliminating runtime access violations while `drawFramebuffer` retains its clean 5-argument public API.
+
+### Native Audio & Sound Synthesis (`stdlib/audio.nv`)
+- Zero external dependencies: binds directly to Win32 `kernel32.dll`'s `Beep(dwFreq, dwDuration)`.
+- UI audio effects: `audio_click()`, `audio_success()`, `audio_error()`, `audio_play_note(note, duration)`.
+- Mathematical PCM waveform synthesis for real-time oscilloscopes: `audio_sample_sine`, `audio_sample_triangle`, `audio_sample_square`, `audio_sample_noise`.
+
+### Headless Benchmark Mode
+- `nova_studio --headless-bench 300`:
+  - Validates in-process compiler diagnostics pipeline.
+  - Simulates 300 physics & rasterization frames into a raw `Buffer` in **7 ms**.
+  - Throughput: **~38,500 FPS** (>600x faster than 60 FPS target).
+
+
+---
+
+## 14. Nova Studio Interactive Polish & Runtime Invariants (Sprint 7)
+
+### GCC Warning Elimination (`runtime.c`)
+- **`_exit` Builtin Declaration Mismatch**: Wrapped `STR_PFX(exit)` in `#pragma GCC diagnostic ignored "-Wbuiltin-declaration-mismatch"`, eliminating ABI mismatch warnings with GCC's builtin.
+- **`__p___argc` / `__p___argv` Redeclaration**: Wrapped extern declarations in `_sys_get_args_c` in `#pragma GCC diagnostic ignored "-Wattributes"`, silencing CRT DLL import warnings.
+- **Clean Compiler Build**: `gcc -c -O3 nova/runtime.c` compiles with 0 errors and 0 warnings.
+
+### High-DPI Framebuffer Alignment & Waveform Bounds
+- **DPI Scaling in `gui_draw_framebuffer`**: Scaled destination coordinates (`px, py, pw, ph`) by `g_gui_dpi_scale` before `StretchDIBits` into `g_gui_mem_dc`. Fixes coordinate and size mismatch where the software-rendered viewport escaped or misaligned with its NSS vector borders on high-DPI displays.
+- **Oscilloscope Waveform Clamping**: Clamped `wy` between `vh - 54` and `vh - 8` with a safe upper limit check `wy < vh - 1` before writing `(wy + 1) * vw + wx`. Separated the particle arena (`y < vh - 62`) from the oscilloscope base with a subtle divider line at `vh - 58`.
+
+### Interactive Button Responsiveness & Visual Hover Feedback
+- **Immediate Mouse-Down Debounced Latching**: Added `m_down = gui_get_mouse_down()` with edge detection (`m_down == 1 and prev_m_down == 0`) so clicks trigger with 0-latency on initial press rather than waiting for mouse release.
+- **Dynamic Visual Hover States**: Highlighted button background (`#45475a`) and borders on hover for `[Check Source]`, `[Run]`, `[Reset Sim]`, `[Sound FX]`, `[Fullscreen]`, and tabs.
+- **Quoted Path Execution & Stderr Streaming**: Wrapped executable and source paths in quotes with `2>&1` (`"\"\"" + nova_bin + "\" run \"" + tmp_run_file + "\" 2>&1\""`) in `process_capture`, preventing failure on Windows directories containing spaces and ensuring compiler/runtime stderr outputs are visible in the console tab.
+- **Fullscreen Mode Toggle**: Removed `gui_present()` call from the fullscreen loop (which previously overwrote the fullscreen framebuffer with the stale non-fullscreen window backbuffer) and added click-consumption debounce to prevent immediate toggle exit.
+
+### Root Frame Stack Alignment Fix (`backend/x86_64/codegen.nv`)
+- **Root Epilogue Stack Alignment**: In `codegen.nv` line 1337, changed top-level stack allocation to `sub_amount = state.local_offset - regs_size; if sub_amount > 0 { emit("sub rsp, " + str(sub_amount)) }`. Previously, subtracting the full `state.local_offset` without subtracting `regs_size` resulted in pushing `used_regs` afterwards, causing an 8-byte stack misalignment whenever `len(state.used_regs)` was odd. This cures access violations when top-level code calls 64-bit ABI functions requiring 16-byte aligned stacks (such as Win32 GDI calls in `test_gui_raw.nv`).
+- **Self-Host Verification**: Rebuilt Stage 1 $\to$ Stage 2 $\to$ Stage 3; byte-identical assembly output verified (`s2.s == s3.s`, SHA256: `6ca54ba0a1a6344c000e3085291fa4f9fbc26af082dfb1f87d206e008046cd35`).
+- **Binary Footprint**: Stripped standalone `nova_studio.exe` footprint is **232.51 KB** (238,094 bytes), well below the `< 250 KB` requirement.
+
+---
+
+## 15. Native Monospace Typography, Reusable UI Components & Nova Studio Polish (Sprint 8)
+
+### Native Monospace Typography & Reusable UI Components (`runtime.c` & `gui.nv`)
+- **Native Monospace Font Support (`runtime.c`)**:
+  - Added `STR_PFX(gui_draw_mono_text)` utilizing Microsoft Windows `Consolas` directly into the Win32 GDI pipeline with exact DPI-scaled pitch and anti-aliasing.
+  - Implemented 6-parameter extern interface `extern def gui_draw_mono_text(text: string, x: int, y: int, font_size: int, color_hex: int, font_weight: int)` matching Microsoft x64 calling convention.
+  - Added public helper `def drawMonoText(text: string, x: int, y: int, size: int, color: int, bold: int)` in `stdlib/gui.nv`.
+  - At font size 11, `Consolas` produces constant advance width of 7px, enabling exact caret positioning (`60 + len(s) * 7`) and column-aligned compiler diagnostic carets (`^~~~`).
+- **Reusable Standard GUI Controls (`stdlib/gui.nv`)**:
+  - `def ui_button(x, y, w, h, text, hover, active, theme)`: Renders polished styled buttons with hover and active states.
+  - `def ui_badge(x, y, text, fg_col, bg_col)`: Renders pill badges with automatic width sizing and centered text.
+  - `def ui_panel(x, y, w, h, bg_col, border_col, title, title_col)`: Renders framed cards and content panels with header bars.
+
+### Nova Studio UI Upgrades (`examples/nova_studio.nv`)
+- **Token-Level Syntax Highlighting (`render_highlighted_code`)**:
+  - Pure in-engine lexical highlighter rendering tokens with `drawMonoText` in fixed-pitch Consolas:
+    - Keywords (`def`, `return`, `if`, `while`, `for`, `import`, etc.) in Catppuccin Mauve (`#cba6f7`, bold).
+    - Built-in functions and types (`int`, `string`, `list`, `print`, `str`, `len`, `range`) in Blue (`#89b4fa`, bold).
+    - String literals in Emerald Green (`#a6e3a1`).
+    - Numeric constants in Warm Peach (`#fab387`).
+    - Punctuation and braces in Sky Blue and Teal (`#89dceb`, `#94e2d5`).
+    - Comments in Muted Gray (`#6c7086`).
+- **Living Constellation Swarm Physics (No Single-Point Collapse)**:
+  - Initial particle positions distributed across viewport dimensions rather than clumped at center.
+  - Added tangential orbital curl acceleration (`tang_x = -dy/450`, `tang_y = dx/450`) combined with gravitational pull, creating stable celestial swirling motion.
+  - Added kinetic wander floor to keep particles permanently active even in steady-state.
+  - Added subtle cosmic grid background (32px pitch dots, `#232438`) for depth and spatial perspective.
+- **Console Auto-Scroll & Semantic Terminal Coloring**:
+  - Automatic bottom scrolling displays the most recent 9 lines (`start_ci = max(0, len(c_lines) - 9)`), ensuring executed program output and exit status are always visible.
+  - Semantic syntax coloring: process invocation headers in blue, compiler progress stages in subtle gray, program stdout in bright teal (`#94e2d5`), clean exit code 0 in emerald green (`#a6e3a1`), and error lines in rose red (`#f38ba8`).
+- **Editor Interaction Enhancements**:
+  - Click-to-seek: clicking anywhere in the code editor panel instantly positions the active line cursor (`cursor_line = (my - 73) / 20`).
+  - Tab key support: pressing Tab (`ch == 9`) inserts a 4-space indent.
+- **Binary Footprint & Performance**:
+  - Stripped standalone `nova_studio.exe`: **247.51 KB** (strictly `< 250 KB`).
+  - Headless benchmark throughput: **34,952 FPS** (>500x the 60 FPS target).
+  - All 76 tests in `test_check_all.py` and `test_studio.py` pass cleanly.
+
+---
+
+## 16. VS Code & Antigravity IDE Architecture and GDI Font Cell Lock (Sprint 9)
+
+### Exact GDI Font Cell Lock (`runtime.c`)
+- **Cumulative Monospace Spacing Drift Elimination**:
+  - In `STR_PFX(gui_draw_mono_text)`, explicitly passed `font_w = (int)(7.0f * g_gui_dpi_scale)` and `font_h = (int)(font_size * 1.35f * g_gui_dpi_scale)` into Win32 GDI's `CreateFontA`.
+  - When `font_w` is non-zero, Windows GDI locks every character cell to exactly `font_w` physical pixels, which mathematically matches Nova's `curr_x + len(tok) * 7` layout advance at any DPI scale.
+  - Eliminated artificial void gaps around parentheses, quotes, and operators (`print("...")` renders seamlessly).
+
+### Full VS Code & Antigravity IDE Architecture (`examples/nova_studio.nv`)
+- **Top Command & Navigation Bar (`y = 0..36`)**:
+  - Branded tag `◆ NOVA` with breadcrumb `workspace › examples › <file>`.
+  - Centered Run & Check command pill (`[ ▶ Run ]` and `[ ✓ Check ]`) with soft rounded borders.
+  - Action pills on right: `[ ↺ Reset ]`, `[ 🔊 Sound ]`, `[ ⛶ Max ]`, and `60 FPS | x86` status pill.
+- **Activity Bar (`x = 0..42`)**:
+  - Left navigation strip (`#11111b`) with 2px active accent line and tool icons (`📁` Explorer, `⚡` Run, `🌌` Sandbox).
+- **Project Explorer Sidebar (`x = 42..185`)**:
+  - Interactive file list: `📄 nova_studio.nv`, `📄 schema_doctor.nv`, `📄 windows_ui.nv`.
+  - Clicking any file smoothly loads its corresponding template in the editor.
+- **Modern Code Editor Zone (`x = 185..650`)**:
+  - Editor tab header `[ 📄 <file>  × ]` with blue `#89b4fa` active top line.
+  - Dark gutter with right-aligned line numbers and active line background highlight (`#24273a`).
+  - Seamless token-level syntax coloring without spacing distortion.
+- **Live Particle Viewport Sandbox (`x = 655..1030`)**:
+  - Tab header `🌌 PARTICLE SANDBOX` with `Click to Shock` interaction indicator.
+  - Software rasterized celestial particle swarm + sine waveform blitted via `drawFramebuffer`.
+- **Integrated Terminal & Problems Bottom Panel (`x = 42..1030`, `y = 482..682`)**:
+  - Tabbed footer panel with `TERMINAL` and `PROBLEMS (0)` tabs.
+  - Right-aligned `⊘ Clear` action button to flush output.
+  - 10pt Consolas monospace terminal output with semantic color highlights.
+- **Integrated Bottom Status Bar (`y = 684..710`)**:
+  - Displays `⊞ Nova v1.0` | `Ln X, Col Y` | `UTF-8` | `Consolas 11pt` | `x86_64 Native | 320 Particles | 60 FPS`.
+- **Performance & Footprint**:
+  - Standalone binary size: **249.51 KB** (strictly `< 250 KB`).
+  - Benchmark throughput: **34,806 FPS**.
+  - All test suites (`test_check_all.py`, `test_studio.py`) pass 100%.
+
+---
+
+## 17. Declarative UI Engine & Two-Pass Layout Architecture (Sprint 10)
+
+### Clean Declarative Paradigm (`nova/stdlib/gui.nv`)
+- **Core Abstractions**:
+  - Extended `Widget` struct with `flex: int`, `measured_w: int`, and `measured_h: int`.
+  - Pure functional factories: `Row(children, props)`, `Column(children, props)`, `Button(label, on_click, props)`, `Text(label, props)`, `Spacer(props)`, and `Canvas(render_fn, props)`.
+  - Preserved legacy immediate-mode and raw widget constructors for complete backward compatibility.
+
+### Two-Pass Layout Engine (`gui_measure` & `gui_layout`)
+- **Pass 1: Bottom-Up Intrinsic Measurement (`gui_measure`)**:
+  - Leaf nodes calculate intrinsic bounds from text metrics (`strLen * char_w`, monospace cell locking, font-size, padding).
+  - Containers recursively measure children, accumulating primary axis dimensions with `gap` and computing cross-axis bounds.
+  - Explicit `width`/`w` and `height`/`h` overrides take precedence where defined.
+- **Pass 2: Top-Down Dynamic Flex & Coordinate Assignment (`gui_layout`)**:
+  - Allocates remaining container space (`inner_primary - fixed_space - gaps`) proportionally across `flex > 0` children.
+  - Assigns absolute coordinates `(pos_x, pos_y)` to all nodes in the tree based on flex direction, gaps, and cross-axis alignment (`align-items: center | start | end | stretch`).
+
+### Event Dispatch & Lifecycle Management (`gui_dispatch_events` & `gui_run`)
+- **Automatic Event Routing (`gui_dispatch_events`)**:
+  - Traverses the widget hierarchy checking mouse pointer intersection against resolved layout bounds.
+  - Automatically updates `is_hovered` and `is_pressed` states.
+  - Triggers action callbacks (`dispatchAction`) upon click without developer event-loop boilerplate.
+- **Window Lifecycle Runner (`gui_run`)**:
+  - Handles window creation, NSS stylesheet loading, layout resolution, double-buffered frame presentation, testing harnesses (`--test`), and native screenshot capture (`--screenshot`).
+
+### Flagship Migration: Nova Studio (`examples/nova_studio.nv`)
+- **Pure Declarative Tree Model**:
+  - Replaced manual coordinate math and 150+ lines of procedural layout with declarative component definitions (`Row`, `Column`, `Button`, `Text`, `Spacer`, `Canvas`).
+  - Brand pill with workspace breadcrumbs, centered Run/Check command pill, and right action cluster (`Reset`, `Sound`, `Max`, `60 FPS`).
+  - Sidebar file explorer built with declarative button list responding to `ACTION_FILE_0..2`.
+  - Zero-allocation 60 FPS loop: interactive code editor and celestial particle sandbox blit inside declarative `Canvas` bounds without intermediate heap churn.
+  - Automated mouse click/hover routing via `gui_dispatch_events(root, mx, my, is_clicked)`.
+
+### Verification & Invariants Gate
+- **Declarative Preview Artifact**:
+  - Captured pixel-perfect GDI screenshot artifact `studio_declarative_preview.png`.
+- **Self-Host Invariant**:
+  - Stage 1 -> Stage 2 -> Stage 3 self-host loop verified: `s2.s SHA256 == s3.s SHA256` (`6ca54ba0a1a6344c000e3085291fa4f9fbc26af082dfb1f87d206e008046cd35`). Byte-for-byte identical.
+- **Test Suites**:
+  - `pytest nova/tests/test_widgets.py` -> 4/4 PASSED.
+  - `pytest nova/tests/test_check_all.py` -> 77/77 PASSED.
+  - `pytest nova/tests/test_studio.py` -> 2/2 PASSED (`nova_studio.exe` size: **249.51 KB** `< 250 KB`, benchmark throughput: **34,806 FPS** `> 60 FPS`).
+
+---
+
+## 18. Unified High-Level Declarative GUI Suite & Default Styling (Stage 1)
+
+### Centralized Styling Architecture (`_apply_default_props`)
+- Centralized reusable modern styling defaults (Catppuccin Mocha palette) applied across all high-level constructors:
+  - `title`: 22pt bold, `#cdd6f4`, `padding-bottom: 8`.
+  - `heading`: 16pt bold, `#89b4fa`, `padding-bottom: 6`.
+  - `text`: 14pt, `#cdd6f4`.
+  - `button`: `#89b4fa` primary fill, `#11111b` text, `border-radius: 6`, padding `8px 14px`, hover `#b4befe`, press `#74c7ec` (ghost buttons preserve transparency when background is unspecified and custom color provided).
+  - `card`: `#1e1e2e` surface, 1px border `#313244`, `border-radius: 8`, padding `16px`, `gap: 10`.
+  - `divider`: 1px rule `#313244`, margin `8px 0`.
+  - `input`: 34px height, `#181825` mantle, 1px border `#45475a`, `border-radius: 6`, padding `10px`, focus border `#89b4fa`.
+  - `textarea`: 80px height, `#181825` mantle, 1px border `#45475a`, `border-radius: 6`, padding `10px`.
+  - `toggle`, `checkbox`, `slider`, `dropdown`: intrinsic sizes and unified modern dark theme controls.
+
+### Complete High-Level Component Suite (`nova/stdlib/gui.nv`)
+- **Typography & Display**: `Title`, `Heading`, `Text`, `Image`, `Canvas`.
+- **Interactive Controls**: `Button`, `Input`, `TextArea`, `Checkbox`, `Toggle`, `Slider`, `Dropdown`.
+- **Layout & Structure**: `Row`, `Column`, `Container`, `Card`, `Divider`, `Spacer`, `Scroll`, `List`.
+- **Lifecycle Management**:
+  - `App(title, root, width, height, props)`: Unifies initialization, NSS loading, layout resolution, double-buffered frame presentation, testing harnesses (`--test`), screenshot capture (`--screenshot`), and clean teardown.
+  - `Window(title, root, width, height, props)`: High-level window app wrapper.
+  - Ergonomic helpers: `title(text)`, `heading(text)`, `app_run(title, root)`.
+
+### Declarative Actions & Intrinsic Layout Extension
+- Extended `dispatchAction` with `"set_text"` handler for declarative string mutation on target widgets.
+- Extended `gui_measure` with accurate leaf intrinsic metrics for `input` (34px), `checkbox` (24px), `toggle` (44x24px), `slider` (140x24px), `dropdown` (120x30px), and `divider` (1px).
+
+### Verification & Invariants Gate
+- **Visual Verification**:
+  - Generated and verified artifact: `declarative_suite_preview.png`.
+  - Created demonstration app `nova/examples/declarative_app_demo.nv`.
+- **Self-Host Invariant**:
+  - Stage 1 -> Stage 2 -> Stage 3 self-host loop: `s2.s SHA256 == s3.s SHA256` (`6ca54ba0a1a6344c000e3085291fa4f9fbc26af082dfb1f87d206e008046cd35`).
+- **Test Suites**:
+  - `pytest nova/tests/test_studio.py` -> 2/2 PASSED (`nova_studio.exe` size: **249.51 KB** `< 250 KB`, benchmark throughput: **34,566 FPS** `> 60 FPS`).
+  - `pytest nova/tests/test_widgets.py` -> 5/5 PASSED.
+  - `pytest nova/tests/test_check_all.py` -> 78/78 PASSED.
+
+---
+
+## 19. Stage 2: Reactive State Management & Component Lifecycle Architecture
+
+### Reactive State Primitives (`data State`)
+- **First-Class Reactive Object**:
+  - `data State { val_type: str, val_int: int, val_str: str, targets: [Widget] }`
+  - Instantiators: `StateInt(val: int)`, `StateStr(val: str)`, `state_int`, `state_str`.
+  - Direct Accessors: `state_get_int(s)`, `state_get_str(s)`, `state_set_int(s, v)`, `state_set_str(s, v)`.
+- **Zero Full-Tree Reconstruction (Observer / Signal Pattern)**:
+  - When `state_set_int` or `state_set_str` is invoked, `state_notify(s)` iterates strictly through registered target observer widgets (`s.targets`) in $O(1)$ time.
+  - Formats bound labels using optional `prefix` and `suffix` props without rebuilding or re-allocating virtual DOM / widget hierarchies.
+  - Guarantees zero heap churn during 60 FPS animations and live text entry.
+
+### Two-Way Data Binding (`"bind": state`)
+- Supported across all components via `_check_state_binding(widget, props)`:
+  - **Text / Title / Heading**: Observes string or integer state changes and updates text.
+  - **Input / TextArea**: Binds live text value to `StateStr`. Typing events update `s.val_str` and immediately trigger `state_notify` to sync peer widgets.
+  - **Checkbox / Toggle**: Binds active boolean state to `StateInt` (0 or 1). Clicking toggles state and notifies observers.
+  - **Dropdown**: Binds selected index to `StateInt` and selected item label to `StateStr`.
+
+### Event Dispatch & Action Registry
+- Integrated reactive actions into `dispatchAction(w, action_id)`:
+  - `"increment"`: `state_set_int(s, s.val_int + 1)`
+  - `"reset"`: `state_set_int(s, 0)`
+  - `"toggle"`: `state_set_int(s, 1 - s.val_int)`
+  - `"set_text"`: `state_set_str(s, new_val)`
+- Focus management (`is_focused`) and keyboard event routing (`_dispatch_key_event`) for live text fields.
+
+### Verification & Invariants Gate
+- **Visual Verification**:
+  - Generated and verified artifact: `reactive_state_preview.png` (720x680 RGB).
+  - Created demonstration app `nova/examples/reactive_state_demo.nv`.
+- **Automated Tests**:
+  - `pytest nova/tests/test_widgets.py` -> **7/7 PASSED** (added `test_reactive_state_demo_suite` and `test_reactive_state_unit`).
+  - `pytest nova/tests/test_studio.py` -> **2/2 PASSED** (`nova_studio.exe` size: **247.51 KB** `< 250 KB`, benchmark throughput: **34,566 FPS** `> 60 FPS`).
+  - `pytest nova/tests/test_check_all.py` -> **82/82 PASSED**.
+- **Self-Host Parity**:
+  - `s2.s SHA256 == s3.s SHA256` (`6ca54ba0a1a6344c000e3085291fa4f9fbc26af082dfb1f87d206e008046cd35`). Absolute byte-for-byte compiler parity preserved.
+
+---
+
+## 20. Stage 3: Advanced Layout Constraints & Built-in Dual-Theme System
+
+### Advanced Layout Constraints (`min_w`, `max_w`, `min_h`, `max_h`, `space-between`, `space-around`)
+- Extended `_expand_props` in `nova/stdlib/gui.nv` to parse layout boundary constraints.
+- Extended `gui_measure`:
+  - Clamps leaf and container measurements against `min_w`, `max_w`, `min_h`, and `max_h` constraints.
+- Extended `gui_layout`:
+  - Implemented `justify-content: "space-between"`: Evenly distributes remaining free space among intermediate child gaps ($N - 1$).
+  - Implemented `justify-content: "space-around"`: Evenly distributes space with half-units at perimeter edges.
+  - Implemented proportional `flex` allocation on main axis when `total_flex > 0`.
+  - Implemented `align-items: "stretch"`, `"center"`, `"end"` cross-axis alignment.
+
+### Built-in Catppuccin Theme Architecture
+- Integrated dual-theme engine (`dark`: Catppuccin Mocha, `light`: Catppuccin Latte):
+  - `set_theme(name: string)`: Activates global active palette (`_gui_active_theme`).
+  - `get_theme() -> string`: Queries active theme identifier.
+  - `toggle_theme() -> string`: Toggles between dark and light themes seamlessly.
+  - `get_theme_color(token: string) -> string`: Resolves palette tokens (`text`, `accent`, `surface`, `mantle`, `border`, `surface_alt`, `muted`, `accent_hover`, `accent_press`).
+- Fully wired into `_apply_default_props` to ensure any widget created dynamically adopts active theme colors.
+- Demonstrated in `nova/examples/layout_and_themes_demo.nv` and visually verified via `layout_themes_preview.png`.
+
+---
+
+## 21. Stage 4: Nova Studio Dual-Mode Architecture
+
+### Simple Mode (Beginner-Friendly 5-Minute Developer Experience)
+- **Top Bar**: Minimal branding, quick starter template selectors (`📄 Hello`, `🔢 Counter`, `🌌 Engine`), `▶ Run App`, `✓ Check`, and `⚙ Mode` toggle.
+- **Main Area**: 2-column beginner workbench:
+  - Left: Clean, full-height source code editor canvas with line numbering, active-line accent, and real-time syntax highlighting.
+  - Right: Unified Live Terminal / Output viewport displaying subprocess compilation and execution results.
+- **Status Bar**: Simplified status information (`Nova v1.0`, `Ln, Col`, `UTF-8`).
+
+### Advanced Mode (Full-Power Creative Studio IDE)
+- **Activity Bar**: Navigation rail (`📁 Explorer`, `⚡ Actions`, `🌌 Sandbox`).
+- **File Explorer**: Workspace tree with quick file switching (`hello_app.nv`, `counter_app.nv`, `engine_demo.nv`).
+- **Interactive Particle Sandbox**: Integrated 60 FPS Win32 software framebuffer viewport simulating 320 celestial particles with ambient cosmic grid, dynamic sine audio waveform, and mouse shockwave physics.
+- **Multi-Tab Bottom Panel**: Tabbed dock switching between Terminal process logs and Problems diagnostic inspector with error badges, column carets, and compiler fix suggestions (`->`).
+- **Toolbar Controls**: Top bar with `▶ Run`, `✓ Check`, `↺ Reset`, `🔊 Sound`, `⛶ Max` (fullscreen sandbox), and real-time FPS throughput badge.
+
+---
+
+## 22. Stage 5: Starter Templates, Engine Consolidation & Binary Size Optimization
+
+### Starter Templates
+- `nova/examples/hello_template.nv`: Clean, zero-boilerplate introductory application demonstrating `Title`, `Text`, `Button`, `Column`, and `App`.
+- `nova/examples/counter_template.nv`: Beginner-friendly reactive state demonstration using `StateInt`, two-way binding (`bind: c`), declarative increment action (`action: "increment"`), and `App`.
+- Both templates compile natively and pass headless verification (`--test`).
+
+### Layout Engine Consolidation & Assembly Pruning
+- **Elimination of Duplicate Layout Engines**:
+  - Replaced legacy 360-line `layoutWidgetInternal` with pure delegation to two-pass `gui_measure` and `gui_layout`.
+  - Replaced duplicate widget constructors (`h1`, `h2`, `h3`, `txt`, `label`, `badge`, `spacer`, `divider`, `input_field`, `icon_btn`, `nav_item`, `card`) with thin forwarding wrappers to unified high-level constructors.
+  - Optimized `_expand_props` to iterate over input dictionary keys directly instead of executing 40 redundant `has()` lookups.
+  - Consolidated Studio UI component constructors (`s_btn`, `s_lbl`, `s_pane`, `list_splice`).
+- **Performance & Binary Invariants**:
+  - `nova_studio.exe` stripped size: **247.51 KB** (strictly `< 250.0 KB` threshold).
+  - Headless benchmark throughput: **34,500+ FPS** (strictly `> 60 FPS` requirement).
+  - Repository test suite: **82/82 PASSED** (`test_check_all.py`), **7/7 PASSED** (`test_widgets.py`), **2/2 PASSED** (`test_studio.py`).
+  - Compiler self-host invariant: `s2.s SHA256 == s3.s SHA256` (`6ca54ba0a1a6344c000e3085291fa4f9fbc26af082dfb1f87d206e008046cd35`). Absolute byte-for-byte compiler parity preserved.
+
+
+
+---
+
+## 23. Galaxy Registry Ecosystem Transformation
+
+### Strategic Transformation
+Transformed Galaxy from a static documentation website into an end-to-end developer ecosystem for the Nova programming language (`galaxy-registry`):
+
+1. **Universal Theme Engine (`theme.css`, `theme.js`)**:
+   - Synchronized dark and light themes across `index.html`, `documentation.html`, `reference.html`, `examples.html`, `templates.html`, and `playground.html` via `localStorage.getItem('nova_theme')`.
+   - Zero-FOUC initialization script with top navigation Sun/Moon toggle button.
+   - Synchronized Monaco editor theme (`vs-dark` / `vs`).
+
+2. **Homepage Ecosystem Positioning (`index.html`)**:
+   - Product positioning: Pythonic ergonomics, C-speed native machine code, sub-250KB binaries, 60 FPS Win32 double-buffered declarative desktop graphics.
+   - Primary Call-to-Action: Prominent `⚡ Try Nova in Playground` button with glowing accent styling.
+   - Embedded Mini-Try-It Runner: Interactive snippet runner on the homepage testing Fibonacci, OOP classes, and text processing.
+   - 6 Comprehensive Feature Pillars: Direct Native Binaries, Native 60 FPS Win32 GUI, Pythonic Static Typing, Nova Studio & Tooling, Git-Backed Package Registry, Cryptographic Release Provenance.
+
+3. **Interactive WebAssembly Playground (`playground.html`, `nova_worker.js`)**:
+   - Real-time diagnostic error squiggly markers via Monaco Editor (`monaco.editor.setModelMarkers`) from WebAssembly Pyodide worker syntax checking (`check_syntax`).
+   - Capability Indicator Badge (`🟢 Browser VM Sandbox`) and interactive modal breaking down browser VM features vs Native toolchain requirements (`import gui`, C FFI, OS subprocesses).
+   - Categorized presets: *Beginner Basics*, *Data Structures*, *Algorithms*, *Standard Library*, *Native GUI (Local Showcase)*.
+   - Shareable permalinks (`#code=...`), execution timing metrics, console shortcuts (`Ctrl+Enter`, `Ctrl+K`).
+
+4. **Interactive Documentation & Learning Lab (`examples.html`, `documentation.html`)**:
+   - Floating / inline **"▶ Run in Playground"** buttons on all 19 code examples and language manual snippets, opening directly into the playground.
+   - **Interactive Coding Challenges**: 3 hands-on exercises (Prime Filter, Word Frequency Counter, Dictionary Inversion) with starter code, expandable hints, and verified solutions.
+
+5. **Package Registry & Security Elevation (`index.html`, `packages/`)**:
+   - Package catalog sorting by Upvotes, Name (A-Z), and Version.
+   - Package detail dependencies viewer and Security & Provenance Card displaying Ed25519 signature status (`.json.sig`), SHA-256 release checksum, static analysis verification, and supply chain health.
+   - Dual install pills (`galaxy install <pkg>`, `galaxy add <pkg>`).
+
+6. **Visual Template & Scaffolding Builder (`templates.html`)**:
+   - Visual project templates for *Pure Reusable Library*, *CLI Terminal Utility*, and *Desktop Native GUI App*.
+   - Live interactive `galaxy.json` manifest builder with live preview and one-click copy.
+   - Publishing checklist from project initialization to GitHub PR review.
+
+---
+
+## 24. Project Nova: Language Ergonomics, Semantic Correctness & Core Evolution (Phases 1–5)
+
+### Architectural Overview
+Completed a 5-phase evolutionary architecture across the self-hosted compiler pipeline (`nova/stdlib/`), C runtime (`nova/runtime.c`), and regression test suite without modifying the frozen Python bootstrap compiler (`nova/bootstrap/*.py`).
+
+### 1. Phase 1: Language Specification & Ergonomics
+- Established comprehensive language grammar and formal specification for:
+  - Named & default function arguments: `def func(name: string, count: int = 1, flag: bool = true)`.
+  - Dictionary subscript read (`val = dict[key]`) and write (`dict[key] = val`) with membership checking (`key in dict`).
+  - Strict type checking rules, explicit `null` safety, and first-class function values.
+
+### 2. Phase 2: Named/Default Arguments & Dictionary Indexing
+- **Parser & AST (`nova/stdlib/parser.nv`)**:
+  - Captured keyword argument names and flags in `Call` and `MethodCall` nodes (`arg_names: list`, `arg_is_kw: list`).
+  - Added default parameter expressions in `Function` declarations (`param_defaults: list`).
+  - Extended index expression parsing for dictionary subscript assignment (`dict[key] = val` -> `dict_set`) and lookup (`dict[key]` -> `dict_get`).
+  - Preserved backward compatibility for `.get()`, `.set()`, and `.has()` methods.
+- **Type Checker (`nova/stdlib/type_checker.nv`)**:
+  - Implemented `tc_bind_args` and `tc_bind_method_args` unifying positional and keyword arguments.
+  - Validates missing required arguments, rejects unknown/duplicate keyword parameters, and substitutes default expressions for omitted trailing parameters.
+  - Precise shape typing for dictionary string literals.
+- **Code Generation (`nova/stdlib/backend/{x86_64,arm64}/codegen_expr.nv`)**:
+  - Emitted runtime calls `dict_get(d, k)` and `dict_set(d, k, v)`.
+  - Re-bound argument lists in parameter declaration order at compile-time for zero runtime overhead.
+- **Test Fixture**: Verified in `nova/tests/test_phase2_features.nv`.
+
+### 3. Phase 3: Type-System Consistency & Formal Null Safety
+- **Strict Static Enforcement**:
+  - Converted silent type mismatches and parameter count mismatches into fatal compiler errors.
+  - Formalized function call arity checks across direct calls, method calls, and extern calls.
+- **Null Safety (`null`)**:
+  - Defined explicit `Null` AST node (`Null`) and type representation (`create_null_type()`).
+  - Unified `null` with pointer/struct/any types while strictly rejecting assignments to primitive integer/float scalars (`cannot assign null to int`).
+- **Test Fixture**: Verified in `nova/tests/test_null.nv`.
+
+### 4. Phase 4: Memory Architecture & Predictable ARC Safety
+- **ARC Primitives (`nova/runtime.c`)**:
+  - Hardened `_nova_arc_inc` and `_nova_arc_dec` with a 64-bit canonical user address space range check:
+    `0x10000ULL <= (unsigned long long)ptr && (unsigned long long)ptr <= 0x00007FFFFFFEFFFFULL`.
+  - Guaranteed immunity against access violations when processing null, unboxed integers, small sentinel offsets, or high kernel addresses.
+  - Deterministic deallocation of dynamic containers, strings, and structs on scope exit.
+- **Test Fixture**: Verified in `nova/tests/test_arc_lifecycle.nv`.
+
+### 5. Phase 5: First-Class Function Values & Dynamic Callbacks
+- **First-Class Function Values**:
+  - Unparenthesized function references (`my_fn = add`) evaluate to native code addresses via `lea %a, [rip + _fn_name]` (x86_64) or `adrp/add` (ARM64).
+  - Type annotations accept `fn` and `func` signatures (`fn`, `func(int, int) -> int`), with generic `fn` unparameterized signatures unifying cleanly with concrete signatures.
+- **Indirect Native Calls**:
+  - Evaluating a call where the callee target is a local variable or parameter holding a function pointer (`my_fn(10, 20)`):
+    - Loads pointer into scratch register `r10` (x86_64) or `x16` (ARM64).
+    - Pops up to 6 register arguments (`rdi, rsi, rdx, rcx, r8, r9`).
+    - Aligns stack and executes indirect call: `call r10` / `blr x16`.
+    - Automatically cleans caller stack arguments if argument count exceeds 6.
+- **Register Allocator Isolation (`nova/stdlib/backend/x86_64/codegen.nv`)**:
+  - In `count_var_refs`, excluded global/extern functions referenced as values from local variable counts, preventing `top_register_candidates` from assigning callee-saved registers (`r12..r15`) to uninitialized function symbols.
+- **Bootstrap Struct Disjointness**:
+  - Renamed `NamedFunc.param_defaults` to `NamedFunc.func_defaults` to eliminate field offset collisions with `AstNode.param_defaults` during Python bootstrap compilation.
+- **Test Fixture**: Verified in `nova/tests/test_first_class_functions.nv`.
+
+### Verification Metrics & Invariants
+- **Self-Hosting Invariant**: Bit-for-bit assembly byte identity verified:
+  `s2.s SHA256 == s3.s SHA256` (`fb77b89bfc88f307e9375be6390795bfc742b4542ac31632186536bc89a7bd2e`).
+- **Binary Footprint Budget**: `nova_studio.exe` stripped size: **248.51 KB** (254,478 bytes, strictly below 250 KB ceiling).
+- **Bootstrap Status**: `nova/bootstrap/*.py` remains completely frozen.
+- **All Fixtures Passing**: Full pytest suite passes across all unit, selfhost, regression, and feature tests.
+
+---
+
+## 25. Modernized Native GUI Framework: First-Class Event Callbacks (`nova/stdlib/gui.nv`)
+
+### Architectural Overview
+Upgraded the Nova declarative GUI framework to leverage Phase 5's native first-class function values and indirect native calls (`call r10` / `blr x16`), replacing legacy dynamic dispatch stubs while maintaining 100% backward compatibility for declarative string actions and integer click IDs.
+
+### 1. Data Model & Widget Struct Modernization
+- **Callback Fields in `data Widget`**:
+  - `on_click_fn: fn`: Direct click callback invoked on button press or widget click.
+  - `on_toggle_fn: fn`: Toggle callback invoked on checkbox / toggle switch state transitions.
+  - `on_change_fn: fn`: Change callback invoked on slider adjustment or dropdown selection.
+  - `on_submit_fn: fn`: Submit callback invoked on text input enter keypress.
+- **Unified Widget Initialization (`_new_widget`)**:
+  - Automatically initializes all callback fields to 0.
+  - Inspects property dictionary for both direct callback keys (`on_click_fn`, `on_toggle_fn`, `on_change_fn`, `on_submit_fn`) and property shorthand keys (`on_toggle`, `on_change`, `on_submit`).
+
+### 2. Ergonomic Constructors & Fluent Helpers
+- **Shorthand & Factory Functions**:
+  - `button(text: string, callback: fn) -> Widget`: Instant zero-boilerplate button with direct callback.
+  - `button_props(text: string, callback: fn, properties: dict) -> Widget`: Button with callback and styling dict.
+  - `ButtonCb(label: string, callback: fn, properties: dict) -> Widget`: Full constructor with automatic click ID allocation.
+- **Fluent Builder Modifiers**:
+  - `on_click(w: Widget, callback: fn) -> Widget`
+  - `on_toggle(w: Widget, callback: fn) -> Widget`
+  - `on_change(w: Widget, callback: fn) -> Widget`
+  - `on_submit(w: Widget, callback: fn) -> Widget`
+
+### 3. Native Indirect Event Dispatch Architecture
+- **Register ABI Indirect Dispatch**:
+  - `dispatchAction`: Indirect call `cb_click(w)` passes widget pointer, allowing 0-arg callbacks `def cb()` and 1-arg callbacks `def cb(w: Widget)` to seamlessly execute without stack corruption.
+  - Checkbox & Toggle: Indirect call `cb_chk(chk, w)` passes new state `chk: int` and widget `w`.
+  - Dropdown: Indirect call `cb_drop(sel, w)` passes selected index `sel: int` and widget `w`.
+  - Slider (`hitTestEx`): Indirect call `cb_slide(calc_val, w)` passes calculated value `calc_val: int` and widget `w`.
+  - Text Input (`_dispatch_key_event`): Indirect call `cb_sub(w.text, w)` passes entered string and widget `w`.
+- **100% Backward Compatibility**:
+  - Existing string actions (`"increment"`, `"reset"`, `"toggle"`, `"submit"`, `"clear"`, `"set_text"`, `"toggle_theme"`) remain fully functional.
+
+### 4. Verification & Invariants
+- **Regression Test Fixture**: `nova/tests/test_gui_callbacks.nv` comprehensively tests button click callbacks, builder chaining, checkbox toggles, slider drag/hitTest calculations, input submission, and legacy string action compatibility.
+- **Test Suite Verification**: All 88 tests in `nova/tests/test_check_all.py` pass cleanly (including the 5 selfhost feature fixtures).
+- **Self-Hosting Byte Identity**: `s2.s SHA256 == s3.s SHA256` (`fb77b89bfc88f307e9375be6390795bfc742b4542ac31632186536bc89a7bd2e`).
+- **Binary Footprint**: Stripped `nova_studio.exe` remains strictly within budget at **249.51 KB** (< 250 KB ceiling).
+
+

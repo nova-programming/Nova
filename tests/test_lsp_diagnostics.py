@@ -39,8 +39,15 @@ def novalsp(selfhost):
     return exe, env
 
 
-def test_check_type_warning_names_the_file(novalsp, tmp_path):
-    """`novalsp --check` must attribute a type warning to the file it came from."""
+def test_check_type_error_names_the_file(novalsp, tmp_path):
+    """`novalsp --check` must attribute a type diagnostic to the file it came from.
+
+    Type mismatches are a fatal `errors.err("Type", ...)` (not `errors.warn`, as they were
+    when this test was first written) -- see CLAUDE.md invariant on strict type diagnostics.
+    `novalsp --check` therefore exits 1 and prints "error [Type]", not "warning [Type]"; the
+    original regression this test guards (an empty filename slot making the diagnostic
+    re-published for every open document) is unaffected by that and still checked below.
+    """
     exe, env = novalsp
     src = tmp_path / "typeerr.nv"
     src.write_text(TYPE_ERROR_SOURCE, encoding="utf-8")
@@ -49,9 +56,9 @@ def test_check_type_warning_names_the_file(novalsp, tmp_path):
         [str(exe), "--check", str(src)],
         capture_output=True, text=True, timeout=120, env=env,
     )
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert "warning [Type]" in r.stdout
-    # Before the fix this line started with ":", the empty filename slot.
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "error [Type]" in r.stdout
+    # Before the original fix this line started with ":", the empty filename slot.
     assert str(src) + ":" in r.stdout
     assert not r.stdout.lstrip().startswith(":")
 

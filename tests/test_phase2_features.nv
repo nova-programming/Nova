@@ -1,0 +1,38 @@
+# Test Priority A: Named and Default Function Arguments
+def greet(name: string, prefix: string = "Hello", count: int = 1) {
+    i = 0
+    while i < count {
+        print(prefix + ", " + name + "!")
+        i = i + 1
+    }
+}
+
+# Test Priority B: Dictionary Subscript Access
+def test_dicts() {
+    user = {"name": "Alex", "role": "Engineer"}
+    print("User name: " + user["name"])
+    print("User role: " + user["role"])
+    
+    # Dictionary write
+    user["city"] = "San Francisco"
+    print("User city: " + user["city"])
+    
+    # Dictionary membership
+    if "city" in user {
+        print("Membership verified: city in user")
+    }
+}
+
+def run_phase2_tests() {
+    print("=== Testing Named and Default Arguments ===")
+    greet("World")
+    greet("Alice", prefix="Welcome")
+    greet("Bob", count=2, prefix="Hi")
+
+    print("=== Testing Dictionary Subscript Access ===")
+    test_dicts()
+
+    print("ALL PHASE 2 TESTS PASSED")
+}
+
+run_phase2_tests()

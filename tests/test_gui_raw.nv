@@ -1,0 +1,48 @@
+extern def gui_init_window(title: string, width: int, height: int) -> int
+extern def gui_poll_events() -> int
+extern def gui_get_mouse_x() -> int
+extern def gui_get_mouse_y() -> int
+extern def gui_get_mouse_down() -> int
+extern def gui_get_mouse_clicked() -> int
+extern def gui_clear(color_hex: int)
+extern def gui_draw_rect(x: int, y: int, w: int, h: int, color_hex: int, radius: int)
+extern def gui_draw_border(x: int, y: int, w: int, h: int, border_w: int, color_hex: int)
+extern def gui_draw_text(text: string, x: int, y: int, font_size: int, color_hex: int, font_weight: int)
+extern def gui_present()
+extern def gui_sleep(ms: int)
+extern def gui_close()
+
+ok = gui_init_window("Nova Native GUI Smoke Test", 640, 480)
+print("gui_init_window returned: " + str(ok))
+
+if ok == 1 {
+    # Dark slate background #1e1e2e -> 0x1e1e2e
+    gui_clear(0x1e1e2e)
+    
+    # Draw a card container with rounded corners
+    gui_draw_rect(50, 50, 540, 380, 0x313244, 16)
+    gui_draw_border(50, 50, 540, 380, 2, 0x45475a)
+    
+    # Draw title
+    gui_draw_text("Welcome to Nova Native GUI!", 80, 80, 26, 0xcdd6f4, 1)
+    gui_draw_text("Powered by 100% native GDI double-buffered canvas.", 80, 130, 16, 0xa6adc8, 0)
+    
+    # Draw a button
+    gui_draw_rect(80, 180, 200, 50, 0x89b4fa, 10)
+    gui_draw_text("Native Button", 125, 194, 18, 0x11111b, 1)
+    
+    # Present to screen
+    gui_present()
+    print("Frame presented successfully!")
+    
+    # Run 5 event pump cycles
+    frame = 0
+    while frame < 5 {
+        ev = gui_poll_events()
+        gui_sleep(16)
+        frame = frame + 1
+    }
+    
+    gui_close()
+    print("GUI closed cleanly.")
+}

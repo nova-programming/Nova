@@ -1610,7 +1610,7 @@ SYSCALL void *_nova_arc_alloc(unsigned int size, uint32_t type_tag) {
 }
 
 SYSCALL void _nova_inc_ref(void *ptr) {
-  if (!ptr)
+  if (!ptr || (uintptr_t)ptr < 0x10000ULL || (uintptr_t)ptr > 0x00007FFFFFFEFFFFULL)
     return;
   NovaARCHeader *hdr = ((NovaARCHeader *)ptr) - 1;
   if (hdr->magic == NOVA_ARC_MAGIC) {
@@ -1621,7 +1621,7 @@ SYSCALL void _nova_inc_ref(void *ptr) {
 SYSCALL void dict_free(void *d);
 
 SYSCALL void _nova_dec_ref(void *ptr) {
-  if (!ptr)
+  if (!ptr || (uintptr_t)ptr < 0x10000ULL || (uintptr_t)ptr > 0x00007FFFFFFEFFFFULL)
     return;
   NovaARCHeader *hdr = ((NovaARCHeader *)ptr) - 1;
   if (hdr->magic == NOVA_ARC_MAGIC) {

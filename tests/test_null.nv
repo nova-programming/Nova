@@ -1,0 +1,17 @@
+def check_ptr(p: any) {
+    if p == null {
+        print("Pointer is null")
+    } else {
+        print("Pointer is not null")
+    }
+}
+
+def run_null_tests() {
+    print("Testing null constant:")
+    check_ptr(null)
+    check_ptr("non-null")
+    print("NULL TESTS PASSED")
+}
+
+run_null_tests()
+

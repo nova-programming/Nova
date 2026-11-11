@@ -278,6 +278,7 @@ def float_str_to_hex(s: string) -> int {
 def is_leaf_expr(state: CodegenState, node: AstNode) -> int {
     if node.kind == "Number" { return 1 }
     if node.kind == "Boolean" { return 1 }
+    if node.kind == "Null" { return 1 }
     if node.kind == "Variable" { return 1 }
     return 0
 }
@@ -293,6 +294,9 @@ def compile_leaf_to_reg(state: CodegenState, node: AstNode, reg_name: string) {
     }
     if node.kind == "Boolean" {
         emit(state, "    mov " + reg_name + ", " + str(node.val_int))
+    }
+    if node.kind == "Null" {
+        emit(state, "    mov " + reg_name + ", 0")
     }
     if node.kind == "Variable" {
         offset = find_var_offset(state, node.val_str)
@@ -363,9 +367,23 @@ def compile_expr(state: CodegenState, node: AstNode) {
         emit(state, "    mov %a, " + str(node.val_int))
         emit(state, "    str %a, [sp, #-16]!")
     }
+    if node.kind == "Null" {
+        emit(state, "    str xzr, [sp, #-16]!")
+    }
     if node.kind == "Variable" {
         offset = find_var_offset(state, node.val_str)
-        emit_fp_load(state, "x0", offset)
+        if offset == 0 {
+            if state.internal_fns.has(node.val_str) or state.extern_fns.has(node.val_str) {
+                fn_name = "_" + node.val_str
+                if node.val_str == "main" { fn_name = "_nova_user_main" }
+                emit(state, "    adrp %a, " + fn_name)
+                emit(state, "    add %a, %a, :lo12:" + fn_name)
+            } else {
+                emit_fp_load(state, "x0", offset)
+            }
+        } else {
+            emit_fp_load(state, "x0", offset)
+        }
         emit(state, "    str %a, [sp, #-16]!")
     }
     if node.kind == "BinOp" {
@@ -923,6 +941,9 @@ def compile_expr(state: CodegenState, node: AstNode) {
         if node.left.inferred_type != 0 and node.left.inferred_type.kind == "dict" {
             is_dict = 1
         }
+        if is_dict == 0 and is_string_expr(state, node.right) == 1 {
+            is_dict = 1
+        }
         if is_dict == 1 {
             emit(state, "    str %c, [sp, #-16]!")
             emit(state, "    str %d, [sp, #-16]!")
@@ -1344,9 +1365,24 @@ def compile_expr(state: CodegenState, node: AstNode) {
                 compile_expr(state, node.args[idx_arg])
                 idx_arg = idx_arg - 1
             }
-            call_target = "_" + node.val_str
-            if node.val_str == "main" { call_target = "_nova_user_main" }
-            emit_call(state, call_target, arg_count)
+            is_var_call = 0
+            if find_var_offset(state, node.val_str) != 0 {
+                is_var_call = 1
+            }
+            if is_var_call == 1 {
+                off = find_var_offset(state, node.val_str)
+                emit_fp_load(state, "x16", off)
+                a = 0
+                while a < arg_count and a < 8 {
+                    emit(state, "    ldr x" + str(a) + ", [sp], #16")
+                    a = a + 1
+                }
+                emit(state, "    blr x16")
+            } else {
+                call_target = "_" + node.val_str
+                if node.val_str == "main" { call_target = "_nova_user_main" }
+                emit_call(state, call_target, arg_count)
+            }
             emit(state, "    str %a, [sp, #-16]!")
         }
     }

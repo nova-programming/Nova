@@ -46,7 +46,8 @@ hello.nv
 simple.nv
 simple_test.nv
 test_*.c
-test_*.nv
+/test_*.nv
+!tests/*.nv
 test_*.txt
 ver_*.txt
 probe*.nv

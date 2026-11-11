@@ -1,0 +1,33 @@
+def run_arc_lifecycle_tests() {
+    # Test 1: Dict insertion, retrieval, and replacement
+    d = {}
+    d["key"] = 100
+    d["key"] = 200
+    print(d["key"])
+
+    # Test 2: Nested dicts
+    outer = {}
+    inner = {}
+    inner["name"] = "Nova"
+    outer["sub"] = inner
+    print("Nested dict name: " + outer["sub"]["name"])
+
+    # Test 3: Dict deletion
+    d.remove("key")
+    if "key" not in d {
+        print("key removed successfully")
+    }
+
+    # Test 4: List operations
+    nums = [10, 20, 30]
+    nums.append(40)
+    print(nums[3])
+
+    # Test 5: List clear
+    nums.clear()
+    print(len(nums))
+
+    print("ARC Lifecycle Test Complete")
+}
+
+run_arc_lifecycle_tests()

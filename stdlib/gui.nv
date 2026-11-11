@@ -227,6 +227,10 @@ data Widget {
     flex: int
     measured_w: int
     measured_h: int
+    on_click_fn: fn
+    on_toggle_fn: fn
+    on_change_fn: fn
+    on_submit_fn: fn
 }
 
 # --- Reactive State Abstraction ---
@@ -538,6 +542,17 @@ def _new_widget(tag: string, text: string, p: dict, children: list, click_id: in
     w.flex = 0
     w.measured_w = 0
     w.measured_h = 0
+    w.on_click_fn = 0
+    w.on_toggle_fn = 0
+    w.on_change_fn = 0
+    w.on_submit_fn = 0
+    if p.has("on_click_fn") == 1 { w.on_click_fn = p.get("on_click_fn") }
+    if p.has("on_toggle_fn") == 1 { w.on_toggle_fn = p.get("on_toggle_fn") }
+    elif p.has("on_toggle") == 1 { w.on_toggle_fn = p.get("on_toggle") }
+    if p.has("on_change_fn") == 1 { w.on_change_fn = p.get("on_change_fn") }
+    elif p.has("on_change") == 1 { w.on_change_fn = p.get("on_change") }
+    if p.has("on_submit_fn") == 1 { w.on_submit_fn = p.get("on_submit_fn") }
+    elif p.has("on_submit") == 1 { w.on_submit_fn = p.get("on_submit") }
     if p.has("flex") == 1 { w.flex = p.get("flex") }
     _check_state_binding(w, p)
     return w
@@ -688,6 +703,42 @@ def divider_v() -> Widget {
 
 def spacer_v() -> Widget {
     return Spacer({})
+}
+
+def ButtonCb(label: string, callback: fn, properties: dict) -> Widget {
+    p = _apply_default_props("button", properties)
+    cid = gui_next_click_id()
+    w = _new_widget("button", label, p, [], cid)
+    w.on_click_fn = callback
+    return w
+}
+
+def button(text: string, callback: fn) -> Widget {
+    return ButtonCb(text, callback, {})
+}
+
+def button_props(text: string, callback: fn, properties: dict) -> Widget {
+    return ButtonCb(text, callback, properties)
+}
+
+def on_click(w: Widget, callback: fn) -> Widget {
+    w.on_click_fn = callback
+    return w
+}
+
+def on_toggle(w: Widget, callback: fn) -> Widget {
+    w.on_toggle_fn = callback
+    return w
+}
+
+def on_change(w: Widget, callback: fn) -> Widget {
+    w.on_change_fn = callback
+    return w
+}
+
+def on_submit(w: Widget, callback: fn) -> Widget {
+    w.on_submit_fn = callback
+    return w
 }
 
 
@@ -1404,8 +1455,9 @@ def hitTestEx(w: Widget, mx: int, my: int, isClick: int, isMouseDown: int) -> in
                 if p.has("suffix") == 1 { sfx = p.get("suffix") }
                 tgt.text = pfx + str(calc_val) + sfx
             }
-            if p.has("on_change") == 1 {
-                call(p.get("on_change"), [calc_val])
+            cb_slide = w.on_change_fn
+            if cb_slide != 0 {
+                cb_slide(calc_val, w)
             }
         }
     } else {
@@ -1458,8 +1510,9 @@ def dispatchAction(w: Widget, clickedId: int) {
                 s = p.get("state")
                 state_set_int(s, chk)
             }
-            if p.has("on_toggle") == 1 {
-                call(p.get("on_toggle"), [chk])
+            cb_chk = w.on_toggle_fn
+            if cb_chk != 0 {
+                cb_chk(chk, w)
             }
         }
 
@@ -1478,8 +1531,9 @@ def dispatchAction(w: Widget, clickedId: int) {
                 s = p.get("state")
                 state_set_int(s, cur_on)
             }
-            if p.has("on_toggle") == 1 {
-                call(p.get("on_toggle"), [cur_on])
+            cb_tog = w.on_toggle_fn
+            if cb_tog != 0 {
+                cb_tog(cur_on, w)
             }
         }
 
@@ -1499,10 +1553,17 @@ def dispatchAction(w: Widget, clickedId: int) {
                     s = p.get("state")
                     state_set_int(s, sel)
                 }
-                if p.has("on_change") == 1 {
-                    call(p.get("on_change"), [sel])
+                cb_drop = w.on_change_fn
+                if cb_drop != 0 {
+                    cb_drop(sel, w)
                 }
             }
+        }
+
+        # Direct first-class function callback
+        cb_click = w.on_click_fn
+        if cb_click != 0 {
+            cb_click(w)
         }
 
         # User-defined callback or action via onClick / on_click
@@ -1677,8 +1738,9 @@ def _dispatch_key_event(w: Widget, key: int) {
                 text_changed = 1
             } elif key == 13 {
                 # Enter / Return
-                if p.has("on_submit") == 1 {
-                    call(p.get("on_submit"), [w.text])
+                cb_sub = w.on_submit_fn
+                if cb_sub != 0 {
+                    cb_sub(w.text, w)
                 }
             } elif key >= 32 and key <= 126 {
                 ch_str = gui_char_to_str(key)

@@ -1,0 +1,64 @@
+import gui
+
+# Create widgets
+counter_val = Text("0 clicks", properties={
+    "value": 0
+})
+
+console_log = Text("ready", properties={})
+
+status_text = Text("60 FPS Direct GDI", properties={})
+
+btn_inc = Button("+ Increment Count", 1, properties={
+    "action": "increment",
+    "target": counter_val,
+    "suffix": " clicks",
+    "log-target": console_log
+})
+
+btn_reset = Button("Reset", 2, properties={
+    "action": "reset",
+    "target": counter_val,
+    "suffix": " clicks",
+    "log-target": console_log
+})
+
+btn_toggle = Button("Toggle Turbo", 3, properties={
+    "action": "toggle",
+    "target": status_text,
+    "state1": "60 FPS Direct GDI",
+    "state2": "120 FPS Turbo GDI",
+    "log-target": console_log
+})
+
+root = Container([
+    counter_val,
+    console_log,
+    status_text,
+    btn_inc,
+    btn_reset,
+    btn_toggle
+], properties={})
+
+# Test dispatchAction
+print("Initial counter: " + counter_val.text)
+dispatchAction(root, 1)
+print("After click 1: " + counter_val.text)
+print("Log after click 1: " + console_log.text)
+
+dispatchAction(root, 1)
+print("After click 2: " + counter_val.text)
+
+dispatchAction(root, 3)
+print("Status after toggle 1: " + status_text.text)
+
+dispatchAction(root, 3)
+print("Status after toggle 2: " + status_text.text)
+
+dispatchAction(root, 2)
+print("After reset: " + counter_val.text)
+print("Log after reset: " + console_log.text)
+
+dispatchAction(root, 1)
+print("After reset then click 1: " + counter_val.text)
+print("All interactive click actions passed!")

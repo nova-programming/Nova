@@ -377,6 +377,7 @@ def is_string_expr(state: CodegenState, node: AstNode) -> int {
     }
     if node.kind == "ArrayIndex" {
         if is_string_expr(state, node.left) == 1 { return 1 }
+        if node.inferred_type != 0 and node.inferred_type.kind == "scalar" and node.inferred_type.name == "string" { return 1 }
     }
     if node.kind == "Slice" {
         if is_string_expr(state, node.left) == 1 { return 1 }

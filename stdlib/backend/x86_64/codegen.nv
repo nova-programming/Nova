@@ -292,6 +292,7 @@ def add_string_literal(state: CodegenState, raw_val: string) -> string {
     }
     state.str_count = state.str_count + 1
     cnt = state.str_count
+    sys = ""
     if cnt == 0 { sys = "0" }
     elif cnt == 1 { sys = "1" }
     elif cnt == 2 { sys = "2" }
@@ -508,6 +509,9 @@ def is_string_expr(state: CodegenState, node: AstNode) -> int {
     }
     if node.kind == "ArrayIndex" {
         if is_string_expr(state, node.left) == 1 {
+            return 1
+        }
+        if node.inferred_type != 0 and node.inferred_type.kind == "scalar" and node.inferred_type.name == "string" {
             return 1
         }
     }
@@ -849,6 +853,9 @@ def count_var_refs(state: CodegenState, node: AstNode, counts: dict, weight: int
     if node == 0 { return }
     LOOP_WEIGHT = 10
     if node.kind == "Variable" {
+        if state.internal_fns.has(node.val_str) == 1 or state.extern_fns.has(node.val_str) == 1 {
+            return
+        }
         prev = 0
         if counts.has(node.val_str) { prev = counts.get(node.val_str) }
         counts.set(node.val_str, prev + weight)

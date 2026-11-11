@@ -38,6 +38,13 @@ def create_dyn_type() -> Type {
     return t
 }
 
+def create_null_type() -> Type {
+    t = Type()
+    t.kind = "null"
+    t.name = "null"
+    return t
+}
+
 def create_list_type(element: Type) -> Type {
     t = Type()
     t.kind = "list"
@@ -50,6 +57,8 @@ def create_dict_type() -> Type {
     t = Type()
     t.kind = "dict"
     t.name = "dict"
+    t.fields = []
+    t.field_names = []
     return t
 }
 
@@ -139,6 +148,8 @@ def types_equal(t1: Type, t2: Type) -> int {
     if t1.kind == "dict" { return 1 }
     if t1.kind == "list" { return types_equal(t1.element_type, t2.element_type) }
     if t1.kind == "func" {
+        if len(t1.params) == 0 and t1.ret != 0 and t1.ret.kind == "any" { return 1 }
+        if len(t2.params) == 0 and t2.ret != 0 and t2.ret.kind == "any" { return 1 }
         if len(t1.params) != len(t2.params) { return 0 }
         i = 0
         while i < len(t1.params) {
@@ -166,7 +177,7 @@ def resolve_type_annotation(annotation_str: string) -> Type {
     if annotation_str == "void" { return create_scalar_type("void") }
     if annotation_str == "list" { return create_list_type(create_any_type()) }
     if annotation_str == "dict" { return create_dict_type() }
-    if annotation_str == "func" { return create_func_type([], create_any_type()) }
+    if annotation_str == "func" or annotation_str == "fn" { return create_func_type([], create_any_type()) }
     if annotation_str == "struct" { return create_struct_type("struct") }
     
     # Check for list[T]

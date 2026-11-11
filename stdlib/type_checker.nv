@@ -12,11 +12,14 @@ data TypeChecker {
     struct_name_map: dict
     current_ret: Type
     filename: string
+    named_func_map: dict
 }
 
 data NamedFunc {
     name: string
     typ: Type
+    param_names: list
+    func_defaults: list
 }
 
 data EnvVar {
@@ -35,6 +38,7 @@ def tc_init(tc: TypeChecker) {
     tc.functions = []
     tc.func_name_map = {}
     tc.struct_name_map = {}
+    tc.named_func_map = {}
     tc.current_ret = 0
     tc.filename = ""
     
@@ -166,8 +170,22 @@ def tc_add_func(tc: TypeChecker, name: string, typ: Type) {
     nf = NamedFunc()
     nf.name = name
     nf.typ = typ
+    nf.param_names = []
+    nf.func_defaults = []
     tc.functions.append(nf)
     tc.func_name_map.set(name, typ)
+    tc.named_func_map.set(name, nf)
+}
+
+def tc_add_func_full(tc: TypeChecker, name: string, typ: Type, p_names: list, p_defs: list) {
+    nf = NamedFunc()
+    nf.name = name
+    nf.typ = typ
+    nf.param_names = p_names
+    nf.func_defaults = p_defs
+    tc.functions.append(nf)
+    tc.func_name_map.set(name, typ)
+    tc.named_func_map.set(name, nf)
 }
 
 def tc_find_func(tc: TypeChecker, name: string) -> Type {
@@ -242,12 +260,187 @@ def tc_unify(tc: TypeChecker, t1: Type, t2: Type, node: AstNode) {
     if t1.kind == "scalar" and t2.kind == "scalar" {
         if (t1.name == "int" or t1.name == "byte") and (t2.name == "int" or t2.name == "byte") { return 0 }
     }
+    if t1.kind == "null" or t2.kind == "null" {
+        if t1.kind == "null" and t2.kind == "scalar" and str_eq(t2.name, "int") == 1 {
+            errors.err("Type", tc.filename, node.line, "expected int but got null", "null cannot be used as an integer value", node.col)
+            return 0
+        }
+        if t2.kind == "null" and t1.kind == "scalar" and str_eq(t1.name, "int") == 1 {
+            errors.err("Type", tc.filename, node.line, "expected int but got null", "null cannot be used as an integer value", node.col)
+            return 0
+        }
+        return 0
+    }
     eq = types_equal(t1, t2)
     if eq == 0 {
-        errors.warn("Type", tc.filename, node.line, "expected " + type_to_string(t1) + " but got " + type_to_string(t2), "change the value type or explicitly convert with int() or str()", node.col)
+        errors.err("Type", tc.filename, node.line, "expected " + type_to_string(t1) + " but got " + type_to_string(t2), "change the value type or explicitly convert with int() or str()", node.col)
         return 0
     }
     return 0
+}
+
+def tc_bind_args(tc: TypeChecker, call_node: AstNode, nf: NamedFunc) -> list {
+    p_names = nf.param_names
+    p_defs = nf.func_defaults
+    n_params = len(p_names)
+
+    arg_names = []
+    arg_is_kw = []
+    if call_node.arg_names != 0 { arg_names = call_node.arg_names }
+    if call_node.arg_is_kw != 0 { arg_is_kw = call_node.arg_is_kw }
+
+    has_kw = 0
+    i = 0
+    while i < len(arg_is_kw) {
+        if arg_is_kw[i] == 1 { has_kw = 1 }
+        i = i + 1
+    }
+
+    if has_kw == 0 and len(call_node.args) == n_params {
+        return call_node.args
+    }
+
+    i = 0
+    while i < len(arg_names) {
+        if i < len(arg_is_kw) and arg_is_kw[i] == 1 {
+            kw = arg_names[i]
+            found = 0
+            p = 0
+            while p < n_params {
+                if str_eq(p_names[p], kw) == 1 { found = 1 }
+                p = p + 1
+            }
+            if found == 0 {
+                errors.err("Name", tc.filename, call_node.line, "function '" + call_node.val_str + "' got unexpected keyword argument '" + kw + "'", "check the parameter names in the function declaration", call_node.col)
+            }
+        }
+        i = i + 1
+    }
+
+    bound = []
+    p = 0
+    while p < n_params {
+        p_name = p_names[p]
+        val = 0
+
+        if p < len(call_node.args) and (p >= len(arg_is_kw) or arg_is_kw[p] == 0) {
+            val = call_node.args[p]
+        }
+
+        i = 0
+        kw_found = 0
+        while i < len(arg_names) {
+            if i < len(arg_is_kw) and arg_is_kw[i] == 1 {
+                if str_eq(arg_names[i], p_name) == 1 {
+                    if val != 0 {
+                        errors.err("Args", tc.filename, call_node.line, "function '" + call_node.val_str + "' got multiple values for argument '" + p_name + "'", "specify argument positionally or as keyword, not both", call_node.col)
+                    }
+                    if kw_found == 1 {
+                        errors.err("Args", tc.filename, call_node.line, "duplicate keyword argument '" + p_name + "'", "remove the duplicate keyword argument", call_node.col)
+                    }
+                    val = call_node.args[i]
+                    kw_found = 1
+                }
+            }
+            i = i + 1
+        }
+
+        if val == 0 {
+            if p < len(p_defs) and p_defs[p] != 0 {
+                val = p_defs[p]
+            } else {
+                errors.err("Args", tc.filename, call_node.line, "function '" + call_node.val_str + "' missing required argument '" + p_name + "'", "supply a value for this parameter", call_node.col)
+                val = AstNode()
+                val.kind = "Number"
+                val.val_int = 0
+                val.line = call_node.line
+            }
+        }
+        bound.append(val)
+        p = p + 1
+    }
+    return bound
+}
+
+def tc_bind_method_args(tc: TypeChecker, call_node: AstNode, nf: NamedFunc) -> list {
+    p_names = nf.param_names
+    p_defs = nf.func_defaults
+    n_params = len(p_names) - 1
+    
+    arg_names = []
+    arg_is_kw = []
+    if call_node.arg_names != 0 { arg_names = call_node.arg_names }
+    if call_node.arg_is_kw != 0 { arg_is_kw = call_node.arg_is_kw }
+    
+    has_kw = 0
+    i = 0
+    while i < len(arg_is_kw) {
+        if arg_is_kw[i] == 1 { has_kw = 1 }
+        i = i + 1
+    }
+    
+    if has_kw == 0 and len(call_node.args) == n_params {
+        return call_node.args
+    }
+    
+    i = 0
+    while i < len(arg_names) {
+        if i < len(arg_is_kw) and arg_is_kw[i] == 1 {
+            kw = arg_names[i]
+            found = 0
+            p = 1
+            while p < len(p_names) {
+                if str_eq(p_names[p], kw) == 1 { found = 1 }
+                p = p + 1
+            }
+            if found == 0 {
+                errors.err("Name", tc.filename, call_node.line, "method '" + call_node.val_str + "' got unexpected keyword argument '" + kw + "'", "check the parameter names in the method declaration", call_node.col)
+            }
+        }
+        i = i + 1
+    }
+    
+    bound = []
+    p = 1
+    while p < len(p_names) {
+        p_name = p_names[p]
+        val = 0
+        arg_idx = p - 1
+        if arg_idx < len(call_node.args) and (arg_idx >= len(arg_is_kw) or arg_is_kw[arg_idx] == 0) {
+            val = call_node.args[arg_idx]
+        }
+        i = 0
+        kw_found = 0
+        while i < len(arg_names) {
+            if i < len(arg_is_kw) and arg_is_kw[i] == 1 {
+                if str_eq(arg_names[i], p_name) == 1 {
+                    if val != 0 {
+                        errors.err("Args", tc.filename, call_node.line, "method '" + call_node.val_str + "' got multiple values for argument '" + p_name + "'", "specify argument positionally or as keyword, not both", call_node.col)
+                    }
+                    if kw_found == 1 {
+                        errors.err("Args", tc.filename, call_node.line, "duplicate keyword argument '" + p_name + "'", "remove the duplicate keyword argument", call_node.col)
+                    }
+                    val = call_node.args[i]
+                    kw_found = 1
+                }
+            }
+            i = i + 1
+        }
+        if val == 0 {
+            if p < len(p_defs) and p_defs[p] != 0 {
+                val = p_defs[p]
+            } else {
+                errors.err("Args", tc.filename, call_node.line, "method '" + call_node.val_str + "' missing required argument '" + p_name + "'", "supply a value for this parameter", call_node.col)
+                val = AstNode()
+                val.kind = "Number"
+                val.val_int = 0
+                val.line = call_node.line
+            }
+        }
+        bound.append(val)
+        p = p + 1
+    }
+    return bound
 }
 
 def tc_visit(tc: TypeChecker, node: AstNode) -> Type {
@@ -260,8 +453,9 @@ def tc_visit(tc: TypeChecker, node: AstNode) -> Type {
 
 def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     if node == 0 { return create_any_type() }
-    kind_handlers = {"Number": 1, "String": 2, "Boolean": 3, "Variable": 4, "BinOp": 5, "Compare": 6, "Assignment": 7, "Function": 8, "Return": 9, "Print": 10, "PrintD": 11, "TRY": 12, "THROW": 13, "Call": 14, "IfElse": 15, "While": 16, "MethodCall": 17, "DataFieldAccess": 18, "DataFieldAssign": 19, "ArrayIndex": 20, "ArrayIndexAssign": 21, "DictLiteral": 22, "ListLiteral": 23, "RawBlock": 24, "ForLoop": 25, "ForIn": 26, "Len": 27, "SizeOf": 28, "Comptime": 29, "Block": 30, "Defer": 31, "MultiReturn": 32, "UnpackAssign": 33, "ClassDef": 34}
+    kind_handlers = {"Number": 1, "String": 2, "Boolean": 3, "Variable": 4, "BinOp": 5, "Compare": 6, "Assignment": 7, "Function": 8, "Return": 9, "Print": 10, "PrintD": 11, "TRY": 12, "THROW": 13, "Call": 14, "IfElse": 15, "While": 16, "MethodCall": 17, "DataFieldAccess": 18, "DataFieldAssign": 19, "ArrayIndex": 20, "ArrayIndexAssign": 21, "DictLiteral": 22, "ListLiteral": 23, "RawBlock": 24, "ForLoop": 25, "ForIn": 26, "Len": 27, "SizeOf": 28, "Comptime": 29, "Block": 30, "Defer": 31, "MultiReturn": 32, "UnpackAssign": 33, "ClassDef": 34, "Null": 35}
     h = kind_handlers.get(node.kind)
+    if h == 35 { return create_null_type() }
     if h == 1 {
         if node.is_float == 1 { return create_scalar_type("float") }
         return create_scalar_type("int")
@@ -276,6 +470,10 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     if h == 4 {
         t = tc_get_var(tc, node.val_str)
         if t == 0 {
+            func_t = tc_find_func(tc, node.val_str)
+            if func_t != 0 {
+                return func_t
+            }
             t = create_any_type()
             tc_set_var(tc, node.val_str, t)
         }
@@ -347,10 +545,9 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     }
     
     if h == 9 {
+        t = create_any_type()
         if node != 0 and node.left != 0 {
             t = tc_visit(tc, node.left)
-        } else {
-            t = create_any_type()
         }
         return t
     }
@@ -432,9 +629,16 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         }
         func_type = tc_find_func(tc, node.val_str)
         if func_type != 0 {
+            nf = 0
+            if tc.named_func_map.has(node.val_str) == 1 {
+                nf = tc.named_func_map.get(node.val_str)
+            }
+            if nf != 0 and len(nf.param_names) > 0 {
+                node.args = tc_bind_args(tc, node, nf)
+            }
             fparams = type_params(func_type)
             if len(node.args) != len(fparams) {
-                errors.warn("Args", tc.filename, node.line, "function " + node.val_str + " expects " + str(len(fparams)) + " args but got " + str(len(node.args)), "add or remove arguments to match the declaration", node.col)
+                errors.err("Args", tc.filename, node.line, "function " + node.val_str + " expects " + str(len(fparams)) + " args but got " + str(len(node.args)), "add or remove arguments to match the declaration", node.col)
             }
             i = 0
             n = len(node.args)
@@ -445,6 +649,22 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
                 i = i + 1
             }
             return type_ret(func_type)
+        }
+        var_t = tc_get_var(tc, node.val_str)
+        if var_t != 0 and var_t.kind == "func" {
+            fparams = type_params(var_t)
+            if len(fparams) > 0 and len(node.args) != len(fparams) {
+                errors.err("Args", tc.filename, node.line, "function pointer " + node.val_str + " expects " + str(len(fparams)) + " args but got " + str(len(node.args)), "add or remove arguments to match", node.col)
+            }
+            i = 0
+            n = len(node.args)
+            if len(fparams) < n { n = len(fparams) }
+            while i < n {
+                arg_t = tc_visit(tc, node.args[i])
+                tc_unify(tc, fparams[i], arg_t, node.args[i])
+                i = i + 1
+            }
+            return type_ret(var_t)
         }
         i = 0
         while i < len(node.args) {
@@ -502,6 +722,14 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         if inst_t != 0 and inst_t.kind == "struct" {
             mfunc = tc_find_func(tc, inst_t.name + "." + node.val_str)
             if mfunc != 0 {
+                full_mname = inst_t.name + "." + node.val_str
+                nf = 0
+                if tc.named_func_map.has(full_mname) == 1 {
+                    nf = tc.named_func_map.get(full_mname)
+                }
+                if nf != 0 and len(nf.param_names) > 1 {
+                    node.args = tc_bind_method_args(tc, node, nf)
+                }
                 mparams = type_params(mfunc)
                 i = 0
                 while i < len(node.args) {
@@ -570,9 +798,28 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
 
     if h == 20 {
         base_t = tc_visit(tc, node.left)
-        tc_visit(tc, node.right)
-        if base_t != 0 and base_t.kind == "list" {
-            return base_t.element_type
+        idx_t = tc_visit(tc, node.right)
+        if base_t != 0 {
+            if base_t.kind == "list" {
+                if base_t.element_type != 0 { return base_t.element_type }
+            }
+            if base_t.kind == "dict" {
+                if node.right.kind == "String" and base_t.field_names != 0 {
+                    k = 0
+                    while k < len(base_t.field_names) {
+                        if str_eq(base_t.field_names[k], node.right.val_str) == 1 {
+                            res_t = base_t.fields[k]
+                            node.inferred_type = res_t
+                            return res_t
+                        }
+                        k = k + 1
+                    }
+                }
+                if base_t.element_type != 0 {
+                    node.inferred_type = base_t.element_type
+                    return base_t.element_type
+                }
+            }
         }
         return create_any_type()
     }
@@ -587,13 +834,31 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         return create_any_type()
     }
     if h == 22 {
+        dt = create_dict_type()
         i = 0
+        has_str_val = 0
+        has_other_val = 0
         while i < len(node.args) {
-            tc_visit(tc, node.args[i])
-            i = i + 1
+            kt = tc_visit(tc, node.args[i])
+            if i + 1 < len(node.args) {
+                vt = tc_visit(tc, node.args[i + 1])
+                if node.args[i].kind == "String" {
+                    dt.field_names.append(node.args[i].val_str)
+                    dt.fields.append(vt)
+                }
+                if vt != 0 and vt.kind == "scalar" and str_eq(vt.name, "string") == 1 {
+                    has_str_val = 1
+                } else {
+                    has_other_val = 1
+                }
+            }
+            i = i + 2
         }
-        node.inferred_type = create_dict_type()
-        return node.inferred_type
+        if has_str_val == 1 and has_other_val == 0 {
+            dt.element_type = create_scalar_type("string")
+        }
+        node.inferred_type = dt
+        return dt
     }
 
     if h == 23 {
@@ -865,7 +1130,9 @@ def tc_check(tc: TypeChecker, ast: list) {
             }
             ret_type = resolve_type_annotation(stmt.return_type)
             func_type = create_func_type(params, ret_type)
-            tc_add_func(tc, stmt.val_str, func_type)
+            p_defs = []
+            if stmt.param_defaults != 0 { p_defs = stmt.param_defaults }
+            tc_add_func_full(tc, stmt.val_str, func_type, stmt.params, p_defs)
         }
         if stmt.kind == "ClassDef" {
             j = 0
@@ -880,9 +1147,11 @@ def tc_check(tc: TypeChecker, ast: list) {
                 ret_type = resolve_type_annotation(m.return_type)
                 func_type = create_func_type(params, ret_type)
                 full = stmt.val_str + "." + m.val_str
-                tc_add_func(tc, full, func_type)
+                p_defs = []
+                if m.param_defaults != 0 { p_defs = m.param_defaults }
+                tc_add_func_full(tc, full, func_type, m.params, p_defs)
                 mangled = stmt.val_str + "_" + m.val_str
-                tc_add_func(tc, mangled, func_type)
+                tc_add_func_full(tc, mangled, func_type, m.params, p_defs)
                 j = j + 1
             }
         }

@@ -251,6 +251,7 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     if cached_size_str != "" {
         if len(current_stamp) > 0 and cached_size_str == current_stamp {
             print("[cached] " + path + " is up to date" + "\n")
+            ext = ""
             if target_os == "windows" {
                 ext = ".exe"
             } else {

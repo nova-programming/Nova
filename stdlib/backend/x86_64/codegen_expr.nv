@@ -281,6 +281,7 @@ def float_str_to_hex(s: string) -> int {
 def is_leaf_expr(state: CodegenState, node: AstNode) -> int {
     if node.kind == "Number" { return 1 }
     if node.kind == "Boolean" { return 1 }
+    if node.kind == "Null" { return 1 }
     if node.kind == "Variable" { return 1 }
     return 0
 }
@@ -296,6 +297,9 @@ def compile_leaf_to_reg(state: CodegenState, node: AstNode, reg_name: string) {
     }
     if node.kind == "Boolean" {
         emit(state, "    mov " + reg_name + ", " + str(node.val_int))
+    }
+    if node.kind == "Null" {
+        emit(state, "    xor " + reg_name + ", " + reg_name)
     }
     if node.kind == "Variable" {
         reg_val = find_var_reg(state, node.val_str)
@@ -407,6 +411,7 @@ def leaf_operand(state: CodegenState, node: AstNode) -> string {
 def is_immediate_leaf(node: AstNode) -> int {
     if node.kind == "Number" { return 1 }
     if node.kind == "Boolean" { return 1 }
+    if node.kind == "Null" { return 1 }
     return 0
 }
 
@@ -753,6 +758,9 @@ def compile_expr(state: CodegenState, node: AstNode) {
     if node.kind == "Boolean" {
         emit(state, "    push " + str(node.val_int))
     }
+    if node.kind == "Null" {
+        emit(state, "    push 0")
+    }
     if node.kind == "Variable" {
         reg_val = find_var_reg(state, node.val_str)
         if reg_val != "" {
@@ -762,8 +770,20 @@ def compile_expr(state: CodegenState, node: AstNode) {
             if offset < 0 {
                 abs_off = 0 - offset
                 emit(state, "    mov %a, [%b + " + str(abs_off) + "]")
-            } else {
+            } elif offset > 0 {
                 emit(state, "    mov %a, [%b - " + str(offset) + "]")
+            } else {
+                if state.internal_fns.has(node.val_str) or state.extern_fns.has(node.val_str) {
+                    fn_name = "_" + node.val_str
+                    if node.val_str == "main" { fn_name = "_nova_user_main" }
+                    if is_x64(state) == 1 {
+                        emit(state, "    lea %a, [rip + " + fn_name + "]")
+                    } else {
+                        emit(state, "    mov %a, offset " + fn_name)
+                    }
+                } else {
+                    emit(state, "    mov %a, [%b - " + str(offset) + "]")
+                }
             }
         }
         emit(state, "    push %a")
@@ -1380,6 +1400,9 @@ def compile_expr(state: CodegenState, node: AstNode) {
         if node.left.inferred_type != 0 and node.left.inferred_type.kind == "dict" {
             is_dict = 1
         }
+        if is_dict == 0 and is_string_expr(state, node.right) == 1 {
+            is_dict = 1
+        }
         if is_dict == 1 {
             emit(state, "    push %c")
             emit(state, "    push %d")
@@ -1841,7 +1864,43 @@ def compile_expr(state: CodegenState, node: AstNode) {
                 compile_expr(state, node.args[idx_arg])
                 idx_arg = idx_arg - 1
             }
-            if state.extern_fns.has(node.val_str) {
+            is_var_call = 0
+            if find_var_reg(state, node.val_str) != "" or find_var_offset(state, node.val_str) != 0 {
+                is_var_call = 1
+            }
+            if is_var_call == 1 {
+                var_reg = find_var_reg(state, node.val_str)
+                if var_reg != "" {
+                    emit(state, "    mov r10, " + var_reg)
+                } else {
+                    off = find_var_offset(state, node.val_str)
+                    if off < 0 {
+                        emit(state, "    mov r10, [%b + " + str(0 - off) + "]")
+                    } else {
+                        emit(state, "    mov r10, [%b - " + str(off) + "]")
+                    }
+                }
+                if is_x64(state) == 1 {
+                    if arg_count >= 1 { emit(state, "    pop rdi") }
+                    if arg_count >= 2 { emit(state, "    pop rsi") }
+                    if arg_count >= 3 { emit(state, "    pop rdx") }
+                    if arg_count >= 4 { emit(state, "    pop rcx") }
+                    if arg_count >= 5 { emit(state, "    pop r8") }
+                    if arg_count >= 6 { emit(state, "    pop r9") }
+                    emit(state, "    xor rax, rax")
+                    emit(state, "    push rbp")
+                    emit(state, "    mov rbp, rsp")
+                    emit(state, "    and rsp, -16")
+                    emit(state, "    sub rsp, 32")
+                    emit(state, "    call r10")
+                    emit(state, "    mov rsp, rbp")
+                    emit(state, "    pop rbp")
+                    if arg_count > 6 { clean_n(state, arg_count - 6) }
+                } else {
+                    emit(state, "    call r10")
+                    if arg_count > 0 { clean_n(state, arg_count) }
+                }
+            } elif state.extern_fns.has(node.val_str) {
                 if state.target_os == "macos" {
                     emit_call(state, "_" + node.val_str, arg_count)
                 } elif state.target_os == "windows" {
