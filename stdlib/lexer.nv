@@ -72,6 +72,7 @@ def match_keyword(word: string) -> string {
         case "elif" { return "ELIF" }
         case "switch" { return "SWITCH" }
         case "case" { return "CASE" }
+        case "match" { return "MATCH" }
         case "while" { return "WHILE" }
         case "for" { return "FOR" }
         case "to" { return "TO" }
@@ -86,6 +87,8 @@ def match_keyword(word: string) -> string {
         case "defer" { return "DEFER" }
         case "const" { return "CONST" }
         case "enum" { return "ENUM" }
+        case "spawn" { return "SPAWN" }
+        case "await" { return "AWAIT" }
         case "class" { return "CLASS" }
         case "data" { return "DATA" }
         case "extern" { return "EXTERN" }
@@ -500,6 +503,12 @@ def tokenize(src: string) -> list {
                 }
                 case "->" { 
                     tok.kind = "ARROW"
+                    tok.val = two_char
+                    i = i + 2
+                    matched = 2 
+                }
+                case "=>" { 
+                    tok.kind = "FAT_ARROW"
                     tok.val = two_char
                     i = i + 2
                     matched = 2 

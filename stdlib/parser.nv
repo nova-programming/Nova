@@ -623,11 +623,37 @@ def parse_primary(state: ParserState) -> AstNode {
                         }
                         method_node = call_node
                     }
+                } elif method_node.left.kind == "Variable" and state.data_fields.has("__enum_" + method_node.left.val_str) {
+                    enum_name = method_node.left.val_str
+                    variant_name = method_node.val_str
+                    tag_val = 0
+                    tag_key = "__enum_tag_" + enum_name + "." + variant_name
+                    if state.data_fields.has(tag_key) {
+                        tag_val = state.data_fields.get(tag_key)[0]
+                    }
+                    tag_node = make_number_node(tag_val, method_node.line, method_node.col)
+                    call_node = AstNode()
+                    call_node.line = method_node.line
+                    call_node.col = method_node.col
+                    call_node.kind = "Call"
+                    call_node.val_str = enum_name + "_" + variant_name
+                    call_node.args = [tag_node]
+                    ak = 0
+                    while ak < len(method_node.args) {
+                        call_node.args.append(method_node.args[ak])
+                        ak = ak + 1
+                    }
+                    call_node.arg_names = []
+                    call_node.arg_is_kw = []
+                    data_constructor_call(state, call_node, call_node.arg_names, call_node.arg_is_kw, tok)
+                    method_node = call_node
                 }
                 node = method_node
             } else {
                 is_ptr = 0
-                if prop_tok.val == "value" { is_ptr = 1 }
+                if node.inferred_type != 0 and node.inferred_type.kind == "struct" {
+                    is_ptr = 0
+                } elif prop_tok.val == "value" { is_ptr = 1 }
                 elif prop_tok.val == "addr" { is_ptr = 1 }
                 elif prop_tok.val == "isValid" { is_ptr = 1 }
                 elif prop_tok.val == "isNull" { is_ptr = 1 }
@@ -716,6 +742,13 @@ def parse_primary(state: ParserState) -> AstNode {
                         access_node.kind = "DataFieldAccess"
                         access_node.left = node  # instance
                         access_node.val_str = prop_tok.val  # field name
+                        if node.kind == "Variable" and state.data_fields.has("__enum_" + node.val_str) {
+                            tag_key = "__enum_tag_" + node.val_str + "." + prop_tok.val
+                            if state.data_fields.has(tag_key) {
+                                tag_list = state.data_fields.get(tag_key)
+                                access_node = make_number_node(tag_list[0], tok.line, tok.col)
+                            }
+                        }
                         node = access_node
                     }
                 }
@@ -994,6 +1027,24 @@ def parse_unary(state: ParserState) -> AstNode {
         node = AstNode()
         node.kind = "UnaryOp"
         node.val_str = tok.val
+        node.line = tok.line
+        node.col = tok.col
+        node.left = parse_unary(state)
+        return node
+    }
+    if tok.kind == "SPAWN" {
+        eat_tok(state, "SPAWN")
+        node = AstNode()
+        node.kind = "Spawn"
+        node.line = tok.line
+        node.col = tok.col
+        node.left = parse_unary(state)
+        return node
+    }
+    if tok.kind == "AWAIT" {
+        eat_tok(state, "AWAIT")
+        node = AstNode()
+        node.kind = "Await"
         node.line = tok.line
         node.col = tok.col
         node.left = parse_unary(state)
@@ -1369,6 +1420,10 @@ def parse_statement(state: ParserState) -> AstNode {
 
     if tok.kind == "SWITCH" {
         return parse_switch(state, stmt_line, stmt_col)
+    }
+
+    if tok.kind == "MATCH" {
+        return parse_match(state, stmt_line, stmt_col)
     }
     
     if tok.kind == "WHILE" {
@@ -2043,22 +2098,276 @@ def parse_switch(state: ParserState, stmt_line: int, stmt_col: int) -> AstNode {
     return current_else[0]
 }
 
+def parse_match_arm_body(state: ParserState) -> list {
+    check = current_tok(state)
+    if check.kind == "LBRACE" {
+        return parse_block(state)
+    }
+    stmt = parse_statement(state)
+    if stmt.kind != "NONE" {
+        return [stmt]
+    }
+    return []
+}
+
+def parse_match(state: ParserState, stmt_line: int, stmt_col: int) -> AstNode {
+    eat_tok(state, "MATCH")
+    target_expr = parse_expr(state)
+    eat_tok(state, "LBRACE")
+
+    tmp_var = "__match_val_" + str(state.comp_counter)
+    state.comp_counter = state.comp_counter + 1
+
+    assign_target = AstNode()
+    assign_target.line = stmt_line
+    assign_target.col = stmt_col
+    assign_target.kind = "Assignment"
+    assign_target.val_str = tmp_var
+    assign_target.left = target_expr
+
+    tmp_ref = AstNode()
+    tmp_ref.line = stmt_line
+    tmp_ref.col = stmt_col
+    tmp_ref.kind = "Variable"
+    tmp_ref.val_str = tmp_var
+
+    arm_conds = []
+    arm_bodies = []
+    else_body = []
+
+    check = current_tok(state)
+    while check.kind != "RBRACE" and check.kind != "EOF" {
+        if check.kind == "ELSE" or (check.kind == "IDENT" and check.val == "_") {
+            eat_tok(state, check.kind)
+            eat_tok(state, "FAT_ARROW")
+            else_body = parse_match_arm_body(state)
+        } else {
+            nt = peek_tok(state, 1)
+            if check.kind == "IDENT" and nt.kind == "DOT" and state.data_fields.has("__enum_" + check.val) {
+                enum_name = eat_tok(state, "IDENT").val
+                eat_tok(state, "DOT")
+                variant_name = eat_tok(state, "IDENT").val
+
+                tag_key = "__enum_tag_" + enum_name + "." + variant_name
+                tag_val = 0
+                if state.data_fields.has(tag_key) {
+                    t_list = state.data_fields.get(tag_key)
+                    tag_val = t_list[0]
+                }
+
+                ncheck = current_tok(state)
+                if ncheck.kind == "LPAREN" {
+                    eat_tok(state, "LPAREN")
+                    bindings = []
+                    bcheck = current_tok(state)
+                    while bcheck.kind != "RPAREN" and bcheck.kind != "EOF" {
+                        b_name = eat_tok(state, "IDENT").val
+                        bindings.append(b_name)
+                        bcheck = current_tok(state)
+                        if bcheck.kind == "COMMA" {
+                            eat_tok(state, "COMMA")
+                            bcheck = current_tok(state)
+                        }
+                    }
+                    eat_tok(state, "RPAREN")
+                    eat_tok(state, "FAT_ARROW")
+                    arm_body = parse_match_arm_body(state)
+
+                    variant_type = enum_name + "_" + variant_name
+
+                    tag_typed_ref = AstNode()
+                    tag_typed_ref.line = stmt_line
+                    tag_typed_ref.col = stmt_col
+                    tag_typed_ref.kind = "Variable"
+                    tag_typed_ref.val_str = tmp_var
+                    tag_typed_ref.inferred_type = create_struct_type(variant_type)
+
+                    tag_access = AstNode()
+                    tag_access.line = stmt_line
+                    tag_access.col = stmt_col
+                    tag_access.kind = "DataFieldAccess"
+                    tag_access.left = tag_typed_ref
+                    tag_access.val_str = "__tag"
+
+                    cmp_node = AstNode()
+                    cmp_node.line = stmt_line
+                    cmp_node.col = stmt_col
+                    cmp_node.kind = "Compare"
+                    cmp_node.val_str = "=="
+                    cmp_node.left = tag_access
+                    cmp_node.right = make_number_node(tag_val, stmt_line, stmt_col)
+
+                    vf_key = "__enum_fields_" + enum_name + "." + variant_name
+                    vfields = []
+                    if state.data_fields.has(vf_key) {
+                        vfields = state.data_fields.get(vf_key)
+                    }
+
+                    full_body = []
+                    bi = 0
+                    while bi < len(bindings) {
+                        fname = "a" + str(bi)
+                        if bi < len(vfields) { fname = vfields[bi] }
+
+                        typed_ref = AstNode()
+                        typed_ref.line = stmt_line
+                        typed_ref.col = stmt_col
+                        typed_ref.kind = "Variable"
+                        typed_ref.val_str = tmp_var
+                        typed_ref.inferred_type = create_struct_type(variant_type)
+
+                        f_access = AstNode()
+                        f_access.line = stmt_line
+                        f_access.col = stmt_col
+                        f_access.kind = "DataFieldAccess"
+                        f_access.left = typed_ref
+                        f_access.val_str = fname
+
+                        b_assign = AstNode()
+                        b_assign.line = stmt_line
+                        b_assign.col = stmt_col
+                        b_assign.kind = "Assignment"
+                        b_assign.val_str = bindings[bi]
+                        b_assign.left = f_access
+
+                        full_body.append(b_assign)
+                        bi = bi + 1
+                    }
+                    bj = 0
+                    while bj < len(arm_body) {
+                        full_body.append(arm_body[bj])
+                        bj = bj + 1
+                    }
+
+                    arm_conds.append(cmp_node)
+                    arm_bodies.append(full_body)
+                } else {
+                    eat_tok(state, "FAT_ARROW")
+                    arm_body = parse_match_arm_body(state)
+
+                    cmp_node = AstNode()
+                    cmp_node.line = stmt_line
+                    cmp_node.col = stmt_col
+                    cmp_node.kind = "Compare"
+                    cmp_node.val_str = "=="
+                    cmp_node.left = tmp_ref
+                    cmp_node.right = make_number_node(tag_val, stmt_line, stmt_col)
+
+                    arm_conds.append(cmp_node)
+                    arm_bodies.append(arm_body)
+                }
+            } else {
+                pat_expr = parse_expr(state)
+                eat_tok(state, "FAT_ARROW")
+                arm_body = parse_match_arm_body(state)
+
+                cmp_node = AstNode()
+                cmp_node.line = stmt_line
+                cmp_node.col = stmt_col
+                cmp_node.kind = "Compare"
+                cmp_node.val_str = "=="
+                cmp_node.left = tmp_ref
+                cmp_node.right = pat_expr
+
+                arm_conds.append(cmp_node)
+                arm_bodies.append(arm_body)
+            }
+        }
+        check = current_tok(state)
+    }
+    eat_tok(state, "RBRACE")
+
+    current_else = else_body
+    i = len(arm_conds) - 1
+    while i >= 0 {
+        if_node = AstNode()
+        if_node.line = stmt_line
+        if_node.col = stmt_col
+        if_node.kind = "IfElse"
+        if_node.cond = arm_conds[i]
+        if_node.body = arm_bodies[i]
+        if_node.else_body = current_else
+
+        current_else = [if_node]
+        i = i - 1
+    }
+
+    block_node = AstNode()
+    block_node.line = stmt_line
+    block_node.col = stmt_col
+    block_node.kind = "Block"
+    if len(current_else) > 0 {
+        block_node.body = [assign_target, current_else[0]]
+    } else {
+        block_node.body = [assign_target]
+    }
+    return block_node
+}
+
 def parse_enum_def(state: ParserState, stmt_line: int, stmt_col: int) -> AstNode {
     eat_tok(state, "ENUM")
     name = eat_tok(state, "IDENT").val
     eat_tok(state, "LBRACE")
     variants = []
+    variant_fields = []
     check = current_tok(state)
     while check.kind != "RBRACE" and check.kind != "EOF" {
         v = eat_tok(state, "IDENT").val
         variants.append(v)
+        vfields = []
         check = current_tok(state)
+        if check.kind == "LPAREN" {
+            eat_tok(state, "LPAREN")
+            pcheck = current_tok(state)
+            while pcheck.kind != "RPAREN" and pcheck.kind != "EOF" {
+                pname = eat_tok(state, "IDENT").val
+                vfields.append(pname)
+                pcheck = current_tok(state)
+                if pcheck.kind == "COMMA" {
+                    eat_tok(state, "COMMA")
+                    pcheck = current_tok(state)
+                }
+            }
+            eat_tok(state, "RPAREN")
+            check = current_tok(state)
+        }
+        variant_fields.append(vfields)
         if check.kind == "COMMA" {
             eat_tok(state, "COMMA")
             check = current_tok(state)
         }
     }
     eat_tok(state, "RBRACE")
+
+    state.data_fields.set("__enum_" + name, variants)
+    j = 0
+    while j < len(variants) {
+        v = variants[j]
+        vf = variant_fields[j]
+        state.data_fields.set("__enum_fields_" + name + "." + v, vf)
+        state.data_fields.set("__enum_tag_" + name + "." + v, [j])
+
+        if len(vf) > 0 {
+            type_name = name + "_" + v
+            struct_fields = ["__tag"]
+            fk = 0
+            while fk < len(vf) {
+                struct_fields.append(vf[fk])
+                fk = fk + 1
+            }
+            state.data_fields.set(type_name, struct_fields)
+            seen = 0
+            si = 0
+            while si < len(state.ctors_used) {
+                if state.ctors_used[si] == type_name { seen = 1 }
+                si = si + 1
+            }
+            if seen == 0 { state.ctors_used.append(type_name) }
+        }
+
+        j = j + 1
+    }
+
     node = AstNode()
     node.line = stmt_line
     node.col = stmt_col
@@ -2068,28 +2377,61 @@ def parse_enum_def(state: ParserState, stmt_line: int, stmt_col: int) -> AstNode
     return node
 }
 
-def desugar_enums(program: list) -> list {
+def desugar_enums(program: list, state: ParserState) -> list {
     result = []
     i = 0
     while i < len(program) {
         node = program[i]
         if node.kind == "EnumDef" {
+            name = node.val_str
             j = 0
             while j < len(node.params) {
-                const_name = node.val_str + "_" + node.params[j]
+                v = node.params[j]
+                vf_key = "__enum_fields_" + name + "." + v
+                vf = []
+                if state.data_fields.has(vf_key) {
+                    vf = state.data_fields.get(vf_key)
+                }
+
+                const_name = name + "_" + v
                 assign = AstNode()
                 assign.line = node.line
                 assign.col = node.col
                 assign.kind = "Assignment"
                 assign.val_str = const_name
-                assign.val_int = 1  # is_const = true
-                num_node = AstNode()
-                num_node.line = node.line
-                num_node.col = node.col
-                num_node.kind = "Number"
-                num_node.val_int = j
-                assign.left = num_node
+                assign.val_int = 1
+                assign.left = make_number_node(j, node.line, node.col)
                 result.append(assign)
+
+                if len(vf) > 0 {
+                    type_name = name + "_" + v
+                    struct_fields = ["__tag"]
+                    struct_types = ["int"]
+                    fk = 0
+                    while fk < len(vf) {
+                        struct_fields.append(vf[fk])
+                        struct_types.append("any")
+                        fk = fk + 1
+                    }
+
+                    dnode = AstNode()
+                    dnode.line = node.line
+                    dnode.col = node.col
+                    dnode.kind = "Data"
+                    dnode.val_str = type_name
+                    dnode.params = struct_fields
+                    dnode.param_types = struct_types
+                    result.append(dnode)
+
+                    state.data_fields.set(type_name, struct_fields)
+                    seen = 0
+                    si = 0
+                    while si < len(state.ctors_used) {
+                        if state.ctors_used[si] == type_name { seen = 1 }
+                        si = si + 1
+                    }
+                    if seen == 0 { state.ctors_used.append(type_name) }
+                }
                 j = j + 1
             }
         } else {
@@ -2122,6 +2464,8 @@ def parse(tokens: list, filename: string) -> list {
             program.append(stmt)
         }
     }
+
+    program = desugar_enums(program, state)
     
     ci = 0
     while ci < len(state.ctors_used) {
@@ -2135,7 +2479,7 @@ def parse(tokens: list, filename: string) -> list {
         ci = ci + 1
     }
 
-    return desugar_enums(program)
+    return program
 }
 
 # --- Utility: atoi ---

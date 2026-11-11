@@ -1,0 +1,96 @@
+# Comprehensive Test: Enums & Pattern Matching with Beginner-Friendly Dot Syntax
+
+enum Status {
+    Pending,
+    Active,
+    Done
+}
+
+enum Result {
+    Ok(data),
+    Err(msg)
+}
+
+enum Shape {
+    Point,
+    Circle(radius),
+    Rectangle(width, height)
+}
+
+def test_unit_enums() {
+    let p = Status.Pending
+    let a = Status.Active
+    let d = Status.Done
+    print(p)
+    print(a)
+    print(d)
+}
+
+def describe_status(s: int) {
+    match s {
+        Status.Pending => print("Status: Pending")
+        Status.Active => print("Status: Active")
+        Status.Done => print("Status: Done")
+        else => print("Status: Unknown")
+    }
+}
+
+def check_code(code: int) {
+    match code {
+        200 => print("HTTP: OK")
+        404 => print("HTTP: Not Found")
+        500 => print("HTTP: Server Error")
+        else => print("HTTP: Other")
+    }
+}
+
+def handle_result(res: any) {
+    match res {
+        Result.Ok(info) => {
+            print("Success: " + info)
+        }
+        Result.Err(err_msg) => {
+            print("Error: " + err_msg)
+        }
+        else => {
+            print("Invalid Result")
+        }
+    }
+}
+
+def calc_area(s: any) -> int {
+    match s {
+        Shape.Point => return 0
+        Shape.Circle(r) => return 314 * r * r / 100
+        Shape.Rectangle(w, h) => return w * h
+        else => return -1
+    }
+}
+
+# 1. Unit Enums
+test_unit_enums()
+describe_status(Status.Pending)
+describe_status(Status.Active)
+describe_status(Status.Done)
+describe_status(999)
+
+# 2. Number Matching
+check_code(200)
+check_code(404)
+check_code(500)
+check_code(123)
+
+# 3. Payload Enums & Match
+r1 = Result.Ok("Download finished successfully")
+r2 = Result.Err("Host unreachable")
+handle_result(r1)
+handle_result(r2)
+
+# 4. Multi-field Enums & Match
+p = Shape.Point
+c = Shape.Circle(10)
+rect = Shape.Rectangle(5, 8)
+print(calc_area(p))
+print(calc_area(c))
+print(calc_area(rect))
+print("ALL ENUM & MATCH TESTS PASSED")

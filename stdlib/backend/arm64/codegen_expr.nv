@@ -719,6 +719,45 @@ def compile_expr(state: CodegenState, node: AstNode) {
         }
         emit(state, "    str %a, [sp, #-16]!")
     }
+    if node.kind == "Spawn" {
+        call_node = node.left
+        if call_node.kind != "Call" {
+            errors.err("Syntax", state.filename, node.line, "spawn requires a function call, e.g. spawn f()", "did you forget parentheses?", node.col)
+            return
+        }
+        arg_count = len(call_node.args)
+        if arg_count > 6 {
+            errors.err("Syntax", state.filename, node.line, "spawn supports up to 6 arguments", "pass a struct or list for more arguments", node.col)
+            return
+        }
+        idx_arg = arg_count - 1
+        while idx_arg >= 0 {
+            compile_expr(state, call_node.args[idx_arg])
+            idx_arg = idx_arg - 1
+        }
+        emit(state, "    mov %a, " + str(arg_count))
+        emit(state, "    str %a, [sp, #-16]!")
+        offset = find_var_offset(state, call_node.val_str)
+        if offset != 0 {
+            emit_fp_load(state, "x0", offset)
+            emit(state, "    str %a, [sp, #-16]!")
+        } else {
+            fn_target = "_" + call_node.val_str
+            if call_node.val_str == "main" { fn_target = "_nova_user_main" }
+            emit(state, "    adrp %a, " + fn_target)
+            emit(state, "    add %a, %a, :lo12:" + fn_target)
+            emit(state, "    str %a, [sp, #-16]!")
+        }
+        emit_call(state, "_nova_task_spawn", arg_count + 2)
+        emit(state, "    str %a, [sp, #-16]!")
+        return
+    }
+    if node.kind == "Await" {
+        compile_expr(state, node.left)
+        emit_call(state, "_nova_task_await", 1)
+        emit(state, "    str %a, [sp, #-16]!")
+        return
+    }
     if node.kind == "DataFieldAccess" {
         compile_expr(state, node.left)
         emit(state, "    ldr %d, [sp], #16")
@@ -1048,8 +1087,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
             }
     }
     if node.kind == "MethodCall" {
-        method_id_map = {"append": 1, "pop": 2, "get": 3, "set": 4, "has": 5, "remove": 6, "keys": 7, "values": 8, "items": 9, "write": 10, "awrite": 11, "read": 12, "close": 13, "flush": 14, "insert": 15, "clear": 16, "as_list": 17}
-        h = method_id_map.get(node.val_str)
+        h = method_name_to_id(node.val_str)
         if h == 1 {
             compile_expr(state, node.args[0])
             compile_expr(state, node.left)
@@ -1439,6 +1477,8 @@ def node_to_asm(state: CodegenState, node: AstNode) -> string {
         return result
     }
     if node.kind == "UnaryOp" { return node.val_str + node_to_asm(state, node.left) }
+    if node.kind == "Spawn" { return "spawn " + node_to_asm(state, node.left) }
+    if node.kind == "Await" { return "await " + node_to_asm(state, node.left) }
     return ""
 }
 

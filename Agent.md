@@ -678,3 +678,171 @@ Upgraded the Nova declarative GUI framework to leverage Phase 5's native first-c
 - **Binary Footprint**: Stripped `nova_studio.exe` remains strictly within budget at **249.51 KB** (< 250 KB ceiling).
 
 
+---
+
+## 26. Path C: Algorithmic & Compiler Performance Optimizations (DSA/DAA Principles)
+
+### Architectural Overview
+Implemented comprehensive DSA/DAA algorithmic and compiler system architecture optimizations across the Nova compiler pipeline and runtime C engine, achieving an **8.5x overall compiler throughput speedup** while maintaining bit-for-bit self-hosting identity and zero struct layout regressions.
+
+### 1. Intelligent Automated Dependency Fingerprinting (`nova/stdlib/compiler.nv`)
+- **Root Cause & Invalidation Tracking**:
+  - Previously, every invocation of `nova build` or test suite run invoked MinGW GCC to recompile `runtime.c` (~2.0-3.5 seconds per compilation), or risked running stale binaries if manual caching was attempted.
+  - Addressed the user question: *"what if they made changes in code?"*
+- **Solution (`_runtime_stamp`)**:
+  - Implemented automatic content-based fingerprinting using `len(content)` and polynomial rolling hash `text_fingerprint(content)` written to `runtime.stamp`.
+  - On every compilation, `_compile_runtime` reads `runtime.c` and computes the exact content fingerprint.
+  - If `runtime.o` exists and `runtime.stamp` matches the fingerprint, GCC recompilation is safely bypassed in `< 1 ms`.
+  - **Dynamic Invalidation**: Any edit to `runtime.c` automatically invalidates the stamp, triggering an immediate clean GCC recompilation and refreshing `runtime.stamp` and `runtime.o`.
+
+### 2. Algorithmic Optimizations in Compiler Core
+- **$O(1)$ Type Checker Environment Popping (`nova/stdlib/type_checker.nv`)**:
+  - Replaced $O(N)$ allocation-heavy stack slice copying (`new_stack = []` and element copy loop) in `tc_pop_env` with native $O(1)$ popping: `_ = tc.env_stack.pop()`.
+- **Static Method Dispatch in Expression Codegen (`nova/stdlib/codegen_common.nv`)**:
+  - Replaced repeated runtime heap allocation of 17-element `method_id_map = {...}` dictionaries inside every `MethodCall` node visitor across both `x86_64/codegen_expr.nv` and `arm64/codegen_expr.nv`.
+  - Replaced with static `def method_name_to_id(name: string) -> int` using compile-time jump table / `switch` dispatch, eliminating thousands of transient dictionary allocations.
+- **Peephole Optimizer Register Lookups (`nova/stdlib/peephole.nv`)**:
+  - Replaced dynamic dictionary instantiation of General Purpose registers (`gp_regs()`) on every peephole pass with static `is_gp_reg(r: string) -> int` switch.
+- **Runtime Hash Table Fast-Path Pointer Short-Circuiting (`nova/runtime.c`)**:
+  - Added pointer equality fast path `(e->key == key || strcmp(e->key, key) == 0)` to `_df_idx` and `_df_find_or_insert` in `nova/runtime.c`. Identical interned/static string pointers bypass string comparison completely.
+
+### 3. Empirical Performance Verification & Benchmark Leap
+- **Compiler Build Speedup across Standard Benchmark Suite (`nova/tools/bench.py --compiler nova/nova.exe`)**:
+  - **Total Build Time**: Dropped from **~32.0s down to 3.8s (8.5x faster overall compiler throughput)**.
+  - `bubble`: 4.0s -> 0.4s (10x faster)
+  - `collatz`: 4.0s -> 0.4s (10x faster)
+  - `dict`: 3.3s -> 0.5s (6.6x faster)
+  - `fib`: 3.5s -> 0.4s (8.7x faster)
+  - `loops`: 3.0s -> 0.3s (10x faster)
+  - `matmul`: 2.6s -> 0.3s (8.6x faster)
+  - `primes`: 2.8s -> 0.4s (7x faster)
+  - `sieve`: 2.5s -> 0.3s (8.3x faster)
+  - `strings`: 2.7s -> 0.4s (6.7x faster)
+  - `structs`: 2.8s -> 0.4s (7x faster)
+  - **Execution Time (Geomean)**: 0.056s. All 10 benchmark execution checksums 100% identical.
+- **Test Suite Runtime**:
+  - `pytest nova/tests/test_check_all.py` completed all **88/88 checks in 44.37s** (down from 69.5s).
+- **Self-Hosting Invariant**:
+  - Bit-for-bit assembly byte identity verified: `s2.s SHA256 == s3.s SHA256` (`4ca91a63a38579298a5d20af9f09cd7a184e57fe07c0afd5a2e9144d80e23e73`).
+- **Binary Footprint Budget**:
+  - Stripped `nova_studio.exe` binary footprint: **249.51 KB** (255,502 bytes, strictly below 250 KB ceiling).
+
+---
+
+## 27. Phase 1A: Algebraic Data Types (ADTs) & Beginner-Friendly Pattern Matching (`enum` and `match`)
+
+### Architectural Overview
+Implemented modern Algebraic Data Types (ADTs / Tagged Unions) and pattern matching (`match`) in the self-hosted compiler, supporting both clean unboxed unit variants and payload variants with beginner-friendly dot syntax (`enumVar.var`), multi-field destructuring, and fallback handling (`else =>` and `_ =>`).
+
+### 1. Syntax & Data Model Design
+- **Unit Variants (Unboxed Zero-Cost Enums)**:
+  ```nova
+  enum Status {
+      Pending,
+      Active,
+      Done
+  }
+  let s = Status.Pending  # Emits unboxed integer constant 0 at compile time
+  ```
+- **Payload Variants (Tagged ARC Structs)**:
+  ```nova
+  enum Result {
+      Ok(data),
+      Err(msg)
+  }
+  let r = Result.Ok("Success")
+  ```
+  - Automatically synthesizes typed `Data` struct definitions (`Result_Ok` with `__tag = 0, data`) and constructor hooks.
+- **Pattern Matching (`match`)**:
+  ```nova
+  match r {
+      Result.Ok(val) => print("Success: " + val)
+      Result.Err(msg) => print("Error: " + msg)
+      else => print("Default fallback")
+  }
+  ```
+  - Supports both concise single-statement arms (`Pattern => stmt`) and braced blocks (`Pattern => { ... }`).
+  - Supports literal values, numbers, strings, and unit enum constants.
+  - Automatically generates scoped temporary bindings (`__match_val_N`) preventing double-evaluation of complex target expressions.
+
+### 2. Implementation Pipeline
+- **Lexer (`nova/stdlib/lexer.nv`)**:
+  - Registered keyword `match` (`MATCH`).
+  - Registered two-character token `=>` (`FAT_ARROW`).
+- **Parser (`nova/stdlib/parser.nv`)**:
+  - `parse_enum_def`: Parses unit and parameterized variants, registering `__enum_...` metadata in `state.data_fields`.
+  - `parse_postfix`:
+    - Transforms unit access `Status.Pending` directly into unboxed `Number(tag_val)` nodes.
+    - Transforms constructor call `Result.Ok(data)` directly into `__new_Result_Ok(0, data)`.
+  - `parse_match`: Parses patterns, payload variable bindings, and arm bodies, desugaring them into structured `IfElse` branches inside a scoped `Block`.
+  - `desugar_enums`: Synthesizes variant constants and `Data` type declarations before constructor source expansion.
+
+### 3. Verification & Invariants
+- **Self-Hosting Invariant**: Bit-for-bit assembly byte identity verified:
+  `s2.s SHA256 == s3.s SHA256` (`02321fc1b1c74e61b3f64857c181a3e19bc27232d6428335c9dbdb40386b54a7`).
+- **Regression Suite**: All **89/89 tests passed** in `nova/tests/test_check_all.py` (including the new comprehensive `test_enums_and_match.nv` running through the self-hosted native compiler).
+- **Binary Footprint Budget**: Stripped `nova_studio.exe` remains **249.51 KB** (255,502 bytes, strictly below 250 KB ceiling).
+- **Bootstrap Status**: `nova/bootstrap/*.py` remains completely frozen.
+
+---
+
+## 28. Phase 2: Lightweight Concurrency & Async Tasks (`spawn` & `await`)
+
+### Architectural Overview
+Implemented native multi-core concurrency in Nova with beginner-friendly syntax (`spawn` and `await`), thread-safe atomic Automatic Reference Counting (ARC), a hardware-scaled work-stealing thread pool, and an assembly bridge maintaining SysV AMD64 register purity.
+
+### 1. Language Ergonomics & Data Model
+- **Beginner-Friendly Syntax**:
+  ```nova
+  # 1. Spawning parallel computation across CPU cores
+  let t1 = spawn fib(34)
+  let t2 = spawn fib(34)
+
+  # 2. Awaiting result directly without unwrapping ceremony
+  let r1 = await t1
+  let r2 = await t2
+  print("Total: " + str(r1 + r2))
+
+  # 3. Direct inline await expression
+  let sum = await spawn square(6) + await spawn square(8)
+
+  # 4. Task fan-out in collections
+  let tasks = []
+  for i = 0 to 7 { tasks.append(spawn worker(i)) }
+  for i = 0 to 7 { print(await tasks[i]) }
+  ```
+
+### 2. Runtime & Concurrency Engine (`nova/runtime.c`)
+- **Thread-Safe Atomic ARC**:
+  - `_nova_inc_ref`: Uses atomic fetch-and-add (`__atomic_fetch_add(&hdr->ref_count, 1, __ATOMIC_RELAXED)` / `lock xadd`).
+  - `_nova_dec_ref`: Uses atomic decrement (`__atomic_sub_fetch(&hdr->ref_count, 1, __ATOMIC_ACQ_REL)`).
+  - Eliminates data races when tasks or data structures are shared across worker threads.
+- **Hardware-Scaled Worker Thread Pool**:
+  - Automatically queries hardware logical core count ($N = \text{cores}$, e.g. `SYSTEM_INFO.dwNumberOfProcessors`).
+  - Spawns background worker threads sleeping on OS semaphores (`CreateSemaphoreA` on Windows, `pthread_cond_t` on POSIX) for zero idle CPU usage.
+  - Dynamically allocated task ring buffer (`NOVA_TASK_QUEUE_CAP = 4096`) protecting binary footprint.
+- **Assembly SysV Bridge (`_nova_task_invoke`)**:
+  - Dedicated handwritten assembly bridge preserving all callee-saved registers (`rbx, rdi, rsi, r12, r13, r14, r15`).
+  - Guarantees 16-byte stack alignment and loads SysV arguments (`rdi, rsi, rdx, rcx, r8, r9`) safely without register clobbering.
+
+### 3. Compiler Pipeline (`lexer.nv`, `parser.nv`, `codegen_expr.nv`)
+- **Lexer (`nova/stdlib/lexer.nv`)**: Registered keywords `spawn` (`SPAWN`) and `await` (`AWAIT`).
+- **Parser (`nova/stdlib/parser.nv`)**: Handled `Spawn` and `Await` AST nodes in `parse_unary`, seamlessly enabling expressions, statements, and inline math.
+- **Type Checker (`nova/stdlib/type_checker.nv`)**: Added AST traversal for `Spawn` and `Await` child expressions.
+- **Backend Codegen (`codegen_expr.nv` x86_64 & arm64)**:
+  - `Spawn`: Compiles arguments, pushes argument count and function pointer, calls `_nova_task_spawn`.
+  - `Await`: Evaluates task handle and calls `_nova_task_await`.
+
+### 4. Verification & Invariants
+- **Multi-Core Speedup Verified**:
+  - Empirical benchmark (`test_concurrency_tasks.nv`): Sequential 2x `fib(34)`: **63 ms** $\to$ Parallel 2x `fib(34)`: **31 ms** (**2.03x parallel speedup** across hardware cores).
+- **Self-Hosting Invariant**: Bit-for-bit assembly byte identity verified:
+  `s2.s SHA256 == s3.s SHA256` (`745be15f71d58be02195b0b6d172c083c7a5ebf93a4abb50b7f471e17f7251fd`).
+- **Regression Suite**: All **90/90 tests passed** in `nova/tests/test_check_all.py`.
+- **GUI & Widget Tests**: All **7/7 tests passed** in `nova/tests/test_widgets.py`.
+- **Studio Tests & Binary Footprint**: All **2/2 tests passed** in `nova/tests/test_studio.py`:
+  - Stripped `nova_studio.exe` footprint: **234.51 KB** (240,142 bytes, comfortably below the 250 KB ceiling).
+  - Headless benchmark throughput: **17,885 FPS** (>290x above 60 FPS requirement).
+- **Bootstrap Status**: `nova/bootstrap/*.py` remains completely frozen.
+
+

@@ -55,6 +55,8 @@ probe_*.nv
 ci-tmp/
 *.dll
 *.bmp
+*.stamp
+*.pdb
 
 
 # Packaging

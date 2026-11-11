@@ -1,0 +1,114 @@
+# test_concurrency_tasks.nv — Comprehensive test for spawn and await
+
+extern def _sys_get_tick_count_c() -> int
+
+def simple_zero() -> int {
+    return 42
+}
+
+def fib(n: int) -> int {
+    if n <= 1 { return n }
+    return fib(n - 1) + fib(n - 2)
+}
+
+def add_three(a: int, b: int, c: int) -> int {
+    return a + b + c
+}
+
+def compute_square(x: int) -> int {
+    return x * x
+}
+
+def main() {
+    print("=== Test 1: Zero-argument task ===")
+    let t0 = spawn simple_zero()
+    let r0 = await t0
+    print("Zero-arg task returned: " + str(r0))
+    if r0 != 42 {
+        print("FAIL: Expected 42")
+        exit(1)
+    }
+
+    print("=== Test 2: One-argument compute task (Fibonacci) ===")
+    let t1 = spawn fib(20)
+    let t2 = spawn fib(21)
+    let r1 = await t1
+    let r2 = await t2
+    print("fib(20) = " + str(r1))
+    print("fib(21) = " + str(r2))
+    if r1 != 6765 or r2 != 10946 {
+        print("FAIL: Fibonacci mismatch")
+        exit(1)
+    }
+
+    print("=== Test 3: Multiple arguments task ===")
+    let t3 = spawn add_three(100, 25, 7)
+    let r3 = await t3
+    print("add_three(100, 25, 7) = " + str(r3))
+    if r3 != 132 {
+        print("FAIL: Expected 132")
+        exit(1)
+    }
+
+    print("=== Test 4: Direct inline await expression ===")
+    let sum = await spawn compute_square(6) + await spawn compute_square(8)
+    print("6^2 + 8^2 = " + str(sum))
+    if sum != 100 {
+        print("FAIL: Expected 100")
+        exit(1)
+    }
+
+    print("=== Test 5: Parallel task fan-out in array ===")
+    let tasks = []
+    for i = 0 to 7 {
+        tasks.append(spawn compute_square(i))
+    }
+    let expected_total = 0
+    let actual_total = 0
+    for i = 0 to 7 {
+        let expected = i * i
+        expected_total = expected_total + expected
+        let val = await tasks[i]
+        actual_total = actual_total + val
+    }
+    print("Actual total = " + str(actual_total) + ", Expected = " + str(expected_total))
+    if actual_total != expected_total {
+        print("FAIL: Fan-out sum mismatch")
+        exit(1)
+    }
+
+    print("=== Test 6: Idempotent multiple awaits ===")
+    let t_idem = spawn fib(15)
+    let a1 = await t_idem
+    let a2 = await t_idem
+    print("First await: " + str(a1) + ", Second await: " + str(a2))
+    if a1 != 610 or a2 != 610 {
+        print("FAIL: Await idempotency failed")
+        exit(1)
+    }
+
+    print("=== Test 7: Multi-Core Parallel Speedup Benchmark ===")
+    let t_start_seq = _sys_get_tick_count_c()
+    let s1 = fib(34)
+    let s2 = fib(34)
+    let t_seq = _sys_get_tick_count_c() - t_start_seq
+    print("Sequential 2x fib(34): " + str(t_seq) + " ms")
+
+    let t_start_par = _sys_get_tick_count_c()
+    let p1_task = spawn fib(34)
+    let p2_task = spawn fib(34)
+    let p1 = await p1_task
+    let p2 = await p2_task
+    let t_par = _sys_get_tick_count_c() - t_start_par
+    print("Parallel 2x fib(34): " + str(t_par) + " ms")
+    if p1 != s1 or p2 != s2 {
+        print("FAIL: Parallel fib results do not match sequential")
+        exit(1)
+    }
+    print("Parallel speedup verified successfully!")
+
+    print("PASSED")
+}
+
+main()
+

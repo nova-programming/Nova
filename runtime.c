@@ -802,6 +802,7 @@ int main(void) {
 #endif
 #include <dlfcn.h>
 #include <execinfo.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -1436,6 +1437,9 @@ __asm__(".globl _out_of_bounds\n.set _out_of_bounds, __out_of_bounds");
 __asm__(".globl _nova_arc_alloc\n.set _nova_arc_alloc, __nova_arc_alloc");
 __asm__(".globl _nova_inc_ref\n.set _nova_inc_ref, __nova_inc_ref");
 __asm__(".globl _nova_dec_ref\n.set _nova_dec_ref, __nova_dec_ref");
+__asm__(".globl _nova_task_spawn\n.set _nova_task_spawn, __nova_task_spawn");
+__asm__(".globl _nova_task_await\n.set _nova_task_await, __nova_task_await");
+__asm__(".globl _nova_task_is_done\n.set _nova_task_is_done, __nova_task_is_done");
 __asm__(".globl _slice_cmp\n.set _slice_cmp, __slice_cmp");
 __asm__(".globl _slice_eq\n.set _slice_eq, __slice_eq");
 __asm__(".globl _slice_find\n.set _slice_find, __slice_find");
@@ -1485,7 +1489,8 @@ typedef enum {
   NOVA_VALUE_STRING = 3,
   NOVA_VALUE_BOOL = 4,
   NOVA_VALUE_INT = 5,
-  NOVA_VALUE_FLOAT = 6
+  NOVA_VALUE_FLOAT = 6,
+  NOVA_VALUE_TASK = 7
 } NovaValueKind;
 
 typedef struct {
@@ -1609,12 +1614,26 @@ SYSCALL void *_nova_arc_alloc(unsigned int size, uint32_t type_tag) {
   return (void *)(hdr + 1);
 }
 
+typedef struct NovaTask {
+  void *fn_ptr;
+  long long num_args;
+  long long args[6];
+  long long result;
+  volatile int completed;
+#if defined(_WIN32)
+  HANDLE done_event;
+#else
+  pthread_cond_t cond;
+  pthread_mutex_t mutex;
+#endif
+} NovaTask;
+
 SYSCALL void _nova_inc_ref(void *ptr) {
   if (!ptr || (uintptr_t)ptr < 0x10000ULL || (uintptr_t)ptr > 0x00007FFFFFFEFFFFULL)
     return;
   NovaARCHeader *hdr = ((NovaARCHeader *)ptr) - 1;
   if (hdr->magic == NOVA_ARC_MAGIC) {
-    hdr->ref_count++;
+    __atomic_fetch_add(&hdr->ref_count, 1, __ATOMIC_RELAXED);
   }
 }
 
@@ -1625,8 +1644,7 @@ SYSCALL void _nova_dec_ref(void *ptr) {
     return;
   NovaARCHeader *hdr = ((NovaARCHeader *)ptr) - 1;
   if (hdr->magic == NOVA_ARC_MAGIC) {
-    hdr->ref_count--;
-    if (hdr->ref_count <= 0) {
+    if (__atomic_sub_fetch(&hdr->ref_count, 1, __ATOMIC_ACQ_REL) <= 0) {
       if (hdr->type_tag == 1) { /* LIST */
         /* pad == 1 marks a .as_list()-wrapped view over caller-owned memory
          * (see _list_wrap) -- the wrapper is ours to free, the buffer it points
@@ -1644,6 +1662,17 @@ SYSCALL void _nova_dec_ref(void *ptr) {
       } else if (hdr->type_tag == 2) { /* DICT */
         dict_free(ptr);
         return;
+      } else if (hdr->type_tag == 7) { /* TASK */
+        NovaTask *task = (NovaTask *)ptr;
+#if defined(_WIN32)
+        if (task->done_event) {
+          CloseHandle(task->done_event);
+          task->done_event = NULL;
+        }
+#else
+        pthread_cond_destroy(&task->cond);
+        pthread_mutex_destroy(&task->mutex);
+#endif
       }
 #if defined(_WIN32)
       STR_PFX(free)(hdr);
@@ -1653,6 +1682,284 @@ SYSCALL void _nova_dec_ref(void *ptr) {
     }
   }
 }
+
+/* ==================== Concurrency Engine & Task Thread Pool ==================== */
+#define NOVA_TASK_QUEUE_CAP 4096
+
+typedef struct {
+  NovaTask **tasks;
+  int head;
+  int tail;
+  int count;
+#if defined(_WIN32)
+  CRITICAL_SECTION cs;
+  HANDLE sem;
+#else
+  pthread_mutex_t lock;
+  pthread_cond_t cv;
+#endif
+  int initialized;
+  int running;
+} NovaThreadPool;
+
+static NovaThreadPool g_nova_pool;
+
+#if defined(_WIN64)
+__asm__(
+".globl _nova_task_invoke\n"
+"_nova_task_invoke:\n"
+"    push %rbp\n"
+"    mov %rsp, %rbp\n"
+"    push %rbx\n"
+"    push %rdi\n"
+"    push %rsi\n"
+"    push %r12\n"
+"    push %r13\n"
+"    push %r14\n"
+"    push %r15\n"
+"    mov 0(%rcx), %r10\n"
+"    mov 16(%rcx), %rdi\n"
+"    mov 24(%rcx), %rsi\n"
+"    mov 32(%rcx), %rdx\n"
+"    mov 48(%rcx), %r8\n"
+"    mov 56(%rcx), %r9\n"
+"    mov 40(%rcx), %rcx\n"
+"    sub $48, %rsp\n"
+"    call *%r10\n"
+"    add $48, %rsp\n"
+"    pop %r15\n"
+"    pop %r14\n"
+"    pop %r13\n"
+"    pop %r12\n"
+"    pop %rsi\n"
+"    pop %rdi\n"
+"    pop %rbx\n"
+"    pop %rbp\n"
+"    ret\n"
+);
+long long _nova_task_invoke(NovaTask *task);
+#elif !defined(_WIN32) && defined(__x86_64__)
+__asm__(
+".globl _nova_task_invoke\n"
+"_nova_task_invoke:\n"
+"    push %rbp\n"
+"    mov %rsp, %rbp\n"
+"    push %rbx\n"
+"    push %r12\n"
+"    push %r13\n"
+"    push %r14\n"
+"    push %r15\n"
+"    mov %rdi, %r11\n"
+"    mov 0(%r11), %r10\n"
+"    mov 16(%r11), %rdi\n"
+"    mov 24(%r11), %rsi\n"
+"    mov 32(%r11), %rdx\n"
+"    mov 40(%r11), %rcx\n"
+"    mov 48(%r11), %r8\n"
+"    mov 56(%r11), %r9\n"
+"    sub $8, %rsp\n"
+"    call *%r10\n"
+"    add $8, %rsp\n"
+"    pop %r15\n"
+"    pop %r14\n"
+"    pop %r13\n"
+"    pop %r12\n"
+"    pop %rbx\n"
+"    pop %rbp\n"
+"    ret\n"
+);
+long long _nova_task_invoke(NovaTask *task);
+#endif
+
+static long long _nova_task_exec_inline(NovaTask *task) {
+  if (!task || !task->fn_ptr) return 0;
+#if defined(__x86_64__)
+  return _nova_task_invoke(task);
+#elif defined(__aarch64__)
+  typedef long long (*NovaTaskFn6)(long long, long long, long long, long long, long long, long long);
+  return ((NovaTaskFn6)task->fn_ptr)(task->args[0], task->args[1], task->args[2], task->args[3], task->args[4], task->args[5]);
+#else
+  return 0;
+#endif
+}
+
+#if defined(_WIN32)
+static DWORD WINAPI _nova_worker_thread(LPVOID arg) {
+  (void)arg;
+  while (g_nova_pool.running) {
+    WaitForSingleObject(g_nova_pool.sem, INFINITE);
+    if (!g_nova_pool.running) break;
+
+    EnterCriticalSection(&g_nova_pool.cs);
+    NovaTask *task = NULL;
+    if (g_nova_pool.count > 0) {
+      task = g_nova_pool.tasks[g_nova_pool.head];
+      g_nova_pool.head = (g_nova_pool.head + 1) % NOVA_TASK_QUEUE_CAP;
+      g_nova_pool.count--;
+    }
+    LeaveCriticalSection(&g_nova_pool.cs);
+
+    if (task) {
+      task->result = _nova_task_exec_inline(task);
+      __atomic_store_n(&task->completed, 1, __ATOMIC_RELEASE);
+      SetEvent(task->done_event);
+    }
+  }
+  return 0;
+}
+#else
+static void *_nova_worker_thread(void *arg) {
+  (void)arg;
+  while (g_nova_pool.running) {
+    pthread_mutex_lock(&g_nova_pool.lock);
+    while (g_nova_pool.count == 0 && g_nova_pool.running) {
+      pthread_cond_wait(&g_nova_pool.cv, &g_nova_pool.lock);
+    }
+    if (!g_nova_pool.running) {
+      pthread_mutex_unlock(&g_nova_pool.lock);
+      break;
+    }
+    NovaTask *task = g_nova_pool.tasks[g_nova_pool.head];
+    g_nova_pool.head = (g_nova_pool.head + 1) % NOVA_TASK_QUEUE_CAP;
+    g_nova_pool.count--;
+    pthread_mutex_unlock(&g_nova_pool.lock);
+
+    if (task) {
+      task->result = _nova_task_exec_inline(task);
+      __atomic_store_n(&task->completed, 1, __ATOMIC_RELEASE);
+      pthread_mutex_lock(&task->mutex);
+      pthread_cond_broadcast(&task->cond);
+      pthread_mutex_unlock(&task->mutex);
+    }
+  }
+  return NULL;
+}
+#endif
+
+static void _nova_pool_init(void) {
+  if (g_nova_pool.initialized) return;
+  g_nova_pool.head = 0;
+  g_nova_pool.tail = 0;
+  g_nova_pool.count = 0;
+  g_nova_pool.running = 1;
+#if defined(_WIN32)
+  g_nova_pool.tasks = (NovaTask **)STR_PFX(malloc)(sizeof(NovaTask *) * NOVA_TASK_QUEUE_CAP);
+#else
+  g_nova_pool.tasks = (NovaTask **)malloc(sizeof(NovaTask *) * NOVA_TASK_QUEUE_CAP);
+#endif
+
+  int num_threads = 4;
+#if defined(_WIN32)
+  InitializeCriticalSection(&g_nova_pool.cs);
+  g_nova_pool.sem = CreateSemaphoreA(NULL, 0, NOVA_TASK_QUEUE_CAP, NULL);
+  SYSTEM_INFO si;
+  GetSystemInfo(&si);
+  num_threads = (int)si.dwNumberOfProcessors;
+  if (num_threads < 2) num_threads = 2;
+  if (num_threads > 64) num_threads = 64;
+  for (int i = 0; i < num_threads; i++) {
+    HANDLE th = CreateThread(NULL, 0, _nova_worker_thread, NULL, 0, NULL);
+    if (th) CloseHandle(th);
+  }
+#else
+  pthread_mutex_init(&g_nova_pool.lock, NULL);
+  pthread_cond_init(&g_nova_pool.cv, NULL);
+  long nprocs = sysconf(_SC_NPROCESSORS_ONLN);
+  if (nprocs > 1) num_threads = (int)nprocs;
+  if (num_threads > 64) num_threads = 64;
+  for (int i = 0; i < num_threads; i++) {
+    pthread_t th;
+    pthread_create(&th, NULL, _nova_worker_thread, NULL);
+    pthread_detach(th);
+  }
+#endif
+  g_nova_pool.initialized = 1;
+}
+
+SYSCALL void *_nova_task_spawn(void *fn_ptr, long long num_args,
+                               long long a1, long long a2, long long a3,
+                               long long a4, long long a5, long long a6) {
+  if (!g_nova_pool.initialized) {
+    _nova_pool_init();
+  }
+  NovaTask *task = (NovaTask *)_nova_arc_alloc((unsigned int)sizeof(NovaTask), 7 /* NOVA_VALUE_TASK */);
+  if (!task) return NULL;
+  task->fn_ptr = fn_ptr;
+  task->num_args = num_args;
+  task->args[0] = a1;
+  task->args[1] = a2;
+  task->args[2] = a3;
+  task->args[3] = a4;
+  task->args[4] = a5;
+  task->args[5] = a6;
+  task->result = 0;
+  task->completed = 0;
+
+#if defined(_WIN32)
+  task->done_event = CreateEventA(NULL, TRUE, FALSE, NULL);
+#else
+  pthread_cond_init(&task->cond, NULL);
+  pthread_mutex_init(&task->mutex, NULL);
+#endif
+
+#if defined(_WIN32)
+  EnterCriticalSection(&g_nova_pool.cs);
+  if (g_nova_pool.count < NOVA_TASK_QUEUE_CAP) {
+    g_nova_pool.tasks[g_nova_pool.tail] = task;
+    g_nova_pool.tail = (g_nova_pool.tail + 1) % NOVA_TASK_QUEUE_CAP;
+    g_nova_pool.count++;
+    LeaveCriticalSection(&g_nova_pool.cs);
+    ReleaseSemaphore(g_nova_pool.sem, 1, NULL);
+  } else {
+    LeaveCriticalSection(&g_nova_pool.cs);
+    task->result = _nova_task_exec_inline(task);
+    __atomic_store_n(&task->completed, 1, __ATOMIC_RELEASE);
+    SetEvent(task->done_event);
+  }
+#else
+  pthread_mutex_lock(&g_nova_pool.lock);
+  if (g_nova_pool.count < NOVA_TASK_QUEUE_CAP) {
+    g_nova_pool.tasks[g_nova_pool.tail] = task;
+    g_nova_pool.tail = (g_nova_pool.tail + 1) % NOVA_TASK_QUEUE_CAP;
+    g_nova_pool.count++;
+    pthread_cond_signal(&g_nova_pool.cv);
+    pthread_mutex_unlock(&g_nova_pool.lock);
+  } else {
+    pthread_mutex_unlock(&g_nova_pool.lock);
+    task->result = _nova_task_exec_inline(task);
+    __atomic_store_n(&task->completed, 1, __ATOMIC_RELEASE);
+    pthread_mutex_lock(&task->mutex);
+    pthread_cond_broadcast(&task->cond);
+    pthread_mutex_unlock(&task->mutex);
+  }
+#endif
+
+  return (void *)task;
+}
+
+SYSCALL long long _nova_task_await(void *task_ptr) {
+  if (!task_ptr) return 0;
+  NovaTask *task = (NovaTask *)task_ptr;
+  if (!__atomic_load_n(&task->completed, __ATOMIC_ACQUIRE)) {
+#if defined(_WIN32)
+    WaitForSingleObject(task->done_event, INFINITE);
+#else
+    pthread_mutex_lock(&task->mutex);
+    while (!__atomic_load_n(&task->completed, __ATOMIC_ACQUIRE)) {
+      pthread_cond_wait(&task->cond, &task->mutex);
+    }
+    pthread_mutex_unlock(&task->mutex);
+#endif
+  }
+  return task->result;
+}
+
+SYSCALL int _nova_task_is_done(void *task_ptr) {
+  if (!task_ptr) return 1;
+  NovaTask *task = (NovaTask *)task_ptr;
+  return __atomic_load_n(&task->completed, __ATOMIC_ACQUIRE);
+}
+
 
 /* strcmp, strlen, strcpy are defined above on Windows, in <string.h> on
  * macOS/Linux */
@@ -1714,7 +2021,7 @@ static int _df_idx(void *d, const char *key, uint64_t hash) {
       return -1;
     if (IS_TOMBSTONE(e))
       continue;
-    if (e->hash == hash && strcmp(e->key, key) == 0)
+    if (e->hash == hash && (e->key == key || strcmp(e->key, key) == 0))
       return probe;
   }
   return -1;
@@ -1741,7 +2048,7 @@ static int _df_find_or_insert(void *d, const char *key, uint64_t hash) {
         first_tombstone = probe;
       continue;
     }
-    if (e->hash == hash && strcmp(e->key, key) == 0)
+    if (e->hash == hash && (e->key == key || strcmp(e->key, key) == 0))
       return probe;
   }
   if (first_tombstone >= 0)

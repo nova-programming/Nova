@@ -42,3 +42,27 @@ def get_data_strings() -> list {
             "str_fmode_rw: .asciz \"r+\"",
             "str_fmode_wp: .asciz \"w+\""]
 }
+
+
+def method_name_to_id(name: string) -> int {
+    switch name {
+        case "append" { return 1 }
+        case "pop" { return 2 }
+        case "get" { return 3 }
+        case "set" { return 4 }
+        case "has" { return 5 }
+        case "remove" { return 6 }
+        case "keys" { return 7 }
+        case "values" { return 8 }
+        case "items" { return 9 }
+        case "write" { return 10 }
+        case "awrite" { return 11 }
+        case "read" { return 12 }
+        case "close" { return 13 }
+        case "flush" { return 14 }
+        case "insert" { return 15 }
+        case "clear" { return 16 }
+        case "as_list" { return 17 }
+    }
+    return 0
+}

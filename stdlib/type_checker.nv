@@ -212,13 +212,7 @@ def tc_push_env(tc: TypeChecker) {
 
 def tc_pop_env(tc: TypeChecker) {
     if len(tc.env_stack) > 0 {
-        new_stack = []
-        i = 0
-        while i < len(tc.env_stack) - 1 {
-            new_stack.append(tc.env_stack[i])
-            i = i + 1
-        }
-        tc.env_stack = new_stack
+        _ = tc.env_stack.pop()
     }
 }
 
@@ -1017,7 +1011,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     # children so they get inferred types; otherwise the backend can't tell which struct a field
     # access like node.line belongs to and falls back to the first struct that has such a field.
     k = node.kind
-    if k == "StrConvert" or k == "UnaryOp" or k == "Slice" or k == "Alloc" or k == "Free" or k == "PointerProperty" or k == "PointerAssign" or k == "ReadFile" or k == "WriteFile" or k == "Openf" or k == "CloseFile" {
+    if k == "StrConvert" or k == "UnaryOp" or k == "Slice" or k == "Alloc" or k == "Free" or k == "PointerProperty" or k == "PointerAssign" or k == "ReadFile" or k == "WriteFile" or k == "Openf" or k == "CloseFile" or k == "Spawn" or k == "Await" {
         tc_visit(tc, node.left)
         tc_visit(tc, node.right)
         tc_visit(tc, node.cond)

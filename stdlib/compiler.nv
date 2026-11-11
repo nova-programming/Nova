@@ -542,10 +542,30 @@ def _verify_output(output_path: string) {
     }
 }
 
+def _runtime_stamp(path: string) -> string {
+    if file_exists(path) == 0 { return "" }
+    fd = sys_open(path, "r")
+    content = sys_read(fd)
+    sys_close(fd)
+    return str(len(content)) + ":" + str(text_fingerprint(content))
+}
+
 def _compile_runtime(gcc_name: string, target_os: string, target_arch: string, compiler_dir: string) {
     runtime_c_path = compiler_dir + "/runtime.c"
     runtime_o_path = compiler_dir + "/runtime.o"
+    stamp_path = compiler_dir + "/runtime.stamp"
     if file_exists(runtime_c_path) == 0 { return }
+
+    current_stamp = _runtime_stamp(runtime_c_path)
+    if file_exists(runtime_o_path) == 1 and file_exists(stamp_path) == 1 {
+        fd_s = sys_open(stamp_path, "r")
+        saved_stamp = sys_read(fd_s)
+        sys_close(fd_s)
+        if saved_stamp == current_stamp {
+            return
+        }
+    }
+
     if len(gcc_name) == 0 {
         print("ERROR: no 64-bit C compiler found; cannot build runtime.o")
         print("  Windows: re-run install.ps1 to bundle MinGW, macOS: xcode-select --install, Linux: sudo apt install build-essential")
@@ -568,7 +588,7 @@ def _compile_runtime(gcc_name: string, target_os: string, target_arch: string, c
         rc_arg = _quote(runtime_c_path)
         ro_arg = _quote(runtime_o_path)
     }
-    cmd = gcc_name + " -O3 -c " + rc_arg + " -o " + ro_arg
+    cmd = gcc_name + " -Os -c " + rc_arg + " -o " + ro_arg
     if target_os == "macos" {
         cmd = cmd + " -D MACOS"
         if target_arch == "arm64" { cmd = cmd + " -arch arm64" }
@@ -580,6 +600,9 @@ def _compile_runtime(gcc_name: string, target_os: string, target_arch: string, c
     print("Compiling runtime.c: " + cmd)
     system.system_exec(cmd)
     _verify_output(runtime_o_path)
+    fd_w = sys_open(stamp_path, "w")
+    sys_write(fd_w, current_stamp)
+    sys_close(fd_w)
 }
 
 def compile_to_file(input_path: string, output_path: string, debug_mode: int, target_arch: string, target_os: string) {
