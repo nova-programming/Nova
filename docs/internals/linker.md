@@ -1,4 +1,4 @@
-# Nova Linker Internals (`stdlib/linker.nv`)
+# Nova Linker Internals (`stdlib/backend/<arch>/linker.nv`)
 
 The `linker.nv` module constructs a Windows PE (Portable Executable) binary from raw byte streams produced by the assembler. Integrated via `assemble_link_file()` in `stdlib/compiler.nv` — the `nova assemble-link` command and `main.py`'s auto-fallback both use it. Supports both x86_64 (PE32+) and ARM64 PE32+ formats.
 
@@ -28,7 +28,7 @@ Import name resolution strips `@N` stdcall suffixes (e.g., `ExitProcess@4` → `
 
 ## Imports (x86_64 & ARM64 PE Linker)
 
-The integrated PE linker (`stdlib/linker.nv`) is used for the assembly-link path on both x86_64 and ARM64. The in-process assembler+linker (`assemble_link_file`) works for both architectures — no GCC or external toolchain needed. ARM64 uses its own PE32+ variant at `stdlib/backend/arm64/linker.nv`. GCC fallback is only used when the in-process path fails or when explicitly requested.
+The integrated PE linker (`stdlib/backend/<arch>/linker.nv`) is used for the assembly-link path on both x86_64 and ARM64. The in-process assembler+linker (`assemble_link_file`) works for both architectures — no GCC or external toolchain needed. ARM64 uses its own PE32+ variant at `stdlib/backend/arm64/linker.nv`. GCC fallback is only used when the in-process path fails or when explicitly requested.
 
 Generates thunks and IAT entries for external functions (`GetProcessHeap`, `HeapAlloc`, `WriteFile`, `CreateFileA`, `ReadFile`, `GetCommandLineA`, `ExitProcess`, `SetFilePointer`, `FlushFileBuffers`, `CloseHandle`, `GetStdHandle`), mapping them to `kernel32.dll` and constructing `IMAGE_IMPORT_DESCRIPTOR` structures.
 

@@ -51,4 +51,4 @@ def test_json_parse_in_stage2_compiler(stage2):
 def test_json_table_entries_registered():
     import names
     assert names.module_function("json", "parse") == "json_parse"
-    assert names.module_function("json", "keyAt") == "json_key_at"
+    assert names.module_function("json", "keyAt") == "json_keyAt"   # module members are camelCase; json_key_at stays as an alias

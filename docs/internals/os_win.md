@@ -1,8 +1,8 @@
-# Nova Windows OS Internals (`stdlib/os_win.nv`)
+# Nova Windows OS Internals (`stdlib/backend/<arch>/os_windows.nv`)
 
 Platform-specific HAL for Windows native compilation. All standard OS functions are natively injected and compiled into every executable (no import statement is required).
 
-Cross-platform equivalents exist: `os_linux.nv` (`sys_platform()` → `"linux"`) and `os_macos.nv` (`sys_platform()` → `"darwin"`). All implement the same API surface (`sys_open`, `sys_read`, `sys_write`, `sys_close`, `sys_system`, `sys_platform`, etc). The compiler selects the correct module based on `target_os`.
+The Unix equivalent is `os_unix.nv` in the same directory (Linux and macOS share it; `sys_platform()` calls into `runtime.c`, so the value comes from the C runtime rather than a per-OS Nova file). Both implement the same API surface (`sys_open`, `sys_read`, `sys_write`, `sys_close`, `sys_system`, `sys_platform`, etc). The compiler selects the correct module based on `target_os`.
 
 ## Functions
 

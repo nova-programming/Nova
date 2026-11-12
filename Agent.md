@@ -20,6 +20,11 @@ Nova is a programming language designed to bridge Python-like readability and ea
    - Verify byte-for-byte identity (`Stage 2 == Stage 3`).
 4. **Git Commands**: Never execute git commands unless explicitly instructed.
 5. **No Hardcoding**: Maintain scalable, modular, clean constants and parameters.
+6. **Public API Naming Rule (`module.camelCase`)**: All public library APIs in Nova follow module-qualified calls with dot notation and camelCase member names (e.g. `ui.open()`, `ui.stack()`, `ui.next()`, `audio.beep()`, `net.listen()`, `fs.read()`, `text.trim()`). Mapped at parse-time in `nova/bootstrap/names.py` and `nova/stdlib/names.nv` to underlying runtime symbols with zero runtime cost, zero ABI impact, and backwards compatibility.
+7. **UI Layout, Alignment, and Non-Overflow Invariant**:
+   - Variables & constants: `UI_LEFT` / `LEFT` (0), `UI_CENTER` / `CENTER` (1), `UI_RIGHT` / `RIGHT` (2). Also available as `ui.left()`, `ui.center()`, `ui.right()`.
+   - Grid & flow layout: `ui.stack(x, y, w)` for vertical stacking; `ui.row(y, h, cols, gap)` + `ui.colX(i)` + `ui.colW()` for fluid multi-column horizontal layouts without manual offset arithmetic.
+   - Zero-Overflow Default: All text rendered through `ui.text()`, `ui.textCenter()`, and `ui.textRight()` automatically clips at container boundaries (`max_w` / `ui.stackW()`) via `typo_draw_clipped_ptr` unless `overflow=1` is explicitly requested by the caller. Text never spills outside its widget or window.
 
 ---
 
@@ -2441,6 +2446,121 @@ Cleanly partitioned `baremetal_os/` into a modular 7-tier domain architecture:
   - `baremetal_os/build.ps1`: Kernel compiles cleanly (**84,805 lines** of native assembly, zero warnings).
   - `python baremetal_os/test_kernel.py`: **100% PASS (28/28 test commands passed)** across Ring 3 isolation, IPC pipes, SMP APIC scheduler, screenshot capture, and desktop compositing.
 
+---
+
+## 83. Declarative Container Trailing Blocks, Canonical camelCase UI & Enum Namespaces
+- **Status**: **COMPLETED & VERIFIED (100% PASS)**.
+- **Part I: Canonical camelCase Naming Rule (`nova/stdlib/names.nv`, `ui.nv`)**:
+  - Internal library functions transitioned to canonical camelCase definitions:
+    - `ui.nv`: `window`, `quit`, `frame`, `endFrame`, `stack`, `endStack`, `card`, `endCard`, `row`, `endRow`, `button`, `text`, `textCenter`, `textRight`, `meter`, `badge`, `divider`, `rect`, `clear`, `group`, `poll`, `hit`, `clicked`, `eventX`, `eventY`, `eventKey`, `width`, `height`, `padding`, `gap`, `buttonHeight`, `setPadding`, `setGap`, `setRadius`, `setButtonHeight`, `theme`, `wait`, `rgb`, `next`, `colX`, `colW`, `stackX`, `stackW`, `left`, `center`, `right`.
+  - Full backwards-compatible forwarding aliases preserved for legacy `ui_*` calls.
+- **Part II: Compile-Time Enum Namespaces (`align`, `size`, `style`, `ui`)**:
+  - Enum constants (`align.left`, `align.center`, `align.right`, `size.fit`, `size.fill`, `style.plain`, `style.primary`, `ui.accent`, etc.) folded into integer constants at parse time in both Python bootstrap and self-hosted `parser.nv`.
+  - Zero runtime overhead and zero memory allocations.
+- **Part III: General Trailing Block Language Feature (`@container`)**:
+  - Syntax: `f(args) { ... }` desugars into `f(args)` -> `body` -> `end_f()`.
+  - Safety invariants:
+    - Requires explicit `@container def f(...)` marker on container functions. Non-containers reject trailing blocks with syntax error.
+    - Requires opening brace `{` on the same line as the call.
+    - AST desugaring wraps the block and injects `end_f()` calls immediately before any early `return` or `break` statement, guaranteeing matched container push/pop balancing.
+- **Part IV: Hierarchical Container Layout & Click-by-ID (`nova/stdlib/ui.nv`)**:
+  - `MAX_CONTAINER_DEPTH = 8` tracked in `UI_STATE` with overflow protection.
+  - `ui.stack(padding, gap)`: Vertical layout container with automatic inter-item margin flow.
+  - `ui.card(height, padding)`: Frosted glass panel chassis containing child auto-flow elements.
+  - `ui.row(gap, cols)`: Horizontal multi-column container auto-distributing child widgets (`button`, etc.) into columns without coordinate arithmetic.
+  - Click-by-ID: `ui.button(..., id=n)` records hit on click; `ui.clicked(n)` provides $O(1)$ event query.
+- **Part V: Modern Declarative `counter_ui.nv` User Application**:
+  - Re-authored with zero manual coordinate math using nested trailing blocks:
+    ```nova
+    ui.frame {
+        ui.stack(padding=16, gap=12) {
+            ui.text("Interactive Counter", align=align.center, bold=true)
+            ui.card(height=48) {
+                ui.meter(percent=n * 10, color=ui.accent)
+            }
+            ui.row(gap=12, cols=2) {
+                ui.button("Add 10%", style=style.primary, id=0)
+                ui.button("Reset", style=style.plain, id=1)
+            }
+        }
+    }
+    ```
+- **Part VI: Regression Verification**:
+  - Self-hosted compiler `nova/nova.exe` compiled from `nova.nv` with zero errors.
+  - `nova/tests/test_names.py`: **21/21 PASS (100%)**.
+  - `baremetal_os/test_memmap.py` & `baremetal_os/test_ui_shell.py`: **7/7 PASS (100%)**.
+  - `baremetal_os/build.ps1`: Builds all Ring 3 ELFs, `counter.nva`, and kernel image cleanly.
+
+---
+
+## 84. Automatic Dynamic Module Namespacing, Post-Parse Resolver Pass, `@export` System & Retirement of `names.nv`
+- **Status**: **COMPLETED & VERIFIED (100% PASS)**.
+- **Architectural Motivation**:
+  - Previously, adding or renaming a module member required manual entries across `nova/stdlib/names.nv` and `nova/bootstrap/names.py`.
+  - Replaced with a single source of truth: each module declares its own exports directly in source via mechanical derivation or `@export("alias")`, eliminating the central table.
+- **Pillar 1: Two-Step Post-Parse Resolver Pass (`resolve_module_nodes`)**:
+  - Decouples parsing from module symbol table visibility. Every file parses into an AST retaining `MethodCall` nodes intact.
+  - After `resolve_imports` expands imported modules and populates the AST, `resolve_module_nodes` traverses the AST and rewrites `mod.member(...)` calls against module export symbol tables.
+  - Prevents parser loops and keeps recursive-descent parsing fast and modular.
+- **Pillar 2: Deterministic Module Exports via `@export` & Scoped Symbol Tables**:
+  - Mechanical derivation: functions prefixed with `<module>_` automatically expose both camelCase and snake_case member names (e.g. `calc_helper_multiply_nums` -> `calc_helper.multiplyNums` and `calc_helper.multiply_nums`).
+  - Explicit renames: `@export("alias") def ...` maps custom member names to internal implementations (e.g. `@export("base") def path_basename`, `@export("ticks") def time_ticks_ms`, `@export("alloc") def new_buffer`, `@export("makeDir") def fs_mkdir`).
+  - File-scoped resolution: `mod.x` resolves strictly against symbols declared within `mod`'s own file, guaranteeing zero global symbol collisions.
+- **Pillar 3: Lexical Shadowing & Variable Precedence**:
+  - `scan_locals` performs recursive AST scans to track all locally assigned variables in functions and blocks.
+  - Variables that shadow module names (e.g. `fs = 42; print(fs)`) always take precedence over imports and are never rewritten. Plain unimported variables remain completely untouched.
+- **Pillar 4: Dynamic Typo Suggestions via Levenshtein Edit Distance**:
+  - `suggest_member_name` compares mistyped member names against candidate lists of actual exported functions.
+  - When an unknown member is called, the compiler emits structured diagnostics with actionable hints (e.g. `did you mean 'calc_helper.multiplyNums'?`).
+- **Pillar 5: Complete Retirement of `names.nv`**:
+  - `nova/stdlib/names.nv` permanently deleted.
+  - Pseudo-module constants (`align.*`, `size.*`, `style.*`, `ui.*`) migrated to `parser.nv` as lightweight compile-time constants.
+- **Pillar 6: Self-Host Parity & Full Test Suite Pass**:
+  - Self-hosted `nova.exe` compiled and verified deterministically across Stage 1 and Stage 2.
+  - `nova/tests/test_names.py`: **21/21 PASS (100%)** (added tests for user-written modules, typo hints, and shadowed module variables).
+  - `baremetal_os/test_memmap.py` & `test_ui_shell.py`: **7/7 PASS (100%)**.
+  - `baremetal_os/build.ps1`: Baremetal OS kernel `kernel.elf` compiles and links cleanly.
+
+---
+
+## 85. Global Modern CamelCase Function Format in Stdlib, Automatic Compiler Symbol Namespacing, and Zero Legacy Forwarding Clutter
+- **Status**: **COMPLETED & VERIFIED (100% PASS)**.
+- **Architectural Motivation**:
+  - Previously, standard library modules retained legacy prefix aliases (e.g. `path_basename`, `path_dirname`, `path_extension`, `path_join2`, `fs_mkdir`, `fs_read_text`, `fs_write_text`, `audio_beep`, `text_to_int`) and single-letter parameter names (`p`, `x`, `y`).
+  - All standard library source files have been overhauled into pure canonical `camelCase` / modern function definitions with semantic, descriptive parameter names and zero legacy wrapper boilerplate or `@export` annotations.
+- **Pillar 1: Complete Overhaul of Standard Library Files**:
+  - `path.nv`: Pure `join(pathParts: list[string])`, `base(targetPath: string)`, `dir(targetPath: string)`, `isAbsolute(targetPath: string)`, `normalize(targetPath: string)`, `ext(targetPath: string)`, `toForward(targetPath: string)`. Zero `path_*` prefixes or legacy forwarding wrappers.
+  - `fs.nv`: Pure `exists(filePath: string)`, `size(filePath: string)`, `kind(filePath: string)`, `makeDir(directoryPath: string)`, `delete(targetPath: string)`, `listDir(directoryPath: string)`, `copy(sourcePath: string, destinationPath: string)`, `move(sourcePath: string, destinationPath: string)`, `read(filePath: string)`, `write(filePath: string, fileContent: string)`, `writeAtomic(filePath: string, fileContent: string)`. Zero `fs_*` prefixes or legacy forwarding wrappers.
+  - `time.nv`: Pure `now()`, `ticks()`, `nowUs()`, `nowMs()`, `sleep(durationMs: int)`.
+  - `buffer.nv`: Pure `alloc(sizeBytes: int)`, `new(sizeBytes: int)`.
+  - `net.nv`: Pure `init()`, `setTimeout(socketFd: int, timeoutMs: int)`, `listen(portNumber: int, backlogCount: int)`, `connect(ipAddress: string, portNumber: int)`.
+  - `env.nv`: Pure `args()`, `platform()`, `get(variableName: string)`, `set(variableName: string, variableValue: string)`.
+  - `process.nv`: Pure `exit(exitCode: int)`, `shell(commandString: string)`, `run(commandArgs: list)`, `capture(commandString: string)`, `captureOutput(rawResult: string)`, `captureCode(rawResult: string)`.
+  - `audio.nv`: Pure `beep(frequencyHz: int, durationMs: int)`, `click()`, `success()`, `error()`, `playNote(noteName: string, durationMs: int)`, `sampleSine(phaseDegrees: int)`, `sampleSquare(phaseDegrees: int)`, `sampleTriangle(phaseDegrees: int)`, `sampleNoise(timeStep: int)`.
+  - `text.nv`: Pure `toInt(targetString: string)`, `isSpace(charString: string)`, `trim(targetString: string)`, `startsWith(targetString: string, prefixString: string)`, `endsWith(targetString: string, suffixString: string)`, `indexOf(targetString: string, needleString: string)`, `contains(targetString: string, needleString: string)`, `replace(sourceString: string, findString: string, replacementString: string)`, `split(sourceString: string, delimiterString: string)`, `join(partsList: list, separatorString: string)`, `repeat(sourceString: string, repeatCount: int)`, `swapCase(sourceString: string)`, `upper(sourceString: string)`, `lower(sourceString: string)`, `words(sourceString: string)`, `lines(sourceString: string)`, `padLeft(targetString: string, targetWidth: int, paddingCharacter: string)`, `padRight(targetString: string, targetWidth: int, paddingCharacter: string)`, `count(targetString: string, needleString: string)`, `capitalize(sourceString: string)`, `slice(targetString: string, startIndex: int, endIndex: int)`.
+  - `json.nv`: Pure `stringify(targetValue)`, `decode(...)`, `src(...)`, `make(...)`, `same(...)`, `fail(...)`, `skipSpace(...)`, `parseString(...)`, `parseWord(...)`, `parseNumber(...)`, `parseArray(...)`, `parseObject(...)`, `parseValue(...)`, `parse(jsonSource: string)`, `kind(...)`, `asInt(...)`, `asString(...)`, `asBool(...)`, `size(...)`, `at(...)`, `keyAt(...)`, `find(...)`, `has(...)`, `get(...)`, `newCursor(...)`, `nextToken(...)`, `tokenKind(...)`, `tokenText(...)`, `tokenPos(...)`.
+  - `compiler.nv` & `nova.nv`: Modernized internal functions to `camelCase` (`strToInt`, `printHelp`, `snakeToCamel`, `suggestMemberName`, `compileToExe`, `compileToBare`, `assembleBareFile`, `assembleLinkFile`, `compileFile`, `checkSyntaxSource`, `checkSource`, `checkFile`, `namespaceModuleAst`, `collectModuleExports`, `resolveImports`).
+- **Pillar 2: Automatic Compiler Module Symbol Namespacing**:
+  - Implemented in both self-hosted `compiler.nv` (`namespace_module_ast`) and Python bootstrap `resolver.py` (`_namespace_ast`).
+  - Full module set covered: `("fs", "path", "buffer", "net", "time", "env", "process", "audio", "text", "json")`.
+  - When any stdlib module is imported, its top-level functions are automatically namespaced to `<module>_<function>` (e.g. `fs_read`, `path_base`, `env_platform`, `text_toInt`, `audio_beep`).
+  - Internal calls within modules (e.g. `writeAtomic` calling `delete` and `move`, `ext` calling `base`, `captureOutput` calling `text.indexOf`) resolve smoothly.
+  - Assembly symbols emitted are prefixed (`_fs_read`, `_env_platform`), completely eliminating collisions with C libc POSIX functions (`_read(int fd)`, `_platform`) and soft keywords.
+- **Pillar 3: Scope Guard for Flat Monolithic Compilation**:
+  - `shouldNamespaceModule(module_name, found_path)` ensures only stdlib public modules are mangled (`str_contains(found_path, "stdlib") != 0`).
+  - Monolithic project modules, kernel drivers, and flat user-space modules (`baremetal_os/fs/fs.nv`, `slab.nv`, `scheduler.nv`, `ulib.nv`) remain completely unmangled with zero naming interference.
+- **Pillar 4: Complete Test Suite & System Verification**:
+  - Self-hosted Stage 2 `nova.exe` compiled and verified deterministically.
+  - `nova/tests/test_names.py`: **21/21 PASS (100%)**.
+  - `baremetal_os/test_memmap.py` & `baremetal_os/test_ui_shell.py`: **7/7 PASS (100%)**.
+  - `baremetal_os/build.ps1`: Builds all Ring 3 user ELF applications (`hello.elf`, `bench.elf`, `counter.elf`, `pipe_test.elf`, `paint.elf`, `fault.elf`), `counter.nva`, `disk.img`, and freestanding Multiboot `kernel.elf` (93,645 lines) cleanly.
+
+
+
+
+
+
+
 
 
 
@@ -2825,9 +2945,114 @@ Cleanly partitioned `baremetal_os/` into a modular 7-tier domain architecture:
   - `baremetal_os/build.ps1`: Kernel compiles cleanly (**84,805 lines** of native assembly, zero warnings).
   - `python baremetal_os/test_kernel.py`: **100% PASS (28/28 test commands passed)** across Ring 3 isolation, IPC pipes, SMP APIC scheduler, screenshot capture, and desktop compositing.
 
+---
 
+## 83. Declarative Container Trailing Blocks, Canonical camelCase UI & Enum Namespaces
+- **Status**: **COMPLETED & VERIFIED (100% PASS)**.
+- **Part I: Canonical camelCase Naming Rule (`nova/stdlib/names.nv`, `ui.nv`)**:
+  - Internal library functions transitioned to canonical camelCase definitions:
+    - `ui.nv`: `window`, `quit`, `frame`, `endFrame`, `stack`, `endStack`, `card`, `endCard`, `row`, `endRow`, `button`, `text`, `textCenter`, `textRight`, `meter`, `badge`, `divider`, `rect`, `clear`, `group`, `poll`, `hit`, `clicked`, `eventX`, `eventY`, `eventKey`, `width`, `height`, `padding`, `gap`, `buttonHeight`, `setPadding`, `setGap`, `setRadius`, `setButtonHeight`, `theme`, `wait`, `rgb`, `next`, `colX`, `colW`, `stackX`, `stackW`, `left`, `center`, `right`.
+  - Full backwards-compatible forwarding aliases preserved for legacy `ui_*` calls.
+- **Part II: Compile-Time Enum Namespaces (`align`, `size`, `style`, `ui`)**:
+  - Enum constants (`align.left`, `align.center`, `align.right`, `size.fit`, `size.fill`, `style.plain`, `style.primary`, `ui.accent`, etc.) folded into integer constants at parse time in both Python bootstrap and self-hosted `parser.nv`.
+  - Zero runtime overhead and zero memory allocations.
+- **Part III: General Trailing Block Language Feature (`@container`)**:
+  - Syntax: `f(args) { ... }` desugars into `f(args)` -> `body` -> `end_f()`.
+  - Safety invariants:
+    - Requires explicit `@container def f(...)` marker on container functions. Non-containers reject trailing blocks with syntax error.
+    - Requires opening brace `{` on the same line as the call.
+    - AST desugaring wraps the block and injects `end_f()` calls immediately before any early `return` or `break` statement, guaranteeing matched container push/pop balancing.
+- **Part IV: Hierarchical Container Layout & Click-by-ID (`nova/stdlib/ui.nv`)**:
+  - `MAX_CONTAINER_DEPTH = 8` tracked in `UI_STATE` with overflow protection.
+  - `ui.stack(padding, gap)`: Vertical layout container with automatic inter-item margin flow.
+  - `ui.card(height, padding)`: Frosted glass panel chassis containing child auto-flow elements.
+  - `ui.row(gap, cols)`: Horizontal multi-column container auto-distributing child widgets (`button`, etc.) into columns without coordinate arithmetic.
+  - Click-by-ID: `ui.button(..., id=n)` records hit on click; `ui.clicked(n)` provides $O(1)$ event query.
+- **Part V: Modern Declarative `counter_ui.nv` User Application**:
+  - Re-authored with zero manual coordinate math using nested trailing blocks:
+    ```nova
+    ui.frame {
+        ui.stack(padding=16, gap=12) {
+            ui.text("Interactive Counter", align=align.center, bold=true)
+            ui.card(height=48) {
+                ui.meter(percent=n * 10, color=ui.accent)
+            }
+            ui.row(gap=12, cols=2) {
+                ui.button("Add 10%", style=style.primary, id=0)
+                ui.button("Reset", style=style.plain, id=1)
+            }
+        }
+    }
+    ```
+- **Part VI: Regression Verification**:
+  - Self-hosted compiler `nova/nova.exe` compiled from `nova.nv` with zero errors.
+  - `nova/tests/test_names.py`: **21/21 PASS (100%)**.
+  - `baremetal_os/test_memmap.py` & `baremetal_os/test_ui_shell.py`: **7/7 PASS (100%)**.
+  - `baremetal_os/build.ps1`: Builds all Ring 3 ELFs, `counter.nva`, and kernel image cleanly.
 
+---
 
+## 84. Automatic Dynamic Module Namespacing, Post-Parse Resolver Pass, `@export` System & Retirement of `names.nv`
+- **Status**: **COMPLETED & VERIFIED (100% PASS)**.
+- **Architectural Motivation**:
+  - Previously, adding or renaming a module member required manual entries across `nova/stdlib/names.nv` and `nova/bootstrap/names.py`.
+  - Replaced with a single source of truth: each module declares its own exports directly in source via mechanical derivation or `@export("alias")`, eliminating the central table.
+- **Pillar 1: Two-Step Post-Parse Resolver Pass (`resolve_module_nodes`)**:
+  - Decouples parsing from module symbol table visibility. Every file parses into an AST retaining `MethodCall` nodes intact.
+  - After `resolve_imports` expands imported modules and populates the AST, `resolve_module_nodes` traverses the AST and rewrites `mod.member(...)` calls against module export symbol tables.
+  - Prevents parser loops and keeps recursive-descent parsing fast and modular.
+- **Pillar 2: Deterministic Module Exports via `@export` & Scoped Symbol Tables**:
+  - Mechanical derivation: functions prefixed with `<module>_` automatically expose both camelCase and snake_case member names (e.g. `calc_helper_multiply_nums` -> `calc_helper.multiplyNums` and `calc_helper.multiply_nums`).
+  - Explicit renames: `@export("alias") def ...` maps custom member names to internal implementations (e.g. `@export("base") def path_basename`, `@export("ticks") def time_ticks_ms`, `@export("alloc") def new_buffer`, `@export("makeDir") def fs_mkdir`).
+  - File-scoped resolution: `mod.x` resolves strictly against symbols declared within `mod`'s own file, guaranteeing zero global symbol collisions.
+- **Pillar 3: Lexical Shadowing & Variable Precedence**:
+  - `scan_locals` performs recursive AST scans to track all locally assigned variables in functions and blocks.
+  - Variables that shadow module names (e.g. `fs = 42; print(fs)`) always take precedence over imports and are never rewritten. Plain unimported variables remain completely untouched.
+- **Pillar 4: Dynamic Typo Suggestions via Levenshtein Edit Distance**:
+  - `suggest_member_name` compares mistyped member names against candidate lists of actual exported functions.
+  - When an unknown member is called, the compiler emits structured diagnostics with actionable hints (e.g. `did you mean 'calc_helper.multiplyNums'?`).
+- **Pillar 5: Complete Retirement of `names.nv`**:
+  - `nova/stdlib/names.nv` permanently deleted.
+  - Pseudo-module constants (`align.*`, `size.*`, `style.*`, `ui.*`) migrated to `parser.nv` as lightweight compile-time constants.
+- **Pillar 6: Self-Host Parity & Full Test Suite Pass**:
+  - Self-hosted `nova.exe` compiled and verified deterministically across Stage 1 and Stage 2.
+  - `nova/tests/test_names.py`: **21/21 PASS (100%)** (added tests for user-written modules, typo hints, and shadowed module variables).
+  - `baremetal_os/test_memmap.py` & `test_ui_shell.py`: **7/7 PASS (100%)**.
+  - `baremetal_os/build.ps1`: Baremetal OS kernel `kernel.elf` compiles and links cleanly.
+
+---
+
+## 85. Global Modern CamelCase Function Format in Stdlib, Automatic Compiler Symbol Namespacing, and Zero Legacy Forwarding Clutter
+- **Status**: **COMPLETED & VERIFIED (100% PASS)**.
+- **Architectural Motivation**:
+  - Previously, standard library modules retained legacy prefix aliases (e.g. `path_basename`, `path_dirname`, `path_extension`, `path_join2`, `fs_mkdir`, `fs_read_text`, `fs_write_text`, `audio_beep`, `text_to_int`) and single-letter parameter names (`p`, `x`, `y`).
+  - All standard library source files have been overhauled into pure canonical `camelCase` / modern function definitions with semantic, descriptive parameter names and zero legacy wrapper boilerplate or `@export` annotations.
+- **Pillar 1: Complete Overhaul of Standard Library Files**:
+  - `path.nv`: Pure `join(pathParts: list[string])`, `base(targetPath: string)`, `dir(targetPath: string)`, `isAbsolute(targetPath: string)`, `normalize(targetPath: string)`, `ext(targetPath: string)`, `toForward(targetPath: string)`. Zero `path_*` prefixes or legacy forwarding wrappers.
+  - `fs.nv`: Pure `exists(filePath: string)`, `size(filePath: string)`, `kind(filePath: string)`, `makeDir(directoryPath: string)`, `delete(targetPath: string)`, `listDir(directoryPath: string)`, `copy(sourcePath: string, destinationPath: string)`, `move(sourcePath: string, destinationPath: string)`, `read(filePath: string)`, `write(filePath: string, fileContent: string)`, `writeAtomic(filePath: string, fileContent: string)`. Zero `fs_*` prefixes or legacy forwarding wrappers.
+  - `time.nv`: Pure `now()`, `ticks()`, `nowUs()`, `nowMs()`, `sleep(durationMs: int)`.
+  - `buffer.nv`: Pure `alloc(sizeBytes: int)`, `new(sizeBytes: int)`.
+  - `net.nv`: Pure `init()`, `setTimeout(socketFd: int, timeoutMs: int)`, `listen(portNumber: int, backlogCount: int)`, `connect(ipAddress: string, portNumber: int)`.
+  - `env.nv`: Pure `args()`, `platform()`, `get(variableName: string)`, `set(variableName: string, variableValue: string)`.
+  - `process.nv`: Pure `exit(exitCode: int)`, `shell(commandString: string)`, `run(commandArgs: list)`, `capture(commandString: string)`, `captureOutput(rawResult: string)`, `captureCode(rawResult: string)`.
+  - `audio.nv`: Pure `beep(frequencyHz: int, durationMs: int)`, `click()`, `success()`, `error()`, `playNote(noteName: string, durationMs: int)`, `sampleSine(phaseDegrees: int)`, `sampleSquare(phaseDegrees: int)`, `sampleTriangle(phaseDegrees: int)`, `sampleNoise(timeStep: int)`.
+  - `text.nv`: Pure `toInt(targetString: string)`, `isSpace(charString: string)`, `trim(targetString: string)`, `startsWith(targetString: string, prefixString: string)`, `endsWith(targetString: string, suffixString: string)`, `indexOf(targetString: string, needleString: string)`, `contains(targetString: string, needleString: string)`, `replace(sourceString: string, findString: string, replacementString: string)`, `split(sourceString: string, delimiterString: string)`, `join(partsList: list, separatorString: string)`, `repeat(sourceString: string, repeatCount: int)`, `swapCase(sourceString: string)`, `upper(sourceString: string)`, `lower(sourceString: string)`, `words(sourceString: string)`, `lines(sourceString: string)`, `padLeft(targetString: string, targetWidth: int, paddingCharacter: string)`, `padRight(targetString: string, targetWidth: int, paddingCharacter: string)`, `count(targetString: string, needleString: string)`, `capitalize(sourceString: string)`, `slice(targetString: string, startIndex: int, endIndex: int)`.
+  - `json.nv`: Pure `stringify(targetValue)`, `decode(...)`, `src(...)`, `make(...)`, `same(...)`, `fail(...)`, `skipSpace(...)`, `parseString(...)`, `parseWord(...)`, `parseNumber(...)`, `parseArray(...)`, `parseObject(...)`, `parseValue(...)`, `parse(jsonSource: string)`, `kind(...)`, `asInt(...)`, `asString(...)`, `asBool(...)`, `size(...)`, `at(...)`, `keyAt(...)`, `find(...)`, `has(...)`, `get(...)`, `newCursor(...)`, `nextToken(...)`, `tokenKind(...)`, `tokenText(...)`, `tokenPos(...)`.
+  - `compiler.nv` & `nova.nv`: Modernized internal functions to `camelCase` (`strToInt`, `printHelp`, `snakeToCamel`, `suggestMemberName`, `compileToExe`, `compileToBare`, `assembleBareFile`, `assembleLinkFile`, `compileFile`, `checkSyntaxSource`, `checkSource`, `checkFile`, `namespaceModuleAst`, `collectModuleExports`, `resolveImports`).
+- **Pillar 2: Automatic Compiler Module Symbol Namespacing**:
+  - Implemented in both self-hosted `compiler.nv` (`namespace_module_ast`) and Python bootstrap `resolver.py` (`_namespace_ast`).
+  - Full module set covered: `("fs", "path", "buffer", "net", "time", "env", "process", "audio", "text", "json")`.
+  - When any stdlib module is imported, its top-level functions are automatically namespaced to `<module>_<function>` (e.g. `fs_read`, `path_base`, `env_platform`, `text_toInt`, `audio_beep`).
+  - Internal calls within modules (e.g. `writeAtomic` calling `delete` and `move`, `ext` calling `base`, `captureOutput` calling `text.indexOf`) resolve smoothly.
+  - Assembly symbols emitted are prefixed (`_fs_read`, `_env_platform`), completely eliminating collisions with C libc POSIX functions (`_read(int fd)`, `_platform`) and soft keywords.
+- **Pillar 3: Scope Guard for Flat Monolithic Compilation**:
+  - `shouldNamespaceModule(module_name, found_path)` ensures only stdlib public modules are mangled (`str_contains(found_path, "stdlib") != 0`).
+  - Monolithic project modules, kernel drivers, and flat user-space modules (`baremetal_os/fs/fs.nv`, `slab.nv`, `scheduler.nv`, `ulib.nv`) remain completely unmangled with zero naming interference.
+- **Pillar 4: Complete Test Suite & System Verification**:
+  - Self-hosted Stage 2 `nova.exe` compiled and verified deterministically.
+  - `nova/tests/test_names.py`: **21/21 PASS (100%)**.
+  - `baremetal_os/test_memmap.py` & `baremetal_os/test_ui_shell.py`: **7/7 PASS (100%)**.
+  - `baremetal_os/build.ps1`: Builds all Ring 3 user ELF applications (`hello.elf`, `bench.elf`, `counter.elf`, `pipe_test.elf`, `paint.elf`, `fault.elf`), `counter.nva`, `disk.img`, and freestanding Multiboot `kernel.elf` (93,645 lines) cleanly.
 
 
 

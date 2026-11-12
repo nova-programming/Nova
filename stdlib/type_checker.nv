@@ -13,6 +13,12 @@ data TypeChecker {
     current_ret: Type
     filename: string
     named_func_map: dict
+    global_names: dict
+    global_consts: dict
+    fn_missing: dict
+    fn_assigned: dict
+    pending: list
+    name_pool: list
 }
 
 data NamedFunc {
@@ -41,15 +47,21 @@ def tc_init(tc: TypeChecker) {
     tc.named_func_map = {}
     tc.current_ret = 0
     tc.filename = ""
-    
+    tc.global_names = {}
+    tc.global_consts = {}
+    tc.fn_missing = {}
+    tc.fn_assigned = {}
+    tc.pending = []
+    tc.name_pool = []
+
     # sys_alloc(size: int) -> any
     sys_alloc_t = create_func_type([create_scalar_type("int")], create_any_type())
     tc_add_func(tc, "sys_alloc", sys_alloc_t)
-    
+
     # sys_free(ptr: any) -> void
     sys_free_t = create_func_type([create_any_type()], create_scalar_type("void"))
     tc_add_func(tc, "sys_free", sys_free_t)
-    
+
     # sys_exit(code: int) -> void
     sys_exit_t = create_func_type([create_scalar_type("int")], create_scalar_type("void"))
     tc_add_func(tc, "sys_exit", sys_exit_t)
@@ -105,11 +117,11 @@ def tc_init(tc: TypeChecker) {
     # alloc(size: int) -> any
     alloc_t = create_func_type([create_scalar_type("int")], create_any_type())
     tc_add_func(tc, "alloc", alloc_t)
-    
+
     # len(target: any) -> int
     len_t = create_func_type([create_any_type()], create_scalar_type("int"))
     tc_add_func(tc, "len", len_t)
-    
+
     # print(val: any) -> void
     print_t = create_func_type([create_any_type()], create_scalar_type("void"))
     tc_add_func(tc, "print", print_t)
@@ -266,21 +278,146 @@ def tc_pop_env(tc: TypeChecker) {
     }
 }
 
+# A real assignment / parameter: the name counts as defined in the current function
 def tc_set_var(tc: TypeChecker, name: string, typ: Type) {
+    tc.fn_assigned.set(name, 1)
+    return tc_set_var_quiet(tc, name, typ)
+}
+
+# Same, without marking the name defined (used to cache the type of a read that found nothing)
+def tc_set_var_quiet(tc: TypeChecker, name: string, typ: Type) {
+    tc_note_name(tc, name)
     if len(tc.env_stack) == 0 { return 0 }
     frame = tc.env_stack[len(tc.env_stack) - 1]
-    
+
     if frame.name_map.has(name) == 1 {
         v = frame.name_map.get(name)
         v.typ = typ
         return 0
     }
-    
+
     v = EnvVar()
     v.name = name
     v.typ = typ
     frame.vars.append(v)
     frame.name_map.set(name, v)
+    return 0
+}
+
+# ---------------------------------------------------------------------------------------------
+# Undefined-name diagnostics
+#
+# Nova declares a variable by assigning it (`x = 1`), so reading a name nobody ever assigns used to be silently
+# accepted as an untyped value - a typo (or a forgotten `let`) compiled and read garbage. A read that finds no
+# variable is now recorded; when the enclosing function ends (or the program, for top-level code) the name is an
+# error unless the function assigned it anywhere, took it as a parameter, or it is a global / function. Deciding at
+# the end of the function keeps the rule independent of statement order and block scoping.
+# ---------------------------------------------------------------------------------------------
+
+def tc_note_name(tc: TypeChecker, name: string) {
+    if tc.global_names.has("pool:" + name) == 1 { return 0 }
+    tc.global_names.set("pool:" + name, 1)
+    tc.name_pool.append(name)
+    return 0
+}
+
+def _edit_distance(a: string, b: string) -> int {
+    la = len(a)
+    lb = len(b)
+    prev = []
+    j = 0
+    while j <= lb {
+        prev.append(j)
+        j = j + 1
+    }
+    i = 1
+    while i <= la {
+        cur = [i]
+        j = 1
+        while j <= lb {
+            cost = 1
+            if a[i - 1] == b[j - 1] { cost = 0 }
+            best = prev[j - 1] + cost
+            if prev[j] + 1 < best { best = prev[j] + 1 }
+            if cur[j - 1] + 1 < best { best = cur[j - 1] + 1 }
+            cur.append(best)
+            j = j + 1
+        }
+        prev = cur
+        i = i + 1
+    }
+    return prev[lb]
+}
+
+# (elements of a list are untyped; a string-typed parameter makes len() measure characters, not a list header)
+def _slen(s: string) -> int {
+    return len(s)
+}
+
+def tc_suggest_name(tc: TypeChecker, name: string) -> string {
+    best = ""
+    best_d = 3
+    i = 0
+    while i < len(tc.name_pool) {
+        cand = tc.name_pool[i]
+        diff = _slen(cand) - len(name)
+        if diff < 0 { diff = 0 - diff }
+        if diff <= 2 and cand != name {
+            d = _edit_distance(name, cand)
+            if d < best_d {
+                best_d = d
+                best = cand
+            }
+        }
+        i = i + 1
+    }
+    if best != "" { return "did you mean '" + best + "'?" }
+    return "assign it before use (x = ...), or check the spelling"
+}
+
+def suggest_param_name(candidates: list, name: string) -> string {
+    best = ""
+    best_d = 4
+    i = 0
+    while i < len(candidates) {
+        cand = candidates[i]
+        diff = _slen(cand) - len(name)
+        if diff < 0 { diff = 0 - diff }
+        if diff <= 2 and cand != name {
+            d = _edit_distance(name, cand)
+            if d < best_d {
+                best_d = d
+                best = cand
+            }
+        }
+        i = i + 1
+    }
+    if best != "" { return "did you mean '" + best + "'?" }
+    return "check the parameter names in the function declaration"
+}
+
+# Report every recorded read that nothing in the current function/program ever defines
+def tc_flush_pending(tc: TypeChecker) {
+    i = 0
+    while i < len(tc.pending) {
+        rec = tc.pending[i]
+        nm = rec[0]
+        if tc.fn_assigned.has(nm) == 0 {
+            if tc.global_consts.has(nm) == 1 {
+                # A module-level constant used by code that the one-pass constant inliner (compiler.nv) saw before
+                # the constant's definition (the module declaring it is merged later). Without this the read
+                # compiled as an uninitialised variable. Inline it here.
+                cn = rec[3]
+                cn.kind = "Number"
+                cn.val_int = tc.global_consts.get(nm)
+                cn.is_float = 0
+            } elif tc.global_names.has(nm) == 0 and tc_find_func(tc, nm) == 0 {
+                errors.err("Name", tc.filename, rec[1], "undefined name '" + nm + "'", tc_suggest_name(tc, nm), rec[2])
+            }
+        }
+        i = i + 1
+    }
+    tc.pending = []
     return 0
 }
 
@@ -355,7 +492,8 @@ def tc_bind_args(tc: TypeChecker, call_node: AstNode, nf: NamedFunc) -> list {
                 p = p + 1
             }
             if found == 0 {
-                errors.err("Name", tc.filename, call_node.line, "function '" + call_node.val_str + "' got unexpected keyword argument '" + kw + "'", "check the parameter names in the function declaration", call_node.col)
+                hint = suggest_param_name(p_names, kw)
+                errors.err("Name", tc.filename, call_node.line, "function '" + call_node.val_str + "' got unexpected keyword argument '" + kw + "'", hint, call_node.col)
             }
         }
         i = i + 1
@@ -410,23 +548,23 @@ def tc_bind_method_args(tc: TypeChecker, call_node: AstNode, nf: NamedFunc) -> l
     p_names = nf.param_names
     p_defs = nf.func_defaults
     n_params = len(p_names) - 1
-    
+
     arg_names = []
     arg_is_kw = []
     if call_node.arg_names != 0 { arg_names = call_node.arg_names }
     if call_node.arg_is_kw != 0 { arg_is_kw = call_node.arg_is_kw }
-    
+
     has_kw = 0
     i = 0
     while i < len(arg_is_kw) {
         if arg_is_kw[i] == 1 { has_kw = 1 }
         i = i + 1
     }
-    
+
     if has_kw == 0 and len(call_node.args) == n_params {
         return call_node.args
     }
-    
+
     i = 0
     while i < len(arg_names) {
         if i < len(arg_is_kw) and arg_is_kw[i] == 1 {
@@ -438,12 +576,13 @@ def tc_bind_method_args(tc: TypeChecker, call_node: AstNode, nf: NamedFunc) -> l
                 p = p + 1
             }
             if found == 0 {
-                errors.err("Name", tc.filename, call_node.line, "method '" + call_node.val_str + "' got unexpected keyword argument '" + kw + "'", "check the parameter names in the method declaration", call_node.col)
+                hint = suggest_param_name(p_names, kw)
+                errors.err("Name", tc.filename, call_node.line, "method '" + call_node.val_str + "' got unexpected keyword argument '" + kw + "'", hint, call_node.col)
             }
         }
         i = i + 1
     }
-    
+
     bound = []
     p = 1
     while p < len(p_names) {
@@ -517,7 +656,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         tc_visit(tc, node.left)
         return create_scalar_type("int")
     }
-    
+
     if h == 4 {
         t = tc_get_var(tc, node.val_str)
         if t == 0 {
@@ -525,17 +664,26 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
             if func_t != 0 {
                 return func_t
             }
+            tc.pending.append([node.val_str, node.line, node.col, node])
+            tc.fn_missing.set(node.val_str, 1)
             t = create_any_type()
-            tc_set_var(tc, node.val_str, t)
+            tc_set_var_quiet(tc, node.val_str, t)
+        } elif tc.fn_missing.has(node.val_str) == 1 {
+            # A later read of a name that was unresolved earlier in this function: remember this node too
+            tc.pending.append([node.val_str, node.line, node.col, node])
+        } elif tc.global_consts.has(node.val_str) == 1 {
+            # Found as a global (module-level constant) - but a constant the inliner missed is only a global
+            # variable slot nobody initialised, so decide at the end of the function (see tc_flush_pending)
+            tc.pending.append([node.val_str, node.line, node.col, node])
         }
         return t
     }
-    
+
     if h == 5 {
         t1 = tc_visit(tc, node.left)
         t2 = tc_visit(tc, node.right)
         tc_unify(tc, t1, t2, node)
-        
+
         if str_eq(node.val_str, "+") == 1 {
             if t1 != 0 and t1.kind == "scalar" and str_eq(t1.name, "string") == 1 {
                 return t1
@@ -546,14 +694,14 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         }
         return t1
     }
-    
+
     if h == 6 {
         t1 = tc_visit(tc, node.left)
         t2 = tc_visit(tc, node.right)
         tc_unify(tc, t1, t2, node)
         return create_scalar_type("int")
     }
-    
+
     if h == 7 {
         t = tc_visit(tc, node.left)
         existing = tc_get_var(tc, node.val_str)
@@ -564,11 +712,23 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         }
         return 0
     }
-    
+
     if h == 8 {
         tc_push_env(tc)
         prev_ret = tc.current_ret
-        
+        outer_pending = tc.pending
+        outer_assigned = tc.fn_assigned
+        outer_missing = tc.fn_missing
+        tc.fn_missing = {}
+        tc.pending = []
+        tc.fn_assigned = {}
+        tc.fn_assigned.set("self", 1)
+        pi = 0
+        while pi < len(node.params) {
+            tc.fn_assigned.set(node.params[pi], 1)
+            pi = pi + 1
+        }
+
         func_type = tc_find_func(tc, node.val_str)
         if func_type != 0 {
             tc.current_ret = type_ret(func_type)
@@ -581,20 +741,25 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
                 i = i + 1
             }
         }
-        
+
         bi = 0
         while bi < len(node.body) {
             tc_visit(tc, node.body[bi])
             bi = bi + 1
         }
-        
+
+        tc_flush_pending(tc)
+        tc.pending = outer_pending
+        tc.fn_assigned = outer_assigned
+        tc.fn_missing = outer_missing
+
         tc.current_ret = prev_ret
         tc_pop_env(tc)
-        
+
         if func_type != 0 { return func_type }
         return create_any_type()
     }
-    
+
     if h == 9 {
         t = create_any_type()
         if node != 0 and node.left != 0 {
@@ -602,17 +767,17 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         }
         return t
     }
-    
+
     if h == 10 {
         tc_visit(tc, node.left)
         return create_any_type()
     }
-    
+
     if h == 11 {
         tc_visit(tc, node.left)
         return create_any_type()
     }
-    
+
     if h == 12 {
         # parse_try_block (stdlib/parser.nv) sets .body (try body) and .else_body (catch
         # body), not .args/.cond -- those are always unset (null) for a TRY node, so
@@ -624,6 +789,8 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
             tc_visit(tc, node.body[i])
             i = i + 1
         }
+        tc.fn_assigned.set(node.val_str, 1)
+        tc_set_var(tc, node.val_str, create_any_type())
         i = 0
         while i < len(node.else_body) {
             tc_visit(tc, node.else_body[i])
@@ -631,7 +798,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         }
         return create_any_type()
     }
-    
+
     if h == 13 {
         if node.left != 0 {
             tc_visit(tc, node.left)
@@ -652,7 +819,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         }
         return create_any_type()
     }
-    
+
     if h == 14 {
         if node.val_str == "random" {
             i = 0
@@ -724,10 +891,10 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         }
         return create_any_type()
     }
-    
+
     if h == 15 {
         tc_visit(tc, node.cond)
-        
+
         tc_push_env(tc)
         i = 0
         while i < len(node.body) {
@@ -735,7 +902,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
             i = i + 1
         }
         tc_pop_env(tc)
-        
+
         tc_push_env(tc)
         i = 0
         while i < len(node.else_body) {
@@ -743,10 +910,10 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
             i = i + 1
         }
         tc_pop_env(tc)
-        
+
         return create_any_type()
     }
-    
+
     if h == 16 {
         tc_visit(tc, node.cond)
         i = 0
@@ -767,9 +934,17 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         tc_pop_env(tc)
         return create_any_type()
     }
-    
+
     if h == 17 {
-        inst_t = tc_visit(tc, node.left)
+        # `module.func(...)`: when the qualifier is not a variable but the member is a known function (or the
+        # qualifier is a built-in intrinsic namespace) it names a module, not a value - do not report it as undefined.
+        is_ns = 0
+        if node.left.kind == "Variable" and tc_get_var(tc, node.left.val_str) == 0 and tc.global_names.has(node.left.val_str) == 0 {
+            qn = node.left.val_str
+            if qn == "peek" or qn == "poke" or qn == "cpu" or qn == "mem" or tc_find_func(tc, node.val_str) != 0 { is_ns = 1 }
+        }
+        inst_t = create_any_type()
+        if is_ns == 0 { inst_t = tc_visit(tc, node.left) }
         if inst_t != 0 and inst_t.kind == "struct" {
             mfunc = tc_find_func(tc, inst_t.name + "." + node.val_str)
             if mfunc != 0 {
@@ -1100,7 +1275,7 @@ def tc_link_struct(tc: TypeChecker, t: Type, seen: list) -> Type {
         i = i + 1
     }
     seen.append(t)
-    
+
     if t == 0 { return 0 }
     if t.kind == "struct" {
         # Look up the registered struct
@@ -1163,7 +1338,7 @@ def tc_find_field(t: Type, name: string) -> Type {
 
 def tc_check(tc: TypeChecker, ast: list) {
     tc_push_env(tc)
-    
+
     # Pass 1: Collect structs
     i = 0
     while i < len(ast) {
@@ -1174,7 +1349,7 @@ def tc_check(tc: TypeChecker, ast: list) {
         }
         i = i + 1
     }
-    
+
     # Pass 1.1: Collect functions
     i = 0
     while i < len(ast) {
@@ -1215,7 +1390,7 @@ def tc_check(tc: TypeChecker, ast: list) {
         }
         i = i + 1
     }
-    
+
     # Pass 1.5: Resolve struct fields (Data/ClassDef store fields in params/param_types)
     i = 0
     while i < len(ast) {
@@ -1235,10 +1410,26 @@ def tc_check(tc: TypeChecker, ast: list) {
         }
         i = i + 1
     }
-    
+
     # Pass 1.6: Link struct types (replace stubs with registered structs)
     tc_link_all_structs(tc)
-    
+
+    # Pass 1.7: global names (top-level assignments and consts, in any order)
+    i = 0
+    while i < len(ast) {
+        stmt = ast[i]
+        if stmt.kind == "Assignment" {
+            tc.global_names.set(stmt.val_str, 1)
+            tc_note_name(tc, stmt.val_str)
+            if stmt.val_int == 1 and stmt.left != 0 {
+                if stmt.left.kind == "Number" and stmt.left.is_float == 0 {
+                    tc.global_consts.set(stmt.val_str, stmt.left.val_int)
+                }
+            }
+        }
+        i = i + 1
+    }
+
     # Pass 2: Infer everything
     i = 0
     while i < len(ast) {
@@ -1246,5 +1437,6 @@ def tc_check(tc: TypeChecker, ast: list) {
         tc_visit(tc, stmt)
         i = i + 1
     }
+    tc_flush_pending(tc)
     tc_pop_env(tc)
 }

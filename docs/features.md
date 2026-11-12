@@ -48,9 +48,16 @@ error: unknown field 'lenght' on list[int]
 Complexity hidden in backend: tokenizer stores column spans; the compiler
 runs a fast Levenshtein check over keywords, variables, and struct fields.
 
-Delivery: `levenshtein_distance()` and `did_you_mean()` helpers added to the
-type checker. `visit_Variable` and `visit_DataFieldAccess` emit warnings with
-suggestions when unknown identifiers/fields are encountered.
+Delivery, by pipeline (verified against the code):
+
+- **Python bootstrap**: `levenshtein_distance()` / `did_you_mean()` helpers in
+  `bootstrap/compiler/type_checker.py` give warnings with suggestions for unknown identifiers and fields.
+- **Self-hosted compiler**: `stdlib/type_checker.nv` reports reads of undefined names as an *error*
+  (`undefined name 'totl'` ... `did you mean 'total'?`, edit distance < 3 over every name seen so far, otherwise a
+  generic hint). The decision is made when the enclosing function (or the program) ends, so it does not depend on
+  statement order or block scoping. Regression tests: `tests/test_undefined_names.py`. The `unknown field ... on
+  list[int]` example above is illustrative for the Python pipeline only; the self-hosted checker does not
+  suggest field names.
 
 ## 3. Direct C FFI — `extern def` — Shipped
 
@@ -114,7 +121,7 @@ Delivery: `alloc[T](count)` syntax parsed with type parameter support.
 handler multiplies count by sizeof(T) before calling malloc. Both x86_64
 and ARM64 backends updated.
 
-## 7. Multiple Returns + `_` Discard — Shipped (Python Bootstrap + VM Only)
+## 7. Multiple Returns + `_` Discard — Shipped (Python bootstrap + VM); self-hosted: partial
 
 ```nova
 def get_user() -> (string, int, bool) {
@@ -156,10 +163,11 @@ claim against the code rather than taking the status label on faith:
   as locals at all, so they'd silently get no stack slot) and `string_vars` tracking driven by
   the callee's parsed `(T1,T2,...)` return-type string (without it, `print()` on a `string`
   target picked the `%d` format and showed the raw pointer as a huge integer).
-- **Self-hosted compiler**: never implemented at all — no `MultiReturn`/`UnpackAssign` support
-  anywhere in `stdlib/parser.nv` or the self-hosted codegen. Not part of this fix; this would
-  be adding a new feature to the self-hosted parser/codegen (`AGENTS.md`'s "language features
-  go into `stdlib`"), not fixing an existing one, and is tracked separately.
+- **Self-hosted compiler**: `stdlib/parser.nv` and the x86_64 codegen now handle `MultiReturn` / `UnpackAssign`
+  (this paragraph used to say it was not implemented at all). Re-checked on the documented example: the
+  values arrive (`age` prints `30`) but a `string` target such as `name` prints as a raw pointer integer instead of
+  the text, i.e. the string-type tracking described above for the Python backend is missing. Treat self-hosted
+  multiple returns as working for integers and unfinished for strings.
 - **ARM64 Python-bootstrap** (`bootstrap/compiler/backend/arm64/codegen.py`): has the identical
   register-smuggling bug as the x86_64 native backend did (`x1`/`x2`/`x3` assumed to survive
   the callee's epilogue). Not fixed — no ARM64 hardware or emulator is available in this
@@ -173,6 +181,9 @@ claim against the code rather than taking the status label on faith:
 
 Developer experience (dead simple): short functions (e.g. `min`) are inlined
 automatically (AST size ≤ 8, non-recursive); `@noinline` opts out.
+**Python bootstrap only:** the inliner and the `@noinline` annotation exist in
+`bootstrap/compiler/backend/*/codegen.py`; the self-hosted compiler does not parse `@noinline`
+(it fails with a syntax error) and has no inliner of this kind.
 
 Complexity hidden in backend: AST cloning with parameter substitution and
 return rewriting at call sites.
@@ -195,7 +206,7 @@ def _start() {
 ```
 
 ```bash
-nova build --bare kernel.nv
+nova build-bare kernel.nv <origin> <entry>   # self-hosted CLI; see README
 ```
 
 Complexity hidden in backend: skip runtime init, no `runtime.c` link, flat
@@ -244,7 +255,5 @@ self-hosted compiler including argument forwarding (`args[1] == "foo"`).
 
 ## Website
 
-The public site (galaxy-registry) lives in a separate repository and is not
-updated by this change. Follow-up there: add `nova run` to the command
-reference, and publish this roadmap (shipped vs. sequenced status per
-feature) on the documentation pages.
+The public site lives in `../galaxy-registry` (static HTML pages such as `documentation.html` and
+`reference.html`). Keeping those pages in step with this document is tracked in `../galaxy-registry/CLAIMS_CHANGELOG.md`.

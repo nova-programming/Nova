@@ -22,39 +22,755 @@ def contains(lst: list, item: string) -> int {
 # resolving stdlib/ relative to the current working directory, this lets `nova build` work from
 # any directory once nova.exe is on PATH -- it no longer has to be run from inside the repo/
 # install checkout.
-def exe_dir() -> string {
-    exe_path = system.exe_path()
-    if len(exe_path) == 0 { return "" }
+def exeDir() -> string {
+    ep = system.exe_path()
+    if len(ep) == 0 { return "" }
     last = -1
     k = 0
-    while k < len(exe_path) {
-        ch = exe_path[k]
+    while k < len(ep) {
+        ch = ep[k]
         if ch == "/" or ch == "\\" { last = k }
         k = k + 1
     }
     if last <= 0 { return "" }
-    return str_sub(exe_path, 0, last)
+    return str_sub(ep, 0, last)
 }
 
+def exe_dir() -> string { return exeDir() }
+
 # Directory part of a path including the trailing slash ("" when there is none).
-def source_dir(path: string) -> string {
+def sourceDir(targetPath: string) -> string {
     slash = -1
     i = 0
-    while i < len(path) {
-        if path[i] == "/" or path[i] == "\\" { slash = i }
+    while i < len(targetPath) {
+        if targetPath[i] == "/" or targetPath[i] == "\\" { slash = i }
         i = i + 1
     }
     if slash < 0 { return "" }
-    return str_sub(path, 0, slash + 1)
+    return str_sub(targetPath, 0, slash + 1)
 }
 
-def resolve_imports(ast: list, visited: list, target_arch: string, target_os: string, filename: string) -> list {
+def source_dir(targetPath: string) -> string { return sourceDir(targetPath) }
+
+def str_upper_char(ch: string) -> string {
+    if ch == "a" { return "A" }
+    if ch == "b" { return "B" }
+    if ch == "c" { return "C" }
+    if ch == "d" { return "D" }
+    if ch == "e" { return "E" }
+    if ch == "f" { return "F" }
+    if ch == "g" { return "G" }
+    if ch == "h" { return "H" }
+    if ch == "i" { return "I" }
+    if ch == "j" { return "J" }
+    if ch == "k" { return "K" }
+    if ch == "l" { return "L" }
+    if ch == "m" { return "M" }
+    if ch == "n" { return "N" }
+    if ch == "o" { return "O" }
+    if ch == "p" { return "P" }
+    if ch == "q" { return "Q" }
+    if ch == "r" { return "R" }
+    if ch == "s" { return "S" }
+    if ch == "t" { return "T" }
+    if ch == "u" { return "U" }
+    if ch == "v" { return "V" }
+    if ch == "w" { return "W" }
+    if ch == "x" { return "X" }
+    if ch == "y" { return "Y" }
+    if ch == "z" { return "Z" }
+    return ch
+}
+
+def snakeToCamel(sourceString: string) -> string {
+    res = ""
+    i = 0
+    to_upper = 0
+    while i < len(sourceString) {
+        ch = sourceString[i]
+        if ch == "_" {
+            to_upper = 1
+        } else {
+            if to_upper == 1 {
+                res = res + str_upper_char(ch)
+                to_upper = 0
+            } else {
+                res = res + ch
+            }
+        }
+        i = i + 1
+    }
+    return res
+}
+
+def snake_to_camel(s: string) -> string {
+    return snakeToCamel(s)
+}
+
+def _resolve_edit_distance(a: string, b: string) -> int {
+    la = len(a)
+    lb = len(b)
+    prev = []
+    j = 0
+    while j <= lb {
+        prev.append(j)
+        j = j + 1
+    }
+    i = 1
+    while i <= la {
+        cur = [i]
+        j = 1
+        while j <= lb {
+            cost = 1
+            if a[i - 1] == b[j - 1] { cost = 0 }
+            best = prev[j - 1] + cost
+            if prev[j] + 1 < best { best = prev[j] + 1 }
+            if cur[j - 1] + 1 < best { best = cur[j - 1] + 1 }
+            cur.append(best)
+            j = j + 1
+        }
+        prev = cur
+        i = i + 1
+    }
+    return prev[lb]
+}
+
+def suggestMemberName(candidates: list, name: string) -> string {
+    if candidates == 0 { return "" }
+    best = ""
+    best_d = 4
+    i = 0
+    while i < len(candidates) {
+        cand = candidates[i] + ""
+        diff = len(cand) - len(name)
+        if diff < 0 { diff = 0 - diff }
+        if diff <= 2 and cand != name {
+            d = _resolve_edit_distance(name, cand)
+            if d < best_d {
+                best_d = d
+                best = cand
+            }
+        }
+        i = i + 1
+    }
+    return best
+}
+
+def suggest_member_name(candidates: list, name: string) -> string {
+    return suggestMemberName(candidates, name)
+}
+
+def rewrite_module_internal_expr(node: AstNode, renames: dict) {
+    if node == 0 { return }
+    k = node.kind
+    if k == "BinOp" or k == "Compare" {
+        rewrite_module_internal_expr(node.left, renames)
+        rewrite_module_internal_expr(node.right, renames)
+        return
+    }
+    if k == "UnaryOp" {
+        rewrite_module_internal_expr(node.left, renames)
+        return
+    }
+    if k == "Ternary" {
+        rewrite_module_internal_expr(node.cond, renames)
+        rewrite_module_internal_expr(node.left, renames)
+        rewrite_module_internal_expr(node.right, renames)
+        return
+    }
+    if k == "Call" {
+        if renames.has(node.val_str) == 1 {
+            node.val_str = renames.get(node.val_str)
+            node.name = node.val_str
+        }
+        if node.args != 0 {
+            ai = 0
+            while ai < len(node.args) {
+                rewrite_module_internal_expr(node.args[ai], renames)
+                ai = ai + 1
+            }
+        }
+        return
+    }
+    if k == "MethodCall" {
+        rewrite_module_internal_expr(node.left, renames)
+        if node.args != 0 {
+            ai = 0
+            while ai < len(node.args) {
+                rewrite_module_internal_expr(node.args[ai], renames)
+                ai = ai + 1
+            }
+        }
+        return
+    }
+    if k == "ArrayIndex" or k == "DataFieldAccess" {
+        rewrite_module_internal_expr(node.left, renames)
+        if node.right != 0 { rewrite_module_internal_expr(node.right, renames) }
+        return
+    }
+    if k == "ListLiteral" {
+        if node.args != 0 {
+            ai = 0
+            while ai < len(node.args) {
+                rewrite_module_internal_expr(node.args[ai], renames)
+                ai = ai + 1
+            }
+        }
+        return
+    }
+}
+
+def rewrite_module_internal_stmt(node: AstNode, renames: dict) {
+    if node == 0 { return }
+    k = node.kind
+    if k == "Assignment" or k == "UnpackAssign" or k == "Return" or k == "Print" or k == "PrintD" {
+        rewrite_module_internal_expr(node.left, renames)
+        return
+    }
+    if k == "DataFieldAssign" {
+        rewrite_module_internal_expr(node.left, renames)
+        rewrite_module_internal_expr(node.right, renames)
+        return
+    }
+    if k == "ArrayIndexAssign" {
+        rewrite_module_internal_expr(node.left, renames)
+        rewrite_module_internal_expr(node.right, renames)
+        rewrite_module_internal_expr(node.cond, renames)
+        return
+    }
+    if k == "IfElse" or k == "While" {
+        rewrite_module_internal_expr(node.cond, renames)
+        if node.body != 0 {
+            bi = 0
+            while bi < len(node.body) {
+                rewrite_module_internal_stmt(node.body[bi], renames)
+                bi = bi + 1
+            }
+        }
+        if node.else_body != 0 {
+            bi = 0
+            while bi < len(node.else_body) {
+                rewrite_module_internal_stmt(node.else_body[bi], renames)
+                bi = bi + 1
+            }
+        }
+        return
+    }
+    if k == "ForIn" or k == "ForLoop" {
+        rewrite_module_internal_expr(node.left, renames)
+        if node.body != 0 {
+            bi = 0
+            while bi < len(node.body) {
+                rewrite_module_internal_stmt(node.body[bi], renames)
+                bi = bi + 1
+            }
+        }
+        return
+    }
+    if k == "Block" or k == "RawBlock" or k == "TRY" or k == "Defer" {
+        if node.body != 0 {
+            bi = 0
+            while bi < len(node.body) {
+                rewrite_module_internal_stmt(node.body[bi], renames)
+                bi = bi + 1
+            }
+        }
+        return
+    }
+    if k == "Call" or k == "MethodCall" {
+        rewrite_module_internal_expr(node, renames)
+        return
+    }
+}
+
+def shouldNamespaceModule(module_name: string, found_path: string) -> int {
+    if str_contains(found_path, "stdlib") == 0 {
+        return 0
+    }
+    if module_name == "fs" or module_name == "path" or module_name == "buffer" or module_name == "net" or module_name == "time" or module_name == "env" or module_name == "process" or module_name == "audio" or module_name == "text" or module_name == "json" {
+        return 1
+    }
+    return 0
+}
+
+def should_namespace_module(module_name: string, found_path: string) -> int {
+    return shouldNamespaceModule(module_name, found_path)
+}
+
+def namespace_module_ast(module_name: string, ast: list, found_path: string) {
+    if should_namespace_module(module_name, found_path) == 0 { return }
+    prefix = module_name + "_"
+    plen = len(prefix)
+    renames = {}
+    i = 0
+    while i < len(ast) {
+        node = ast[i]
+        if node.kind == "Function" and node.val_int != 2 {
+            fn_name = node.val_str
+            if len(fn_name) <= plen or str_sub(fn_name, 0, plen) != prefix {
+                mangled = prefix + fn_name
+                renames.set(fn_name, mangled)
+                node.val_str = mangled
+                node.name = mangled
+            }
+        }
+        i = i + 1
+    }
+    if len(renames.keys()) > 0 {
+        i = 0
+        while i < len(ast) {
+            node = ast[i]
+            if node.kind == "Function" and node.body != 0 {
+                bi = 0
+                while bi < len(node.body) {
+                    rewrite_module_internal_stmt(node.body[bi], renames)
+                    bi = bi + 1
+                }
+            }
+            # methods of the module's classes call the module's own functions too (TcpListener.accept -> new_tcp_stream)
+            if node.kind == "ClassDef" and node.methods != 0 {
+                mi = 0
+                while mi < len(node.methods) {
+                    meth = node.methods[mi]
+                    if meth.body != 0 {
+                        bi = 0
+                        while bi < len(meth.body) {
+                            rewrite_module_internal_stmt(meth.body[bi], renames)
+                            bi = bi + 1
+                        }
+                    }
+                    mi = mi + 1
+                }
+            }
+            i = i + 1
+        }
+    }
+}
+
+def collect_module_exports(module_name: string, ast: list, module_exports: dict, module_candidates: dict) {
+    mod_table = {}
+    if module_exports.has(module_name) == 1 {
+        mod_table = module_exports.get(module_name)
+    } else {
+        module_exports.set(module_name, mod_table)
+    }
+    cands = []
+    if module_candidates.has(module_name) == 1 {
+        cands = module_candidates.get(module_name)
+    } else {
+        module_candidates.set(module_name, cands)
+    }
+
+    prefix = module_name + "_"
+    plen = len(prefix)
+
+    i = 0
+    while i < len(ast) {
+        node = ast[i]
+        if node.kind == "Function" {
+            fn_name = node.val_str
+            # Always register exact function name
+            mod_table.set(fn_name, fn_name)
+            cands.append(fn_name)
+
+            # Starts with module_name + "_"
+            if len(fn_name) > plen and str_sub(fn_name, 0, plen) == prefix {
+                stripped = str_sub(fn_name, plen, len(fn_name))
+                camel = snake_to_camel(stripped)
+                if mod_table.has(camel) == 0 {
+                    mod_table.set(camel, fn_name)
+                    cands.append(camel)
+                }
+                if camel != stripped and mod_table.has(stripped) == 0 {
+                    mod_table.set(stripped, fn_name)
+                }
+                if module_name == "path" {
+                    if stripped == "base" and mod_table.has("basename") == 0 { mod_table.set("basename", fn_name) }
+                    if stripped == "dir" and mod_table.has("dirname") == 0 { mod_table.set("dirname", fn_name) }
+                    if stripped == "ext" and mod_table.has("extension") == 0 { mod_table.set("extension", fn_name) }
+                }
+                if module_name == "fs" {
+                    if stripped == "read" and mod_table.has("readText") == 0 { mod_table.set("readText", fn_name) }
+                    if stripped == "write" and mod_table.has("writeText") == 0 { mod_table.set("writeText", fn_name) }
+                    if stripped == "makeDir" and mod_table.has("mkdir") == 0 { mod_table.set("mkdir", fn_name) }
+                }
+            } else {
+                camel = snake_to_camel(fn_name)
+                if camel != fn_name and mod_table.has(camel) == 0 {
+                    mod_table.set(camel, fn_name)
+                    cands.append(camel)
+                }
+            }
+        }
+        i = i + 1
+    }
+    if module_name == "os_windows" or module_name == "os_unix" {
+        module_exports.set("os_impl", mod_table)
+        module_candidates.set("os_impl", cands)
+    }
+}
+
+# Old flat spellings stay valid after a module's members became camelCase (fs_write_atomic -> fs_writeAtomic,
+# path_basename -> path_base, new_buffer -> buffer_alloc): map a call to the function the module really defines.
+def legacy_flat_name(name: string, module_exports: dict) -> string {
+    if name == "new_buffer" { return "buffer_alloc" }
+    if name == "socket_set_timeout" { return "net_setTimeout" }
+    if name == "time_ticks_ms" { return "time_ticks" }
+    if name == "str_slice" { return "text_slice" }
+    if name == "tcp_listen" { return "net_listen" }
+    if name == "tcp_connect" { return "net_connect" }
+    if name == "new_tcp_stream" { return "net_new_tcp_stream" }
+    if name == "json_cursor_new" { return "json_newCursor" }
+    mods = module_exports.keys()
+    mi = 0
+    while mi < len(mods) {
+        m = mods[mi]
+        prefix = m + "_"
+        plen = len(prefix)
+        if len(name) > plen and str_sub(name, 0, plen) == prefix {
+            mtab = module_exports.get(m)
+            if mtab.has(name) == 0 {
+                rest = str_sub(name, plen, len(name))
+                camel = snake_to_camel(rest)
+                if mtab.has(camel) == 1 { return mtab.get(camel) }
+                if mtab.has(rest) == 1 { return mtab.get(rest) }
+            }
+        }
+        mi = mi + 1
+    }
+    return name
+}
+
+def resolve_module_expr(node: AstNode, module_exports: dict, module_candidates: dict, scope_modules: dict, scope_locals: dict, filename: string) -> AstNode {
+    if node == 0 { return 0 }
+    k = node.kind
+    if k == "BinOp" or k == "Compare" {
+        node.left = resolve_module_expr(node.left, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        node.right = resolve_module_expr(node.right, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        return node
+    }
+    if k == "UnaryOp" {
+        node.left = resolve_module_expr(node.left, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        return node
+    }
+    if k == "Ternary" {
+        node.cond = resolve_module_expr(node.cond, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        node.left = resolve_module_expr(node.left, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        node.right = resolve_module_expr(node.right, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        return node
+    }
+    if k == "Call" {
+        if node.args != 0 {
+            ai = 0
+            while ai < len(node.args) {
+                node.args[ai] = resolve_module_expr(node.args[ai], module_exports, module_candidates, scope_modules, scope_locals, filename)
+                ai = ai + 1
+            }
+        }
+        node.val_str = legacy_flat_name(node.val_str, module_exports)
+        return node
+    }
+    if k == "MethodCall" {
+        node.left = resolve_module_expr(node.left, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        if node.args != 0 {
+            ai = 0
+            while ai < len(node.args) {
+                node.args[ai] = resolve_module_expr(node.args[ai], module_exports, module_candidates, scope_modules, scope_locals, filename)
+                ai = ai + 1
+            }
+        }
+        if node.left != 0 and node.left.kind == "Variable" {
+            var_name = node.left.val_str
+            if scope_locals.has(var_name) == 0 and scope_modules.has(var_name) == 1 {
+                mod_name = scope_modules.get(var_name)
+                member = node.val_str
+                target_fn = ""
+                if module_exports.has(mod_name) == 1 {
+                    mtab = module_exports.get(mod_name)
+                    if mtab.has(member) == 1 {
+                        target_fn = mtab.get(member)
+                    }
+                }
+                if len(target_fn) > 0 {
+                    call_node = AstNode()
+                    call_node.line = node.line
+                    call_node.col = node.col
+                    call_node.kind = "Call"
+                    call_node.val_str = target_fn
+                    call_node.args = node.args
+                    call_node.arg_names = node.arg_names
+                    call_node.arg_is_kw = node.arg_is_kw
+                    if (target_fn == "path_join" or (mod_name == "path" and target_fn == "join")) and len(node.args) != 1 {
+                        list_node = AstNode()
+                        list_node.line = node.line
+                        list_node.col = node.col
+                        list_node.kind = "ListLiteral"
+                        list_node.args = node.args
+                        call_node.args = [list_node]
+                    }
+                    return call_node
+                } else {
+                    cands = 0
+                    if module_candidates.has(mod_name) == 1 {
+                        cands = module_candidates.get(mod_name)
+                    }
+                    sug = suggest_member_name(cands, member)
+                    if len(sug) > 0 {
+                        errors.err("Name", filename, node.line, "module '" + mod_name + "' has no function '" + member + "'", "did you mean '" + mod_name + "." + sug + "'?", node.col)
+                    } else {
+                        errors.err("Name", filename, node.line, "module '" + mod_name + "' has no function '" + member + "'", "check the spelling; see the module's public functions in the docs", node.col)
+                    }
+                }
+            }
+        }
+        return node
+    }
+    if k == "DataFieldAccess" {
+        node.left = resolve_module_expr(node.left, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        if node.left != 0 and node.left.kind == "Variable" {
+            var_name = node.left.val_str
+            member = node.val_str
+            if publicConst(var_name, member) == 1 {
+                cval = moduleConst(var_name, member)
+                num_node = AstNode()
+                num_node.line = node.line
+                num_node.col = node.col
+                num_node.kind = "Number"
+                num_node.val_int = cval
+                num_node.is_float = 0
+                return num_node
+            }
+            if scope_locals.has(var_name) == 0 and scope_modules.has(var_name) == 1 {
+                mod_name = scope_modules.get(var_name)
+                target_fn = ""
+                if module_exports.has(mod_name) == 1 {
+                    mtab = module_exports.get(mod_name)
+                    if mtab.has(member) == 1 {
+                        target_fn = mtab.get(member)
+                    }
+                }
+                if len(target_fn) > 0 {
+                    call_node = AstNode()
+                    call_node.line = node.line
+                    call_node.col = node.col
+                    call_node.kind = "Call"
+                    call_node.val_str = target_fn
+                    call_node.args = []
+                    return call_node
+                }
+            }
+        }
+        return node
+    }
+    if k == "ArrayIndex" {
+        node.left = resolve_module_expr(node.left, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        node.right = resolve_module_expr(node.right, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        return node
+    }
+    if k == "ListLiteral" or k == "DictLiteral" {
+        if node.args != 0 {
+            ai = 0
+            while ai < len(node.args) {
+                node.args[ai] = resolve_module_expr(node.args[ai], module_exports, module_candidates, scope_modules, scope_locals, filename)
+                ai = ai + 1
+            }
+        }
+        return node
+    }
+    if k == "Block" {
+        if node.body != 0 {
+            bi = 0
+            while bi < len(node.body) {
+                resolve_module_stmt(node.body[bi], module_exports, module_candidates, scope_modules, scope_locals, filename)
+                bi = bi + 1
+            }
+        }
+        return node
+    }
+    if k == "Len" or k == "StrConvert" or k == "SizeOf" or k == "Alloc" or k == "Free" or k == "OpenFile" or k == "Openf" or k == "ReadFile" or k == "WriteFile" or k == "CloseFile" or k == "Spawn" or k == "Await" {
+        if node.left != 0 {
+            node.left = resolve_module_expr(node.left, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        }
+        if node.args != 0 {
+            ai = 0
+            while ai < len(node.args) {
+                node.args[ai] = resolve_module_expr(node.args[ai], module_exports, module_candidates, scope_modules, scope_locals, filename)
+                ai = ai + 1
+            }
+        }
+        return node
+    }
+    return node
+}
+
+def scan_locals(stmts: list, locals_map: dict) {
+    if stmts == 0 { return }
+    i = 0
+    while i < len(stmts) {
+        s = stmts[i]
+        if s != 0 {
+            if s.kind == "Assignment" {
+                locals_map.set(s.val_str, 1)
+            } elif s.kind == "IfElse" {
+                scan_locals(s.body, locals_map)
+                scan_locals(s.else_body, locals_map)
+            } elif s.kind == "While" or s.kind == "ForIn" or s.kind == "ForLoop" or s.kind == "Block" {
+                scan_locals(s.body, locals_map)
+            }
+        }
+        i = i + 1
+    }
+}
+
+def resolve_module_stmt(node: AstNode, module_exports: dict, module_candidates: dict, scope_modules: dict, scope_locals: dict, filename: string) {
+    if node == 0 { return }
+    k = node.kind
+    if k == "Assignment" {
+        node.left = resolve_module_expr(node.left, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        if scope_modules.has(node.val_str) == 1 {
+            scope_locals.set(node.val_str, 1)
+        }
+        return
+    }
+    if k == "UnpackAssign" {
+        node.left = resolve_module_expr(node.left, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        return
+    }
+    if k == "DataFieldAssign" {
+        node.left = resolve_module_expr(node.left, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        node.right = resolve_module_expr(node.right, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        return
+    }
+    if k == "ArrayIndexAssign" {
+        node.left = resolve_module_expr(node.left, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        node.right = resolve_module_expr(node.right, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        node.cond = resolve_module_expr(node.cond, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        return
+    }
+    if k == "Return" {
+        node.left = resolve_module_expr(node.left, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        return
+    }
+    if k == "IfElse" {
+        node.cond = resolve_module_expr(node.cond, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        if node.body != 0 {
+            si = 0
+            while si < len(node.body) {
+                resolve_module_stmt(node.body[si], module_exports, module_candidates, scope_modules, scope_locals, filename)
+                si = si + 1
+            }
+        }
+        if node.else_body != 0 {
+            si = 0
+            while si < len(node.else_body) {
+                resolve_module_stmt(node.else_body[si], module_exports, module_candidates, scope_modules, scope_locals, filename)
+                si = si + 1
+            }
+        }
+        return
+    }
+    if k == "While" {
+        node.cond = resolve_module_expr(node.cond, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        if node.body != 0 {
+            si = 0
+            while si < len(node.body) {
+                resolve_module_stmt(node.body[si], module_exports, module_candidates, scope_modules, scope_locals, filename)
+                si = si + 1
+            }
+        }
+        return
+    }
+    if k == "ForIn" or k == "ForLoop" {
+        node.left = resolve_module_expr(node.left, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        if node.body != 0 {
+            si = 0
+            while si < len(node.body) {
+                resolve_module_stmt(node.body[si], module_exports, module_candidates, scope_modules, scope_locals, filename)
+                si = si + 1
+            }
+        }
+        return
+    }
+    if k == "Function" {
+        fn_locals = {}
+        if node.params != 0 {
+            pi = 0
+            while pi < len(node.params) {
+                fn_locals.set(node.params[pi], 1)
+                pi = pi + 1
+            }
+        }
+        if node.body != 0 {
+            scan_locals(node.body, fn_locals)
+            bi = 0
+            while bi < len(node.body) {
+                resolve_module_stmt(node.body[bi], module_exports, module_candidates, scope_modules, fn_locals, filename)
+                bi = bi + 1
+            }
+        }
+        return
+    }
+    if k == "Call" or k == "MethodCall" or k == "DataFieldAccess" {
+        res = resolve_module_expr(node, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        if res != node and res != 0 {
+            node.kind = res.kind
+            node.val_str = res.val_str
+            node.args = res.args
+            node.arg_names = res.arg_names
+            node.arg_is_kw = res.arg_is_kw
+            node.left = res.left
+            node.val_int = res.val_int
+            node.is_float = res.is_float
+        }
+        return
+    }
+    if k == "Print" or k == "PrintD" {
+        node.left = resolve_module_expr(node.left, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        return
+    }
+    if k == "Block" or k == "RawBlock" or k == "TRY" or k == "Defer" {
+        if node.body != 0 {
+            si = 0
+            while si < len(node.body) {
+                resolve_module_stmt(node.body[si], module_exports, module_candidates, scope_modules, scope_locals, filename)
+                si = si + 1
+            }
+        }
+        if node.else_body != 0 {
+            si = 0
+            while si < len(node.else_body) {
+                resolve_module_stmt(node.else_body[si], module_exports, module_candidates, scope_modules, scope_locals, filename)
+                si = si + 1
+            }
+        }
+        return
+    }
+}
+
+def resolve_module_nodes(ast: list, module_exports: dict, module_candidates: dict, imported_modules: dict, filename: string) -> list {
+    scope_modules = imported_modules
+    scope_locals = {}
+    i = 0
+    while i < len(ast) {
+        node = ast[i]
+        resolve_module_stmt(node, module_exports, module_candidates, scope_modules, scope_locals, filename)
+        i = i + 1
+    }
+    return ast
+}
+
+def resolve_imports(ast: list, visited: list, target_arch: string, target_os: string, filename: string, module_exports: dict, module_candidates: dict, imported_modules: dict) -> list {
     expanded = []
     i = 0
     while i < len(ast) {
         node = ast[i]
         if node.kind == "Import" {
             module_name = node.val_str
+            alias_name = node.val_str
+            if node.name != 0 and len(node.name) > 0 {
+                alias_name = node.name
+            }
+            orig_mod = node.val_str
             if module_name == "os_impl" {
                 if target_os == "windows" {
                     module_name = "os_windows"
@@ -62,6 +778,8 @@ def resolve_imports(ast: list, visited: list, target_arch: string, target_os: st
                     module_name = "os_unix"
                 }
             }
+            imported_modules.set(alias_name, module_name)
+            imported_modules.set(orig_mod, module_name)
             if contains(visited, module_name) == 0 {
                 visited.append(module_name)
                 found_path = ""
@@ -155,7 +873,9 @@ def resolve_imports(ast: list, visited: list, target_arch: string, target_os: st
                     }
                     tokens = tokenize(source)
                     imported_ast = parse(tokens, found_path)
-                    resolved_ast = resolve_imports(imported_ast, visited, target_arch, target_os, found_path)
+                    namespace_module_ast(module_name, imported_ast, found_path)
+                    collect_module_exports(module_name, imported_ast, module_exports, module_candidates)
+                    resolved_ast = resolve_imports(imported_ast, visited, target_arch, target_os, found_path, module_exports, module_candidates, imported_modules)
                     j = 0
                     while j < len(resolved_ast) {
                         expanded.append(resolved_ast[j])
@@ -569,7 +1289,11 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
 
     print("[3/5] Resolving imports")
     visited = []
-    ast = resolve_imports(ast, visited, target_arch, target_os, path)
+    module_exports = {}
+    module_candidates = {}
+    imported_modules = {}
+    ast = resolve_imports(ast, visited, target_arch, target_os, path, module_exports, module_candidates, imported_modules)
+    ast = resolve_module_nodes(ast, module_exports, module_candidates, imported_modules, path)
     ast = inline_constants_ast(ast)
     print("[3/5] done: " + str(len(ast)) + " nodes after imports")
 
@@ -636,7 +1360,11 @@ def check_source(source: string, filename: string, target_arch: string, target_o
     tokens = tokenize(source)
     ast = parse(tokens, filename)
     visited = []
-    ast = resolve_imports(ast, visited, target_arch, target_os, filename)
+    module_exports = {}
+    module_candidates = {}
+    imported_modules = {}
+    ast = resolve_imports(ast, visited, target_arch, target_os, filename, module_exports, module_candidates, imported_modules)
+    ast = resolve_module_nodes(ast, module_exports, module_candidates, imported_modules, filename)
     ast = inline_constants_ast(ast)
     if had_errors() == 1 { return 1 }
     infer_return_types(ast)
@@ -1047,4 +1775,60 @@ def assemble_link_file(asm_path: string, output_path: string) {
     sys_write_raw(fd2, exe_bytes)
     sys_close(fd2)
     print("Generated: " + output_path)
+}
+
+def compileToExe(input_path: string, output_path: string, debug_mode: int, target_arch: string, target_os: string) {
+    compile_to_exe(input_path, output_path, debug_mode, target_arch, target_os)
+}
+
+def compileToBare(input_path: string, output_path: string, debug_mode: int, load_addr: int, entry_name: string, target_arch: string, target_os: string) {
+    compile_to_bare(input_path, output_path, debug_mode, load_addr, entry_name, target_arch, target_os)
+}
+
+def assembleBareFile(asm_path: string, output_path: string, load_addr: int) {
+    assemble_bare_file(asm_path, output_path, load_addr)
+}
+
+def assembleLinkFile(asm_path: string, output_path: string) {
+    assemble_link_file(asm_path, output_path)
+}
+
+def getCompilerDir() -> string {
+    return get_compiler_dir()
+}
+
+def writeLines(lines: list, path: string) {
+    write_lines(lines, path)
+}
+
+def readLines(path: string) -> list {
+    return read_lines(path)
+}
+
+def compileFile(path: string, debug_mode: int, target_arch: string, target_os: string) -> list {
+    return compile_file(path, debug_mode, target_arch, target_os)
+}
+
+def checkSyntaxSource(source: string, filename: string) -> int {
+    return check_syntax_source(source, filename)
+}
+
+def checkSource(source: string, filename: string, target_arch: string, target_os: string) -> int {
+    return check_source(source, filename, target_arch, target_os)
+}
+
+def checkFile(path: string, target_arch: string, target_os: string) -> int {
+    return check_file(path, target_arch, target_os)
+}
+
+def namespaceModuleAst(module_name: string, ast: list, found_path: string) {
+    namespace_module_ast(module_name, ast, found_path)
+}
+
+def collectModuleExports(module_name: string, ast: list, module_exports: dict, module_candidates: dict) {
+    collect_module_exports(module_name, ast, module_exports, module_candidates)
+}
+
+def resolveImports(ast: list, visited: list, target_arch: string, target_os: string, filename: string, module_exports: dict, module_candidates: dict, imported_modules: dict) -> list {
+    return resolve_imports(ast, visited, target_arch, target_os, filename, module_exports, module_candidates, imported_modules)
 }

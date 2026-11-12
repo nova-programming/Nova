@@ -2,11 +2,11 @@
 # Inputs may use either slash style. These helpers return slash-separated
 # paths so source code remains portable; OS backends accept both styles.
 
-def path_join(parts: list[string]) -> string {
+def join(pathParts: list[string]) -> string {
     result = ""
     i = 0
-    while i < len(parts) {
-        part = parts[i]
+    while i < len(pathParts) {
+        part = pathParts[i]
         if len(part) > 0 {
             if len(result) > 0 {
                 result = result + "/"
@@ -18,40 +18,27 @@ def path_join(parts: list[string]) -> string {
     return result
 }
 
-def path_join2(first: string, second: string) -> string {
-    return path_join([first, second])
-}
-
-def path_basename(value: string) -> string {
-    end = len(value)
+def base(targetPath: string) -> string {
+    end = len(targetPath)
     i = end - 1
     while i >= 0 {
-        if value[i] == "/" {
-            return str_sub(value, i + 1, end)
-        }
-        if value[i] == "\\" {
-            return str_sub(value, i + 1, end)
+        if targetPath[i] == "/" or targetPath[i] == "\\" {
+            return str_sub(targetPath, i + 1, end)
         }
         i = i - 1
     }
-    return value
+    return targetPath
 }
 
-def path_dirname(value: string) -> string {
-    end = len(value)
+def dir(targetPath: string) -> string {
+    end = len(targetPath)
     i = end - 1
     while i >= 0 {
-        if value[i] == "/" {
+        if targetPath[i] == "/" or targetPath[i] == "\\" {
             if i == 0 {
                 return "/"
             }
-            return str_sub(value, 0, i)
-        }
-        if value[i] == "\\" {
-            if i == 0 {
-                return "/"
-            }
-            return str_sub(value, 0, i)
+            return str_sub(targetPath, 0, i)
         }
         i = i - 1
     }
@@ -59,15 +46,15 @@ def path_dirname(value: string) -> string {
 }
 
 # True for a leading "/" or "\", or a Windows drive prefix like "C:/" or "C:\".
-def path_is_absolute(value: string) -> int {
-    if len(value) == 0 {
+def isAbsolute(targetPath: string) -> int {
+    if len(targetPath) == 0 {
         return 0
     }
-    if value[0] == "/" or value[0] == "\\" {
+    if targetPath[0] == "/" or targetPath[0] == "\\" {
         return 1
     }
-    if len(value) >= 3 and value[1] == ":" {
-        if value[2] == "/" or value[2] == "\\" {
+    if len(targetPath) >= 3 and targetPath[1] == ":" {
+        if targetPath[2] == "/" or targetPath[2] == "\\" {
             return 1
         }
     }
@@ -77,13 +64,13 @@ def path_is_absolute(value: string) -> int {
 # Collapses "." segments, resolves ".." against the segments seen so far, and reduces runs of
 # "/"/"\\" to a single "/". A leading drive prefix ("C:") or absolute slash is preserved; a
 # ".." that would escape an absolute path's root, or past a relative path's known segments, is
-# kept literally (there is nothing above it to resolve against).
-def path_normalize(value: string) -> string {
+# kept literally.
+def normalize(targetPath: string) -> string {
     prefix = ""
-    rest = value
-    if len(value) >= 2 and value[1] == ":" {
-        prefix = str_sub(value, 0, 2)
-        rest = str_sub(value, 2, len(value))
+    rest = targetPath
+    if len(targetPath) >= 2 and targetPath[1] == ":" {
+        prefix = str_sub(targetPath, 0, 2)
+        rest = str_sub(targetPath, 2, len(targetPath))
     }
     absolute = 0
     if len(rest) > 0 and (rest[0] == "/" or rest[0] == "\\") {
@@ -117,7 +104,7 @@ def path_normalize(value: string) -> string {
         }
     }
 
-    joined = path_join(segments)
+    joined = join(segments)
     result = prefix
     if absolute == 1 {
         result = result + "/"
@@ -129,8 +116,8 @@ def path_normalize(value: string) -> string {
     return result
 }
 
-def path_extension(value: string) -> string {
-    name = path_basename(value)
+def ext(targetPath: string) -> string {
+    name = base(targetPath)
     i = len(name) - 1
     while i >= 0 {
         if name[i] == "." {
@@ -142,12 +129,12 @@ def path_extension(value: string) -> string {
 }
 
 # Normalizes all backslashes to forward slashes for deterministic cross-platform path handling
-def path_to_forward(value: string) -> string {
+def toForward(targetPath: string) -> string {
     result = ""
     i = 0
-    n = len(value)
+    n = len(targetPath)
     while i < n {
-        ch = value[i]
+        ch = targetPath[i]
         if ch == "\\" {
             result = result + "/"
         } else {

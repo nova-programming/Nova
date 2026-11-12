@@ -142,18 +142,6 @@ def tokenize(src: string) -> list {
         col = i - line_start
 
         if ch == "@" {
-            if i + 6 < length {
-                if src[i + 1] == "e" and src[i + 2] == "x" and src[i + 3] == "p" and src[i + 4] == "o" and src[i + 5] == "r" and src[i + 6] == "t" {
-                    tok = Token()
-                    tok.kind = "EXPORT"
-                    tok.val = "@export"
-                    tok.line = line_num
-                    tok.col = col
-                    tokens.append(tok)
-                    i = i + 7
-                    continue
-                }
-            }
             if i + 3 < length {
                 if src[i + 1] == "r" and src[i + 2] == "a" and src[i + 3] == "w" {
                     tok = Token()
@@ -175,6 +163,18 @@ def tokenize(src: string) -> list {
                     tok.col = col
                     tokens.append(tok)
                     i = i + 6
+                    continue
+                }
+            }
+            if i + 9 < length {
+                if src[i + 1] == "c" and src[i + 2] == "o" and src[i + 3] == "n" and src[i + 4] == "t" and src[i + 5] == "a" and src[i + 6] == "i" and src[i + 7] == "n" and src[i + 8] == "e" and src[i + 9] == "r" {
+                    tok = Token()
+                    tok.kind = "CONTAINER"
+                    tok.val = "@container"
+                    tok.line = line_num
+                    tok.col = col
+                    tokens.append(tok)
+                    i = i + 10
                     continue
                 }
             }
@@ -621,6 +621,11 @@ def free_soft_keywords(tokens: list) -> list {
     while i + 1 < len(tokens) {
         if tokens[i].kind == "DEF" and is_soft_keyword(tokens[i + 1].kind) == 1 {
             defined.append(tokens[i + 1].val)
+        }
+        # `def has(...)` / `def alloc(...)` inside a module: public member names (json.has, buffer.alloc) may
+        # spell an operator/intrinsic keyword; only the declaration name is freed.
+        if tokens[i].kind == "DEF" and (tokens[i + 1].kind == "HAS" or tokens[i + 1].kind == "ALLOC") {
+            tokens[i + 1].kind = "IDENT"
         }
         i = i + 1
     }

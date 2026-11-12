@@ -60,6 +60,13 @@ did-you-mean hint. Module-qualified names are the preferred API; flat names rema
 ### String literals
 `"x = {x}"` interpolates. Write `\{` and `\}` for literal braces (for example inline JSON: `"\{\"a\": 1\}"`); a doubled backslash followed by a brace still interpolates.
 
+### Variables, `let`, and undefined names
+A variable is declared by assigning it: `x = 1`. A leading `let` is an optional declaration marker (`let x = 1` means the
+same thing); it is consumed by the parser, not a separate construct. Reading a name that is never assigned in the current
+function, never a parameter, and not a global or function is a **compile error** in the self-hosted compiler
+(`undefined name 'totl'` with `did you mean 'total'?` when a similar name exists). `catch e` binds `e`, and `for` loop
+variables count as assigned. The check is order-independent within a function.
+
 ### Soft keywords
 `read`, `write`, `close`, `api`, `openf` are keywords only when called (`read(fd)`), and `data` only in
 `data Name { ... }`; elsewhere they are ordinary identifiers (variables, fields, your own functions).
@@ -183,7 +190,7 @@ These functions are available natively in all programs without requiring manual 
   jge _out_of_bounds      ; exits process with code 1
   ```
 
-### Native OS Interface (`os_win.nv` / `os_linux.nv`)
+### Native OS Interface (`backend/<arch>/os_windows.nv` / `os_unix.nv`)
 * **`sys_get_args()`**: Extracts CLI arguments via FFI (using `GetCommandLineA` on Windows), returning them as a parsed string array. Surrounding quotes are automatically stripped.
 * **`sys_system(cmd)`**: Executes shell commands via system sub-processes (uses C library `system()`).
 * **`sys_flush()`**: Flushes standard output buffers.
@@ -252,8 +259,8 @@ Both x86_64 and ARM64 backends have been optimized to eliminate the frame pointe
 The compiler supports building for different target platforms via the `target_os` field in `CodegenState`:
 - Platform-aware GCC command generation (`gcc` on Linux/macOS, bundled `gcc/bin/gcc.exe` on Windows)
 - OS-appropriate output extensions (`.exe` on Windows, no extension on macOS/Linux)
-- Platform-specific stub selection (`os_win.nv`, `os_linux.nv`, `os_macos.nv`)
-- `--target` flag for cross-compilation invocations
+- Platform-specific stub selection (`backend/<arch>/os_windows.nv`, `backend/<arch>/os_unix.nv`; Linux and macOS share the Unix facade)
+- `--os <windows|linux|macos>` and `-arch <x86_64|arm64>` flags select the target on `build` / `run`
 
 ### 8. CLI Modes
 
@@ -263,12 +270,13 @@ The compiler supports building for different target platforms via the `target_os
 |---------|------|-------------|
 | `python main.py build <file.nv>` | Production | Compiles to native x86 executable using python codegen + GCC |
 | `python main.py dev <file.nv>` | Development | Runs in Python bytecode VM |
-| `nova.exe build <file.nv>` | Self-hosted | Nova-compiled compiler compiles directly to native PE executable using internal assembler + linker (no external toolchain required) |
+| `nova.exe build <file.nv>` | Self-hosted | Nova-compiled compiler; has an internal assembler + PE linker, but the default build path currently invokes GCC (it printed `Using GCC to assemble and link...` when checked, Nov 2026) |
 | `nova.exe run <file.nv> [args...]` | Self-hosted | Compiles and immediately executes native binary with argument forwarding |
 | `nova.exe assemble-link <file.s> <out.exe>` | Assembler/Linker | Assembles and links a raw x86 assembly file directly to a PE executable |
 | `nova.exe build-bare <file.nv> <org> <entry>` | Flat Binary | Compiles to a flat, headerless binary (ideal for bare-metal/bootloader use) |
-| `nova.exe dev <file.nv>` | Development | Runs in the Nova-written bytecode VM (stdlib/vm.nv) |
-| `nova.exe repl` | Interactive | Starts the interactive REPL with multi-line input and persistent state |
+| `nova.exe check <file.nv>` | Self-hosted | Parse + type-check only (includes the undefined-name error) |
+| `python main.py repl` | Interactive | REPL (Python entry point only; `nova.exe` has no `dev`/`repl`/`lint`/`fmt` commands) |
+| `python main.py lint` / `fmt` | Tooling | Advisory style warnings / deterministic formatter (Python entry point only) |
 
 ---
 

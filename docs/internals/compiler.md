@@ -53,7 +53,7 @@ The compiler is split into modular `.nv` files:
 - `errors.nv` — structured error/warning printer with fix suggestions
 - `compiler.nv` — pipeline orchestration
 - `vm.nv` — Nova bytecode VM written in Nova (stack-based bytecode execution for 20+ opcodes via `exec_func`)
-- `os_win.nv` — Windows platform runtime facade
-- `os_linux.nv`, `os_macos.nv` — Linux/macOS platform facades sharing the common API; platform coverage is still narrower than Windows
+- `backend/<arch>/os_windows.nv` — Windows platform runtime facade
+- `backend/<arch>/os_unix.nv` — Linux/macOS platform facade sharing the common API; platform coverage is still narrower than Windows
 
 All compiler improvements can be written purely in Nova, maintaining a self-sustaining ecosystem.

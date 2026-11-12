@@ -12,12 +12,12 @@ extern def nova_net_recv(sock: int, buf: int, max_len: int) -> int
 extern def nova_net_close(sock: int)
 extern def nova_socket_set_timeout(sock: int, timeout_ms: int) -> int
 
-def net_init() -> int {
+def init() -> int {
     return nova_net_init()
 }
 
-def socket_set_timeout(sock: int, timeout_ms: int) -> int {
-    return nova_socket_set_timeout(sock, timeout_ms)
+def setTimeout(socketFd: int, timeoutMs: int) -> int {
+    return nova_socket_set_timeout(socketFd, timeoutMs)
 }
 
 class TcpStream {
@@ -66,15 +66,15 @@ class TcpListener {
     }
 }
 
-def tcp_listen(port: int, backlog: int) -> TcpListener {
-    s = nova_tcp_listen(port, backlog)
+def listen(portNumber: int, backlogCount: int) -> TcpListener {
+    s = nova_tcp_listen(portNumber, backlogCount)
     l = TcpListener()
     l.sock = s
-    l.port = port
+    l.port = portNumber
     return l
 }
 
-def tcp_connect(ip: string, port: int) -> TcpStream {
-    s = nova_tcp_connect(ip, port)
+def connect(ipAddress: string, portNumber: int) -> TcpStream {
+    s = nova_tcp_connect(ipAddress, portNumber)
     return new_tcp_stream(s)
 }

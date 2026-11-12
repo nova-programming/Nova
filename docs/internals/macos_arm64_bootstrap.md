@@ -115,7 +115,7 @@ could produce corrupt code that crashes at runtime rather than at assembly time.
 7. Check `_str_sub` for off-by-one errors with 64-bit lengths
 
 ### If Hypothesis 3
-8. Check `stdlib/assembler.nv` ARM64 encoding for correct instruction widths
+8. Check `stdlib/backend/arm64/assembler*.nv` ARM64 encoding for correct instruction widths
 9. Verify `.rept`/`.endr` expansion doesn't overflow internal buffers
 
 ## Key Files

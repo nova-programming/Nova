@@ -37,6 +37,7 @@ KEYWORDS = {
     "defer": "DEFER",
     "extern": "EXTERN",
     "@raw": "RAW", "@export": "EXPORT", "@entry": "ENTRY", "@noinline": "NOINLINE",
+    "@container": "CONTAINER",
 }
 
 ESCAPE_MAP = {
@@ -240,6 +241,8 @@ def tokenize(code):
 # when called (``read(fd)``). Everywhere else they are ordinary identifiers, so
 # ``write = 5``, ``def close()``, ``self.api`` and ``f.read()`` all work.
 SOFT_KEYWORDS = {"READ", "WRITE", "CLOSE", "API", "OPENF"}
+# Hard keywords that may still name a function in its `def` (call sites reach them as `module.name(...)`)
+DEF_NAME_KEYWORDS = {"HAS", "ALLOC"}
 
 
 def _free_soft_keywords(tokens):
@@ -247,6 +250,10 @@ def _free_soft_keywords(tokens):
     for i in range(len(tokens) - 1):
         if tokens[i][0] == "DEF" and tokens[i + 1][0] in SOFT_KEYWORDS:
             defined.add(tokens[i + 1][1])
+        # `def has(...)` / `def alloc(...)` inside a module: public member names (json.has, buffer.alloc)
+        # may spell an operator/intrinsic keyword; only the declaration name is freed.
+        if tokens[i][0] == "DEF" and tokens[i + 1][0] in DEF_NAME_KEYWORDS:
+            tokens[i + 1] = ("IDENT",) + tuple(tokens[i + 1][1:])
     for i, tok in enumerate(tokens):
         if tok[0] == "DATA":
             # `data Name {` declares a struct; anywhere else `data` is a plain identifier

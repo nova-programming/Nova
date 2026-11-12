@@ -3,40 +3,40 @@
 # empty/zero values for failed reads or metadata queries.
 import system
 
-def fs_exists(path: string) -> int {
-    return file_exists(path)
+def exists(filePath: string) -> int {
+    return file_exists(filePath)
 }
 
-def fs_size(path: string) -> int {
-    return file_size(path)
+def size(filePath: string) -> int {
+    return file_size(filePath)
 }
 
-def fs_kind(path: string) -> string {
-    return file_type(path)
+def kind(filePath: string) -> string {
+    return file_type(filePath)
 }
 
-def fs_mkdir(path: string) -> int {
-    return file_mkdir(path)
+def makeDir(directoryPath: string) -> int {
+    return file_mkdir(directoryPath)
 }
 
-def fs_delete(path: string) -> int {
-    return file_delete(path)
+def delete(targetPath: string) -> int {
+    return file_delete(targetPath)
 }
 
-def fs_list_dir(path: string) -> list[string] {
-    return file_listdir(path)
+def listDir(directoryPath: string) -> list[string] {
+    return file_listdir(directoryPath)
 }
 
-def fs_copy(source: string, destination: string) -> int {
-    return file_copy(source, destination)
+def copy(sourcePath: string, destinationPath: string) -> int {
+    return file_copy(sourcePath, destinationPath)
 }
 
-def fs_move(source: string, destination: string) -> int {
-    return file_move(source, destination)
+def move(sourcePath: string, destinationPath: string) -> int {
+    return file_move(sourcePath, destinationPath)
 }
 
-def fs_read(path: string) -> string {
-    fd = file_open(path, "r")
+def read(filePath: string) -> string {
+    fd = file_open(filePath, "r")
     if fd == 0 {
         return ""
     }
@@ -45,36 +45,27 @@ def fs_read(path: string) -> string {
     return value
 }
 
-def fs_write(path: string, content: string) -> int {
-    fd = file_open(path, "w")
+def write(filePath: string, fileContent: string) -> int {
+    fd = file_open(filePath, "w")
     if fd == 0 {
         return 0
     }
-    file_write(fd, content)
+    file_write(fd, fileContent)
     file_close(fd)
     return 1
 }
 
 # Atomic file write: writes payload to a temporary file then atomically renames to target
-def fs_write_atomic(path: string, content: string) -> int {
-    tmp_path = path + ".tmp"
-    ok = fs_write(tmp_path, content)
+def writeAtomic(filePath: string, fileContent: string) -> int {
+    tmp_path = filePath + ".tmp"
+    ok = write(tmp_path, fileContent)
     if ok == 0 {
         return 0
     }
-    res = fs_move(tmp_path, path)
+    res = move(tmp_path, filePath)
     if res == 0 {
-        fs_delete(path)
-        res = fs_move(tmp_path, path)
+        delete(filePath)
+        res = move(tmp_path, filePath)
     }
     return res
-}
-
-# Descriptive aliases retained for readability and compatibility.
-def fs_read_text(path: string) -> string {
-    return fs_read(path)
-}
-
-def fs_write_text(path: string, content: string) -> int {
-    return fs_write(path, content)
 }

@@ -1,16 +1,16 @@
 import system
 import compiler
 
-def str_to_int(s: string) -> int {
+def strToInt(sourceText: string) -> int {
     result = 0
     i = 0
     negative = 0
-    if len(s) > 0 and s[0] == "-" {
+    if len(sourceText) > 0 and sourceText[0] == "-" {
         negative = 1
         i = 1
     }
-    while i < len(s) {
-        ch = s[i]
+    while i < len(sourceText) {
+        ch = sourceText[i]
         digit = 0
         if ch == "0" { digit = 0 }
         if ch == "1" { digit = 1 }
@@ -29,9 +29,13 @@ def str_to_int(s: string) -> int {
     return result
 }
 
+def str_to_int(s: string) -> int {
+    return strToInt(s)
+}
+
 NOVA_VERSION = "0.8.0"
 
-def print_help() {
+def printHelp() {
     print("Nova v" + NOVA_VERSION)
     print("Usage: nova <command> [options] [arguments]")
     print("")
@@ -52,16 +56,20 @@ def print_help() {
     print("  --os <os>            Target operating system (windows, linux, macos)")
 }
 
+def print_help() {
+    printHelp()
+}
+
 plat = ""
 args = system.get_args()
 if len(args) < 2 {
-    print_help()
+    printHelp()
     sys_exit(0)
 }
 
 cmd = args[1]
 if cmd == "--help" or cmd == "help" or cmd == "-h" {
-    print_help()
+    printHelp()
     sys_exit(0)
 }
 if cmd == "--version" or cmd == "version" or cmd == "-v" {
@@ -304,7 +312,7 @@ if cmd == "build" {
     load_addr = 0
     entry_name = "_start"
     if len(args) >= 4 {
-        load_addr = str_to_int(args[3])
+        load_addr = strToInt(args[3])
     }
     if len(args) >= 5 {
         entry_name = args[4]
@@ -328,7 +336,7 @@ if cmd == "build" {
     out_path = args[3]
     load_addr = 0
     if len(args) >= 5 {
-        load_addr = str_to_int(args[4])
+        load_addr = strToInt(args[4])
     }
     print("asm is " + asm_path)
     print("out is " + out_path)

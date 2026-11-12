@@ -6,13 +6,10 @@ import re
 
 import names
 
-OLD_MEMBERS = {
-    "as_list": "asList", "value_byte": "valueByte", "value_word": "valueWord",
-    "value_dword": "valueDword", "value_qword": "valueQword",
-}
+OLD_MEMBERS = {v: k for k, v in names.MEMBER_ALIASES.items()}
 
 _CALL_RE = re.compile(r"(?<![\w.])([a-z][a-z0-9_]*)(\s*\()")
-_MEMBER_RE = re.compile(r"\.(as_list|value_byte|value_word|value_dword|value_qword)\b")
+_MEMBER_RE = re.compile(r"\.(" + "|".join(re.escape(v) for v in names.MEMBER_ALIASES.values()) + r")\b")
 _DEF_RE = re.compile(r"^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)", re.M)
 
 
@@ -22,6 +19,14 @@ def old_api_map():
              for mod, funcs in names.MODULE_FUNCS.items()
              for member, internal in funcs.items()}
     table["path_join2"] = ("path", "join")
+    table["path_basename"] = ("path", "base")
+    table["path_dirname"] = ("path", "dir")
+    table["path_extension"] = ("path", "ext")
+    table["path_is_absolute"] = ("path", "isAbsolute")
+    table["path_to_forward"] = ("path", "toForward")
+    table["fs_mkdir"] = ("fs", "makeDir")
+    table["fs_read_text"] = ("fs", "read")
+    table["fs_write_text"] = ("fs", "write")
     return table
 
 

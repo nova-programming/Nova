@@ -352,6 +352,9 @@ class Compiler:
         elif isinstance(node, RawBlock):
             for stmt in node.body:
                 self.compile_stmt(stmt)
+        elif isinstance(node, Block):
+            for stmt in node.stmts:
+                self.compile_stmt(stmt)
         elif isinstance(node, Export):
             # The VM dynamically looks up global functions and variables,
             # so `@export` doesn't strictly need a runtime compilation step in this simplified VM,

@@ -47,17 +47,11 @@ def _native_output(source, tmp_path):
     return r.stdout
 
 
-# ---- the two name tables stay in sync ---------------------------------------
+# ---- names.nv is retired in favor of automatic post-parse resolution ---------
 
-def test_python_and_nova_tables_match():
-    text = open(os.path.join(ROOT, "stdlib", "names.nv"), encoding="utf-8").read()
-    nova_pairs = dict(re.findall(r'"([a-z]+\.[A-Za-z]+)":\s*"([a-z_0-9]+)"', text))
-    py_pairs = {f"{m}.{f}": t for m, fs in names.MODULE_FUNCS.items() for f, t in fs.items()}
-    assert nova_pairs == py_pairs
-    nova_modules = set(re.findall(r'if name == "([a-z]+)" \{ return 1 \}', text))
-    assert nova_modules == set(names.MODULE_FUNCS)
-    nova_members = dict(re.findall(r'if name == "([A-Za-z]+)" \{ return "([a-z_]+)" \}', text))
-    assert nova_members == names.MEMBER_ALIASES
+def test_names_nv_retired_and_not_needed():
+    # stdlib/names.nv is retired; module resolution is dynamic from AST def statements
+    assert not os.path.exists(os.path.join(ROOT, "stdlib", "names.nv"))
 
 
 # ---- module-qualified calls --------------------------------------------------
@@ -253,3 +247,119 @@ def test_fmt_modernize_only_writes_with_write_flag(tmp_path):
     subprocess.run([sys.executable, MAIN_PY, "fmt", "--write", "--modernize", str(f)],
                    capture_output=True, text=True, cwd=ROOT)
     assert f.read_text() == 'import path\nx = path.base("a/b")\n'
+
+
+def test_ui_and_audio_module_names_resolve():
+    from parser.parser import Parser
+    from lexer.tokenizer import tokenize
+    src = "import ui\nimport audio\nui.open(\"Test\", 100, 100)\naudio.beep(440, 50)\n"
+    ast = Parser(tokenize(src)).parse()
+    # Should resolve ui.open to Call("ui_open") and audio.beep to Call("audio_beep")
+    calls = [n for n in ast if type(n).__name__ == "Call"]
+    names_called = [c.name for c in calls]
+    assert "ui_open" in names_called
+    assert "audio_beep" in names_called
+
+
+# ---- dynamic module resolution & user modules --------------------------------
+
+def test_user_written_module_dynamic_resolution(selfhost, selfhost_run):
+    stage1, work, env = selfhost
+    mod_file = work / "calc_helper.nv"
+    mod_file.write_text(
+        'def add(a: int, b: int) -> int {\n'
+        '    return a + b\n'
+        '}\n'
+        'def multiply_nums(a: int, b: int) -> int {\n'
+        '    return a * b\n'
+        '}\n',
+        encoding="utf-8"
+    )
+    src = (
+        'import calc_helper\n'
+        'def main() {\n'
+        '    print(calc_helper.add(15, 27))\n'
+        '    print(calc_helper.multiplyNums(6, 7))\n'
+        '}\n'
+        'main()\n'
+    )
+    r, _ = selfhost_run(src, "test_user_mod_main")
+    assert r.returncode == 0
+    assert r.stdout.split() == ["42", "42"]
+
+
+def test_user_module_typo_suggestion(selfhost):
+    stage1, work, env = selfhost
+    from conftest import run_built, EXE
+    mod_file = work / "calc_helper.nv"
+    mod_file.write_text(
+        'def add(a: int, b: int) -> int {\n'
+        '    return a + b\n'
+        '}\n'
+        'def multiply_nums(a: int, b: int) -> int {\n'
+        '    return a * b\n'
+        '}\n',
+        encoding="utf-8"
+    )
+    src_file = work / "test_typo_main.nv"
+    src_file.write_text(
+        'import calc_helper\n'
+        'def main() {\n'
+        '    print(calc_helper.multiplyNum(6, 7))\n'
+        '}\n'
+        'main()\n',
+        encoding="utf-8"
+    )
+    exe = work / ("test_typo_main" + EXE)
+    if exe.exists():
+        exe.unlink()
+    b = run_built([str(stage1), "build", str(src_file)], str(exe), capture_output=True, text=True,
+                  timeout=60, cwd=work, env=env)
+    assert b.returncode != 0
+    err_out = b.stdout + b.stderr
+    assert "module 'calc_helper' has no function 'multiplyNum'" in err_out
+    assert "did you mean 'calc_helper.multiplyNums'?" in err_out
+
+
+def test_shadowed_module_name(selfhost_run):
+    src = (
+        'import fs\n'
+        'def run() {\n'
+        '    fs = 42\n'
+        '    print(fs)\n'
+        '}\n'
+        'run()\n'
+    )
+    r, _ = selfhost_run(src, "test_shadow_fs")
+    assert r.returncode == 0
+    assert r.stdout.strip() == "42"
+
+
+
+
+# ---- legacy flat names and keyword-named members -----------------------------------------------
+
+LEGACY_PROGRAM = (
+    "import text\nimport json\nimport buffer\nimport time\n"
+    'print(text_to_int("12"))\n'
+    'print(json_as_int(json.parse("5")))\n'
+    "b = new_buffer(8)\nb.set_u8(0, 9)\nprint(b.get_u8(0))\n"
+    "print(len(time.now()) > 0)\n"
+)
+
+
+def test_legacy_snake_case_names_still_resolve_selfhost(selfhost_run):
+    # Module members are camelCase (fs.writeAtomic); the old flat spellings (fs_write_atomic, text_to_int,
+    # new_buffer, ...) must keep compiling. Regression: they linked as undefined `_text_to_int` etc.
+    r, _ = selfhost_run(LEGACY_PROGRAM, "names_legacy")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.stdout.split() == ["12", "5", "9", "1"]
+
+
+def test_keywords_may_name_module_functions():
+    # `has` and `alloc` are keywords, but json.has / buffer.alloc are public members: only the `def` name is freed.
+    ast = Parser(tokenize("def has(a, b) { return 1 }\ndef alloc(n) { return n }\n")).parse()
+    assert [n.name for n in ast if type(n).__name__ == "Function"] == ["has", "alloc"]
+    # ...while `x has y` and alloc[int](n) are still the operator / intrinsic
+    ast2 = Parser(tokenize('ok = "abc" has "b"\nq = alloc[int](4)\n')).parse()
+    assert type(ast2[1].value).__name__ == "Alloc"

@@ -1,0 +1,713 @@
+# ui - build Nova OS apps (.nva) from readable, declarative calls.
+#
+#   import ui
+#
+#   def main() -> int {
+#       ui.window()
+#       let n = 0
+#       let running = true
+#       while running == true {
+#           ui.frame {
+#               ui.stack(padding=16, gap=12) {
+#                   ui.text("Counter", align=align.center, bold=true)
+#                   ui.card(height=48) {
+#                       ui.meter(percent=n * 10, color=ui.accent)
+#                   }
+#                   ui.row(gap=12, cols=2) {
+#                       ui.button("Add 10%", style=style.primary, id=0)
+#                       ui.button("Reset", style=style.plain, id=1)
+#                   }
+#               }
+#           }
+#           if ui.clicked(0) == true { n = n + 1 }
+#           if ui.clicked(1) == true { n = 0 }
+#           if ui.eventKey() == 27 { running = false }
+#       }
+#       ui.quit()
+#       return 0
+#   }
+
+extern def nova_create_window(w: int, h: int, title: int) -> int
+extern def nova_damage_window(id: int) -> int
+extern def nova_poll_event(id: int, buf: int) -> int
+extern def nova_destroy_window(id: int) -> int
+extern def nova_sleep(ms: int) -> int
+
+# ---- alignment constants & helpers ---------------------------------------------------------------------------
+const UI_LEFT   = 0
+const UI_CENTER = 1
+const UI_RIGHT  = 2
+
+const LEFT   = 0
+const CENTER = 1
+const RIGHT  = 2
+
+def left() -> int { return 0 }
+def center() -> int { return 1 }
+def right() -> int { return 2 }
+
+def ui_left() -> int { return 0 }
+def ui_center() -> int { return 1 }
+def ui_right() -> int { return 2 }
+
+# ---- theme roles (0 = the element's own default) -------------------------------------------------------------
+const UI_DEFAULT   = 0
+const UI_TEXT      = 1
+const UI_SECONDARY = 2
+const UI_MUTED     = 3
+const UI_ACCENT    = 4
+const UI_OK        = 5
+const UI_WARN      = 6
+const UI_ERR       = 7
+
+# ---- button styles ---------------------------------------------------------------------------------------------
+const UI_PLAIN   = 0
+const UI_HOVER   = 1
+const UI_PRIMARY = 2
+
+# ---- events -------------------------------------------------------------------------------------------------------
+const UI_EV_NONE  = 0
+const UI_EV_CLICK = 1
+const UI_EV_KEY   = 2
+
+# ---- fixed layout of the shared display page (must match ui/clients.nv in the OS) ----------------------------
+const UI_PAGE      = 0x74C000     # user address of the display list
+const UI_MAGIC     = 0x3149554E   # "NUI1"
+const UI_CMDS      = 0x74C010
+const UI_POOL      = 0x74E010     # UI_PAGE + 8208
+const UI_POOL_SIZE = 7920
+const UI_MAX_CMDS  = 256
+const UI_STATE     = 0x74FF00     # 256 bytes of library state (the OS never reads it)
+
+# state offsets
+const ST_GAP        = 0
+const ST_PAD        = 4
+const ST_WIN        = 8
+const ST_SX         = 12
+const ST_SY         = 16
+const ST_SW         = 20
+const ST_EVT        = 24      # last event: type, x, y, key  (4 x u32 = 16 bytes: 24..39)
+const ST_W          = 40
+const ST_H          = 44
+const ST_RADIUS     = 48
+const ST_BTN_H      = 52
+const ST_ROW_Y      = 56
+const ST_ROW_H      = 60
+const ST_ROW_COLS   = 64
+const ST_ROW_GAP    = 68
+const ST_COL_W      = 72
+const ST_CLICKED_ID = 76
+const ST_DEPTH      = 80
+const ST_OVERFLOW   = 84
+const ST_ROW_COL_I  = 88
+
+# ---- default values -------------------------------------------------------------------------------------------
+const UI_DEFAULT_GAP    = 12
+const UI_DEFAULT_PAD    = 16
+const UI_DEFAULT_RADIUS = 10
+const UI_DEFAULT_BTN_H  = 28
+const MAX_CONTAINER_DEPTH = 8
+
+def uiState(off: int) -> int { return peek.u32(UI_STATE + off) }
+def uiSetState(off: int, v: int) { poke.u32(UI_STATE + off, v) }
+
+def ui_state(off: int) -> int { return uiState(off) }
+def ui_set_state(off: int, v: int) { uiSetState(off, v) }
+
+# Explicit RGB colour (0x01RRGGBB)
+def rgb(r: int, g: int, b: int) -> int {
+    return 0x01000000 | (r << 16) | (g << 8) | b
+}
+def ui_rgb(r: int, g: int, b: int) -> int { return rgb(r, g, b) }
+
+# ---- state accessors -------------------------------------------------------------------------------------------
+def setGap(px: int) { uiSetState(ST_GAP, px) }
+def setPadding(px: int) { uiSetState(ST_PAD, px) }
+def setRadius(px: int) { uiSetState(ST_RADIUS, px) }
+def setButtonHeight(px: int) { uiSetState(ST_BTN_H, px) }
+
+def gap() -> int { return uiState(ST_GAP) }
+def padding() -> int { return uiState(ST_PAD) }
+def buttonHeight() -> int { return uiState(ST_BTN_H) }
+def width() -> int { return uiState(ST_W) }
+def height() -> int { return uiState(ST_H) }
+
+def ui_set_gap(px: int) { setGap(px) }
+def ui_set_padding(px: int) { setPadding(px) }
+def ui_set_radius(px: int) { setRadius(px) }
+def ui_set_button_height(px: int) { setButtonHeight(px) }
+def ui_gap() -> int { return gap() }
+def ui_padding() -> int { return padding() }
+def ui_button_height() -> int { return buttonHeight() }
+def ui_width() -> int { return width() }
+def ui_height() -> int { return height() }
+
+# ---- container hierarchy stack --------------------------------------------------------------------------------
+def pushContainer(cType: int, cX: int, cY: int, cW: int) {
+    let d = uiState(ST_DEPTH)
+    if d >= MAX_CONTAINER_DEPTH {
+        uiSetState(ST_OVERFLOW, 1)
+        return
+    }
+    let slot = UI_STATE + 96 + d * 16
+    poke.u32(slot + 0, cType)
+    poke.u32(slot + 4, cX)
+    poke.u32(slot + 8, cY)
+    poke.u32(slot + 12, cW)
+    uiSetState(ST_DEPTH, d + 1)
+}
+
+def popContainer() {
+    let d = uiState(ST_DEPTH)
+    if d > 0 {
+        uiSetState(ST_DEPTH, d - 1)
+    }
+}
+
+def currentContainerType() -> int {
+    let d = uiState(ST_DEPTH)
+    if d <= 0 { return 0 }
+    let slot = UI_STATE + 96 + (d - 1) * 16
+    return peek.u32(slot + 0)
+}
+
+def currentContainerX() -> int {
+    let d = uiState(ST_DEPTH)
+    if d <= 0 { return padding() }
+    let slot = UI_STATE + 96 + (d - 1) * 16
+    return peek.u32(slot + 4)
+}
+
+def currentContainerY() -> int {
+    let d = uiState(ST_DEPTH)
+    if d <= 0 { return padding() }
+    let slot = UI_STATE + 96 + (d - 1) * 16
+    return peek.u32(slot + 8)
+}
+
+def currentContainerW() -> int {
+    let d = uiState(ST_DEPTH)
+    if d <= 0 { return width() - 2 * padding() }
+    let slot = UI_STATE + 96 + (d - 1) * 16
+    return peek.u32(slot + 12)
+}
+
+def advanceContainerY(itemH: int) -> int {
+    let d = uiState(ST_DEPTH)
+    if d <= 0 {
+        return next(itemH)
+    }
+    let slot = UI_STATE + 96 + (d - 1) * 16
+    let y = peek.u32(slot + 8)
+    let g = gap()
+    poke.u32(slot + 8, y + itemH + g)
+    return y
+}
+
+# ---- window lifecycle ------------------------------------------------------------------------------------------
+def syncSize() {
+    let w = peek.u32(UI_PAGE + 20)
+    let h = peek.u32(UI_PAGE + 24)
+    if w > 0 and h > 0 {
+        uiSetState(ST_W, w)
+        uiSetState(ST_H, h)
+    }
+}
+def ui_sync_size() { syncSize() }
+
+def window(title: string = "App", width: int = 340, height: int = 220) -> int {
+    let id = nova_create_window(width, height, title.ptr)
+    uiSetState(ST_WIN, id)
+    uiSetState(ST_GAP, UI_DEFAULT_GAP)
+    uiSetState(ST_PAD, UI_DEFAULT_PAD)
+    uiSetState(ST_RADIUS, UI_DEFAULT_RADIUS)
+    uiSetState(ST_BTN_H, UI_DEFAULT_BTN_H)
+    uiSetState(ST_W, width)
+    uiSetState(ST_H, height)
+    uiSetState(ST_DEPTH, 0)
+    uiSetState(ST_OVERFLOW, 0)
+    uiSetState(ST_CLICKED_ID, 0 - 1)
+    poke.u32(UI_PAGE + 0, UI_MAGIC)
+    poke.u32(UI_PAGE + 4, 0)
+    poke.u32(UI_PAGE + 8, 0)
+    poke.u32(UI_PAGE + 12, 0)
+    syncSize()
+    return id
+}
+def ui_open(title: string, width: int, height: int) -> int {
+    return window(title, width, height)
+}
+
+def quit() {
+    nova_destroy_window(uiState(ST_WIN))
+}
+def ui_close() { quit() }
+
+def wait(ms: int) {
+    nova_sleep(ms)
+}
+def ui_wait(ms: int) { wait(ms) }
+
+def theme(accent: int = -1, gap: int = -1, padding: int = -1, radius: int = -1) {
+    if gap >= 0 { setGap(gap) }
+    if padding >= 0 { setPadding(padding) }
+    if radius >= 0 { setRadius(radius) }
+}
+def ui_theme(accent: int = -1, gap: int = -1, padding: int = -1, radius: int = -1) {
+    theme(accent, gap, padding, radius)
+}
+
+# ---- frame management ------------------------------------------------------------------------------------------
+def begin() {
+    poke.u32(UI_PAGE + 8, 0)      # frame not ready
+    poke.u32(UI_PAGE + 4, 0)
+    poke.u32(UI_PAGE + 12, 0)
+}
+def ui_begin() { begin() }
+
+def end() {
+    poke.u32(UI_PAGE + 8, 1)      # ready
+    nova_damage_window(uiState(ST_WIN))
+}
+def ui_end() { end() }
+
+@container def frame() {
+    uiSetState(ST_DEPTH, 0)
+    uiSetState(ST_CLICKED_ID, 0 - 1)
+    begin()
+    poll()
+}
+def endFrame() {
+    end()
+    wait(16)
+}
+def end_frame() { endFrame() }
+def ui_frame() { frame() }
+def ui_end_frame() { endFrame() }
+
+# ---- low level buffers -----------------------------------------------------------------------------------------
+def poolAdd(s: string) -> int {
+    let p = s.ptr
+    let used = peek.u32(UI_PAGE + 12)
+    let n = 0
+    while peek.u8(p + n) != 0 { n = n + 1 }
+    if used + n + 1 > UI_POOL_SIZE { return 0 - 1 }
+    let i = 0
+    while i < n {
+        poke.u8(UI_POOL + used + i, peek.u8(p + i))
+        i = i + 1
+    }
+    poke.u8(UI_POOL + used + n, 0)
+    poke.u32(UI_PAGE + 12, used + n + 1)
+    return used
+}
+def ui_pool_add(s: string) -> int { return poolAdd(s) }
+
+def cmd(op: int) -> int {
+    let n = peek.u32(UI_PAGE + 4)
+    if n >= UI_MAX_CMDS { return 0 }
+    poke.u32(UI_PAGE + 4, n + 1)
+    let c = UI_CMDS + n * 32
+    poke.u32(c + 0, op)
+    poke.u32(c + 4, 0)
+    poke.u32(c + 8, 0)
+    poke.u32(c + 12, 0)
+    poke.u32(c + 16, 0)
+    poke.u32(c + 20, 0)
+    poke.u32(c + 24, 0)
+    poke.u32(c + 28, 0)
+    return c
+}
+def ui_cmd(op: int) -> int { return cmd(op) }
+
+# ---- drawing commands ------------------------------------------------------------------------------------------
+def clear(color: int = 0) {
+    let c = cmd(1)
+    if c != 0 { poke.u32(c + 4, color) }
+}
+def ui_clear(color: int = 0) { clear(color) }
+
+def rect(x: int, y: int, width: int, height: int, color: int = 0, radius: int = 0) {
+    let c = cmd(2)
+    if c != 0 {
+        poke.u32(c + 4, x)
+        poke.u32(c + 8, y)
+        poke.u32(c + 12, width)
+        poke.u32(c + 16, height)
+        poke.u32(c + 20, radius)
+        poke.u32(c + 24, color)
+    }
+}
+def ui_rect(x: int, y: int, width: int, height: int, color: int = 0, radius: int = 0) {
+    rect(x, y, width, height, color, radius)
+}
+
+def group(x: int, y: int, width: int, height: int) {
+    let c = cmd(3)
+    if c != 0 {
+        poke.u32(c + 4, x)
+        poke.u32(c + 8, y)
+        poke.u32(c + 12, width)
+        poke.u32(c + 16, height)
+    }
+}
+def ui_group(x: int, y: int, width: int, height: int) { group(x, y, width, height) }
+
+def text(content: string = "", align: int = 0, bold: bool = false, color: int = 0, maxWidth: int = -1, overflow: bool = false) {
+    let h = 20
+    let x = currentContainerX()
+    let y = advanceContainerY(h)
+    let w = currentContainerW()
+    if maxWidth > 0 { w = maxWidth }
+    let off = poolAdd(content)
+    if off < 0 { return }
+    let c = cmd(4)
+    if c != 0 {
+        let bVal = 0
+        if bold == true { bVal = 1 }
+        let oVal = 0
+        if overflow == true { oVal = 1 }
+        let flags = bVal | (oVal << 1)
+        poke.u32(c + 4, x)
+        poke.u32(c + 8, y)
+        poke.u32(c + 12, color)
+        poke.u32(c + 16, w)
+        poke.u32(c + 20, off)
+        poke.u32(c + 24, flags)
+        poke.u32(c + 28, align)
+    }
+}
+
+def textCenter(content: string = "", color: int = 0, bold: bool = false, overflow: bool = false) {
+    text(content, UI_CENTER, bold, color, -1, overflow)
+}
+def textRight(content: string = "", color: int = 0, bold: bool = false, overflow: bool = false) {
+    text(content, UI_RIGHT, bold, color, -1, overflow)
+}
+
+def ui_text(x: int, y: int, s: string, color: int = 0, bold: int = 0, align: int = 0, max_w: int = 0, overflow: int = 0) {
+    let off = poolAdd(s)
+    if off < 0 { return }
+    let c = cmd(4)
+    if c != 0 {
+        if max_w <= 0 {
+            max_w = stackW()
+            if max_w <= 0 { max_w = width() - x }
+        }
+        let flags = (bold & 1) | ((overflow & 1) << 1)
+        poke.u32(c + 4, x)
+        poke.u32(c + 8, y)
+        poke.u32(c + 12, color)
+        poke.u32(c + 16, max_w)
+        poke.u32(c + 20, off)
+        poke.u32(c + 24, flags)
+        poke.u32(c + 28, align)
+    }
+}
+def ui_text_center(y: int, s: string, color: int = 0, bold: int = 0, overflow: int = 0) {
+    let sx = stackX()
+    let sw = stackW()
+    if sw <= 0 {
+        sx = padding()
+        sw = width() - 2 * padding()
+    }
+    ui_text(sx, y, s, color, bold, UI_CENTER, sw, overflow)
+}
+def ui_text_right(y: int, s: string, color: int = 0, bold: int = 0, overflow: int = 0) {
+    let sx = stackX()
+    let sw = stackW()
+    if sw <= 0 {
+        sx = padding()
+        sw = width() - 2 * padding()
+    }
+    ui_text(sx, y, s, color, bold, UI_RIGHT, sw, overflow)
+}
+
+def badge(label: string = "", role: int = UI_ACCENT, width: int = -1, height: int = -1) {
+    let h = 24
+    if height > 0 { h = height }
+    let w = 64
+    if width > 0 { w = width }
+    let x = currentContainerX()
+    let y = advanceContainerY(h)
+    let off = poolAdd(label)
+    if off < 0 { return }
+    let c = cmd(8)
+    if c != 0 {
+        poke.u32(c + 4, x)
+        poke.u32(c + 8, y)
+        poke.u32(c + 12, w)
+        poke.u32(c + 16, h)
+        poke.u32(c + 20, off)
+        poke.u32(c + 24, role)
+    }
+}
+def ui_badge(x: int, y: int, w: int, h: int, label: string, role: int = UI_ACCENT) {
+    let off = poolAdd(label)
+    if off < 0 { return }
+    let c = cmd(8)
+    if c != 0 {
+        poke.u32(c + 4, x)
+        poke.u32(c + 8, y)
+        poke.u32(c + 12, w)
+        poke.u32(c + 16, h)
+        poke.u32(c + 20, off)
+        poke.u32(c + 24, role)
+    }
+}
+
+def button(label: string = "", align: int = 1, style: int = 0, width: int = -1, height: int = -1, id: int = -1) {
+    let cType = currentContainerType()
+    let x = 0
+    let y = 0
+    let w = 0
+    let h = 0
+    if cType == 3 {
+        let colIdx = uiState(ST_ROW_COL_I)
+        x = colX(colIdx)
+        y = uiState(ST_ROW_Y)
+        w = colW()
+        h = uiState(ST_ROW_H)
+        uiSetState(ST_ROW_COL_I, colIdx + 1)
+    } else {
+        h = buttonHeight()
+        if height > 0 { h = height }
+        w = currentContainerW()
+        if width > 0 { w = width }
+        x = currentContainerX()
+        y = advanceContainerY(h)
+    }
+    let off = poolAdd(label)
+    if off >= 0 {
+        let c = cmd(5)
+        if c != 0 {
+            poke.u32(c + 4, x)
+            poke.u32(c + 8, y)
+            poke.u32(c + 12, w)
+            poke.u32(c + 16, h)
+            poke.u32(c + 20, off)
+            poke.u32(c + 24, style)
+            if id >= 0 {
+                poke.u32(c + 28, id)
+            }
+        }
+    }
+    if id >= 0 {
+        if hit(x, y, w, h) == 1 {
+            uiSetState(ST_CLICKED_ID, id)
+        }
+    }
+}
+def ui_button(x: int, y: int, w: int, h: int, label: string, style: int = 0) {
+    let off = poolAdd(label)
+    if off < 0 { return }
+    let c = cmd(5)
+    if c != 0 {
+        poke.u32(c + 4, x)
+        poke.u32(c + 8, y)
+        poke.u32(c + 12, w)
+        poke.u32(c + 16, h)
+        poke.u32(c + 20, off)
+        poke.u32(c + 24, style)
+    }
+}
+
+def meter(percent: int = 0, color: int = 4, width: int = -1, height: int = -1) {
+    let h = 8
+    if height > 0 { h = height }
+    let w = currentContainerW()
+    if width > 0 { w = width }
+    let x = currentContainerX()
+    let y = advanceContainerY(h)
+    let c = cmd(6)
+    if c != 0 {
+        poke.u32(c + 4, x)
+        poke.u32(c + 8, y)
+        poke.u32(c + 12, w)
+        poke.u32(c + 16, h)
+        poke.u32(c + 20, percent)
+        poke.u32(c + 24, color)
+    }
+}
+def ui_meter(x: int, y: int, w: int, h: int, percent: int, color: int = 0) {
+    let c = cmd(6)
+    if c != 0 {
+        poke.u32(c + 4, x)
+        poke.u32(c + 8, y)
+        poke.u32(c + 12, w)
+        poke.u32(c + 16, h)
+        poke.u32(c + 20, percent)
+        poke.u32(c + 24, color)
+    }
+}
+
+def divider(length: int = -1, horizontal: int = 1) {
+    let x = currentContainerX()
+    let y = advanceContainerY(1)
+    let l = length
+    if l <= 0 { l = currentContainerW() }
+    let c = cmd(7)
+    if c != 0 {
+        poke.u32(c + 4, x)
+        poke.u32(c + 8, y)
+        poke.u32(c + 12, l)
+        poke.u32(c + 28, horizontal)
+    }
+}
+def ui_divider(x: int, y: int, length: int, horizontal: int = 1) {
+    let c = cmd(7)
+    if c != 0 {
+        poke.u32(c + 4, x)
+        poke.u32(c + 8, y)
+        poke.u32(c + 12, length)
+        poke.u32(c + 28, horizontal)
+    }
+}
+
+# ---- layout containers -----------------------------------------------------------------------------------------
+@container def stack(padding: int = -1, gap: int = -1, width: int = -1) {
+    if padding < 0 { padding = uiState(ST_PAD) }
+    if gap < 0 { gap = uiState(ST_GAP) }
+    let curX = currentContainerX()
+    let curY = currentContainerY()
+    let curW = currentContainerW()
+    if uiState(ST_DEPTH) <= 0 {
+        # outermost stack: its own padding is the window margin (the implicit root padding must not be added twice)
+        curX = 0
+        curY = 0
+        curW = uiState(ST_W)     # not width(): `width` is this function's parameter
+    }
+    let sx = curX + padding
+    let sw = curW - 2 * padding
+    if width > 0 { sw = width }
+    pushContainer(1, sx, curY + padding, sw)
+    uiSetState(ST_SX, sx)
+    uiSetState(ST_SY, curY + padding)
+    uiSetState(ST_SW, sw)
+}
+def endStack() {
+    let childY = currentContainerY()
+    popContainer()
+    let curY = currentContainerY()
+    let totalH = childY - curY
+    if totalH > 0 {
+        advanceContainerY(totalH)
+    }
+}
+def end_stack() { endStack() }
+def ui_stack(x: int, y: int, w: int) {
+    uiSetState(ST_SX, x)
+    uiSetState(ST_SY, y)
+    uiSetState(ST_SW, w)
+}
+def ui_end_stack() { endStack() }
+
+@container def card(height: int = -1, padding: int = -1) {
+    if height < 0 { height = 48 }
+    if padding < 0 { padding = 8 }
+    let cx = currentContainerX()
+    let cy = advanceContainerY(height)
+    let cw = currentContainerW()
+    group(cx, cy, cw, height)
+    pushContainer(2, cx + padding, cy + padding, cw - 2 * padding)
+}
+def endCard() {
+    popContainer()
+}
+def end_card() { endCard() }
+def ui_card(height: int = -1, padding: int = -1) { card(height, padding) }
+def ui_end_card() { endCard() }
+
+@container def row(gap: int = -1, height: int = -1, cols: int = -1) {
+    if gap < 0 { gap = uiState(ST_GAP) }
+    if height < 0 { height = uiState(ST_BTN_H) }
+    if cols < 0 { cols = 2 }
+    let rx = currentContainerX()
+    let ry = advanceContainerY(height)
+    let rw = currentContainerW()
+    let totalGaps = (cols - 1) * gap
+    let colW = (rw - totalGaps) / cols
+    if colW < 1 { colW = 1 }
+    uiSetState(ST_ROW_Y, ry)
+    uiSetState(ST_ROW_H, height)
+    uiSetState(ST_ROW_COLS, cols)
+    uiSetState(ST_ROW_GAP, gap)
+    uiSetState(ST_COL_W, colW)
+    uiSetState(ST_ROW_COL_I, 0)
+    pushContainer(3, rx, ry, rw)
+}
+def endRow() {
+    popContainer()
+}
+def end_row() { endRow() }
+def ui_row(y: int, h: int, cols: int, gap: int = -1) {
+    if gap < 0 { gap = ui_gap() }
+    let sw = stackW()
+    if sw <= 0 { sw = width() - 2 * padding() }
+    let totalGaps = (cols - 1) * gap
+    let colW = (sw - totalGaps) / cols
+    if colW < 1 { colW = 1 }
+    uiSetState(ST_ROW_Y, y)
+    uiSetState(ST_ROW_H, h)
+    uiSetState(ST_ROW_COLS, cols)
+    uiSetState(ST_ROW_GAP, gap)
+    uiSetState(ST_COL_W, colW)
+}
+def ui_end_row() { endRow() }
+
+def next(h: int) -> int {
+    let y = uiState(ST_SY)
+    uiSetState(ST_SY, y + h + uiState(ST_GAP))
+    return y
+}
+def ui_next(h: int) -> int { return next(h) }
+
+def stackX() -> int { return uiState(ST_SX) }
+def stackW() -> int { return uiState(ST_SW) }
+def ui_stack_x() -> int { return stackX() }
+def ui_stack_w() -> int { return stackW() }
+
+def colX(colIdx: int) -> int {
+    let sx = currentContainerX()
+    let colW = uiState(ST_COL_W)
+    let gap = uiState(ST_ROW_GAP)
+    return sx + colIdx * (colW + gap)
+}
+def colW() -> int { return uiState(ST_COL_W) }
+def ui_col_x(colIdx: int) -> int { return colX(colIdx) }
+def ui_col_w() -> int { return colW() }
+
+# ---- input & events --------------------------------------------------------------------------------------------
+def poll() -> int {
+    let buf = UI_STATE + ST_EVT
+    let got = nova_poll_event(uiState(ST_WIN), buf)
+    if got == 0 {
+        poke.u32(buf, 0)
+        return UI_EV_NONE
+    }
+    return peek.u32(buf)
+}
+def ui_poll() -> int { return poll() }
+
+def eventX() -> int { return peek.u32(UI_STATE + ST_EVT + 4) }
+def eventY() -> int { return peek.u32(UI_STATE + ST_EVT + 8) }
+def eventKey() -> int { return peek.u32(UI_STATE + ST_EVT + 12) }
+def ui_ev_x() -> int { return eventX() }
+def ui_ev_y() -> int { return eventY() }
+def ui_ev_key() -> int { return eventKey() }
+
+def hit(x: int, y: int, width: int, height: int) -> int {
+    if peek.u32(UI_STATE + ST_EVT) != UI_EV_CLICK { return 0 }
+    let mx = eventX()
+    let my = eventY()
+    if mx >= x and mx < x + width and my >= y and my < y + height { return 1 }
+    return 0
+}
+def ui_hit(x: int, y: int, width: int, height: int) -> int { return hit(x, y, width, height) }
+
+def clicked(id: int) -> bool {
+    if peek.u32(UI_STATE + ST_EVT) != UI_EV_CLICK { return false }
+    if uiState(ST_CLICKED_ID) == id { return true }
+    return false
+}
+def ui_clicked(id: int) -> bool { return clicked(id) }

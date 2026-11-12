@@ -58,10 +58,117 @@ class ModuleResolver:
         print(f"[Resolver] Parsing {file_path}")
         tokens = tokenize(source)
         ast = Parser(tokens).parse()
+        if "stdlib" in file_path and module_name in ("fs", "path", "buffer", "net", "time", "env", "process", "audio", "text", "json"):
+            self._namespace_ast(module_name, ast)
 
         # Cache the result
         self.imported[file_path] = ast
         return ast
+
+    def _namespace_ast(self, module_name, ast):
+        if not module_name or module_name == "system":
+            return
+        prefix = f"{module_name}_"
+        renames = {}
+        from nova_ast.nodes import Function, Call
+        for node in ast:
+            if isinstance(node, Function) and not getattr(node, "is_extern", False):
+                if not node.name.startswith(prefix):
+                    new_name = f"{prefix}{node.name}"
+                    renames[node.name] = new_name
+                    node.name = new_name
+        if not renames:
+            return
+
+        def _rewrite_expr(expr):
+            if expr is None:
+                return
+            if isinstance(expr, Call):
+                if expr.name in renames:
+                    expr.name = renames[expr.name]
+                for arg in getattr(expr, "args", []) or []:
+                    _rewrite_expr(arg)
+            elif hasattr(expr, "args") and isinstance(expr.args, list):
+                for arg in expr.args:
+                    _rewrite_expr(arg)
+            for attr in ("left", "right", "cond", "condition", "value", "instance"):
+                if hasattr(expr, attr):
+                    _rewrite_expr(getattr(expr, attr))
+
+        def _rewrite_stmt(stmt):
+            if stmt is None:
+                return
+            for attr in ("body", "if_body", "else_body"):
+                if hasattr(stmt, attr):
+                    body = getattr(stmt, attr)
+                    if isinstance(body, list):
+                        for s in body:
+                            _rewrite_stmt(s)
+            for attr in ("left", "right", "cond", "condition", "value", "expr"):
+                if hasattr(stmt, attr):
+                    _rewrite_expr(getattr(stmt, attr))
+            if isinstance(stmt, Call):
+                _rewrite_expr(stmt)
+
+        for node in ast:
+            if isinstance(node, Function):
+                for s in (node.body or []):
+                    _rewrite_stmt(s)
+
+        from nova_ast.nodes import Variable, Return, ListLiteral
+        if module_name == "path":
+            ast.append(Function("path_basename", [("targetPath", None)], [Return(Call("path_base", [Variable("targetPath")]))]))
+            ast.append(Function("path_dirname", [("targetPath", None)], [Return(Call("path_dir", [Variable("targetPath")]))]))
+            ast.append(Function("path_extension", [("targetPath", None)], [Return(Call("path_ext", [Variable("targetPath")]))]))
+            ast.append(Function("path_join2", [("a", None), ("b", None)], [Return(Call("path_join", [ListLiteral([Variable("a"), Variable("b")])]))]))
+        elif module_name == "fs":
+            ast.append(Function("fs_mkdir", [("p", None)], [Return(Call("fs_makeDir", [Variable("p")]))]))
+            ast.append(Function("fs_read_text", [("p", None)], [Return(Call("fs_read", [Variable("p")]))]))
+            ast.append(Function("fs_write_text", [("p", None), ("c", None)], [Return(Call("fs_write", [Variable("p"), Variable("c")]))]))
+        elif module_name == "text":
+            ast.append(Function("text_to_int", [("s", None)], [Return(Call("text_toInt", [Variable("s")]))]))
+            ast.append(Function("text_starts_with", [("s", None), ("p", None)], [Return(Call("text_startsWith", [Variable("s"), Variable("p")]))]))
+            ast.append(Function("text_ends_with", [("s", None), ("p", None)], [Return(Call("text_endsWith", [Variable("s"), Variable("p")]))]))
+            ast.append(Function("text_index_of", [("s", None), ("sub", None)], [Return(Call("text_indexOf", [Variable("s"), Variable("sub")]))]))
+            ast.append(Function("text_pad_left", [("s", None), ("w", None), ("ch", None)], [Return(Call("text_padLeft", [Variable("s"), Variable("w"), Variable("ch")]))]))
+            ast.append(Function("text_pad_right", [("s", None), ("w", None), ("ch", None)], [Return(Call("text_padRight", [Variable("s"), Variable("w"), Variable("ch")]))]))
+        elif module_name == "audio":
+            ast.append(Function("audio_play_note", [("n", None), ("d", None)], [Return(Call("audio_playNote", [Variable("n"), Variable("d")]))]))
+            ast.append(Function("audio_sample_sine", [("p", None)], [Return(Call("audio_sampleSine", [Variable("p")]))]))
+            ast.append(Function("audio_sample_square", [("p", None)], [Return(Call("audio_sampleSquare", [Variable("p")]))]))
+            ast.append(Function("audio_sample_triangle", [("p", None)], [Return(Call("audio_sampleTriangle", [Variable("p")]))]))
+            ast.append(Function("audio_sample_noise", [("p", None)], [Return(Call("audio_sampleNoise", [Variable("p")]))]))
+        elif module_name == "process":
+            ast.append(Function("process_capture_output", [("r", None)], [Return(Call("process_captureOutput", [Variable("r")]))]))
+            ast.append(Function("process_capture_code", [("r", None)], [Return(Call("process_captureCode", [Variable("r")]))]))
+        elif module_name == "json":
+            ast.append(Function("json_as_int", [("j", None)], [Return(Call("json_asInt", [Variable("j")]))]))
+            ast.append(Function("json_as_string", [("j", None)], [Return(Call("json_asString", [Variable("j")]))]))
+            ast.append(Function("json_as_bool", [("j", None)], [Return(Call("json_asBool", [Variable("j")]))]))
+            ast.append(Function("json_key_at", [("j", None), ("i", None)], [Return(Call("json_keyAt", [Variable("j"), Variable("i")]))]))
+        elif module_name == "buffer":
+            ast.append(Function("new_buffer", [("s", None)], [Return(Call("buffer_alloc", [Variable("s")]))]))
+        elif module_name == "net":
+            ast.append(Function("tcp_listen", [("p", None), ("b", None)], [Return(Call("net_listen", [Variable("p"), Variable("b")]))]))
+            ast.append(Function("tcp_connect", [("ip", None), ("p", None)], [Return(Call("net_connect", [Variable("ip"), Variable("p")]))]))
+            ast.append(Function("socket_set_timeout", [("s", None), ("t", None)], [Return(Call("net_setTimeout", [Variable("s"), Variable("t")]))]))
+        elif module_name == "time":
+            ast.append(Function("time_ticks_ms", [], [Return(Call("time_ticks", []))]))
+
+        # Old snake_case spellings of camelCase members stay valid (fs_write_atomic -> fs_writeAtomic, ...):
+        # every camelCase module function also gets a snake_case alias unless one was defined above.
+        import copy
+        import re
+        existing = {n.name for n in ast if isinstance(n, Function)}
+        for node in list(ast):
+            if isinstance(node, Function) and not getattr(node, "is_extern", False) and node.name.startswith(prefix):
+                tail = node.name[len(prefix):]
+                snake = prefix + re.sub(r"(?<=[a-z0-9])([A-Z])", lambda m: "_" + m.group(1).lower(), tail)
+                if snake != node.name and snake not in existing:
+                    alias = copy.copy(node)
+                    alias.name = snake
+                    ast.append(alias)
+                    existing.add(snake)
 
     def _find_module(self, module_name, importer_dir=None):
         """

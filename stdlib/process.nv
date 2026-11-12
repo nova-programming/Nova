@@ -1,45 +1,37 @@
-# Process boundary. `process_exit` is portable; shell execution is explicit.
+# Process boundary. `exit` is portable; shell execution is explicit.
 import system
 import text
 
-def process_exit(code: int) {
-    system_exit(code)
+def exit(exitCode: int) {
+    system_exit(exitCode)
 }
 
-def process_shell(command: string) {
-    system_exec(command)
+def shell(commandString: string) {
+    system_exec(commandString)
 }
 
-def process_run(args: list) -> int {
-    return system_process_run(args)
+def run(commandArgs: list) -> int {
+    return system_process_run(commandArgs)
 }
 
-# Runs `command` through the shell and captures its stdout, same as process_shell but
+# Runs `commandString` through the shell and captures its stdout, same as shell but
 # returning the output instead of running inherited to this process's own stdio.
 #
-# Returns the raw "<exit_code>\n<captured stdout>" the runtime encodes into one string
-# (stdlib/backend/*/os_*.nv, runtime.c's _sys_process_capture_c) rather than unpacking it
-# here. Multi-return (docs/features.md's "Multiple Returns" feature) now works in both the
-# VM and the Python-bootstrap native backends (fixed pre-dating this comment's last
-# update), but process_capture() still returns the encoded string rather than
-# `-> (int, string)` directly, since the self-hosted compiler still has no multi-return
-# support at all (see ROADMAP.md) and this module's callers shouldn't have to care which
-# compiler built them. Use process_capture_code()/process_capture_output() on the result,
-# which work identically across every pipeline and only run the command once.
-def process_capture(command: string) -> string {
-    return system_process_capture(command)
+# Returns the raw "<exit_code>\n<captured stdout>" the runtime encodes into one string.
+def capture(commandString: string) -> string {
+    return system_process_capture(commandString)
 }
 
-# The captured stdout from a process_capture() result.
-def process_capture_output(raw: string) -> string {
-    nl = text_index_of(raw, "\n")
+# The captured stdout from a capture() result.
+def captureOutput(rawResult: string) -> string {
+    nl = text.indexOf(rawResult, "\n")
     if nl < 0 { return "" }
-    return str_sub(raw, nl + 1, len(raw))
+    return str_sub(rawResult, nl + 1, len(rawResult))
 }
 
-# The exit code from a process_capture() result.
-def process_capture_code(raw: string) -> int {
-    nl = text_index_of(raw, "\n")
+# The exit code from a capture() result.
+def captureCode(rawResult: string) -> int {
+    nl = text.indexOf(rawResult, "\n")
     if nl < 0 { return -1 }
-    return text_to_int(str_sub(raw, 0, nl))
+    return text.toInt(str_sub(rawResult, 0, nl))
 }

@@ -4,7 +4,81 @@
 
 import lexer
 import errors
-import names
+
+def canonicalMember(name: string) -> string {
+    if name == "asList" { return "as_list" }
+    if name == "valueByte" { return "value_byte" }
+    if name == "valueWord" { return "value_word" }
+    if name == "valueDword" { return "value_dword" }
+    if name == "valueQword" { return "value_qword" }
+    if name == "getU8" { return "get_u8" }
+    if name == "setU8" { return "set_u8" }
+    if name == "getU16" { return "get_u16" }
+    if name == "setU16" { return "set_u16" }
+    if name == "getI32" { return "get_i32" }
+    if name == "setI32" { return "set_i32" }
+    if name == "copyFrom" { return "copy_from" }
+    if name == "fillI32" { return "fill_i32" }
+    return name
+}
+
+def publicConst(module: string, constName: string) -> int {
+    if module == "align" {
+        if constName == "left" or constName == "center" or constName == "right" or constName == "top" or constName == "middle" or constName == "bottom" { return 1 }
+    }
+    if module == "size" {
+        if constName == "fit" or constName == "fill" { return 1 }
+    }
+    if module == "style" {
+        if constName == "plain" or constName == "hover" or constName == "primary" { return 1 }
+    }
+    if module == "ui" {
+        if constName == "left" or constName == "center" or constName == "right" or constName == "top" or constName == "middle" or constName == "bottom" or constName == "plain" or constName == "hover" or constName == "primary" or constName == "default" or constName == "text" or constName == "secondary" or constName == "muted" or constName == "accent" or constName == "ok" or constName == "warn" or constName == "err" or constName == "fit" or constName == "fill" { return 1 }
+    }
+    return 0
+}
+
+def moduleConst(module: string, constName: string) -> int {
+    if module == "align" {
+        if constName == "left" { return 0 }
+        if constName == "center" { return 1 }
+        if constName == "right" { return 2 }
+        if constName == "top" { return 0 }
+        if constName == "middle" { return 1 }
+        if constName == "bottom" { return 2 }
+    }
+    if module == "size" {
+        if constName == "fit" { return 0 - 1 }
+        if constName == "fill" { return 0 - 2 }
+    }
+    if module == "style" {
+        if constName == "plain" { return 0 }
+        if constName == "hover" { return 1 }
+        if constName == "primary" { return 2 }
+    }
+    if module == "ui" {
+        if constName == "left" { return 0 }
+        if constName == "center" { return 1 }
+        if constName == "right" { return 2 }
+        if constName == "top" { return 0 }
+        if constName == "middle" { return 1 }
+        if constName == "bottom" { return 2 }
+        if constName == "plain" { return 0 }
+        if constName == "hover" { return 1 }
+        if constName == "primary" { return 2 }
+        if constName == "default" { return 0 }
+        if constName == "text" { return 1 }
+        if constName == "secondary" { return 2 }
+        if constName == "muted" { return 3 }
+        if constName == "accent" { return 4 }
+        if constName == "ok" { return 5 }
+        if constName == "warn" { return 6 }
+        if constName == "err" { return 7 }
+        if constName == "fit" { return 0 - 1 }
+        if constName == "fill" { return 0 - 2 }
+    }
+    return 0
+}
 
 data AstNode {
     kind: string
@@ -40,6 +114,8 @@ data ParserState {
     data_fields: dict
     ctors_used: list
     const_table: dict
+    containers: dict
+    container_ends: dict
 }
 
 def current_tok(state: ParserState) -> Token {
@@ -550,7 +626,7 @@ def parse_primary(state: ParserState) -> AstNode {
         if next_tok.kind == "DOT" {
             eat_tok(state, "DOT")
             prop_tok = eat_prop_name(state)
-            prop_tok.val = names_canonical_member(prop_tok.val)
+            prop_tok.val = canonicalMember(prop_tok.val)
             next_after = current_tok(state)
             if next_after.kind == "LPAREN" {
                 # Method call: obj.method()
@@ -607,31 +683,7 @@ def parse_primary(state: ParserState) -> AstNode {
                 eat_tok(state, "RPAREN")
                 method_node.arg_names = method_arg_names
                 method_node.arg_is_kw = method_arg_is_kw
-                if method_node.left.kind == "Variable" and state.imported_modules.has(method_node.left.val_str) {
-                    module_name = state.imported_modules.get(method_node.left.val_str)
-                    target_fn = names_module_function(module_name, method_node.val_str)
-                    if len(target_fn) == 0 {
-                        errors.err("Name", state.filename, tok.line, "module '" + module_name + "' has no function '" + method_node.val_str + "'", "check the spelling; see the module's public functions in the docs", tok.col)
-                    } else {
-                        call_node = AstNode()
-                        call_node.line = method_node.line
-                        call_node.col = method_node.col
-                        call_node.kind = "Call"
-                        call_node.val_str = target_fn
-                        call_node.args = method_node.args
-                        call_node.arg_names = method_node.arg_names
-                        call_node.arg_is_kw = method_node.arg_is_kw
-                        if target_fn == "path_join" and len(method_node.args) != 1 {
-                            list_node = AstNode()
-                            list_node.line = tok.line
-                            list_node.col = tok.col
-                            list_node.kind = "ListLiteral"
-                            list_node.args = method_node.args
-                            call_node.args = [list_node]
-                        }
-                        method_node = call_node
-                    }
-                } elif method_node.left.kind == "Variable" and state.data_fields.has("__enum_" + method_node.left.val_str) {
+                if method_node.left.kind == "Variable" and state.data_fields.has("__enum_" + method_node.left.val_str) {
                     enum_name = method_node.left.val_str
                     variant_name = method_node.val_str
                     tag_val = 0
@@ -825,7 +877,10 @@ def parse_primary(state: ParserState) -> AstNode {
                         access_node.kind = "DataFieldAccess"
                         access_node.left = node  # instance
                         access_node.val_str = prop_tok.val  # field name
-                        if node.kind == "Variable" and state.data_fields.has("__enum_" + node.val_str) {
+                        if node.kind == "Variable" and publicConst(node.val_str, prop_tok.val) == 1 {
+                            val = moduleConst(node.val_str, prop_tok.val)
+                            access_node = make_number_node(val, tok.line, tok.col)
+                        } elif node.kind == "Variable" and state.data_fields.has("__enum_" + node.val_str) {
                             tag_key = "__enum_tag_" + node.val_str + "." + prop_tok.val
                             if state.data_fields.has(tag_key) {
                                 tag_list = state.data_fields.get(tag_key)
@@ -1431,10 +1486,44 @@ def parse_block(state: ParserState) -> list {
     return body
 }
 
+def inject_container_cleanup(stmts: list, end_node: AstNode) -> list {
+    res = []
+    i = 0
+    while i < len(stmts) {
+        s = stmts[i]
+        if s.kind == "Return" or s.kind == "Break" {
+            res.append(end_node)
+            res.append(s)
+        } elif s.kind == "IfElse" {
+            if s.body != 0 {
+                s.body = inject_container_cleanup(s.body, end_node)
+            }
+            if s.else_body != 0 {
+                s.else_body = inject_container_cleanup(s.else_body, end_node)
+            }
+            res.append(s)
+        } else {
+            res.append(s)
+        }
+        i = i + 1
+    }
+    return res
+}
+
 def parse_statement(state: ParserState) -> AstNode {
     tok = current_tok(state)
     stmt_line = tok.line
     stmt_col = tok.col
+
+    # `let x = ...` is an explicit declaration marker: it is consumed here and the declaration that follows is parsed
+    # as the statement. (It used to survive as a stray read of an undefined variable called `let`.)
+    if tok.kind == "IDENT" and tok.val == "let" {
+        let_next = peek_tok(state, 1)
+        if let_next.kind == "IDENT" {
+            eat_tok(state, "IDENT")
+            return parse_statement(state)
+        }
+    }
     
     if tok.kind == "PRINTD" {
         eat_tok(state, "PRINTD")
@@ -1701,38 +1790,43 @@ def parse_statement(state: ParserState) -> AstNode {
     is_entry = 0
     is_extern = 0
     extern_lib = ""
-    if tok.kind == "ENTRY" {
-        eat_tok(state, "ENTRY")
-        if current_tok(state).kind != "DEF" {
-            errors.err("Syntax", state.filename, stmt_line, "unexpected token: @entry must precede def", "@entry marks the program entry function - write '@entry def name' with parens and body", stmt_col)
-            node = AstNode()
-            node.line = stmt_line
-            node.col = stmt_col
-            node.kind = "NONE"
-            return node
+    is_container = 0
+
+    while tok.kind == "CONTAINER" or tok.kind == "ENTRY" or tok.kind == "EXTERN" {
+        if tok.kind == "CONTAINER" {
+            eat_tok(state, "CONTAINER")
+            is_container = 1
+            tok = current_tok(state)
+        } elif tok.kind == "ENTRY" {
+            eat_tok(state, "ENTRY")
+            is_entry = 1
+            tok = current_tok(state)
+        } elif tok.kind == "EXTERN" {
+            eat_tok(state, "EXTERN")
+            if current_tok(state).kind == "STRING" {
+                extern_lib = eat_tok(state, "STRING").val
+            }
+            is_extern = 1
+            tok = current_tok(state)
         }
-        is_entry = 1
-        tok = current_tok(state)
-    } elif tok.kind == "EXTERN" {
-        eat_tok(state, "EXTERN")
-        if current_tok(state).kind == "STRING" {
-            extern_lib = eat_tok(state, "STRING").val
-        }
-        if current_tok(state).kind != "DEF" {
-            errors.err("Syntax", state.filename, stmt_line, "unexpected token: extern must precede def", "extern declarations must declare functions - write 'extern def name(...) -> type' or 'extern \"lib\" def name(...) -> type'", stmt_col)
-            node = AstNode()
-            node.line = stmt_line
-            node.col = stmt_col
-            node.kind = "NONE"
-            return node
-        }
-        is_extern = 1
-        tok = current_tok(state)
+    }
+
+    if tok.kind != "DEF" and (is_entry == 1 or is_extern == 1 or is_container == 1) {
+        errors.err("Syntax", state.filename, stmt_line, "unexpected token after attribute: expected def", "function attributes (@container, @entry, extern) must precede def", stmt_col)
+        node = AstNode()
+        node.line = stmt_line
+        node.col = stmt_col
+        node.kind = "NONE"
+        return node
     }
 
     if tok.kind == "DEF" {
         eat_tok(state, "DEF")
         name = eat_tok(state, "IDENT").val
+        if is_container == 1 {
+            state.containers.set(name, 1)
+            state.container_ends.set(name, "end_" + name)
+        }
         eat_tok(state, "LPAREN")
         param_names = []
         param_types = []
@@ -1853,6 +1947,8 @@ def parse_statement(state: ParserState) -> AstNode {
                 field_name = eat_tok(state, check.kind).val
             } else {
                 field_name = eat_tok(state, "IDENT").val
+                # eat_tok only reports on a mismatch; skip the bad token so the loop always makes progress
+                state.pos = state.pos + 1
             }
             check_type = current_tok(state)
             field_type = ""
@@ -1863,6 +1959,11 @@ def parse_statement(state: ParserState) -> AstNode {
             fields.append(field_name)
             field_types.append(field_type)
             check = current_tok(state)
+            # fields may be separated by newlines or (optionally) commas: data P { x: int, y: int }
+            if check.kind == "COMMA" {
+                eat_tok(state, "COMMA")
+                check = current_tok(state)
+            }
         }
         eat_tok(state, "RBRACE")
         node = AstNode()
@@ -2021,6 +2122,7 @@ def parse_statement(state: ParserState) -> AstNode {
         node.line = stmt_line
         node.col = stmt_col
         node.kind = "Import"
+        node.name = ""
         # Check for FFI string import `import "c" as libc`
         check = current_tok(state)
         if check.kind == "STRING" {
@@ -2037,9 +2139,7 @@ def parse_statement(state: ParserState) -> AstNode {
                 node.name = eat_tok(state, "IDENT").val
                 local_mod = node.name
             }
-            if names_public_module(node.val_str) == 1 {
-                state.imported_modules.set(local_mod, node.val_str)
-            }
+            state.imported_modules.set(local_mod, node.val_str)
         }
         return node
     }
@@ -2129,6 +2229,86 @@ def parse_statement(state: ParserState) -> AstNode {
             node.left = value_expr
             return node
         }
+    }
+
+    if current_tok(state).kind == "LBRACE" {
+        brace_tok = current_tok(state)
+        if brace_tok.line != stmt_line {
+            errors.err("Syntax", state.filename, brace_tok.line, "trailing block opening brace must be on the same line as the call", "move the opening brace to the same line as the container call", brace_tok.col)
+        }
+        fn_name = ""
+        if expr.kind == "Call" {
+            fn_name = expr.val_str
+        } elif expr.kind == "MethodCall" {
+            fn_name = expr.val_str
+        } elif expr.kind == "Variable" {
+            fn_name = expr.val_str
+            call_expr = AstNode()
+            call_expr.line = stmt_line
+            call_expr.col = stmt_col
+            call_expr.kind = "Call"
+            call_expr.val_str = fn_name
+            call_expr.args = []
+            expr = call_expr
+        } elif expr.kind == "DataFieldAccess" {
+            fn_name = expr.val_str
+            call_expr = AstNode()
+            call_expr.line = stmt_line
+            call_expr.col = stmt_col
+            call_expr.kind = "Call"
+            call_expr.val_str = fn_name
+            call_expr.args = []
+            expr = call_expr
+        } else {
+            errors.err("Syntax", state.filename, brace_tok.line, "trailing block requires a call or container identifier", "ensure the trailing block follows a container function call", brace_tok.col)
+        }
+
+        short_name = fn_name
+        if len(fn_name) > 3 and str_sub(fn_name, 0, 3) == "ui_" {
+            short_name = str_sub(fn_name, 3, len(fn_name))
+        }
+
+        is_cont = 0
+        if state.containers.has(fn_name) == 1 or state.containers.has(short_name) == 1 {
+            is_cont = 1
+        }
+        if is_cont == 0 {
+            errors.err("Syntax", state.filename, brace_tok.line, "function '" + fn_name + "' is not marked with @container and cannot take a trailing block", "mark container functions with '@container def " + fn_name + "(...)'", brace_tok.col)
+        }
+
+        end_fn = "end_" + short_name
+        if state.container_ends.has(fn_name) == 1 {
+            end_fn = state.container_ends.get(fn_name)
+        } elif state.container_ends.has(short_name) == 1 {
+            end_fn = state.container_ends.get(short_name)
+        }
+        if len(fn_name) > 3 and str_sub(fn_name, 0, 3) == "ui_" and (len(end_fn) <= 3 or str_sub(end_fn, 0, 3) != "ui_") {
+            end_fn = "ui_" + end_fn
+        }
+
+        raw_body = parse_block(state)
+
+        end_node = AstNode()
+        end_node.line = brace_tok.line
+        end_node.col = brace_tok.col
+        end_node.kind = "Call"
+        end_node.val_str = end_fn
+        end_node.args = []
+
+        transformed = inject_container_cleanup(raw_body, end_node)
+        transformed.append(end_node)
+
+        block_node = AstNode()
+        block_node.line = stmt_line
+        block_node.col = stmt_col
+        block_node.kind = "Block"
+        block_node.body = [expr]
+        bi = 0
+        while bi < len(transformed) {
+            block_node.body.append(transformed[bi])
+            bi = bi + 1
+        }
+        return block_node
     }
 
     return expr
@@ -2567,6 +2747,8 @@ def parse(tokens: list, filename: string) -> list {
     state.data_fields = {}
     state.ctors_used = []
     state.const_table = {}
+    state.containers = {"stack": 1, "card": 1, "row": 1, "frame": 1, "ui_stack": 1, "ui_card": 1, "ui_row": 1, "ui_frame": 1}
+    state.container_ends = {"stack": "end_stack", "card": "end_card", "row": "end_row", "frame": "end_frame", "ui_stack": "ui_end_stack", "ui_card": "ui_end_card", "ui_row": "ui_end_row", "ui_frame": "ui_end_frame"}
     program = []
     
     loop = 1

@@ -78,10 +78,19 @@ class Buffer {
     }
 }
 
-def new_buffer(size_bytes: int) -> Buffer {
-    h = buf_new(size_bytes)
+def alloc(sizeBytes: int) -> Buffer {
+    h = buf_new(sizeBytes)
     b = Buffer()
     b.handle = h
-    b.size = size_bytes
+    b.size = sizeBytes
+    return b
+}
+
+def new(sizeBytes: int) -> Buffer {
+    # same as alloc; `alloc` is also the intrinsic keyword, so it is not called by name here
+    h = buf_new(sizeBytes)
+    b = Buffer()
+    b.handle = h
+    b.size = sizeBytes
     return b
 }

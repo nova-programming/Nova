@@ -12,7 +12,7 @@ specified and has the same effect: end-user code never sees the platform split.
 ### 2. Galaxy Package Manager (Implemented)
 Galaxy is a fully functional package manager with a Git-backed registry website, standalone CLI (`galaxy`), three trust tiers (Core/Verified/Community), template system (`galaxy init`), GitHub Issues-based publishing workflow, and GitHub Actions automation for validation/quarantine/promotion. See the [Galaxy Registry](https://galaxy-registry.vercel.app) for documentation.
 
-### 3. Small Function Inlining (Implemented)
+### 3. Small Function Inlining (Implemented in the Python bootstrap backends only)
 Implement advanced compiler optimizations to inline extremely short, non-recursive functions, entirely eliminating call/ret overhead for utility methods.
 
 ### 4. Language Feature Roadmap (All Ten Shipped — Python Bootstrap + VM)
@@ -29,10 +29,9 @@ at all, replaced in both backends with a side-stash that doesn't fight the calle
 epilogue/frame-cleanup. The identical register-smuggling bug in the ARM64 Python-bootstrap
 backend is also now fixed (same side-stash design), verified by cross-assembling with
 `clang --target=arm64-apple-macos11 -c` (no ARM64 hardware/emulator available here to run it).
-**Still not implemented in the self-hosted compiler at all** (a new feature there, not a fix —
-tracked separately; an attempt surfaced a real, unconfirmed memory-safety bug somewhere in the
-self-hosted compiler's own internals — see `docs/AGENT_LOG.md` Phase 38/39 — so it was reverted
-rather than shipped untested).
+**Self-hosted compiler (re-checked Nov 2026):** `stdlib/parser.nv` and the x86_64 codegen now handle
+multiple returns; integer results unpack correctly, but a `string` target prints as a raw pointer, so this is
+partial. The inliner and `@noinline` still exist only in the Python bootstrap backends.
 
 Two further items are open and tracked separately, not part of this nine/ten count: full SSO
 (inline ≤15B string buffers) was deferred entirely — it changes the `char*` ABI at every
@@ -69,8 +68,8 @@ The next work is correctness-first rather than another large syntax batch:
    run it). See `tests/test_native_exec.py::test_ptr_and_as_list_round_trip`.
 3. Keep VM-only features such as `call()` explicit and rejected by native builds.
 4. Add `nova check`, formatting, structured diagnostics, and reproducible
-   dependency/build metadata. `nova fmt` is deterministic and opt-in;
-   `nova check --json` and `nova lint --json` expose stable diagnostic codes.
+   dependency/build metadata. `fmt` is deterministic and opt-in;
+   `check --json` and `lint --json` (Python entry point, `python bootstrap/main.py`) expose stable diagnostic codes.
 5. Expand portable filesystem, path, JSON, and subprocess libraries.
 
 The native test suite now includes a VM/native output comparison for control
@@ -79,11 +78,18 @@ parity; new language features should add cases to it.
 
 ### Tooling control policy
 
-`nova fmt` only edits files with the explicit `--write` flag. `nova lint` is
+`fmt` only edits files with the explicit `--write` flag. `lint` is
 advisory unless `--strict` is selected. JSON diagnostics are one object per
 line and never alter build behavior, source files, or dependencies.
 
 ## Completed Milestones
+
+### Undefined Names Are an Error (Nov 2026)
+Reading a name that is never assigned (typo, forgotten assignment) used to compile silently and read an untyped zero.
+The self-hosted type checker now rejects it with `undefined name 'x'` and a `did you mean` hint, deciding at the end of
+each function so statement order and block scoping do not matter. `let x = ...` is accepted as an optional declaration
+marker; `catch e` and loop variables are definitions. Tests: `tests/test_undefined_names.py`. The same check found a real
+bug in the bare-metal OS (`fs_cat` read an undefined `dir_sec`). Self-hosted only; the frozen Python bootstrap is unchanged.
 
 ### Simpler Syntax and a Consistent API (Oct 2026)
 - Dotted module calls (`fs.read`, `path.join`, `text.trim`, `json.parse`), camelCase members, and soft keywords (`read`, `write`, `close`, `api`, `openf`, `data` work as ordinary names). Old flat names stay valid; `nova lint` flags them (`STYLE003`) and `nova fmt --write --modernize` migrates.
@@ -120,7 +126,7 @@ x86_64 now uses `rsp`-relative offsets (`state.bp="rsp"`), ARM64 uses `sp`-relat
 All 4 backends (x86_64 .nv, ARM64 .nv, x86_64 Python, ARM64 Python) emit proper `_dict_new`/`_dict_set`/`_dict_get`/`_dict_has`/`_dict_remove`/`_dict_keys`/`_dict_values`/`_dict_items` native calls. Dict construction `{"key": val}` and all 7 dict methods work natively. No more placeholder — complete.
 
 ### Self-Hosted VM (June 2026)
-`stdlib/vm.nv` implements a full Nova bytecode VM written in Nova. Supports 20+ opcodes (LOAD_CONST, LOAD_NAME, STORE_NAME, ADD, SUB, MUL, DIV, CMP, JMP, CJMP, CALL, RETURN, PRINT, LOAD_STR, LOAD_BOOL, OP_TRY, OP_THROW, OP_CATCHEND, NEW_LIST, LIST_APPEND, DICT_SET, DICT_GET). `nova dev` now uses the Nova-in-Nova VM via `nova.exe dev <file.nv>` or `nova repl`.
+`stdlib/vm.nv` implements a full Nova bytecode VM written in Nova. Supports a stack-based opcode set (LOAD_CONST, LOAD_NAME, STORE_NAME, ADD, SUB, MUL, DIV, CMP, JMP, CJMP, CALL, RETURN, PRINT, LOAD_STR, LOAD_BOOL, OP_TRY, OP_THROW, OP_CATCHEND, NEW_LIST, LIST_APPEND, DICT_SET, DICT_GET). `nova dev` now uses the Nova-in-Nova VM via `nova.exe dev <file.nv>` or `nova repl`.
 
 ### Exceptions (try/catch/throw) (June 2026)
 Full implementation: lexer keywords (try, catch, throw), parser AST nodes (Try, Throw with catch_body/catch_var_name), VM opcodes (OP_TRY, OP_THROW, OP_CATCHEND), native runtime using setjmp/longjmp in runtime.c. 10 tests all passing.
@@ -132,7 +138,7 @@ Full implementation: lexer keywords (try, catch, throw), parser AST nodes (Try, 
 `switch expr { case val { body } else { body } }` syntax desugars at parse time to if-elif-else chain. Both Python parser and self-hosted parser implement it.
 
 ### REPL (June 2026)
-`nova repl` command with multi-line input, persistent state across lines. Integration with both VM and native modes.
+`repl` command (Python entry point) with multi-line input, persistent state across lines. Integration with both VM and native modes.
 
 ### Cross-Compilation Infrastructure (June 2026)
 `target_os` field through CodegenState, platform-aware GCC command generation, OS-appropriate output extension (.exe on Windows). os_linux.nv and os_macos.nv provide the common facade, with narrower platform coverage than Windows.

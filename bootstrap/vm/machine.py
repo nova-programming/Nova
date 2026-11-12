@@ -788,6 +788,8 @@ def _vm_run(self):
                     else:
                         stack.append(instance)
                         continue
+                if func_name not in functions and _camel_alias(func_name) in functions:
+                    func_name = _camel_alias(func_name)      # jsonStringify -> json_stringify (a module function)
                 if func_name not in functions:
                     self.ip = ip
                     self.stack = stack

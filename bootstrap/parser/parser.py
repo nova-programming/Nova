@@ -11,6 +11,15 @@ class Parser:
         self.imported_modules = {}  # local name -> public module (fs, path, ...)
         self.data_fields = {}      # data type name -> field names (for Point(1, 2) constructors)
         self.ctors_used = []
+        self.enums = {}
+        self.containers = {"stack", "card", "row", "frame", "group"}
+        self.container_ends = {
+            "stack": "end_stack",
+            "card": "end_card",
+            "row": "end_row",
+            "frame": "end_frame",
+            "group": "end_group",
+        }
 
     def parse_type_annotation(self):
         token = self.current()
@@ -580,6 +589,14 @@ class Parser:
                         return PointerAssign(node, prop, value, line=line)
                     node = PointerProperty(node, prop, line=line)
                 else:
+                    if isinstance(node, Variable):
+                        mod_name = self.imported_modules.get(node.name, node.name)
+                        if names.is_public_const(mod_name, prop):
+                            node = Number(names.module_const(mod_name, prop), line=line)
+                            continue
+                        if node.name in self.enums and prop in self.enums[node.name]:
+                            node = Number(self.enums[node.name].index(prop), line=line)
+                            continue
                     tok = self.current()
                     if tok and tok[0] in ("EQUALS", "PLUSEQ", "MINUSEQ", "STAREQ", "SLASHEQ", "PERCENTEQ"):
                         op = self.eat(tok[0])[1]
@@ -659,6 +676,7 @@ class Parser:
             if self.current() and self.current()[0] == "COMMA":
                 self.eat("COMMA")
         self.eat("RBRACE")
+        self.enums[name] = variants
         return EnumDef(name, variants, line=line)
 
     def parse_class(self):
@@ -712,6 +730,22 @@ class Parser:
             return self.parse_raw()
         if kind == "FOR":
             return self.parse_for()
+        if kind == "CONTAINER":
+            self.eat("CONTAINER")
+            end_name = None
+            if self.current() and self.current()[0] == "LPAREN":
+                self.eat("LPAREN")
+                if self.current() and self.current()[0] in ("IDENT", "STRING"):
+                    end_name = self.eat(self.current()[0])[1].strip('"\'')
+                self.eat("RPAREN")
+            fn = self.parse_function()
+            if end_name is None:
+                end_name = f"end_{fn.name}"
+            self.containers.add(fn.name)
+            self.container_ends[fn.name] = end_name
+            fn.is_container = True
+            fn.end_container = end_name
+            return fn
         if kind == "DEF":
             return self.parse_function()
         if kind == "PRINTD":
@@ -825,6 +859,64 @@ class Parser:
                 self.eat("EQUALS")
                 value = self.parse_expr()
                 return UnpackAssign(targets, value, line=line)
+
+        if self.current() and self.current()[0] == "LBRACE":
+            brace_token = self.current()
+            brace_line = brace_token[2] if len(brace_token) > 2 else line
+            if brace_line != line:
+                self._syntax_error("trailing block brace '{' must be on the same line as the call")
+            fn_name = ""
+            if isinstance(expr, Call):
+                fn_name = expr.name
+            elif isinstance(expr, MethodCall):
+                fn_name = expr.method_name
+            elif isinstance(expr, Variable):
+                fn_name = expr.name
+                expr = Call(fn_name, [], line=line)
+            elif isinstance(expr, DataFieldAccess):
+                if isinstance(expr.instance, Variable) and expr.instance.name in self.imported_modules:
+                    mod = self.imported_modules[expr.instance.name]
+                    fn_name = names.module_function(mod, expr.field_name) or expr.field_name
+                else:
+                    fn_name = expr.field_name
+                expr = Call(fn_name, [], line=line)
+            else:
+                self._syntax_error("trailing block requires a call or container identifier")
+            
+            short_name = fn_name[3:] if fn_name.startswith("ui_") else fn_name
+            if fn_name not in self.containers and short_name not in self.containers:
+                self._syntax_error(f"function '{fn_name}' is not marked with @container and cannot take a trailing block")
+            
+            end_fn = self.container_ends.get(fn_name, self.container_ends.get(short_name, f"end_{short_name}"))
+            if fn_name.startswith("ui_") and not end_fn.startswith("ui_"):
+                end_fn = "ui_" + end_fn
+            
+            raw_body = self.parse_block()
+            end_call = Call(end_fn, [], line=brace_line)
+            
+            def inject_cleanup(stmts):
+                res = []
+                for s in stmts:
+                    if type(s).__name__ == "Return":
+                        res.append(end_call)
+                        res.append(s)
+                    elif type(s).__name__ == "Break":
+                        res.append(end_call)
+                        res.append(s)
+                    elif type(s).__name__ == "If":
+                        s.then_branch = inject_cleanup(s.then_branch) if isinstance(s.then_branch, list) else [s.then_branch]
+                        if s.else_branch:
+                            s.else_branch = inject_cleanup(s.else_branch) if isinstance(s.else_branch, list) else [s.else_branch]
+                        res.append(s)
+                    else:
+                        res.append(s)
+                return res
+            
+            transformed = inject_cleanup(raw_body)
+            transformed.append(end_call)
+            
+            from nova_ast.nodes import Block
+            return Block([expr] + transformed, line=line)
 
         return expr
 
@@ -1211,7 +1303,7 @@ def _desugar_enums(program):
             for i, variant in enumerate(node.variants):
                 const_name = f"{node.name}_{variant}"
                 result.append(Assignment(
-                    Variable(const_name, type_name="int", line=node.line),
+                    const_name,
                     Number(i, line=node.line),
                     is_const=True,
                     line=node.line

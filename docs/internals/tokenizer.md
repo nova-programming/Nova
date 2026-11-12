@@ -1,4 +1,4 @@
-# Nova Tokenizer Internals (`stdlib/tokenizer.nv`)
+# Nova Tokenizer Internals (`stdlib/lexer.nv`)
 
 Lexical analysis: raw source string → list of `Token` structs.
 
