@@ -39,6 +39,7 @@ data ParserState {
     imported_modules: dict
     data_fields: dict
     ctors_used: list
+    const_table: dict
 }
 
 def current_tok(state: ParserState) -> Token {
@@ -107,6 +108,14 @@ def eat_prop_name(state: ParserState) -> Token {
         return tok
     }
     if tok.kind == "STR" {
+        state.pos = state.pos + 1
+        return tok
+    }
+    if tok.kind == "ALLOC" {
+        state.pos = state.pos + 1
+        return tok
+    }
+    if tok.kind == "FREE" {
         state.pos = state.pos + 1
         return tok
     }
@@ -508,6 +517,9 @@ def parse_primary(state: ParserState) -> AstNode {
                 data_constructor_call(state, node, call_arg_names, call_arg_is_kw, tok)
             }
         } else {
+            if state.const_table.has(tok.val) {
+                return make_number_node(state.const_table.get(tok.val), tok.line, tok.col)
+            }
             node.kind = "Variable"
             node.val_str = tok.val
         }
@@ -643,7 +655,7 @@ def parse_primary(state: ParserState) -> AstNode {
                     call_node.arg_is_kw = []
                     data_constructor_call(state, call_node, call_node.arg_names, call_node.arg_is_kw, tok)
                     method_node = call_node
-                } elif method_node.left.kind == "Variable" and (method_node.left.val_str == "peek" or method_node.left.val_str == "poke" or method_node.left.val_str == "cpu") {
+                } elif method_node.left.kind == "Variable" and (method_node.left.val_str == "peek" or method_node.left.val_str == "poke" or method_node.left.val_str == "cpu" or method_node.left.val_str == "mem") {
                     ns = method_node.left.val_str
                     fn = method_node.val_str
                     call_node = AstNode()
@@ -667,10 +679,24 @@ def parse_primary(state: ParserState) -> AstNode {
                         elif fn == "out" or fn == "out8" or fn == "outb" or fn == "write_port" { call_node.val_str = "cpu_outb" }
                         elif fn == "out16" or fn == "outw" or fn == "write_port16" { call_node.val_str = "cpu_outw" }
                         elif fn == "out32" or fn == "outd" or fn == "write_port32" { call_node.val_str = "cpu_outd" }
-                        elif fn == "read_cr3" or fn == "get_page_table" { call_node.val_str = "cpu_read_cr3" }
-                        elif fn == "write_cr3" or fn == "set_page_table" { call_node.val_str = "cpu_write_cr3" }
+                        elif fn == "read_cr3" or fn == "get_page_table" or fn == "cr3" { call_node.val_str = "cpu_read_cr3" }
+                        elif fn == "write_cr3" or fn == "set_page_table" or fn == "set_cr3" { call_node.val_str = "cpu_write_cr3" }
+                        elif fn == "read_cr2" or fn == "cr2" { call_node.val_str = "cpu_read_cr2" }
+                        elif fn == "read_cr0" or fn == "cr0" { call_node.val_str = "cpu_read_cr0" }
+                        elif fn == "write_cr0" or fn == "set_cr0" { call_node.val_str = "cpu_write_cr0" }
+                        elif fn == "pause" { call_node.val_str = "cpu_pause" }
+                        elif fn == "rdtsc" { call_node.val_str = "cpu_rdtsc" }
+                        elif fn == "atomic_xchg" or fn == "xchg" { call_node.val_str = "cpu_atomic_xchg" }
+                        elif fn == "atomic_cas" or fn == "cas" { call_node.val_str = "cpu_atomic_cas" }
                         elif fn == "invlpg" or fn == "invalidate_page" { call_node.val_str = "cpu_invlpg" }
                         else { call_node.val_str = "cpu_" + fn }
+                    } elif ns == "mem" {
+                        if fn == "alloc" or fn == "malloc" { call_node.val_str = "mem_alloc" }
+                        elif fn == "free" { call_node.val_str = "mem_free" }
+                        elif fn == "set_allocator" or fn == "hook" { call_node.val_str = "mem_set_allocator" }
+                        elif fn == "heap_used" or fn == "used" { call_node.val_str = "mem_heap_used" }
+                        elif fn == "heap_total" or fn == "total" { call_node.val_str = "mem_heap_total" }
+                        else { call_node.val_str = "mem_" + fn }
                     }
                     method_node = call_node
                 } elif method_node.left.kind == "DataFieldAccess" and method_node.left.left.kind == "Variable" and method_node.left.left.val_str == "cpu" {
@@ -818,7 +844,7 @@ def parse_primary(state: ParserState) -> AstNode {
             check_colon = current_tok(state)
             if check_colon.kind == "COLON" {
                 eat_tok(state, "COLON")
-                end_node = AstNode()
+                end_node = 0
                 check_end = current_tok(state)
                 if check_end.kind != "RBRACK" {
                     end_node = parse_expr(state)
@@ -829,7 +855,7 @@ def parse_primary(state: ParserState) -> AstNode {
                 slice_node.col = tok.col
                 slice_node.kind = "Slice"
                 slice_node.left = node  # base
-                slice_node.right = AstNode()  # start = 0 (unused, handled at runtime)
+                slice_node.right = 0    # start = 0 (omitted)
                 slice_node.cond = end_node     # end
                 node = slice_node
             } else {
@@ -837,7 +863,7 @@ def parse_primary(state: ParserState) -> AstNode {
                 check_colon2 = current_tok(state)
                 if check_colon2.kind == "COLON" {
                     eat_tok(state, "COLON")
-                    end_node = AstNode()
+                    end_node = 0
                     check_end = current_tok(state)
                     if check_end.kind != "RBRACK" {
                         end_node = parse_expr(state)
@@ -1293,7 +1319,23 @@ def parse_dict_key(state: ParserState) -> AstNode {
 }
 
 def parse_expr(state: ParserState) -> AstNode {
-    return parse_logic(state)
+    cond = parse_logic(state)
+    tok = current_tok(state)
+    if tok.kind == "QUESTION" {
+        eat_tok(state, "QUESTION")
+        true_expr = parse_expr(state)
+        eat_tok(state, "COLON")
+        false_expr = parse_expr(state)
+        node = AstNode()
+        node.kind = "Ternary"
+        node.line = tok.line
+        node.col = tok.col
+        node.cond = cond
+        node.left = true_expr
+        node.right = false_expr
+        return node
+    }
+    return cond
 }
 
 def parse_type_annotation(state: ParserState) -> string {
@@ -2023,6 +2065,13 @@ def parse_statement(state: ParserState) -> AstNode {
         return node
     }
     
+    if tok.kind == "IDENT" and state.const_table.has(tok.val) {
+        peek1 = peek_tok(state, 1)
+        if peek1.kind == "EQUALS" or peek1.kind == "PLUSEQ" or peek1.kind == "MINUSEQ" or peek1.kind == "STAREQ" or peek1.kind == "SLASHEQ" or peek1.kind == "PERCENTEQ" {
+            errors.err("Syntax", state.filename, tok.line, "cannot assign to const '" + tok.val + "'", "constants are immutable and cannot be reassigned", tok.col)
+        }
+    }
+
     expr = parse_expr(state)
     next_tok = current_tok(state)
     if next_tok.kind == "EQUALS" or next_tok.kind == "PLUSEQ" or next_tok.kind == "MINUSEQ" or next_tok.kind == "STAREQ" or next_tok.kind == "SLASHEQ" or next_tok.kind == "PERCENTEQ" {
@@ -2046,7 +2095,14 @@ def parse_statement(state: ParserState) -> AstNode {
             node.kind = "Assignment"
             node.val_str = expr.val_str
             node.val_int = 0  # is_const = 0 (false) by default
-            if is_const == 1 { node.val_int = 1 }
+            if is_const == 1 {
+                node.val_int = 1
+                if val_expr.kind == "Number" and val_expr.is_float == 0 {
+                    state.const_table.set(expr.val_str, val_expr.val_int)
+                } elif val_expr.kind == "UnaryOp" and val_expr.val_str == "-" and val_expr.left.kind == "Number" and val_expr.left.is_float == 0 {
+                    state.const_table.set(expr.val_str, 0 - val_expr.left.val_int)
+                }
+            }
             node.left = val_expr
             return node
         }
@@ -2403,6 +2459,7 @@ def parse_enum_def(state: ParserState, stmt_line: int, stmt_col: int) -> AstNode
         vf = variant_fields[j]
         state.data_fields.set("__enum_fields_" + name + "." + v, vf)
         state.data_fields.set("__enum_tag_" + name + "." + v, [j])
+        state.const_table.set(name + "_" + v, j)
 
         if len(vf) > 0 {
             type_name = name + "_" + v
@@ -2451,6 +2508,7 @@ def desugar_enums(program: list, state: ParserState) -> list {
                 }
 
                 const_name = name + "_" + v
+                state.const_table.set(const_name, j)
                 assign = AstNode()
                 assign.line = node.line
                 assign.col = node.col
@@ -2508,6 +2566,7 @@ def parse(tokens: list, filename: string) -> list {
     state.imported_modules = {}
     state.data_fields = {}
     state.ctors_used = []
+    state.const_table = {}
     program = []
     
     loop = 1

@@ -695,6 +695,23 @@ def compile_cond_jump(state: CodegenState, cond: AstNode, target: string, jump_i
 }
 
 def compile_expr(state: CodegenState, node: AstNode) {
+    if node.kind == "Ternary" {
+        else_label = "L_tern_else_" + str(state.label_count)
+        state.label_count = state.label_count + 1
+        end_label = "L_tern_end_" + str(state.label_count)
+        state.label_count = state.label_count + 1
+
+        compile_expr(state, node.cond)
+        emit(state, "    pop %a")
+        emit(state, "    cmp %a, 0")
+        emit(state, "    je " + else_label)
+        compile_expr(state, node.left)
+        emit(state, "    jmp " + end_label)
+        emit(state, else_label + ":")
+        compile_expr(state, node.right)
+        emit(state, end_label + ":")
+        return
+    }
     if node.kind == "SizeOf" {
         sz = 8
         if node.left != 0 and node.left.inferred_type != 0 and node.left.inferred_type.kind == "struct" {
@@ -1485,8 +1502,16 @@ def compile_expr(state: CodegenState, node: AstNode) {
         return
     }
     if node.kind == "Slice" {
-        compile_expr(state, node.cond)
-        compile_expr(state, node.right)
+        if node.cond != 0 and node.cond.kind != "" {
+            compile_expr(state, node.cond)
+        } else {
+            emit(state, "    push 2147483647")
+        }
+        if node.right != 0 and node.right.kind != "" {
+            compile_expr(state, node.right)
+        } else {
+            emit(state, "    push 0")
+        }
         compile_expr(state, node.left)
         emit(state, "    pop %x")
         emit(state, "    pop %c")
@@ -2110,6 +2135,123 @@ def compile_expr(state: CodegenState, node: AstNode) {
                 compile_expr(state, node.args[0])
                 emit_call(state, "_cpu_invlpg", 1)
                 emit(state, "    push 0")
+            }
+            return
+        }
+        if node.val_str == "cpu_pause" {
+            emit(state, "    pause")
+            emit(state, "    push 0")
+            return
+        }
+        if node.val_str == "cpu_read_cr2" {
+            if state.target_os == "bare" {
+                emit(state, "    mov rax, cr2")
+                emit(state, "    push %a")
+            } else {
+                emit_call(state, "_cpu_read_cr2", 0)
+                emit(state, "    push %a")
+            }
+            return
+        }
+        if node.val_str == "cpu_read_cr0" {
+            if state.target_os == "bare" {
+                emit(state, "    mov rax, cr0")
+                emit(state, "    push %a")
+            } else {
+                emit_call(state, "_cpu_read_cr0", 0)
+                emit(state, "    push %a")
+            }
+            return
+        }
+        if node.val_str == "cpu_write_cr0" {
+            if state.target_os == "bare" {
+                compile_expr(state, node.args[0])
+                emit(state, "    pop %a")
+                emit(state, "    mov cr0, rax")
+                emit(state, "    push 0")
+            } else {
+                compile_expr(state, node.args[0])
+                emit_call(state, "_cpu_write_cr0", 1)
+                emit(state, "    push 0")
+            }
+            return
+        }
+        if node.val_str == "cpu_rdtsc" {
+            emit(state, "    rdtsc")
+            emit(state, "    shl rdx, 32")
+            emit(state, "    or rax, rdx")
+            emit(state, "    push %a")
+            return
+        }
+        if node.val_str == "cpu_atomic_xchg" {
+            compile_expr(state, node.args[1])
+            compile_expr(state, node.args[0])
+            emit(state, "    pop %d")
+            emit(state, "    pop %a")
+            emit(state, "    xchg [rdx], eax")
+            emit(state, "    push %a")
+            return
+        }
+        if node.val_str == "cpu_atomic_cas" {
+            compile_expr(state, node.args[2])
+            compile_expr(state, node.args[1])
+            compile_expr(state, node.args[0])
+            emit(state, "    pop %d")
+            emit(state, "    pop %a")
+            emit(state, "    pop %c")
+            emit(state, "    lock cmpxchg [rdx], ecx")
+            emit(state, "    push %a")
+            return
+        }
+        if node.val_str == "mem_alloc" {
+            compile_expr(state, node.args[0])
+            emit_call(state, "_malloc", 1)
+            emit(state, "    push %a")
+            return
+        }
+        if node.val_str == "mem_free" {
+            compile_expr(state, node.args[0])
+            emit_call(state, "_free", 1)
+            emit(state, "    push 0")
+            return
+        }
+        if node.val_str == "mem_set_allocator" {
+            if state.target_os == "bare" {
+                compile_expr(state, node.args[1])
+                compile_expr(state, node.args[0])
+                emit(state, "    pop %a")
+                emit(state, "    pop %d")
+                emit(state, "    lea rcx, [rip + __nova_custom_alloc_fn]")
+                emit(state, "    mov [rcx], %a")
+                emit(state, "    lea rcx, [rip + __nova_custom_free_fn]")
+                emit(state, "    mov [rcx], %d")
+                emit(state, "    push 0")
+            } else {
+                compile_expr(state, node.args[1])
+                compile_expr(state, node.args[0])
+                emit_call(state, "_mem_set_allocator", 2)
+                emit(state, "    push 0")
+            }
+            return
+        }
+        if node.val_str == "mem_heap_used" {
+            if state.target_os == "bare" {
+                emit(state, "    mov rax, [rip + __nova_bare_heap_ptr]")
+                emit(state, "    lea rdx, [rip + __nova_bare_heap]")
+                emit(state, "    sub rax, rdx")
+                emit(state, "    push %a")
+            } else {
+                emit_call(state, "_mem_heap_used", 0)
+                emit(state, "    push %a")
+            }
+            return
+        }
+        if node.val_str == "mem_heap_total" {
+            if state.target_os == "bare" {
+                emit(state, "    push 262144")
+            } else {
+                emit_call(state, "_mem_heap_total", 0)
+                emit(state, "    push %a")
             }
             return
         }

@@ -14,7 +14,7 @@ MAIN_PY = os.path.join(ROOT, "bootstrap", "main.py")
 # syntax for a self-hosted-only feature, so these can never "check clean" under it by design.
 # They still get real compiler coverage from test_selfhost_feature_fixtures_run (below), which
 # runs them through the self-hosted compiler instead.
-BOOTSTRAP_INCOMPATIBLE = {"test_null.nv", "test_phase2_features.nv", "test_first_class_functions.nv", "test_gui_callbacks.nv", "test_enums_and_match.nv", "test_concurrency_tasks.nv", "test_baremetal_hardware.nv"}
+BOOTSTRAP_INCOMPATIBLE = {"test_null.nv", "test_phase2_features.nv", "test_first_class_functions.nv", "test_gui_callbacks.nv", "test_enums_and_match.nv", "test_concurrency_tasks.nv", "test_baremetal_hardware.nv", "test_baremetal_allocator.nv"}
 
 SOURCES = sorted(
     p for p in (
@@ -36,7 +36,7 @@ def test_source_checks_clean(path):
 
 
 @pytest.mark.parametrize("name", sorted(
-    ["test_null.nv", "test_phase2_features.nv", "test_arc_lifecycle.nv", "test_first_class_functions.nv", "test_gui_callbacks.nv", "test_enums_and_match.nv", "test_concurrency_tasks.nv", "test_baremetal_hardware.nv"]
+    ["test_null.nv", "test_phase2_features.nv", "test_arc_lifecycle.nv", "test_first_class_functions.nv", "test_gui_callbacks.nv", "test_enums_and_match.nv", "test_concurrency_tasks.nv", "test_baremetal_hardware.nv", "test_baremetal_allocator.nv"]
 ))
 def test_selfhost_feature_fixtures_run(selfhost, name):
     """Regression coverage for the self-hosted-only feature fixtures: null, named/default

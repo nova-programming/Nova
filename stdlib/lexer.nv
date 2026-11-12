@@ -583,6 +583,7 @@ def tokenize(src: string) -> list {
                 case "]" { tok.kind = "RBRACK" }
                 case "," { tok.kind = "COMMA" }
                 case ":" { tok.kind = "COLON" }
+                case "?" { tok.kind = "QUESTION" }
                 case "." { tok.kind = "DOT" }
                 case ";" { tok.kind = "SEMICOLON" }
             }
@@ -626,7 +627,7 @@ def free_soft_keywords(tokens: list) -> list {
     i = 0
     while i < len(tokens) {
         tk = tokens[i]
-        if tk.kind == "DATA" {
+        if tk.kind == "DATA" or tk.kind == "CLASS" {
             is_decl = 0
             if i + 2 < len(tokens) {
                 if tokens[i + 1].kind == "IDENT" and tokens[i + 2].kind == "LBRACE" { is_decl = 1 }

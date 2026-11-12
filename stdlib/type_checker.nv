@@ -198,7 +198,22 @@ def tc_init(tc: TypeChecker) {
 
     tc_add_func(tc, "cpu_read_cr3", fn_void_int)
     tc_add_func(tc, "cpu_write_cr3", fn_int_int)
+    tc_add_func(tc, "cpu_read_cr2", fn_void_int)
+    tc_add_func(tc, "cpu_read_cr0", fn_void_int)
+    tc_add_func(tc, "cpu_write_cr0", fn_int_int)
+    tc_add_func(tc, "cpu_pause", fn_void_int)
+    tc_add_func(tc, "cpu_rdtsc", fn_void_int)
+    tc_add_func(tc, "cpu_atomic_xchg", fn_addr_int_int)
+    fn_int_int_int_int = create_func_type([int_t, int_t, int_t], int_t)
+    tc_add_func(tc, "cpu_atomic_cas", fn_int_int_int_int)
     tc_add_func(tc, "cpu_invlpg", fn_int_int)
+
+    fn_addr_addr_int = create_func_type([any_t, any_t], int_t)
+    tc_add_func(tc, "mem_alloc", fn_int_int)
+    tc_add_func(tc, "mem_free", fn_addr_int)
+    tc_add_func(tc, "mem_set_allocator", fn_addr_addr_int)
+    tc_add_func(tc, "mem_heap_used", fn_void_int)
+    tc_add_func(tc, "mem_heap_total", fn_void_int)
 }
 
 def tc_add_func(tc: TypeChecker, name: string, typ: Type) {
@@ -482,8 +497,15 @@ def tc_visit(tc: TypeChecker, node: AstNode) -> Type {
 
 def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
     if node == 0 { return create_any_type() }
-    kind_handlers = {"Number": 1, "String": 2, "Boolean": 3, "Variable": 4, "BinOp": 5, "Compare": 6, "Assignment": 7, "Function": 8, "Return": 9, "Print": 10, "PrintD": 11, "TRY": 12, "THROW": 13, "Call": 14, "IfElse": 15, "While": 16, "MethodCall": 17, "DataFieldAccess": 18, "DataFieldAssign": 19, "ArrayIndex": 20, "ArrayIndexAssign": 21, "DictLiteral": 22, "ListLiteral": 23, "RawBlock": 24, "ForLoop": 25, "ForIn": 26, "Len": 27, "SizeOf": 28, "Comptime": 29, "Block": 30, "Defer": 31, "MultiReturn": 32, "UnpackAssign": 33, "ClassDef": 34, "Null": 35}
+    kind_handlers = {"Number": 1, "String": 2, "Boolean": 3, "Variable": 4, "BinOp": 5, "Compare": 6, "Assignment": 7, "Function": 8, "Return": 9, "Print": 10, "PrintD": 11, "TRY": 12, "THROW": 13, "Call": 14, "IfElse": 15, "While": 16, "MethodCall": 17, "DataFieldAccess": 18, "DataFieldAssign": 19, "ArrayIndex": 20, "ArrayIndexAssign": 21, "DictLiteral": 22, "ListLiteral": 23, "RawBlock": 24, "ForLoop": 25, "ForIn": 26, "Len": 27, "SizeOf": 28, "Comptime": 29, "Block": 30, "Defer": 31, "MultiReturn": 32, "UnpackAssign": 33, "ClassDef": 34, "Null": 35, "Ternary": 36}
     h = kind_handlers.get(node.kind)
+    if h == 36 {
+        tc_visit(tc, node.cond)
+        t_true = tc_visit(tc, node.left)
+        t_false = tc_visit(tc, node.right)
+        tc_unify(tc, t_true, t_false, node)
+        return t_true
+    }
     if h == 35 { return create_null_type() }
     if h == 1 {
         if node.is_float == 1 { return create_scalar_type("float") }
@@ -778,6 +800,13 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         if node.left.kind == "Variable" {
             mfunc = tc_find_func(tc, node.val_str)
             if mfunc != 0 {
+                nf = 0
+                if tc.named_func_map.has(node.val_str) == 1 {
+                    nf = tc.named_func_map.get(node.val_str)
+                }
+                if nf != 0 and len(nf.param_names) > 0 {
+                    node.args = tc_bind_args(tc, node, nf)
+                }
                 mparams = type_params(mfunc)
                 i = 0
                 n = len(node.args)

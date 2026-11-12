@@ -5069,7 +5069,20 @@ SYSCALL int64_t _cpu_outw(int64_t port, int64_t val) { (void)port; (void)val; re
 SYSCALL int64_t _cpu_outd(int64_t port, int64_t val) { (void)port; (void)val; return 0; }
 SYSCALL int64_t _cpu_read_cr3(void) { return 0; }
 SYSCALL int64_t _cpu_write_cr3(int64_t val) { (void)val; return 0; }
+SYSCALL int64_t _cpu_read_cr2(void) { return 0; }
+SYSCALL int64_t _cpu_read_cr0(void) { return 0; }
+SYSCALL int64_t _cpu_write_cr0(int64_t val) { (void)val; return 0; }
+SYSCALL int64_t _cpu_pause(void) { return 0; }
+SYSCALL int64_t _cpu_rdtsc(void) { return 0; }
+SYSCALL int64_t _cpu_atomic_xchg(int64_t ptr, int64_t val) { (void)ptr; (void)val; return 0; }
+SYSCALL int64_t _cpu_atomic_cas(int64_t ptr, int64_t exp, int64_t nval) { (void)ptr; (void)exp; (void)nval; return 0; }
 SYSCALL int64_t _cpu_invlpg(int64_t addr) { (void)addr; return 0; }
+
+SYSCALL int64_t _mem_alloc(int64_t size) { return (int64_t)(intptr_t)malloc((size_t)size); }
+SYSCALL int64_t _mem_free(int64_t ptr) { free((void *)(intptr_t)ptr); return 0; }
+SYSCALL int64_t _mem_set_allocator(int64_t alloc_fn, int64_t free_fn) { (void)alloc_fn; (void)free_fn; return 0; }
+SYSCALL int64_t _mem_heap_used(void) { return 0; }
+SYSCALL int64_t _mem_heap_total(void) { return 0; }
 
 int64_t peek_u8(int64_t addr) { return _peek_u8(addr); }
 int64_t peek_u16(int64_t addr) { return _peek_u16(addr); }
@@ -5091,4 +5104,10 @@ int64_t cpu_outd(int64_t port, int64_t val) { return _cpu_outd(port, val); }
 int64_t cpu_read_cr3(void) { return _cpu_read_cr3(); }
 int64_t cpu_write_cr3(int64_t val) { return _cpu_write_cr3(val); }
 int64_t cpu_invlpg(int64_t addr) { return _cpu_invlpg(addr); }
+int64_t mem_alloc(int64_t size) { return _mem_alloc(size); }
+int64_t mem_free(int64_t ptr) { return _mem_free(ptr); }
+int64_t mem_set_allocator(int64_t alloc_fn, int64_t free_fn) { return _mem_set_allocator(alloc_fn, free_fn); }
+int64_t mem_heap_used(void) { return _mem_heap_used(); }
+int64_t mem_heap_total(void) { return _mem_heap_total(); }
+
 

@@ -100,3 +100,38 @@ print(slice.byte_at(sl, 3))
 """
     lines = _run_native(code)
     assert lines == ["65", "66", "67", "-1"]
+
+
+def test_slice_open_ended_syntax():
+    code = """
+s = "Hello World"
+prefix = s[:5]
+suffix = s[6:]
+full = s[:]
+print(prefix)
+print(suffix)
+print(full)
+
+arr = [100, 200, 300, 400]
+sub_arr1 = arr[:2]
+sub_arr2 = arr[2:]
+print(len(sub_arr1))
+print(sub_arr1[0])
+print(sub_arr1[1])
+print(len(sub_arr2))
+print(sub_arr2[0])
+print(sub_arr2[1])
+"""
+    lines = _run_native(code)
+    assert lines == [
+        "Hello",
+        "World",
+        "Hello World",
+        "2",
+        "100",
+        "200",
+        "2",
+        "300",
+        "400",
+    ]
+

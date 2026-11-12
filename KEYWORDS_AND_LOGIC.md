@@ -31,6 +31,8 @@ Nova bridges high-level Pythonic simplicity with low-level C-like control. This 
 * **`from` / `as`**: Used in imports for aliasing module namespaces or specifying FFI libraries.
   * *Syntax*: `import "kernel32.dll" as kernel32` or `import math_utils as mu`
 * **`if` / `elif` / `else`**: Conditional branching. Codegen emits test instructions (`cmp eax, 0`) and conditional jumps (`je`, `jne`, etc.) using generated unique labels.
+* **`? :` (Ternary Operator)**: Inline conditional expression. Evaluates condition and yields true or false expression with zero branches in scalar contexts (`cmov`) or short-circuit jumps.
+  * *Syntax*: `let val = (x > y) ? x : y`
 * **`while`**: Basic loop iteration. Evaluates a condition before executing the loop body.
 * **`for`**: Supports two iteration syntaxes:
   1. **Range-based loops**: `for i = start to end step s { ... }` or `for i = start downto end step s { ... }` for descending iteration.
@@ -135,6 +137,15 @@ Within `@raw` blocks, pointers (integer addresses representing memory locations)
 * **`ptr.bytes`**: Accesses raw byte-level array representations of memory.
 * **`lst.ptr`**: Returns the raw memory address of the list's internal backing buffer.
 * **`ptr.as_list(count)`**: Wraps a raw memory pointer into a high-level `list` header with `count` elements with zero copying.
+
+### Hardware & Bare-Metal Intrinsics (`cpu.*`, `peek.*`, `poke.*`)
+
+When targeting bare-metal systems (`--os bare`) or low-level systems programming, Nova provides direct compiler intrinsics that map directly to single machine instructions:
+* **Port I/O**: `cpu.in8(port)` / `cpu.in16(port)` / `cpu.in32(port)`, `cpu.out8(port, val)` / `cpu.out16(port, val)` / `cpu.out32(port, val)`.
+* **CPU Execution & Interrupts**: `cpu.cli()` (`cli`), `cpu.sti()` (`sti`), `cpu.hlt()` (`hlt`), `cpu.pause()` (`pause`), `cpu.invlpg(addr)` (`invlpg`).
+* **Control Registers**: `cpu.cr3()` (`mov rax, cr3`), `cpu.set_cr3(val)` (`mov cr3, rax`), `cpu.cr2()` (`mov rax, cr2`), `cpu.cr0()` (`mov rax, cr0`), `cpu.set_cr0(val)` (`mov cr0, rax`).
+* **Hardware Timestamp & Concurrency**: `cpu.rdtsc()` (`rdtsc`), `cpu.atomic_xchg(ptr, val)` (`lock xchg`), `cpu.atomic_cas(ptr, expected, new_val)` (`lock cmpxchg`).
+* **Memory Peek/Poke**: `peek.u8(addr)`, `peek.u16(addr)`, `peek.u32(addr)`, `peek.u64(addr)`, `poke.u8(addr, val)`, `poke.u16(addr, val)`, `poke.u32(addr, val)`, `poke.u64(addr, val)`.
 
 ---
 

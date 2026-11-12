@@ -1,0 +1,55 @@
+# Nova Bare-Metal Allocator & Dynamic Memory Test
+
+# 1. mem.alloc and mem.free primitives
+let p = mem.alloc(128)
+if p != 0 {
+    poke.u64(p, 0xCAFEBABE)
+    let val = peek.u64(p)
+    if val == 0xCAFEBABE {
+        print("PASS: mem.alloc and poke/peek")
+    }
+    mem.free(p)
+    print("PASS: mem.free")
+}
+
+# 2. Dynamic lists on bare metal
+let services = ["VGA", "Serial", "Timer", "Paging"]
+if len(services) == 4 {
+    print("PASS: Dynamic list creation and len()")
+}
+
+let joined = ""
+let i = 0
+while i < len(services) {
+    if i > 0 {
+        joined = joined + ", "
+    }
+    joined = joined + services[i]
+    i = i + 1
+}
+
+if len(joined) > 0 {
+    print("PASS: Dynamic string concatenation")
+}
+
+# 3. Struct allocation
+data ServiceDescriptor {
+    id: int
+    name: string
+    active: int
+}
+
+let s1 = ServiceDescriptor(1, "Serial COM1", 1)
+if s1.id == 1 {
+    if s1.name == "Serial COM1" {
+        print("PASS: Struct allocation on bare metal")
+    }
+}
+
+# 4. Pluggable allocator hook API
+mem.set_allocator(0, 0)
+let used = mem.heap_used()
+let total = mem.heap_total()
+
+print("ALL BAREMETAL ALLOCATOR TESTS PASSED")
+

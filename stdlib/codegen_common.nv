@@ -21,10 +21,12 @@ def get_externs() -> list {
             "_nova_task_spawn", "_nova_task_await",
             "_peek_u8", "_peek_u16", "_peek_u32", "_peek_u64",
             "_poke_u8", "_poke_u16", "_poke_u32", "_poke_u64",
-            "_cpu_cli", "_cpu_sti", "_cpu_hlt",
+            "_cpu_cli", "_cpu_sti", "_cpu_hlt", "_cpu_pause",
             "_cpu_inb", "_cpu_inw", "_cpu_ind",
             "_cpu_outb", "_cpu_outw", "_cpu_outd",
-            "_cpu_read_cr3", "_cpu_write_cr3", "_cpu_invlpg"]
+            "_cpu_read_cr3", "_cpu_write_cr3", "_cpu_read_cr2",
+            "_cpu_read_cr0", "_cpu_write_cr0", "_cpu_rdtsc",
+            "_cpu_atomic_xchg", "_cpu_atomic_cas", "_cpu_invlpg"]
 }
 
 def get_data_strings() -> list {

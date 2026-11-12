@@ -1,0 +1,34 @@
+# Test function pointers and callbacks in Nova
+def add_ten(x: int) -> int {
+    return x + 10
+}
+
+def multiply(a: int, b: int) -> int {
+    return a * b
+}
+
+def apply(f, val: int) -> int {
+    return f(val)
+}
+
+def run() {
+    let fn = add_ten
+    let res = fn(5)
+    print("res: " + str(res))
+
+    let res2 = apply(add_ten, 25)
+    print("res2: " + str(res2))
+
+    let table = [add_ten, add_ten]
+    let f = table[0]
+    let res3 = f(40)
+    print("res3: " + str(res3))
+
+    let ptr = fn
+    let res4 = ptr(100)
+    print("res4: " + str(res4))
+}
+
+run()
+
+main()

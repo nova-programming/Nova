@@ -36,6 +36,18 @@ def exe_dir() -> string {
     return str_sub(exe_path, 0, last)
 }
 
+# Directory part of a path including the trailing slash ("" when there is none).
+def source_dir(path: string) -> string {
+    slash = -1
+    i = 0
+    while i < len(path) {
+        if path[i] == "/" or path[i] == "\\" { slash = i }
+        i = i + 1
+    }
+    if slash < 0 { return "" }
+    return str_sub(path, 0, slash + 1)
+}
+
 def resolve_imports(ast: list, visited: list, target_arch: string, target_os: string, filename: string) -> list {
     expanded = []
     i = 0
@@ -52,18 +64,53 @@ def resolve_imports(ast: list, visited: list, target_arch: string, target_os: st
             }
             if contains(visited, module_name) == 0 {
                 visited.append(module_name)
+                found_path = ""
                 # 1. Current working directory (./<module>.nv)
                 fd = sys_open(module_name + ".nv", "r")
-                # 2. NOVA_PATH environment variable (if set)
+                if fd != 0 {
+                    found_path = module_name + ".nv"
+                }
+                # 1b. Relative to importing source file
+                if fd == 0 {
+                    src_dir = source_dir(filename)
+                    if len(src_dir) > 0 {
+                        fd = sys_open(src_dir + module_name + ".nv", "r")
+                        if fd != 0 {
+                            found_path = src_dir + module_name + ".nv"
+                        }
+                    }
+                }
+                # 2. NOVA_PATH environment variable (search semicolon/colon separated paths)
                 if fd == 0 {
                     nova_path = system.system_env_get("NOVA_PATH")
                     if len(nova_path) > 0 {
-                        fd = sys_open(nova_path + "/" + module_name + ".nv", "r")
-                        if fd == 0 {
-                            fd = sys_open(nova_path + "/stdlib/" + module_name + ".nv", "r")
-                        }
-                        if fd == 0 {
-                            fd = sys_open(nova_path + "/stdlib/backend/" + target_arch + "/" + module_name + ".nv", "r")
+                        np_len = len(nova_path)
+                        np_start = 0
+                        np_i = 0
+                        while np_i <= np_len and fd == 0 {
+                            if np_i == np_len or nova_path[np_i] == ";" or (target_os != "windows" and nova_path[np_i] == ":") {
+                                if np_i > np_start {
+                                    dir_entry = str_sub(nova_path, np_start, np_i)
+                                    fd = sys_open(dir_entry + "/" + module_name + ".nv", "r")
+                                    if fd != 0 {
+                                        found_path = dir_entry + "/" + module_name + ".nv"
+                                    }
+                                    if fd == 0 {
+                                        fd = sys_open(dir_entry + "/stdlib/" + module_name + ".nv", "r")
+                                        if fd != 0 {
+                                            found_path = dir_entry + "/stdlib/" + module_name + ".nv"
+                                        }
+                                    }
+                                    if fd == 0 {
+                                        fd = sys_open(dir_entry + "/stdlib/backend/" + target_arch + "/" + module_name + ".nv", "r")
+                                        if fd != 0 {
+                                            found_path = dir_entry + "/stdlib/backend/" + target_arch + "/" + module_name + ".nv"
+                                        }
+                                    }
+                                }
+                                np_start = np_i + 1
+                            }
+                            np_i = np_i + 1
                         }
                     }
                 }
@@ -72,31 +119,43 @@ def resolve_imports(ast: list, visited: list, target_arch: string, target_os: st
                     dir = exe_dir()
                     if len(dir) > 0 {
                         fd = sys_open(dir + "/stdlib/" + module_name + ".nv", "r")
+                        if fd != 0 {
+                            found_path = dir + "/stdlib/" + module_name + ".nv"
+                        }
                         if fd == 0 {
                             fd = sys_open(dir + "/stdlib/backend/" + target_arch + "/" + module_name + ".nv", "r")
+                            if fd != 0 {
+                                found_path = dir + "/stdlib/backend/" + target_arch + "/" + module_name + ".nv"
+                            }
                         }
                     }
                 }
                 # 4. Fallback to CWD ./stdlib/<module>.nv
                 if fd == 0 {
                     fd = sys_open("stdlib/" + module_name + ".nv", "r")
+                    if fd != 0 {
+                        found_path = "stdlib/" + module_name + ".nv"
+                    }
                 }
                 if fd == 0 {
                     fd = sys_open("stdlib/backend/" + target_arch + "/" + module_name + ".nv", "r")
+                    if fd != 0 {
+                        found_path = "stdlib/backend/" + target_arch + "/" + module_name + ".nv"
+                    }
                 }
                 if fd == 0 {
                     errors.err("Import", filename, node.line, "could not resolve module '" + module_name + "'", "make sure '" + module_name + ".nv' exists in the current directory, stdlib/, or next to the nova executable", node.col)
                 } else {
-    source = sys_read(fd)
-    sys_close(fd)
+                    source = sys_read(fd)
+                    sys_close(fd)
                     # Keep stdout clean when the front-end is embedded (language server): it
                     # owns stdout for JSON-RPC. Diagnostics travel through NOVA_DIAG_FILE.
                     if system.system_env_get("NOVA_DIAG_FILE") == "" {
                         print("Tokenizing... " + module_name)
                     }
                     tokens = tokenize(source)
-                    imported_ast = parse(tokens, module_name + ".nv")
-                    resolved_ast = resolve_imports(imported_ast, visited, target_arch, target_os, module_name + ".nv")
+                    imported_ast = parse(tokens, found_path)
+                    resolved_ast = resolve_imports(imported_ast, visited, target_arch, target_os, found_path)
                     j = 0
                     while j < len(resolved_ast) {
                         expanded.append(resolved_ast[j])
@@ -179,18 +238,6 @@ def text_fingerprint(s: string) -> int {
     return h
 }
 
-# Directory part of a path including the trailing slash ("" when there is none).
-def source_dir(path: string) -> string {
-    slash = -1
-    i = 0
-    while i < len(path) {
-        if path[i] == "/" or path[i] == "\\" { slash = i }
-        i = i + 1
-    }
-    if slash < 0 { return "" }
-    return str_sub(path, 0, slash + 1)
-}
-
 # True when the source imports a module that lives next to it (its edits are not part of the stamp).
 def imports_local_module(content: string, dir_prefix: string) -> int {
     n = len(content)
@@ -225,6 +272,248 @@ def build_stamp(path: string) -> string {
     args = system.get_args()
     compiler_id = file_size(args[0])
     return str(len(content)) + ":" + str(text_fingerprint(content)) + ":" + str(compiler_id)
+}
+
+# --- Constant inlining & AST folding pass ---
+def inline_node_expr(node: AstNode, const_map: dict) -> AstNode {
+    if node == 0 { return 0 }
+    k = node.kind
+    if k == "Variable" {
+        if const_map.has(node.val_str) {
+            val = const_map.get(node.val_str)
+            num = AstNode()
+            num.kind = "Number"
+            num.val_int = val
+            num.is_float = 0
+            num.line = node.line
+            num.col = node.col
+            return num
+        }
+        return node
+    }
+    if k == "BinOp" {
+        node.left = inline_node_expr(node.left, const_map)
+        node.right = inline_node_expr(node.right, const_map)
+        if node.left != 0 and node.right != 0 and node.left.kind == "Number" and node.right.kind == "Number" and node.left.is_float == 0 and node.right.is_float == 0 {
+            op = node.val_str
+            if op == "+" {
+                node.left.val_int = node.left.val_int + node.right.val_int
+                return node.left
+            }
+            if op == "-" {
+                node.left.val_int = node.left.val_int - node.right.val_int
+                return node.left
+            }
+            if op == "*" {
+                node.left.val_int = node.left.val_int * node.right.val_int
+                return node.left
+            }
+            if op == "/" and node.right.val_int != 0 {
+                node.left.val_int = node.left.val_int / node.right.val_int
+                return node.left
+            }
+            if op == "%" and node.right.val_int != 0 {
+                node.left.val_int = node.left.val_int % node.right.val_int
+                return node.left
+            }
+            if op == "<<" {
+                node.left.val_int = node.left.val_int << node.right.val_int
+                return node.left
+            }
+            if op == ">>" {
+                node.left.val_int = node.left.val_int >> node.right.val_int
+                return node.left
+            }
+            if op == "&" {
+                node.left.val_int = node.left.val_int & node.right.val_int
+                return node.left
+            }
+            if op == "|" {
+                node.left.val_int = node.left.val_int | node.right.val_int
+                return node.left
+            }
+            if op == "^" {
+                node.left.val_int = node.left.val_int ^ node.right.val_int
+                return node.left
+            }
+        }
+        return node
+    }
+    if k == "UnaryOp" {
+        node.left = inline_node_expr(node.left, const_map)
+        if node.left != 0 and node.left.kind == "Number" and node.left.is_float == 0 and node.val_str == "-" {
+            node.left.val_int = 0 - node.left.val_int
+            return node.left
+        }
+        return node
+    }
+    if k == "Compare" {
+        node.left = inline_node_expr(node.left, const_map)
+        node.right = inline_node_expr(node.right, const_map)
+        return node
+    }
+    if k == "Call" {
+        if node.args != 0 {
+            ai = 0
+            while ai < len(node.args) {
+                node.args[ai] = inline_node_expr(node.args[ai], const_map)
+                ai = ai + 1
+            }
+        }
+        return node
+    }
+    if k == "MethodCall" {
+        node.left = inline_node_expr(node.left, const_map)
+        if node.args != 0 {
+            ai = 0
+            while ai < len(node.args) {
+                node.args[ai] = inline_node_expr(node.args[ai], const_map)
+                ai = ai + 1
+            }
+        }
+        return node
+    }
+    if k == "DataFieldAccess" {
+        node.left = inline_node_expr(node.left, const_map)
+        return node
+    }
+    if k == "ArrayIndex" {
+        node.left = inline_node_expr(node.left, const_map)
+        node.right = inline_node_expr(node.right, const_map)
+        return node
+    }
+    if k == "Ternary" {
+        node.cond = inline_node_expr(node.cond, const_map)
+        node.left = inline_node_expr(node.left, const_map)
+        node.right = inline_node_expr(node.right, const_map)
+        return node
+    }
+    if k == "ListLiteral" {
+        if node.args != 0 {
+            ai = 0
+            while ai < len(node.args) {
+                node.args[ai] = inline_node_expr(node.args[ai], const_map)
+                ai = ai + 1
+            }
+        }
+        return node
+    }
+    return node
+}
+
+def inline_node_stmt(node: AstNode, const_map: dict) {
+    if node == 0 { return }
+    k = node.kind
+    if k == "Assignment" {
+        node.left = inline_node_expr(node.left, const_map)
+        if node.val_int == 1 {
+            if node.left != 0 and node.left.kind == "Number" and node.left.is_float == 0 {
+                const_map.set(node.val_str, node.left.val_int)
+            }
+        }
+        return
+    }
+    if k == "DataFieldAssign" {
+        node.left = inline_node_expr(node.left, const_map)
+        node.right = inline_node_expr(node.right, const_map)
+        return
+    }
+    if k == "ArrayIndexAssign" {
+        node.left = inline_node_expr(node.left, const_map)
+        node.right = inline_node_expr(node.right, const_map)
+        node.cond = inline_node_expr(node.cond, const_map)
+        return
+    }
+    if k == "Return" {
+        node.left = inline_node_expr(node.left, const_map)
+        return
+    }
+    if k == "IfElse" {
+        node.cond = inline_node_expr(node.cond, const_map)
+        if node.body != 0 {
+            si = 0
+            while si < len(node.body) {
+                inline_node_stmt(node.body[si], const_map)
+                si = si + 1
+            }
+        }
+        if node.else_body != 0 {
+            si = 0
+            while si < len(node.else_body) {
+                inline_node_stmt(node.else_body[si], const_map)
+                si = si + 1
+            }
+        }
+        return
+    }
+    if k == "While" {
+        node.cond = inline_node_expr(node.cond, const_map)
+        if node.body != 0 {
+            si = 0
+            while si < len(node.body) {
+                inline_node_stmt(node.body[si], const_map)
+                si = si + 1
+            }
+        }
+        return
+    }
+    if k == "ForLoop" {
+        node.left = inline_node_expr(node.left, const_map)
+        node.right = inline_node_expr(node.right, const_map)
+        if node.body != 0 {
+            si = 0
+            while si < len(node.body) {
+                inline_node_stmt(node.body[si], const_map)
+                si = si + 1
+            }
+        }
+        return
+    }
+    if k == "Function" {
+        if node.body != 0 {
+            si = 0
+            while si < len(node.body) {
+                inline_node_stmt(node.body[si], const_map)
+                si = si + 1
+            }
+        }
+        return
+    }
+    if k == "ClassDef" {
+        if node.methods != 0 {
+            mi = 0
+            while mi < len(node.methods) {
+                m = node.methods[mi]
+                if m.body != 0 {
+                    si = 0
+                    while si < len(m.body) {
+                        inline_node_stmt(m.body[si], const_map)
+                        si = si + 1
+                    }
+                }
+                mi = mi + 1
+            }
+        }
+        return
+    }
+    if k == "Print" or k == "PrintD" {
+        node.left = inline_node_expr(node.left, const_map)
+        return
+    }
+    if k == "Call" or k == "MethodCall" {
+        inline_node_expr(node, const_map)
+        return
+    }
+}
+
+def inline_constants_ast(ast: list) -> list {
+    const_map = {}
+    i = 0
+    while i < len(ast) {
+        inline_node_stmt(ast[i], const_map)
+        i = i + 1
+    }
+    return ast
 }
 
 def compile_file(path: string, debug_mode: int, target_arch: string, target_os: string) -> list {
@@ -281,6 +570,7 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     print("[3/5] Resolving imports")
     visited = []
     ast = resolve_imports(ast, visited, target_arch, target_os, path)
+    ast = inline_constants_ast(ast)
     print("[3/5] done: " + str(len(ast)) + " nodes after imports")
 
     if had_errors() == 1 {
@@ -347,6 +637,7 @@ def check_source(source: string, filename: string, target_arch: string, target_o
     ast = parse(tokens, filename)
     visited = []
     ast = resolve_imports(ast, visited, target_arch, target_os, filename)
+    ast = inline_constants_ast(ast)
     if had_errors() == 1 { return 1 }
     infer_return_types(ast)
     tc = TypeChecker()
@@ -588,7 +879,7 @@ def _compile_runtime(gcc_name: string, target_os: string, target_arch: string, c
         rc_arg = _quote(runtime_c_path)
         ro_arg = _quote(runtime_o_path)
     }
-    cmd = gcc_name + " -Os -c " + rc_arg + " -o " + ro_arg
+    cmd = gcc_name + " -Os -ffunction-sections -fdata-sections -c " + rc_arg + " -o " + ro_arg
     if target_os == "macos" {
         cmd = cmd + " -D MACOS"
         if target_arch == "arm64" { cmd = cmd + " -arch arm64" }
@@ -691,7 +982,7 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
     
     if is_windows == 1 and target_arch == "x86_64" {
         print("Using GCC to assemble and link...")
-        system.system_exec(gcc_name + " -O3 " + _quote(to_win_path(input_path + ".s")) + " " + _quote(to_win_path(runtime_o_path)) + " -o " + _quote(to_win_path(output_path)) + " -mconsole -Wl,--stack,16777216 -lkernel32 -lgdi32 -luser32")
+        system.system_exec(gcc_name + " -O3 " + _quote(to_win_path(input_path + ".s")) + " " + _quote(to_win_path(runtime_o_path)) + " -o " + _quote(to_win_path(output_path)) + " -mconsole -Wl,--gc-sections -Wl,--stack,16777216 -lkernel32 -lgdi32 -luser32")
         _verify_output(output_path)
     } elif is_windows == 1 {
         print("Assembling...")
