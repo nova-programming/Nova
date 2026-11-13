@@ -196,6 +196,16 @@ def tc_init(tc: TypeChecker) {
     tc_add_func(tc, "poke_u32", fn_addr_int_int)
     tc_add_func(tc, "poke_u64", fn_addr_int_int)
 
+    tc_add_func(tc, "mem_read_u8", fn_addr_int)
+    tc_add_func(tc, "mem_read_u16", fn_addr_int)
+    tc_add_func(tc, "mem_read_u32", fn_addr_int)
+    tc_add_func(tc, "mem_read_u64", fn_addr_int)
+
+    tc_add_func(tc, "mem_write_u8", fn_addr_int_int)
+    tc_add_func(tc, "mem_write_u16", fn_addr_int_int)
+    tc_add_func(tc, "mem_write_u32", fn_addr_int_int)
+    tc_add_func(tc, "mem_write_u64", fn_addr_int_int)
+
     tc_add_func(tc, "cpu_cli", fn_void_int)
     tc_add_func(tc, "cpu_sti", fn_void_int)
     tc_add_func(tc, "cpu_hlt", fn_void_int)
@@ -837,6 +847,28 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
             }
             return create_any_type()
         }
+        if node.val_str == "mem_view" {
+            if len(node.args) != 2 {
+                errors.err("Args", tc.filename, node.line, "mem.view expects 2 arguments: (Type, address)", "pass Type and address", node.col)
+                return create_any_type()
+            }
+            target_type_name = ""
+            if node.args[0].kind == "Variable" {
+                target_type_name = node.args[0].val_str
+            } elif node.args[0].kind == "DataFieldAccess" {
+                target_type_name = node.args[0].val_str
+            }
+            st = tc_find_struct(tc, target_type_name)
+            if st == 0 {
+                errors.err("Type", tc.filename, node.line, "mem.view target '" + target_type_name + "' is not a defined struct/data type", "define 'data " + target_type_name + "' first", node.col)
+            }
+            addr_t = tc_visit(tc, node.args[1])
+            if st != 0 {
+                node.inferred_type = st
+                return st
+            }
+            return create_any_type()
+        }
         if tc_find_struct(tc, node.val_str) != 0 {
             i = 0
             while i < len(node.args) {
@@ -941,7 +973,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         is_ns = 0
         if node.left.kind == "Variable" and tc_get_var(tc, node.left.val_str) == 0 and tc.global_names.has(node.left.val_str) == 0 {
             qn = node.left.val_str
-            if qn == "peek" or qn == "poke" or qn == "cpu" or qn == "mem" or tc_find_func(tc, node.val_str) != 0 { is_ns = 1 }
+            if qn == "cpu" or qn == "mem" or tc_find_func(tc, node.val_str) != 0 { is_ns = 1 }
         }
         inst_t = create_any_type()
         if is_ns == 0 { inst_t = tc_visit(tc, node.left) }

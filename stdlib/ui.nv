@@ -108,8 +108,8 @@ const UI_DEFAULT_RADIUS = 10
 const UI_DEFAULT_BTN_H  = 28
 const MAX_CONTAINER_DEPTH = 8
 
-def uiState(off: int) -> int { return peek.u32(UI_STATE + off) }
-def uiSetState(off: int, v: int) { poke.u32(UI_STATE + off, v) }
+def uiState(off: int) -> int { return mem.read_u32(UI_STATE + off) }
+def uiSetState(off: int, v: int) { mem.write_u32(UI_STATE + off, v) }
 
 def ui_state(off: int) -> int { return uiState(off) }
 def ui_set_state(off: int, v: int) { uiSetState(off, v) }
@@ -150,10 +150,10 @@ def pushContainer(cType: int, cX: int, cY: int, cW: int) {
         return
     }
     let slot = UI_STATE + 96 + d * 16
-    poke.u32(slot + 0, cType)
-    poke.u32(slot + 4, cX)
-    poke.u32(slot + 8, cY)
-    poke.u32(slot + 12, cW)
+    mem.write_u32(slot + 0, cType)
+    mem.write_u32(slot + 4, cX)
+    mem.write_u32(slot + 8, cY)
+    mem.write_u32(slot + 12, cW)
     uiSetState(ST_DEPTH, d + 1)
 }
 
@@ -168,28 +168,28 @@ def currentContainerType() -> int {
     let d = uiState(ST_DEPTH)
     if d <= 0 { return 0 }
     let slot = UI_STATE + 96 + (d - 1) * 16
-    return peek.u32(slot + 0)
+    return mem.read_u32(slot + 0)
 }
 
 def currentContainerX() -> int {
     let d = uiState(ST_DEPTH)
     if d <= 0 { return padding() }
     let slot = UI_STATE + 96 + (d - 1) * 16
-    return peek.u32(slot + 4)
+    return mem.read_u32(slot + 4)
 }
 
 def currentContainerY() -> int {
     let d = uiState(ST_DEPTH)
     if d <= 0 { return padding() }
     let slot = UI_STATE + 96 + (d - 1) * 16
-    return peek.u32(slot + 8)
+    return mem.read_u32(slot + 8)
 }
 
 def currentContainerW() -> int {
     let d = uiState(ST_DEPTH)
     if d <= 0 { return width() - 2 * padding() }
     let slot = UI_STATE + 96 + (d - 1) * 16
-    return peek.u32(slot + 12)
+    return mem.read_u32(slot + 12)
 }
 
 def advanceContainerY(itemH: int) -> int {
@@ -198,16 +198,16 @@ def advanceContainerY(itemH: int) -> int {
         return next(itemH)
     }
     let slot = UI_STATE + 96 + (d - 1) * 16
-    let y = peek.u32(slot + 8)
+    let y = mem.read_u32(slot + 8)
     let g = gap()
-    poke.u32(slot + 8, y + itemH + g)
+    mem.write_u32(slot + 8, y + itemH + g)
     return y
 }
 
 # ---- window lifecycle ------------------------------------------------------------------------------------------
 def syncSize() {
-    let w = peek.u32(UI_PAGE + 20)
-    let h = peek.u32(UI_PAGE + 24)
+    let w = mem.read_u32(UI_PAGE + 20)
+    let h = mem.read_u32(UI_PAGE + 24)
     if w > 0 and h > 0 {
         uiSetState(ST_W, w)
         uiSetState(ST_H, h)
@@ -227,10 +227,10 @@ def window(title: string = "App", width: int = 340, height: int = 220) -> int {
     uiSetState(ST_DEPTH, 0)
     uiSetState(ST_OVERFLOW, 0)
     uiSetState(ST_CLICKED_ID, 0 - 1)
-    poke.u32(UI_PAGE + 0, UI_MAGIC)
-    poke.u32(UI_PAGE + 4, 0)
-    poke.u32(UI_PAGE + 8, 0)
-    poke.u32(UI_PAGE + 12, 0)
+    mem.write_u32(UI_PAGE + 0, UI_MAGIC)
+    mem.write_u32(UI_PAGE + 4, 0)
+    mem.write_u32(UI_PAGE + 8, 0)
+    mem.write_u32(UI_PAGE + 12, 0)
     syncSize()
     return id
 }
@@ -259,14 +259,14 @@ def ui_theme(accent: int = -1, gap: int = -1, padding: int = -1, radius: int = -
 
 # ---- frame management ------------------------------------------------------------------------------------------
 def begin() {
-    poke.u32(UI_PAGE + 8, 0)      # frame not ready
-    poke.u32(UI_PAGE + 4, 0)
-    poke.u32(UI_PAGE + 12, 0)
+    mem.write_u32(UI_PAGE + 8, 0)      # frame not ready
+    mem.write_u32(UI_PAGE + 4, 0)
+    mem.write_u32(UI_PAGE + 12, 0)
 }
 def ui_begin() { begin() }
 
 def end() {
-    poke.u32(UI_PAGE + 8, 1)      # ready
+    mem.write_u32(UI_PAGE + 8, 1)      # ready
     nova_damage_window(uiState(ST_WIN))
 }
 def ui_end() { end() }
@@ -288,34 +288,71 @@ def ui_end_frame() { endFrame() }
 # ---- low level buffers -----------------------------------------------------------------------------------------
 def poolAdd(s: string) -> int {
     let p = s.ptr
-    let used = peek.u32(UI_PAGE + 12)
+    let used = mem.read_u32(UI_PAGE + 12)
     let n = 0
-    while peek.u8(p + n) != 0 { n = n + 1 }
+    while mem.read_u8(p + n) != 0 { n = n + 1 }
     if used + n + 1 > UI_POOL_SIZE { return 0 - 1 }
     let i = 0
     while i < n {
-        poke.u8(UI_POOL + used + i, peek.u8(p + i))
+        mem.write_u8(UI_POOL + used + i, mem.read_u8(p + i))
         i = i + 1
     }
-    poke.u8(UI_POOL + used + n, 0)
-    poke.u32(UI_PAGE + 12, used + n + 1)
+    mem.write_u8(UI_POOL + used + n, 0)
+    mem.write_u32(UI_PAGE + 12, used + n + 1)
     return used
 }
 def ui_pool_add(s: string) -> int { return poolAdd(s) }
 
+def poolAddInt(val: int) -> int {
+    let used = mem.read_u32(UI_PAGE + 12)
+    if val == 0 {
+        if used + 2 > UI_POOL_SIZE { return 0 - 1 }
+        mem.write_u8(UI_POOL + used + 0, 48) # '0'
+        mem.write_u8(UI_POOL + used + 1, 0)
+        mem.write_u32(UI_PAGE + 12, used + 2)
+        return used
+    }
+    let temp = UI_STATE + 192
+    let n = 0
+    let v = val
+    if v < 0 { v = 0 - v }
+    while v > 0 {
+        mem.write_u8(temp + n, 48 + (v % 10))
+        v = v / 10
+        n = n + 1
+    }
+    let extra = 0
+    if val < 0 { extra = 1 }
+    if used + n + extra + 1 > UI_POOL_SIZE { return 0 - 1 }
+    let j = 0
+    if val < 0 {
+        mem.write_u8(UI_POOL + used + 0, 45) # '-'
+        j = 1
+    }
+    let k = 0
+    while k < n {
+        mem.write_u8(UI_POOL + used + j, mem.read_u8(temp + (n - 1 - k)))
+        j = j + 1
+        k = k + 1
+    }
+    mem.write_u8(UI_POOL + used + j, 0)
+    mem.write_u32(UI_PAGE + 12, used + j + 1)
+    return used
+}
+
 def cmd(op: int) -> int {
-    let n = peek.u32(UI_PAGE + 4)
+    let n = mem.read_u32(UI_PAGE + 4)
     if n >= UI_MAX_CMDS { return 0 }
-    poke.u32(UI_PAGE + 4, n + 1)
+    mem.write_u32(UI_PAGE + 4, n + 1)
     let c = UI_CMDS + n * 32
-    poke.u32(c + 0, op)
-    poke.u32(c + 4, 0)
-    poke.u32(c + 8, 0)
-    poke.u32(c + 12, 0)
-    poke.u32(c + 16, 0)
-    poke.u32(c + 20, 0)
-    poke.u32(c + 24, 0)
-    poke.u32(c + 28, 0)
+    mem.write_u32(c + 0, op)
+    mem.write_u32(c + 4, 0)
+    mem.write_u32(c + 8, 0)
+    mem.write_u32(c + 12, 0)
+    mem.write_u32(c + 16, 0)
+    mem.write_u32(c + 20, 0)
+    mem.write_u32(c + 24, 0)
+    mem.write_u32(c + 28, 0)
     return c
 }
 def ui_cmd(op: int) -> int { return cmd(op) }
@@ -323,19 +360,19 @@ def ui_cmd(op: int) -> int { return cmd(op) }
 # ---- drawing commands ------------------------------------------------------------------------------------------
 def clear(color: int = 0) {
     let c = cmd(1)
-    if c != 0 { poke.u32(c + 4, color) }
+    if c != 0 { mem.write_u32(c + 4, color) }
 }
 def ui_clear(color: int = 0) { clear(color) }
 
 def rect(x: int, y: int, width: int, height: int, color: int = 0, radius: int = 0) {
     let c = cmd(2)
     if c != 0 {
-        poke.u32(c + 4, x)
-        poke.u32(c + 8, y)
-        poke.u32(c + 12, width)
-        poke.u32(c + 16, height)
-        poke.u32(c + 20, radius)
-        poke.u32(c + 24, color)
+        mem.write_u32(c + 4, x)
+        mem.write_u32(c + 8, y)
+        mem.write_u32(c + 12, width)
+        mem.write_u32(c + 16, height)
+        mem.write_u32(c + 20, radius)
+        mem.write_u32(c + 24, color)
     }
 }
 def ui_rect(x: int, y: int, width: int, height: int, color: int = 0, radius: int = 0) {
@@ -345,10 +382,10 @@ def ui_rect(x: int, y: int, width: int, height: int, color: int = 0, radius: int
 def group(x: int, y: int, width: int, height: int) {
     let c = cmd(3)
     if c != 0 {
-        poke.u32(c + 4, x)
-        poke.u32(c + 8, y)
-        poke.u32(c + 12, width)
-        poke.u32(c + 16, height)
+        mem.write_u32(c + 4, x)
+        mem.write_u32(c + 8, y)
+        mem.write_u32(c + 12, width)
+        mem.write_u32(c + 16, height)
     }
 }
 def ui_group(x: int, y: int, width: int, height: int) { group(x, y, width, height) }
@@ -368,13 +405,38 @@ def text(content: string = "", align: int = 0, bold: bool = false, color: int = 
         let oVal = 0
         if overflow == true { oVal = 1 }
         let flags = bVal | (oVal << 1)
-        poke.u32(c + 4, x)
-        poke.u32(c + 8, y)
-        poke.u32(c + 12, color)
-        poke.u32(c + 16, w)
-        poke.u32(c + 20, off)
-        poke.u32(c + 24, flags)
-        poke.u32(c + 28, align)
+        mem.write_u32(c + 4, x)
+        mem.write_u32(c + 8, y)
+        mem.write_u32(c + 12, color)
+        mem.write_u32(c + 16, w)
+        mem.write_u32(c + 20, off)
+        mem.write_u32(c + 24, flags)
+        mem.write_u32(c + 28, align)
+    }
+}
+
+def textInt(content: int = 0, align: int = 0, bold: bool = false, color: int = 0, maxWidth: int = -1, overflow: bool = false) {
+    let h = 20
+    let x = currentContainerX()
+    let y = advanceContainerY(h)
+    let w = currentContainerW()
+    if maxWidth > 0 { w = maxWidth }
+    let off = poolAddInt(content)
+    if off < 0 { return }
+    let c = cmd(4)
+    if c != 0 {
+        let bVal = 0
+        if bold == true { bVal = 1 }
+        let oVal = 0
+        if overflow == true { oVal = 1 }
+        let flags = bVal | (oVal << 1)
+        mem.write_u32(c + 4, x)
+        mem.write_u32(c + 8, y)
+        mem.write_u32(c + 12, color)
+        mem.write_u32(c + 16, w)
+        mem.write_u32(c + 20, off)
+        mem.write_u32(c + 24, flags)
+        mem.write_u32(c + 28, align)
     }
 }
 
@@ -395,13 +457,13 @@ def ui_text(x: int, y: int, s: string, color: int = 0, bold: int = 0, align: int
             if max_w <= 0 { max_w = width() - x }
         }
         let flags = (bold & 1) | ((overflow & 1) << 1)
-        poke.u32(c + 4, x)
-        poke.u32(c + 8, y)
-        poke.u32(c + 12, color)
-        poke.u32(c + 16, max_w)
-        poke.u32(c + 20, off)
-        poke.u32(c + 24, flags)
-        poke.u32(c + 28, align)
+        mem.write_u32(c + 4, x)
+        mem.write_u32(c + 8, y)
+        mem.write_u32(c + 12, color)
+        mem.write_u32(c + 16, max_w)
+        mem.write_u32(c + 20, off)
+        mem.write_u32(c + 24, flags)
+        mem.write_u32(c + 28, align)
     }
 }
 def ui_text_center(y: int, s: string, color: int = 0, bold: int = 0, overflow: int = 0) {
@@ -434,12 +496,12 @@ def badge(label: string = "", role: int = UI_ACCENT, width: int = -1, height: in
     if off < 0 { return }
     let c = cmd(8)
     if c != 0 {
-        poke.u32(c + 4, x)
-        poke.u32(c + 8, y)
-        poke.u32(c + 12, w)
-        poke.u32(c + 16, h)
-        poke.u32(c + 20, off)
-        poke.u32(c + 24, role)
+        mem.write_u32(c + 4, x)
+        mem.write_u32(c + 8, y)
+        mem.write_u32(c + 12, w)
+        mem.write_u32(c + 16, h)
+        mem.write_u32(c + 20, off)
+        mem.write_u32(c + 24, role)
     }
 }
 def ui_badge(x: int, y: int, w: int, h: int, label: string, role: int = UI_ACCENT) {
@@ -447,12 +509,12 @@ def ui_badge(x: int, y: int, w: int, h: int, label: string, role: int = UI_ACCEN
     if off < 0 { return }
     let c = cmd(8)
     if c != 0 {
-        poke.u32(c + 4, x)
-        poke.u32(c + 8, y)
-        poke.u32(c + 12, w)
-        poke.u32(c + 16, h)
-        poke.u32(c + 20, off)
-        poke.u32(c + 24, role)
+        mem.write_u32(c + 4, x)
+        mem.write_u32(c + 8, y)
+        mem.write_u32(c + 12, w)
+        mem.write_u32(c + 16, h)
+        mem.write_u32(c + 20, off)
+        mem.write_u32(c + 24, role)
     }
 }
 
@@ -481,14 +543,14 @@ def button(label: string = "", align: int = 1, style: int = 0, width: int = -1, 
     if off >= 0 {
         let c = cmd(5)
         if c != 0 {
-            poke.u32(c + 4, x)
-            poke.u32(c + 8, y)
-            poke.u32(c + 12, w)
-            poke.u32(c + 16, h)
-            poke.u32(c + 20, off)
-            poke.u32(c + 24, style)
+            mem.write_u32(c + 4, x)
+            mem.write_u32(c + 8, y)
+            mem.write_u32(c + 12, w)
+            mem.write_u32(c + 16, h)
+            mem.write_u32(c + 20, off)
+            mem.write_u32(c + 24, style)
             if id >= 0 {
-                poke.u32(c + 28, id)
+                mem.write_u32(c + 28, id)
             }
         }
     }
@@ -503,12 +565,12 @@ def ui_button(x: int, y: int, w: int, h: int, label: string, style: int = 0) {
     if off < 0 { return }
     let c = cmd(5)
     if c != 0 {
-        poke.u32(c + 4, x)
-        poke.u32(c + 8, y)
-        poke.u32(c + 12, w)
-        poke.u32(c + 16, h)
-        poke.u32(c + 20, off)
-        poke.u32(c + 24, style)
+        mem.write_u32(c + 4, x)
+        mem.write_u32(c + 8, y)
+        mem.write_u32(c + 12, w)
+        mem.write_u32(c + 16, h)
+        mem.write_u32(c + 20, off)
+        mem.write_u32(c + 24, style)
     }
 }
 
@@ -521,23 +583,23 @@ def meter(percent: int = 0, color: int = 4, width: int = -1, height: int = -1) {
     let y = advanceContainerY(h)
     let c = cmd(6)
     if c != 0 {
-        poke.u32(c + 4, x)
-        poke.u32(c + 8, y)
-        poke.u32(c + 12, w)
-        poke.u32(c + 16, h)
-        poke.u32(c + 20, percent)
-        poke.u32(c + 24, color)
+        mem.write_u32(c + 4, x)
+        mem.write_u32(c + 8, y)
+        mem.write_u32(c + 12, w)
+        mem.write_u32(c + 16, h)
+        mem.write_u32(c + 20, percent)
+        mem.write_u32(c + 24, color)
     }
 }
 def ui_meter(x: int, y: int, w: int, h: int, percent: int, color: int = 0) {
     let c = cmd(6)
     if c != 0 {
-        poke.u32(c + 4, x)
-        poke.u32(c + 8, y)
-        poke.u32(c + 12, w)
-        poke.u32(c + 16, h)
-        poke.u32(c + 20, percent)
-        poke.u32(c + 24, color)
+        mem.write_u32(c + 4, x)
+        mem.write_u32(c + 8, y)
+        mem.write_u32(c + 12, w)
+        mem.write_u32(c + 16, h)
+        mem.write_u32(c + 20, percent)
+        mem.write_u32(c + 24, color)
     }
 }
 
@@ -548,19 +610,19 @@ def divider(length: int = -1, horizontal: int = 1) {
     if l <= 0 { l = currentContainerW() }
     let c = cmd(7)
     if c != 0 {
-        poke.u32(c + 4, x)
-        poke.u32(c + 8, y)
-        poke.u32(c + 12, l)
-        poke.u32(c + 28, horizontal)
+        mem.write_u32(c + 4, x)
+        mem.write_u32(c + 8, y)
+        mem.write_u32(c + 12, l)
+        mem.write_u32(c + 28, horizontal)
     }
 }
 def ui_divider(x: int, y: int, length: int, horizontal: int = 1) {
     let c = cmd(7)
     if c != 0 {
-        poke.u32(c + 4, x)
-        poke.u32(c + 8, y)
-        poke.u32(c + 12, length)
-        poke.u32(c + 28, horizontal)
+        mem.write_u32(c + 4, x)
+        mem.write_u32(c + 8, y)
+        mem.write_u32(c + 12, length)
+        mem.write_u32(c + 28, horizontal)
     }
 }
 
@@ -682,22 +744,22 @@ def poll() -> int {
     let buf = UI_STATE + ST_EVT
     let got = nova_poll_event(uiState(ST_WIN), buf)
     if got == 0 {
-        poke.u32(buf, 0)
+        mem.write_u32(buf, 0)
         return UI_EV_NONE
     }
-    return peek.u32(buf)
+    return mem.read_u32(buf)
 }
 def ui_poll() -> int { return poll() }
 
-def eventX() -> int { return peek.u32(UI_STATE + ST_EVT + 4) }
-def eventY() -> int { return peek.u32(UI_STATE + ST_EVT + 8) }
-def eventKey() -> int { return peek.u32(UI_STATE + ST_EVT + 12) }
+def eventX() -> int { return mem.read_u32(UI_STATE + ST_EVT + 4) }
+def eventY() -> int { return mem.read_u32(UI_STATE + ST_EVT + 8) }
+def eventKey() -> int { return mem.read_u32(UI_STATE + ST_EVT + 12) }
 def ui_ev_x() -> int { return eventX() }
 def ui_ev_y() -> int { return eventY() }
 def ui_ev_key() -> int { return eventKey() }
 
 def hit(x: int, y: int, width: int, height: int) -> int {
-    if peek.u32(UI_STATE + ST_EVT) != UI_EV_CLICK { return 0 }
+    if mem.read_u32(UI_STATE + ST_EVT) != UI_EV_CLICK { return 0 }
     let mx = eventX()
     let my = eventY()
     if mx >= x and mx < x + width and my >= y and my < y + height { return 1 }
@@ -706,7 +768,7 @@ def hit(x: int, y: int, width: int, height: int) -> int {
 def ui_hit(x: int, y: int, width: int, height: int) -> int { return hit(x, y, width, height) }
 
 def clicked(id: int) -> bool {
-    if peek.u32(UI_STATE + ST_EVT) != UI_EV_CLICK { return false }
+    if mem.read_u32(UI_STATE + ST_EVT) != UI_EV_CLICK { return false }
     if uiState(ST_CLICKED_ID) == id { return true }
     return false
 }

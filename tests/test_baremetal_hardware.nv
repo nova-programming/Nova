@@ -8,26 +8,26 @@ if is_set == 1 {
     print("PASS: Binary literal and bitwise AND")
 }
 
-# 2. Hardware Memory Primitives (peek & poke with dot notation)
+# 2. Hardware Memory Primitives (mem.read & mem.write with dot notation)
 let buf = alloc(64)
-poke.u8(buf, 0x5A)
-poke.u16(buf + 2, 0x1234)
-poke.u32(buf + 4, 0x789ABCDE)
-poke.u64(buf + 8, 0x0123456789ABCDEF)
+mem.write_u8(buf, 0x5A)
+mem.write_u16(buf + 2, 0x1234)
+mem.write_u32(buf + 4, 0x789ABCDE)
+mem.write_u64(buf + 8, 0x0123456789ABCDEF)
 
-let v8 = peek.u8(buf)
-let v16 = peek.u16(buf + 2)
-let v32 = peek.u32(buf + 4)
-let v64 = peek.u64(buf + 8)
+let v8 = mem.read_u8(buf)
+let v16 = mem.read_u16(buf + 2)
+let v32 = mem.read_u32(buf + 4)
+let v64 = mem.read_u64(buf + 8)
 
 if v8 == 0x5A {
-    print("PASS: peek.u8 and poke.u8")
+    print("PASS: mem.read_u8 and mem.write_u8")
 }
 if v16 == 0x1234 {
-    print("PASS: peek.u16 and poke.u16")
+    print("PASS: mem.read_u16 and mem.write_u16")
 }
 if v32 == 0x789ABCDE {
-    print("PASS: peek.u32 and poke.u32")
+    print("PASS: mem.read_u32 and mem.write_u32")
 }
 
 # 3. CPU Intrinsics with clean dot notation

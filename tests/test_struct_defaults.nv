@@ -1,0 +1,84 @@
+# Nova Struct Default Field Values Test
+
+data Point {
+    x: int = 10
+    y: int = 20
+}
+
+data Process {
+    pid: int
+    state: int = 1
+    priority: int = 5
+}
+
+data Config {
+    flag: int = 0xFF
+    offset: int = -10
+    verbose: bool = true
+}
+
+def main() -> int {
+    # 1. Full defaults with no args
+    let pt1 = Point()
+    if pt1.x != 10 {
+        print("FAIL: pt1.x default")
+        return 1
+    }
+    if pt1.y != 20 {
+        print("FAIL: pt1.y default")
+        return 1
+    }
+    print("PASS: full defaults with no args")
+
+    # 2. Positional override
+    let pt2 = Point(99)
+    if pt2.x != 99 or pt2.y != 20 {
+        print("FAIL: pt2 positional override")
+        return 1
+    }
+    print("PASS: positional override")
+
+    # 3. Keyword override
+    let pt3 = Point(y=88)
+    if pt3.x != 10 or pt3.y != 88 {
+        print("FAIL: pt3 keyword override")
+        return 1
+    }
+    print("PASS: keyword override")
+
+    # 4. Mixed defaults with required field
+    let pr1 = Process(pid=42)
+    if pr1.pid != 42 or pr1.state != 1 or pr1.priority != 5 {
+        print("FAIL: pr1 mixed defaults")
+        return 1
+    }
+    print("PASS: mixed defaults with keyword")
+
+    let pr2 = Process(100, 2)
+    if pr2.pid != 100 or pr2.state != 2 or pr2.priority != 5 {
+        print("FAIL: pr2 positional mixed defaults")
+        return 1
+    }
+    print("PASS: positional mixed defaults")
+
+    # 5. Hex, negative and boolean defaults
+    let cfg = Config()
+    if cfg.flag != 255 {
+        print("FAIL: cfg.flag hex default")
+        return 1
+    }
+    if cfg.offset != -10 {
+        print("FAIL: cfg.offset negative default")
+        return 1
+    }
+    if cfg.verbose != true {
+        print("FAIL: cfg.verbose bool default")
+        return 1
+    }
+    print("PASS: hex, negative, boolean defaults")
+
+    print("ALL STRUCT DEFAULTS TESTS PASSED")
+    return 0
+}
+
+main()

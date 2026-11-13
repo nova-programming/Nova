@@ -1,0 +1,40 @@
+# Test for mem.view zero-cost struct projections and unified mem module
+
+data Header {
+    magic: int
+    version: int
+    flags: int
+    size: int
+}
+
+let buf = alloc(64)
+
+# 1. Project struct over raw allocated buffer without heap allocation
+let h = mem.view(Header, buf)
+h.magic = 0x12345678
+h.version = 42
+h.flags = 0xFF
+h.size = 2048
+
+if h.magic == 0x12345678 {
+    print("PASS: mem.view write & read magic")
+}
+if h.version == 42 {
+    print("PASS: mem.view write & read version")
+}
+if h.flags == 0xFF {
+    print("PASS: mem.view write & read flags")
+}
+if h.size == 2048 {
+    print("PASS: mem.view write & read size")
+}
+
+# 2. Unified mem.read_* and mem.write_* primitives
+mem.write_u32(buf + 32, 0xABCDEF01)
+let v = mem.read_u32(buf + 32)
+if v == 0xABCDEF01 {
+    print("PASS: mem.write_u32 and mem.read_u32")
+}
+
+free(buf)
+print("PASS: all mem.view tests completed successfully")

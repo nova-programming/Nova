@@ -116,6 +116,7 @@ data ParserState {
     const_table: dict
     containers: dict
     container_ends: dict
+    data_field_defaults: dict
 }
 
 def current_tok(state: ParserState) -> Token {
@@ -589,7 +590,16 @@ def parse_primary(state: ParserState) -> AstNode {
             if node.val_str == "char_code" and len(node.args) == 1 {
                 node.args.append(make_num(0, 0))
             }
-            if len(node.args) > 0 and state.data_fields.has(node.val_str) {
+            has_defs = 0
+            if state.data_field_defaults != 0 and state.data_field_defaults.has(node.val_str) {
+                defs_list = state.data_field_defaults.get(node.val_str)
+                di = 0
+                while di < len(defs_list) {
+                    if defs_list[di] != 0 { has_defs = 1 }
+                    di = di + 1
+                }
+            }
+            if (len(node.args) > 0 or has_defs == 1) and state.data_fields.has(node.val_str) {
                 data_constructor_call(state, node, call_arg_names, call_arg_is_kw, tok)
             }
         } else {
@@ -707,7 +717,7 @@ def parse_primary(state: ParserState) -> AstNode {
                     call_node.arg_is_kw = []
                     data_constructor_call(state, call_node, call_node.arg_names, call_node.arg_is_kw, tok)
                     method_node = call_node
-                } elif method_node.left.kind == "Variable" and (method_node.left.val_str == "peek" or method_node.left.val_str == "poke" or method_node.left.val_str == "cpu" or method_node.left.val_str == "mem") {
+                } elif method_node.left.kind == "Variable" and (method_node.left.val_str == "cpu" or method_node.left.val_str == "mem") {
                     ns = method_node.left.val_str
                     fn = method_node.val_str
                     call_node = AstNode()
@@ -717,11 +727,7 @@ def parse_primary(state: ParserState) -> AstNode {
                     call_node.args = method_node.args
                     call_node.arg_names = method_node.arg_names
                     call_node.arg_is_kw = method_node.arg_is_kw
-                    if ns == "peek" {
-                        call_node.val_str = "peek_" + fn
-                    } elif ns == "poke" {
-                        call_node.val_str = "poke_" + fn
-                    } elif ns == "cpu" {
+                    if ns == "cpu" {
                         if fn == "halt" { call_node.val_str = "cpu_hlt" }
                         elif fn == "cli" or fn == "disable" or fn == "disable_interrupts" { call_node.val_str = "cpu_cli" }
                         elif fn == "sti" or fn == "enable" or fn == "enable_interrupts" { call_node.val_str = "cpu_sti" }
@@ -748,6 +754,15 @@ def parse_primary(state: ParserState) -> AstNode {
                         elif fn == "set_allocator" or fn == "hook" { call_node.val_str = "mem_set_allocator" }
                         elif fn == "heap_used" or fn == "used" { call_node.val_str = "mem_heap_used" }
                         elif fn == "heap_total" or fn == "total" { call_node.val_str = "mem_heap_total" }
+                        elif fn == "view" { call_node.val_str = "mem_view" }
+                        elif fn == "read_u8" or fn == "u8" { call_node.val_str = "mem_read_u8" }
+                        elif fn == "read_u16" or fn == "u16" { call_node.val_str = "mem_read_u16" }
+                        elif fn == "read_u32" or fn == "u32" { call_node.val_str = "mem_read_u32" }
+                        elif fn == "read_u64" or fn == "u64" { call_node.val_str = "mem_read_u64" }
+                        elif fn == "write_u8" or fn == "set_u8" { call_node.val_str = "mem_write_u8" }
+                        elif fn == "write_u16" or fn == "set_u16" { call_node.val_str = "mem_write_u16" }
+                        elif fn == "write_u32" or fn == "set_u32" { call_node.val_str = "mem_write_u32" }
+                        elif fn == "write_u64" or fn == "set_u64" { call_node.val_str = "mem_write_u64" }
                         else { call_node.val_str = "mem_" + fn }
                     }
                     method_node = call_node
@@ -991,9 +1006,39 @@ def same_text(a: string, b: string) -> int {
 }
 
 # Point(1, 2) / Point(x=1, y=2) -> __new_Point(...) with the values in field order.
+def clone_ast_node(node: AstNode) -> AstNode {
+    if node == 0 { return 0 }
+    copy = AstNode()
+    copy.kind = node.kind
+    copy.val_int = node.val_int
+    copy.val_str = node.val_str
+    copy.line = node.line
+    copy.col = node.col
+    copy.is_float = node.is_float
+    copy.left = clone_ast_node(node.left)
+    copy.right = clone_ast_node(node.right)
+    copy.cond = clone_ast_node(node.cond)
+    copy.name = node.name
+    copy.return_type = node.return_type
+    copy.lib = node.lib
+    copy.args = []
+    if node.args != 0 {
+        ai = 0
+        while ai < len(node.args) {
+            copy.args.append(clone_ast_node(node.args[ai]))
+            ai = ai + 1
+        }
+    }
+    return copy
+}
+
 def data_constructor_call(state: ParserState, node: AstNode, arg_names: list, arg_is_kw: list, tok: Token) {
     type_name = node.val_str
     fields = state.data_fields.get(type_name)
+    defaults = []
+    if state.data_field_defaults != 0 and state.data_field_defaults.has(type_name) {
+        defaults = state.data_field_defaults.get(type_name)
+    }
     kw_count = 0
     i = 0
     while i < len(arg_is_kw) {
@@ -1020,11 +1065,18 @@ def data_constructor_call(state: ParserState, node: AstNode, arg_names: list, ar
         }
         f = 0
         while f < len(fields) {
-            value = make_number_node(0, tok.line, tok.col)
+            value = 0
             i = 0
             while i < len(arg_names) {
                 if same_text(arg_names[i], fields[f]) == 1 { value = node.args[i] }
                 i = i + 1
+            }
+            if value == 0 {
+                if f < len(defaults) and defaults[f] != 0 {
+                    value = clone_ast_node(defaults[f])
+                } else {
+                    value = make_number_node(0, tok.line, tok.col)
+                }
             }
             ordered.append(value)
             f = f + 1
@@ -1038,17 +1090,17 @@ def data_constructor_call(state: ParserState, node: AstNode, arg_names: list, ar
             if i < len(node.args) {
                 ordered.append(node.args[i])
             } else {
-                ordered.append(make_number_node(0, tok.line, tok.col))
+                if i < len(defaults) and defaults[i] != 0 {
+                    ordered.append(clone_ast_node(defaults[i]))
+                } else {
+                    ordered.append(make_number_node(0, tok.line, tok.col))
+                }
             }
             i = i + 1
         }
     }
     node.val_str = "__new_" + type_name
     node.args = ordered
-    # The call is now fully positional (args were reordered by field name above) --
-    # clear the original keyword-arg bookkeeping so the type checker's keyword-argument
-    # validation doesn't try to match stale field names like "x"/"y" against the
-    # synthesized constructor's real parameter names ("a0", "a1", ...).
     node.arg_names = []
     node.arg_is_kw = []
     seen = 0
@@ -1939,6 +1991,7 @@ def parse_statement(state: ParserState) -> AstNode {
         name = eat_tok(state, "IDENT").val
         fields = []
         field_types = []
+        field_defaults = []
         eat_tok(state, "LBRACE")
         check = current_tok(state)
         while check.kind != "RBRACE" and check.kind != "EOF" {
@@ -1956,8 +2009,15 @@ def parse_statement(state: ParserState) -> AstNode {
                 eat_tok(state, "COLON")
                 field_type = parse_type_annotation(state)
             }
+            check_eq = current_tok(state)
+            default_val = 0
+            if check_eq.kind == "EQUALS" {
+                eat_tok(state, "EQUALS")
+                default_val = parse_expr(state)
+            }
             fields.append(field_name)
             field_types.append(field_type)
+            field_defaults.append(default_val)
             check = current_tok(state)
             # fields may be separated by newlines or (optionally) commas: data P { x: int, y: int }
             if check.kind == "COMMA" {
@@ -1971,9 +2031,11 @@ def parse_statement(state: ParserState) -> AstNode {
         node.col = stmt_col
         node.kind = "Data"
         state.data_fields.set(name, fields)
+        state.data_field_defaults.set(name, field_defaults)
         node.val_str = name
         node.params = fields
         node.param_types = field_types
+        node.param_defaults = field_defaults
         return node
     }
 
@@ -2745,6 +2807,7 @@ def parse(tokens: list, filename: string) -> list {
     state.comp_counter = 0
     state.imported_modules = {}
     state.data_fields = {}
+    state.data_field_defaults = {}
     state.ctors_used = []
     state.const_table = {}
     state.containers = {"stack": 1, "card": 1, "row": 1, "frame": 1, "ui_stack": 1, "ui_card": 1, "ui_row": 1, "ui_frame": 1}

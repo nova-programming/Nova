@@ -3,10 +3,10 @@
 # 1. mem.alloc and mem.free primitives
 let p = mem.alloc(128)
 if p != 0 {
-    poke.u64(p, 0xCAFEBABE)
-    let val = peek.u64(p)
+    mem.write_u64(p, 0xCAFEBABE)
+    let val = mem.read_u64(p)
     if val == 0xCAFEBABE {
-        print("PASS: mem.alloc and poke/peek")
+        print("PASS: mem.alloc and mem.write/read")
     }
     mem.free(p)
     print("PASS: mem.free")

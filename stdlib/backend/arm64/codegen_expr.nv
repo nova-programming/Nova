@@ -1391,35 +1391,35 @@ def compile_expr(state: CodegenState, node: AstNode) {
             return
         }
 
-        if node.val_str == "peek_u8" {
+        if node.val_str == "mem_read_u8" or node.val_str == "peek_u8" {
             compile_expr(state, node.args[0])
             emit(state, "    ldr %d, [sp], #16")
             emit(state, "    ldrb w0, [%d]")
             emit(state, "    str %a, [sp, #-16]!")
             return
         }
-        if node.val_str == "peek_u16" {
+        if node.val_str == "mem_read_u16" or node.val_str == "peek_u16" {
             compile_expr(state, node.args[0])
             emit(state, "    ldr %d, [sp], #16")
             emit(state, "    ldrh w0, [%d]")
             emit(state, "    str %a, [sp, #-16]!")
             return
         }
-        if node.val_str == "peek_u32" {
+        if node.val_str == "mem_read_u32" or node.val_str == "peek_u32" {
             compile_expr(state, node.args[0])
             emit(state, "    ldr %d, [sp], #16")
             emit(state, "    ldr w0, [%d]")
             emit(state, "    str %a, [sp, #-16]!")
             return
         }
-        if node.val_str == "peek_u64" {
+        if node.val_str == "mem_read_u64" or node.val_str == "peek_u64" {
             compile_expr(state, node.args[0])
             emit(state, "    ldr %d, [sp], #16")
             emit(state, "    ldr x0, [%d]")
             emit(state, "    str %a, [sp, #-16]!")
             return
         }
-        if node.val_str == "poke_u8" {
+        if node.val_str == "mem_write_u8" or node.val_str == "poke_u8" {
             compile_expr(state, node.args[1])
             compile_expr(state, node.args[0])
             emit(state, "    ldr %d, [sp], #16")
@@ -1429,7 +1429,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    str %a, [sp, #-16]!")
             return
         }
-        if node.val_str == "poke_u16" {
+        if node.val_str == "mem_write_u16" or node.val_str == "poke_u16" {
             compile_expr(state, node.args[1])
             compile_expr(state, node.args[0])
             emit(state, "    ldr %d, [sp], #16")
@@ -1439,7 +1439,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    str %a, [sp, #-16]!")
             return
         }
-        if node.val_str == "poke_u32" {
+        if node.val_str == "mem_write_u32" or node.val_str == "poke_u32" {
             compile_expr(state, node.args[1])
             compile_expr(state, node.args[0])
             emit(state, "    ldr %d, [sp], #16")
@@ -1449,7 +1449,7 @@ def compile_expr(state: CodegenState, node: AstNode) {
             emit(state, "    str %a, [sp, #-16]!")
             return
         }
-        if node.val_str == "poke_u64" {
+        if node.val_str == "mem_write_u64" or node.val_str == "poke_u64" {
             compile_expr(state, node.args[1])
             compile_expr(state, node.args[0])
             emit(state, "    ldr %d, [sp], #16")
@@ -1626,6 +1626,10 @@ def compile_expr(state: CodegenState, node: AstNode) {
                 emit(state, "    mov %a, 0")
                 emit(state, "    str %a, [sp, #-16]!")
             }
+            return
+        }
+        if node.val_str == "mem_view" {
+            compile_expr(state, node.args[1])
             return
         }
         if node.val_str == "mem_alloc" {
