@@ -1,0 +1,46 @@
+# Checkbox, slider and text field with the `ui` library (runs on the desktop; the same calls work on Nova OS).
+#   nova run examples/ui_widgets.nv          type in the field, drag the slider, tick the box; Esc quits
+#   nova run examples/ui_widgets.nv --test   draws a few frames and exits (used by the tests)
+import ui
+import system
+
+def main() -> int {
+    ui.window("Widgets", 360, 300)
+    let notify = true
+    let volume = 40
+    let name = alloc(32)
+    mem.write_u8(name, 0)
+    let frames = 0
+    let running = true
+    let test_mode = false
+    args = system.get_args()
+    if len(args) > 1 and args[1] == "--test" { test_mode = true }
+
+    while running == true {
+        ui.frame {
+            ui.stack(padding=16, gap=10) {
+                ui.text("Widgets", align=align.center, bold=true)
+                ui.input(name, 32, id="name", placeholder="Your name")
+                notify = ui.checkbox("Notifications", notify, id="notify")
+                volume = ui.slider(volume, id="volume")
+                ui.meter(percent=volume, color=ui.accent)
+                ui.divider()
+                ui.button("Reset", style=style.primary, id="reset")
+            }
+        }
+        if ui.clicked("reset") == true {
+            volume = 40
+            notify = true
+            mem.write_u8(name, 0)
+        }
+        if ui.eventKey() == 27 and test_mode == false { running = false }
+        frames = frames + 1
+        if frames == 8 and test_mode == true { ui.screenshot("ui_widgets_shot.bmp") }
+        if test_mode == true and frames >= 20 { running = false }
+    }
+    ui.quit()
+    print("Demo completed successfully!")
+    return 0
+}
+
+main()

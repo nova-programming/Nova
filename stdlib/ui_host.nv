@@ -1,0 +1,205 @@
+# ui_host - the desktop backend of the ui library (Windows, GDI).
+#
+# The ui library never draws: it writes a display list (a page of 32-byte commands plus a string pool) and asks its
+# backend to show it. On Nova OS the kernel draws that list; here this module does, with the gui_* runtime calls.
+# `import ui_backend` in ui.nv resolves to this file for native host builds, so one ui program runs on both.
+#
+# Display list layout, op codes and colour roles are the same as ui/clients.nv in baremetal_os.
+extern def VirtualAlloc(addr: int, size: int, alloc_type: int, protect: int) -> int
+extern def gui_init_window(title: string, width: int, height: int) -> int
+extern def gui_poll_events() -> int
+extern def gui_get_mouse_x() -> int
+extern def gui_get_mouse_y() -> int
+extern def gui_get_mouse_clicked() -> int
+extern def gui_clear(color_hex: int)
+extern def gui_draw_rect(x: int, y: int, w: int, h: int, color_hex: int, radius: int)
+extern def gui_draw_border(x: int, y: int, w: int, h: int, border_w: int, color_hex: int)
+extern def gui_draw_text(text: string, x: int, y: int, font_size: int, color_hex: int, font_weight: int)
+extern def gui_present()
+extern def gui_sleep(ms: int)
+extern def gui_close()
+extern def gui_save_screenshot(path: string) -> int
+extern def gui_poll_char() -> int
+extern def gui_char_to_str(c: int) -> string
+
+const HOST_PAGE   = 0x74C000
+const HOST_FONT   = 14
+const HOST_CHAR_W = 8
+
+# theme roles (see ui.nv: 1 text, 2 secondary, 3 muted, 4 accent, 5 ok, 6 warn, 7 err)
+def hostColor(c: int, fallback: int) -> int {
+    if c == 0 { return fallback }
+    if c == 1 { return 0xcdd6f4 }
+    if c == 2 { return 0xa6adc8 }
+    if c == 3 { return 0x6c7086 }
+    if c == 4 { return 0x89b4fa }
+    if c == 5 { return 0xa6e3a1 }
+    if c == 6 { return 0xf9e2af }
+    if c == 7 { return 0xf38ba8 }
+    if (c & 0xFF000000) == 0x01000000 { return c & 0xFFFFFF }
+    return fallback
+}
+
+# The pool holds NUL-terminated bytes; the draw calls want a string
+def hostString(p: int) -> string {
+    let s = ""
+    let i = 0
+    let b = mem.read_u8(p)
+    while b != 0 and i < 160 {
+        s = s + gui_char_to_str(b)
+        i = i + 1
+        b = mem.read_u8(p + i)
+    }
+    return s
+}
+
+def hostTextWidth(p: int) -> int {
+    let i = 0
+    while mem.read_u8(p + i) != 0 and i < 160 { i = i + 1 }
+    return i * HOST_CHAR_W
+}
+
+def nova_create_window(w: int, h: int, title: int) -> int {
+    # The page lives at a fixed address in the OS; reserve the same address here. Windows reserves in 64 KB steps,
+    # so reserve from the step below (0x740000) to cover 0x74C000 .. 0x750000 (read/write, committed)
+    let page = VirtualAlloc(0x740000, 0x20000, 0x3000, 4)
+    if page != 0x740000 { return 0 - 1 }
+    let ok = gui_init_window(hostString(title), w, h)
+    if ok != 1 { return 0 - 1 }
+    mem.write_u32(HOST_PAGE + 20, w)
+    mem.write_u32(HOST_PAGE + 24, h)
+    return 1
+}
+
+def hostDrawList() {
+    let n = mem.read_u32(HOST_PAGE + 4)
+    if n > 256 { n = 256 }
+    let pool = HOST_PAGE + 8208
+    gui_clear(0x1e1e2e)
+    let i = 0
+    while i < n {
+        let c = HOST_PAGE + 16 + i * 32
+        let op = mem.read_u32(c + 0)
+        let a = mem.read_u32(c + 4)
+        let b = mem.read_u32(c + 8)
+        let w = mem.read_u32(c + 12)
+        let h = mem.read_u32(c + 16)
+        let e = mem.read_u32(c + 20)
+        let f = mem.read_u32(c + 24)
+        let g = mem.read_u32(c + 28)
+        if op == 1 {
+            gui_clear(hostColor(a, 0x1e1e2e))
+        } elif op == 2 {
+            gui_draw_rect(a, b, w, h, hostColor(f, 0x313244), e)
+        } elif op == 3 {
+            gui_draw_rect(a, b, w, h, 0x181825, 10)
+            gui_draw_border(a, b, w, h, 1, 0x313244)
+        } elif op == 4 {
+            let tw = hostTextWidth(pool + e)
+            let max_w = h
+            if max_w <= 0 { max_w = 100000 }
+            let tx = a
+            if g == 1 and max_w > tw { tx = a + (max_w - tw) / 2 }
+            if g == 2 and max_w > tw { tx = a + (max_w - tw) }
+            let weight = 0
+            if (f & 1) == 1 { weight = 1 }
+            gui_draw_text(hostString(pool + e), tx, b, HOST_FONT, hostColor(w, 0xcdd6f4), weight)
+        } elif op == 5 {
+            let tw = hostTextWidth(pool + e)
+            let bg = 0x313244
+            let fg = 0xcdd6f4
+            if (f & 2) == 2 {
+                bg = 0x89b4fa
+                fg = 0x1e1e2e
+            }
+            gui_draw_rect(a, b, w, h, bg, 6)
+            gui_draw_text(hostString(pool + e), a + (w - tw) / 2, b + (h - HOST_FONT) / 2 - 1, HOST_FONT, fg, 0)
+        } elif op == 6 {
+            gui_draw_rect(a, b, w, h, 0x313244, h / 2)
+            let fill = w * e / 100
+            if e > 100 { fill = w }
+            if fill > 0 { gui_draw_rect(a, b, fill, h, hostColor(f, 0x89b4fa), h / 2) }
+        } elif op == 7 {
+            if g == 1 {
+                gui_draw_rect(a, b, w, 1, 0x45475a, 0)
+            } else {
+                gui_draw_rect(a, b, 1, w, 0x45475a, 0)
+            }
+        } elif op == 8 {
+            let tw = hostTextWidth(pool + e)
+            gui_draw_rect(a, b, w, h, hostColor(f, 0x89b4fa), h / 2)
+            gui_draw_text(hostString(pool + e), a + (w - tw) / 2, b + (h - HOST_FONT) / 2 - 1, HOST_FONT, 0xffffff, 1)
+        } elif op == 9 {
+            gui_draw_rect(a, b + 3, 16, 16, 0x313244, 4)
+            gui_draw_border(a, b + 3, 16, 16, 1, 0x45475a)
+            if f == 1 { gui_draw_rect(a + 4, b + 7, 8, 8, 0x89b4fa, 2) }
+            gui_draw_text(hostString(pool + e), a + 24, b + (h - HOST_FONT) / 2 - 1, HOST_FONT, 0xcdd6f4, 0)
+        } elif op == 10 {
+            let ty = b + h / 2 - 3
+            gui_draw_rect(a, ty, w, 6, 0x313244, 3)
+            let kx = w * e / 100
+            if kx > 0 { gui_draw_rect(a, ty, kx, 6, 0x89b4fa, 3) }
+            gui_draw_rect(a + kx - 6, b + h / 2 - 6, 12, 12, 0xcdd6f4, 6)
+        } elif op == 11 {
+            gui_draw_rect(a, b, w, h, 0x313244, 6)
+            let edge = 0x45475a
+            if (f & 1) == 1 { edge = 0x89b4fa }
+            gui_draw_border(a, b, w, h, 1, edge)
+            let col = 0xcdd6f4
+            if (f & 2) == 2 { col = 0x6c7086 }
+            gui_draw_text(hostString(pool + e), a + 8, b + (h - HOST_FONT) / 2 - 1, HOST_FONT, col, 0)
+            if (f & 1) == 1 and (f & 2) == 0 {
+                gui_draw_rect(a + 9 + hostTextWidth(pool + e), b + 6, 1, h - 12, 0xcdd6f4, 0)
+            }
+        }
+        i = i + 1
+    }
+}
+
+def nova_damage_window(id: int) -> int {
+    if mem.read_u32(HOST_PAGE + 8) != 1 { return 0 }
+    hostDrawList()
+    gui_present()
+    return 1
+}
+
+# One event per call, like the OS: a click (type 1: x, y), a key (type 2: key), or the window being closed (Esc)
+def nova_poll_event(id: int, buf: int) -> int {
+    if gui_poll_events() == 0 - 1 {
+        mem.write_u32(buf, 2)
+        mem.write_u32(buf + 4, 0)
+        mem.write_u32(buf + 8, 0)
+        mem.write_u32(buf + 12, 27)
+        return 1
+    }
+    if gui_get_mouse_clicked() > 0 {
+        mem.write_u32(buf, 1)
+        mem.write_u32(buf + 4, gui_get_mouse_x())
+        mem.write_u32(buf + 8, gui_get_mouse_y())
+        mem.write_u32(buf + 12, 0)
+        return 1
+    }
+    let k = gui_poll_char()
+    if k > 0 {
+        mem.write_u32(buf, 2)
+        mem.write_u32(buf + 4, 0)
+        mem.write_u32(buf + 8, 0)
+        mem.write_u32(buf + 12, k)
+        return 1
+    }
+    return 0
+}
+
+def nova_destroy_window(id: int) -> int {
+    gui_close()
+    return 1
+}
+
+def nova_save_screenshot(path: int) -> int {
+    return gui_save_screenshot(hostString(path))
+}
+
+def nova_sleep(ms: int) -> int {
+    gui_sleep(ms)
+    return 0
+}

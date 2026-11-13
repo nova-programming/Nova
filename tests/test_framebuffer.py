@@ -37,13 +37,21 @@ def _run_build_and_exec(tmp_path, src_code: str, exe_name: str = "prog"):
     return run_res
 
 def test_framebuffer_lifecycle(tmp_path):
-    src = """import gui
-import buffer
+    src = """import buffer
 import time
+
+extern def gui_init_window(title: string, width: int, height: int) -> int
+extern def gui_present_framebuffer(buffer_ptr: int, width: int, height: int)
+extern def gui_get_mouse_x() -> int
+extern def gui_get_mouse_y() -> int
+extern def gui_key_down(keycode: int) -> int
+extern def gui_mouse_down_btn(button: int) -> int
+extern def gui_poll_events() -> int
+extern def gui_close()
 
 w = 640
 h = 480
-ok = initWindow("Nova Framebuffer Smoke Test", w, h)
+ok = gui_init_window("Nova Framebuffer Smoke Test", w, h)
 print("WINDOW_INIT=" + str(ok))
 
 if ok == 1 {
@@ -69,25 +77,25 @@ if ok == 1 {
     }
 
     # Present direct to screen via StretchDIBits
-    presentFramebuffer(fb.handle, w, h)
+    gui_present_framebuffer(fb.handle, w, h)
     print("FRAMEBUFFER_PRESENTED")
 
     # Poll input state
-    mx = gui_mouse_x()
-    my = gui_mouse_y()
-    k_esc = isKeyDown(27) # VK_ESCAPE
-    m_left = isMouseDown(0)
+    mx = gui_get_mouse_x()
+    my = gui_get_mouse_y()
+    k_esc = gui_key_down(27) # VK_ESCAPE
+    m_left = gui_mouse_down_btn(0)
     print("INPUT_POLL_OK")
 
     # Event pump for 5 frames
     frame = 0
     while frame < 5 {
-        _ = pollEvents()
+        _ = gui_poll_events()
         sleep_ms(16)
         frame = frame + 1
     }
 
-    closeWindow()
+    gui_close()
     fb.release()
     print("CLEAN_TEARDOWN_OK")
 }

@@ -1,0 +1,12 @@
+# ui_os - the Nova OS backend of the ui library: the window calls are system calls provided by the OS runtime
+# (user/libnova.s). `import ui_backend` in ui.nv resolves to this file for --os bare / --os nova builds.
+extern def nova_create_window(w: int, h: int, title: int) -> int
+extern def nova_damage_window(id: int) -> int
+extern def nova_poll_event(id: int, buf: int) -> int
+extern def nova_destroy_window(id: int) -> int
+extern def nova_sleep(ms: int) -> int
+
+# screenshots are a desktop feature; the OS has its own (Print Screen)
+def nova_save_screenshot(path: int) -> int {
+    return 0
+}

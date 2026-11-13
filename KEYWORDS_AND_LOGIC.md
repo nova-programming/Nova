@@ -324,103 +324,38 @@ The compiler supports building for different target platforms via the `target_os
 
 ---
 
-## 9. Native GUI & NSS Styling Engine (`gui`)
+## 9. Windows and Nova OS apps (`ui`)
 
-Nova includes a native, lightweight GUI and NSS (Nova Style Sheets) layout engine designed with zero third-party web bloat (no Chromium, Electron, or WebView2). It leverages native Win32 double-buffered GDI rendering at a smooth 60 FPS.
-
-### Inline NSS Properties Syntax
-Styling is passed directly via the `properties={...}` dictionary parameter on UI components and windows:
+One library, `import ui`, builds the window of a desktop program and of a Nova OS app. It is immediate mode: every
+frame you describe the screen, and `ui` lays it out and draws it.
 
 ```nova
-import gui
+import ui
 
-# Create Window with background styling
-app = window("Nova Studio", 520, 500, properties={
-    "background-color": "#181825"
-})
-
-# Button with hover effect, rounded corners, and padding
-btn = Button("Click Me (+1)", 1, properties={
-    "background-color": "#89b4fa",
-    "color": "#11111b",
-    "font-size": 16,
-    "border-radius": 10,
-    "padding-left": 28,
-    "padding-right": 28,
-    "padding-top": 12,
-    "padding-bottom": 12
-})
-
-# Flexbox container with alignment and spacing
-card = Container([
-    Text("Interactive Counter", properties={"color": "#bac2de", "font-size": 18, "font-weight": "bold"}),
-    btn
-], properties={
-    "background-color": "#1e1e2e",
-    "border-radius": 12,
-    "border-width": 1,
-    "border-color": "#313244",
-    "padding": 24,
-    "align-items": "center",
-    "gap": 16,
-    "width": 460
-})
-app.root = card
+def main() -> int {
+    ui.window("Counter", 320, 200)
+    let n = 0
+    let running = true
+    while running == true {
+        ui.frame {
+            ui.stack(padding=16, gap=12) {
+                ui.text("Counter", align=align.center, bold=true)
+                ui.meter(percent=n * 10, color=ui.accent)
+                ui.button("Add 10%", style=style.primary, id="add")
+            }
+        }
+        if ui.clicked("add") == true { n = n + 1 }
+        if ui.eventKey() == 27 { running = false }
+    }
+    ui.quit()
+    return 0
+}
 ```
 
-### Supported NSS Styling Properties
-| Property | Value Format | Description |
-|---|---|---|
-| `background-color` | `"#RRGGBB"` | Background fill color (hex format) |
-| `color` | `"#RRGGBB"` | Text / foreground font color |
-| `font-size` | `int` | Font size in points (e.g. 14, 16, 24) |
-| `font-weight` | `"normal"` / `"bold"` | Text font weight |
-| `border-radius` | `int` | Corner curvature radius in pixels |
-| `border-width` | `int` | Border thickness in pixels |
-| `border-color` | `"#RRGGBB"` | Border color |
-| `padding` | `int` | Uniform padding on all 4 edges |
-| `padding-left`, `-right`, `-top`, `-bottom` | `int` | Per-side padding in pixels |
-| `gap` | `int` | Spacing between flex children |
-| `flex-direction` | `"column"` / `"row"` | Flex layout direction |
-| `align-items` | `"center"` | Cross-axis alignment |
-| `width`, `height` | `int` | Fixed dimensions in pixels |
-
----
-
-### Galaxy Package Manager
-
-After installing with `python install.py`, the `nova` and `galaxy` commands are available globally:
-
-| Command | Description |
-|---------|-------------|
-| `nova --version` | Show Nova compiler version |
-| `nova build <file.nv>` | Compile a Nova program (alias for `python main.py build`) |
-| `nova run <file.nv> [args...]` | Compile and run native binary immediately |
-| `nova dev <file.nv>` | Run in the Nova bytecode VM |
-| `nova repl` | Start the interactive REPL |
-| `nova update` | Update Nova compiler itself |
-| `galaxy --version` | Show Galaxy CLI version |
-| `galaxy init library <name>` | Scaffold a new library project |
-| `galaxy install <pkg>` | Install a package from the registry or GitHub |
-| `galaxy search <query>` | Search the registry by name, keyword, or author |
-| `galaxy info <pkg>` | Show detailed package information |
-| `galaxy publish` | Submit your package to the registry (opens GitHub Issue) |
-| `galaxy update` | Update Galaxy CLI itself |
-| `galaxy upgrade [pkg]` | Update installed packages |
-| `galaxy remove <pkg>` | Uninstall a package |
-| `galaxy list` | List locally installed packages |
-
-### Quick Install
-
-**macOS / Linux (bash):**
-```bash
-curl -O https://galaxy-registry.vercel.app/install.sh && bash install.sh
-```
-**Windows (PowerShell):**
-```powershell
-Invoke-WebRequest -Uri https://galaxy-registry.vercel.app/install.ps1 -OutFile install.ps1; powershell -File install.ps1
-```
-**Python fallback (any platform):**
-```bash
-curl -O https://galaxy-registry.vercel.app/install.py && python install.py
-```
+* **Widgets**: `text`, `button`, `meter`, `divider`, `badge`, `checkbox`, `slider`, `input`; containers `stack`, `card`, `row`.
+* **Backends**: `ui` never draws. It writes a display list and hands it to a backend chosen at compile time:
+  `ui_host` (Win32 GDI) for native builds, `ui_os` (system calls) for `--os bare` and `--os nova`. The same program
+  runs in both; see `examples/ui_counter.nv` and `examples/ui_widgets.nv`.
+* **State is yours**: the app keeps its values; `ui.checkbox` and `ui.slider` return the new value, and `ui.input`
+  edits a byte buffer you own.
+* The older `gui` widget tree and NSS stylesheets were removed; colours come from theme roles (`ui.accent`, ...).

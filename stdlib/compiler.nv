@@ -778,6 +778,13 @@ def resolve_imports(ast: list, visited: list, target_arch: string, target_os: st
                     module_name = "os_unix"
                 }
             }
+            if module_name == "ui_backend" {
+                if target_os == "bare" {
+                    module_name = "ui_os"
+                } else {
+                    module_name = "ui_host"
+                }
+            }
             imported_modules.set(alias_name, module_name)
             imported_modules.set(orig_mod, module_name)
             if contains(visited, module_name) == 0 {

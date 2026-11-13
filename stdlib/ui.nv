@@ -27,11 +27,8 @@
 #       return 0
 #   }
 
-extern def nova_create_window(w: int, h: int, title: int) -> int
-extern def nova_damage_window(id: int) -> int
-extern def nova_poll_event(id: int, buf: int) -> int
-extern def nova_destroy_window(id: int) -> int
-extern def nova_sleep(ms: int) -> int
+# the window calls (create, damage, poll, destroy, sleep) come from the backend: ui_os on Nova OS, ui_host on desktops
+import ui_backend
 
 # ---- alignment constants & helpers ---------------------------------------------------------------------------
 const UI_LEFT   = 0
@@ -100,6 +97,7 @@ const ST_CLICKED_ID = 76
 const ST_DEPTH      = 80
 const ST_OVERFLOW   = 84
 const ST_ROW_COL_I  = 88
+const ST_FOCUS      = 224     # id of the input that has keyboard focus (-1: none); 224..255 is free
 
 # ---- default values -------------------------------------------------------------------------------------------
 const UI_DEFAULT_GAP    = 12
@@ -227,6 +225,7 @@ def window(title: string = "App", width: int = 340, height: int = 220) -> int {
     uiSetState(ST_DEPTH, 0)
     uiSetState(ST_OVERFLOW, 0)
     uiSetState(ST_CLICKED_ID, 0 - 1)
+    uiSetState(ST_FOCUS, 0 - 1)
     mem.write_u32(UI_PAGE + 0, UI_MAGIC)
     mem.write_u32(UI_PAGE + 4, 0)
     mem.write_u32(UI_PAGE + 8, 0)
@@ -236,6 +235,11 @@ def window(title: string = "App", width: int = 340, height: int = 220) -> int {
 }
 def ui_open(title: string, width: int, height: int) -> int {
     return window(title, width, height)
+}
+
+# Save the window contents as a BMP (desktop only; returns 1 on success, 0 where unsupported)
+def screenshot(path: string) -> int {
+    return nova_save_screenshot(path.ptr)
 }
 
 def quit() {
@@ -771,6 +775,139 @@ def colX(colIdx: int) -> int {
 def colW() -> int { return uiState(ST_COL_W) }
 def ui_col_x(colIdx: int) -> int { return colX(colIdx) }
 def ui_col_w() -> int { return colW() }
+
+
+# ---- interactive widgets: checkbox, slider, text input --------------------------------------------------------------
+# Immediate mode: the app owns the value, the widget draws it and returns the new one.
+#
+#     on = ui.checkbox("Notifications", on, id="notify")
+#     volume = ui.slider(volume, id="volume")                  # 0..100
+#     ui.input(name_buf, 32, id="name", placeholder="Your name")   # edits the NUL-terminated bytes at name_buf in place
+
+# a NUL-terminated byte string that already lives in memory (not a Nova string)
+def poolAddRaw(p: int) -> int {
+    let used = mem.read_u32(UI_PAGE + 12)
+    let n = 0
+    while mem.read_u8(p + n) != 0 and n < 120 { n = n + 1 }
+    if used + n + 1 > UI_POOL_SIZE { return 0 - 1 }
+    let i = 0
+    while i < n {
+        mem.write_u8(UI_POOL + used + i, mem.read_u8(p + i))
+        i = i + 1
+    }
+    mem.write_u8(UI_POOL + used + n, 0)
+    mem.write_u32(UI_PAGE + 12, used + n + 1)
+    return used
+}
+
+def widgetId(id: string) -> int {
+    return uiHashId(id)
+}
+
+def checkbox(label: string = "", checked: bool = false, id: string = "") -> bool {
+    let h = 22
+    let x = currentContainerX()
+    let w = currentContainerW()
+    let y = advanceContainerY(h)
+    let wid = uiHashId(id)
+    if wid < 0 { wid = uiHashId(label) }
+    let value = checked
+    if wid >= 0 and hit(x, y, w, h) == 1 {
+        uiSetState(ST_CLICKED_ID, wid)
+        if checked == true { value = false } else { value = true }
+    }
+    let off = poolAdd(label)
+    if off >= 0 {
+        let c = cmd(9)
+        if c != 0 {
+            let on = 0
+            if value == true { on = 1 }
+            mem.write_u32(c + 4, x)
+            mem.write_u32(c + 8, y)
+            mem.write_u32(c + 12, w)
+            mem.write_u32(c + 16, h)
+            mem.write_u32(c + 20, off)
+            mem.write_u32(c + 24, on)
+            mem.write_u32(c + 28, wid)
+        }
+    }
+    return value
+}
+
+def slider(percent: int = 0, id: string = "") -> int {
+    let h = 22
+    let x = currentContainerX()
+    let w = currentContainerW()
+    let y = advanceContainerY(h)
+    let wid = uiHashId(id)
+    let value = percent
+    if wid >= 0 and hit(x, y, w, h) == 1 and w > 0 {
+        uiSetState(ST_CLICKED_ID, wid)
+        value = (eventX() - x) * 100 / w
+        if value < 0 { value = 0 }
+        if value > 100 { value = 100 }
+    }
+    let c = cmd(10)
+    if c != 0 {
+        mem.write_u32(c + 4, x)
+        mem.write_u32(c + 8, y)
+        mem.write_u32(c + 12, w)
+        mem.write_u32(c + 16, h)
+        mem.write_u32(c + 20, value)
+        mem.write_u32(c + 28, wid)
+    }
+    return value
+}
+
+# Text field. `buf` holds `cap` bytes (NUL-terminated text, start it with a 0 byte); typing, Backspace and clicking
+# to focus are handled here. Returns the length of the text.
+def input(buf: int, cap: int = 32, id: string = "", placeholder: string = "") -> int {
+    let h = 28
+    let x = currentContainerX()
+    let w = currentContainerW()
+    let y = advanceContainerY(h)
+    let wid = uiHashId(id)
+    if wid >= 0 and hit(x, y, w, h) == 1 {
+        uiSetState(ST_FOCUS, wid)
+        uiSetState(ST_CLICKED_ID, wid)
+    }
+    let focused = 0
+    if wid >= 0 and uiState(ST_FOCUS) == wid { focused = 1 }
+    let n = 0
+    while mem.read_u8(buf + n) != 0 and n < cap - 1 { n = n + 1 }
+    if focused == 1 and mem.read_u32(UI_STATE + ST_EVT) == UI_EV_KEY {
+        let k = eventKey()
+        if (k == 8 or k == 127) and n > 0 {
+            n = n - 1
+            mem.write_u8(buf + n, 0)
+        } elif k >= 32 and k < 127 and n < cap - 1 {
+            mem.write_u8(buf + n, k)
+            mem.write_u8(buf + n + 1, 0)
+            n = n + 1
+        }
+    }
+    let off = 0 - 1
+    let shown_hint = 0
+    if n > 0 {
+        off = poolAddRaw(buf)
+    } else {
+        off = poolAdd(placeholder)
+        shown_hint = 1
+    }
+    if off >= 0 {
+        let c = cmd(11)
+        if c != 0 {
+            mem.write_u32(c + 4, x)
+            mem.write_u32(c + 8, y)
+            mem.write_u32(c + 12, w)
+            mem.write_u32(c + 16, h)
+            mem.write_u32(c + 20, off)
+            mem.write_u32(c + 24, focused | (shown_hint << 1))
+            mem.write_u32(c + 28, wid)
+        }
+    }
+    return n
+}
 
 # ---- input & events --------------------------------------------------------------------------------------------
 def poll() -> int {

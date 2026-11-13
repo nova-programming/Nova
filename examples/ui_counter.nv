@@ -1,0 +1,45 @@
+# The same `ui` program that runs on Nova OS (baremetal_os/user/counter_ui.nv), as a desktop window.
+#   nova run examples/ui_counter.nv            click the buttons, Esc or close the window to quit
+#   nova run examples/ui_counter.nv --test     draws a few frames, clicks "Add" once, and exits (used by the tests)
+import ui
+import system
+
+def main() -> int {
+    ui.window("Counter", 320, 200)
+    let n = 0
+    let frames = 0
+    let running = true
+    let test_mode = false
+    args = system.get_args()
+    if len(args) > 1 and args[1] == "--test" { test_mode = true }
+
+    while running == true {
+        ui.frame {
+            ui.stack(padding=16, gap=12) {
+                ui.text("Interactive Counter", align=align.center, bold=true)
+                ui.card(height=48) {
+                    ui.meter(percent=n * 10, color=ui.accent)
+                }
+                ui.row(gap=12, cols=2) {
+                    ui.button("Add 10%", style=style.primary, id="add")
+                    ui.button("Reset", style=style.plain, id="reset")
+                }
+            }
+        }
+        if ui.clicked("add") == true {
+            n = n + 1
+            if n > 10 { n = 10 }
+            print("n=" + str(n))
+        }
+        if ui.clicked("reset") == true { n = 0 }
+        if ui.eventKey() == 27 { running = false }
+        frames = frames + 1
+        if frames == 5 and test_mode == true { ui.screenshot("ui_counter_shot.bmp") }
+        if test_mode == true and frames >= 20 { running = false }
+    }
+    ui.quit()
+    print("Demo completed successfully!")
+    return 0
+}
+
+main()
