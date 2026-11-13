@@ -67,6 +67,50 @@ function, never a parameter, and not a global or function is a **compile error**
 (`undefined name 'totl'` with `did you mean 'total'?` when a similar name exists). `catch e` binds `e`, and `for` loop
 variables count as assigned. The check is order-independent within a function.
 
+### Tests and `assert` (self-hosted compiler)
+
+```
+def add(a: int, b: int) -> int {
+    return a + b
+}
+
+test "adds numbers" {
+    assert(add(1, 2) == 3)
+    assert(add(2, 2) == 4, "two plus two")     # optional message
+}
+```
+
+* `nova test file.nv` builds the file with its `test` blocks, runs them and exits with code 1 if any fails. Each test
+  prints `ok` or `FAILED` plus the `file:line` of the failing assert; a failing assert ends only its own test.
+* `nova build` / `nova run` ignore `test` blocks completely; `nova check` type-checks them.
+* `test` is only special when a string literal follows it, so a variable called `test` still works.
+* `assert(cond)` / `assert(cond, "message")` outside a test prints the failure and stops the program with exit code 1.
+* The Python bootstrap does not know `test` blocks (they are self-hosted only).
+
+### Diagnostics
+
+Errors print the offending line and underline the token, with a suggestion where there is one:
+
+```
+ERROR [app.nv:5:10] (Name): undefined name 'mesage'
+  5 | print(mesage)
+    |       ^~~~~~
+  -> did you mean 'message'?
+```
+
+Besides undefined names, the self-hosted type checker rejects calling a variable that hides a function
+(`cannot call 'width': here it is a variable of type int`; this also covers a local that is assigned *later* in the same
+function, as in `let tx = tx(w)`, because every name assigned anywhere in a function is a local, so the call would go
+through the empty variable and jump to address 0) and calls to functions that do not exist
+(`call to undefined function 'greeet'`, with a "did you mean"). C library calls such as `exit(...)` stay allowed.
+The undefined-function check only applies to your own code, not to the standard library.
+
+### Nova OS apps: `nova build --os nova`
+
+`nova build app.nv --os nova -o app.nva` compiles for Nova OS (ring 3), links against the OS runtime and packs a `.nva`.
+The manifest is read from comment lines in the source: `#nva name=Counter id=dev.nova.counter version=1.0 window=320x200 perms=fs`
+(`_` in `name` is a space). The runtime files come from `$NOVA_OS_DIR` or `../baremetal_os`.
+
 ### Soft keywords
 `read`, `write`, `close`, `api`, `openf` are keywords only when called (`read(fd)`), and `data` only in
 `data Name { ... }`; elsewhere they are ordinary identifiers (variables, fields, your own functions).

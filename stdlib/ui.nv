@@ -14,13 +14,13 @@
 #                       ui.meter(percent=n * 10, color=ui.accent)
 #                   }
 #                   ui.row(gap=12, cols=2) {
-#                       ui.button("Add 10%", style=style.primary, id=0)
-#                       ui.button("Reset", style=style.plain, id=1)
+#                       ui.button("Add 10%", style=style.primary, id="add")
+#                       ui.button("Reset", style=style.plain, id="reset")
 #                   }
 #               }
 #           }
-#           if ui.clicked(0) == true { n = n + 1 }
-#           if ui.clicked(1) == true { n = 0 }
+#           if ui.clicked("add") == true { n = n + 1 }
+#           if ui.clicked("reset") == true { n = 0 }
 #           if ui.eventKey() == 27 { running = false }
 #       }
 #       ui.quit()
@@ -285,6 +285,23 @@ def end_frame() { endFrame() }
 def ui_frame() { frame() }
 def ui_end_frame() { endFrame() }
 
+# ---- widget identification & hashing --------------------------------------------------------------------------
+def uiHashId(s: string) -> int {
+    let p = s.ptr
+    if p == 0 { return 0 - 1 }
+    if mem.read_u8(p) == 0 { return 0 - 1 }
+    let h = 5381
+    let i = 0
+    let b = mem.read_u8(p + i)
+    while b != 0 {
+        h = ((h * 33) + b) & 0x7FFFFFFF
+        i = i + 1
+        b = mem.read_u8(p + i)
+    }
+    return h
+}
+def ui_hash_id(s: string) -> int { return uiHashId(s) }
+
 # ---- low level buffers -----------------------------------------------------------------------------------------
 def poolAdd(s: string) -> int {
     let p = s.ptr
@@ -518,7 +535,7 @@ def ui_badge(x: int, y: int, w: int, h: int, label: string, role: int = UI_ACCEN
     }
 }
 
-def button(label: string = "", align: int = 1, style: int = 0, width: int = -1, height: int = -1, id: int = -1) {
+def button(label: string = "", align: int = 1, style: int = 0, width: int = -1, height: int = -1, id: string = "") {
     let cType = currentContainerType()
     let x = 0
     let y = 0
@@ -539,6 +556,10 @@ def button(label: string = "", align: int = 1, style: int = 0, width: int = -1, 
         x = currentContainerX()
         y = advanceContainerY(h)
     }
+    let btn_id = uiHashId(id)
+    if btn_id < 0 {
+        btn_id = uiHashId(label)
+    }
     let off = poolAdd(label)
     if off >= 0 {
         let c = cmd(5)
@@ -549,18 +570,22 @@ def button(label: string = "", align: int = 1, style: int = 0, width: int = -1, 
             mem.write_u32(c + 16, h)
             mem.write_u32(c + 20, off)
             mem.write_u32(c + 24, style)
-            if id >= 0 {
-                mem.write_u32(c + 28, id)
+            if btn_id >= 0 {
+                mem.write_u32(c + 28, btn_id)
             }
         }
     }
-    if id >= 0 {
+    if btn_id >= 0 {
         if hit(x, y, w, h) == 1 {
-            uiSetState(ST_CLICKED_ID, id)
+            uiSetState(ST_CLICKED_ID, btn_id)
         }
     }
 }
-def ui_button(x: int, y: int, w: int, h: int, label: string, style: int = 0) {
+def ui_button(x: int, y: int, w: int, h: int, label: string, style: int = 0, id: string = "") {
+    let btn_id = uiHashId(id)
+    if btn_id < 0 {
+        btn_id = uiHashId(label)
+    }
     let off = poolAdd(label)
     if off < 0 { return }
     let c = cmd(5)
@@ -571,6 +596,14 @@ def ui_button(x: int, y: int, w: int, h: int, label: string, style: int = 0) {
         mem.write_u32(c + 16, h)
         mem.write_u32(c + 20, off)
         mem.write_u32(c + 24, style)
+        if btn_id >= 0 {
+            mem.write_u32(c + 28, btn_id)
+        }
+    }
+    if btn_id >= 0 {
+        if hit(x, y, w, h) == 1 {
+            uiSetState(ST_CLICKED_ID, btn_id)
+        }
     }
 }
 
@@ -767,9 +800,10 @@ def hit(x: int, y: int, width: int, height: int) -> int {
 }
 def ui_hit(x: int, y: int, width: int, height: int) -> int { return hit(x, y, width, height) }
 
-def clicked(id: int) -> bool {
+def clicked(id: string) -> bool {
     if mem.read_u32(UI_STATE + ST_EVT) != UI_EV_CLICK { return false }
-    if uiState(ST_CLICKED_ID) == id { return true }
+    let target = uiHashId(id)
+    if target >= 0 and uiState(ST_CLICKED_ID) == target { return true }
     return false
 }
-def ui_clicked(id: int) -> bool { return clicked(id) }
+def ui_clicked(id: string) -> bool { return clicked(id) }

@@ -470,6 +470,27 @@ def _create_launchers():
 # PATH management (Windows user-level PATH via Registry)
 # ---------------------------------------------------------------------------
 
+def _broadcast_environment_change() -> None:
+    """Tell running programs (Explorer, new terminals) that the environment changed.
+
+    Uses SendMessageTimeoutW with SMTO_ABORTIFHUNG. The plain SendMessageW broadcast this replaced waits for EVERY
+    top-level window to handle the message, so one window that stopped pumping messages blocked the installer
+    (and the test suite) forever.
+    """
+    try:
+        import ctypes
+        HWND_BROADCAST = 0xFFFF
+        WM_SETTINGCHANGE = 0x001A
+        SMTO_ABORTIFHUNG = 0x0002
+        result = ctypes.c_ulong()
+        ctypes.windll.user32.SendMessageTimeoutW(
+            HWND_BROADCAST, WM_SETTINGCHANGE, 0, "Environment",
+            SMTO_ABORTIFHUNG, 2000, ctypes.byref(result),
+        )
+    except Exception:
+        pass
+
+
 def _add_to_path_windows() -> bool:
     try:
         import winreg
@@ -499,15 +520,7 @@ def _add_to_path_windows() -> bool:
             winreg.SetValueEx(key, "PATH", 0, reg_type, current)
 
         # Notify Windows of environment change
-        try:
-            HWND_BROADCAST = 0xFFFF
-            WM_SETTINGCHANGE = 0x001A
-            import ctypes
-            ctypes.windll.user32.SendMessageW(
-                HWND_BROADCAST, WM_SETTINGCHANGE, 0, "Environment"
-            )
-        except Exception:
-            pass
+        _broadcast_environment_change()
 
         # Also update the current process's PATH so child terminals
         # (opened from this session) inherit the correct environment

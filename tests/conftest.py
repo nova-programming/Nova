@@ -1,4 +1,5 @@
 """Shared fixtures: a self-hosted (stage-1) Nova compiler built once per test session."""
+import hashlib
 import os
 import platform
 import shutil
@@ -74,6 +75,36 @@ def gcc_env():
     return env
 
 
+def _sources_hash():
+    """Hash of everything the session-built compiler depends on (the compiler sources, the Python bootstrap that
+    builds it, and the C runtime)."""
+    h = hashlib.sha1()
+    files = [os.path.join(ROOT, name) for name in ("nova.nv", "runtime.c")]
+    for top in ("stdlib", "bootstrap"):
+        for dirpath, dirnames, filenames in os.walk(os.path.join(ROOT, top)):
+            dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
+            for fname in sorted(filenames):
+                if fname.endswith((".nv", ".py", ".c", ".h")):
+                    files.append(os.path.join(dirpath, fname))
+    for path in files:
+        h.update(os.path.relpath(path, ROOT).encode("utf-8"))
+        with open(path, "rb") as fh:
+            h.update(fh.read())
+    return h.hexdigest()[:16]
+
+
+def _prune_selfhost_cache(cache_root, keep):
+    """Keep only the newest `keep` cached builds."""
+    try:
+        entries = [os.path.join(cache_root, d) for d in os.listdir(cache_root)]
+        entries = [e for e in entries if os.path.isdir(e)]
+        entries.sort(key=os.path.getmtime, reverse=True)
+        for old in entries[keep:]:
+            shutil.rmtree(old, ignore_errors=True)
+    except OSError:
+        pass
+
+
 @pytest.fixture(scope="session")
 def selfhost(tmp_path_factory):
     """(stage1 exe, work dir, env): the self-hosted compiler built from the current sources."""
@@ -87,11 +118,36 @@ def selfhost(tmp_path_factory):
     for name in ("nova.nv", "runtime.c"):
         shutil.copy(os.path.join(ROOT, name), work / name)
     stage1 = work / ("stage1" + EXE)
+
+    # The compiler and its compiled runtime only depend on the sources below, so they are built once per source state
+    # and reused by every later test session (set NOVA_TEST_REBUILD=1 to force a rebuild).
+    cache = os.path.join(ROOT, ".selfhost_cache", _sources_hash())
+    cached_exe = os.path.join(cache, "stage1" + EXE)
+    cached_rt = os.path.join(cache, "runtime.o")
+    if os.path.exists(cached_exe) and not os.environ.get("NOVA_TEST_REBUILD"):
+        shutil.copy(cached_exe, stage1)
+        if os.path.exists(cached_rt):
+            shutil.copy(cached_rt, work / "runtime.o")
+        return stage1, work, env
+
     r = run_built(
         [sys.executable, MAIN_PY, "build", os.path.join(ROOT, "nova.nv"), "-o", str(stage1)],
         str(stage1), capture_output=True, text=True, timeout=300, cwd=ROOT, env=env,
     )
     assert r.returncode == 0 and stage1.exists(), r.stdout[-2000:] + r.stderr[-2000:]
+    # compile one trivial program so runtime.o exists, then cache both
+    warm = work / "warm_cache.nv"
+    warm.write_text("print(1)\n", encoding="utf-8")
+    run_built([str(stage1), "build", str(warm)], str(work / ("warm_cache" + EXE)), capture_output=True, text=True,
+              timeout=300, cwd=work, env=env)
+    try:
+        os.makedirs(cache, exist_ok=True)
+        shutil.copy(stage1, cached_exe)
+        if (work / "runtime.o").exists():
+            shutil.copy(work / "runtime.o", cached_rt)
+        _prune_selfhost_cache(os.path.dirname(cache), keep=2)
+    except OSError:
+        pass                                   # a read-only checkout just means no cache
     return stage1, work, env
 
 

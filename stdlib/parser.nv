@@ -5,6 +5,53 @@
 import lexer
 import errors
 
+# Text of a Nova string literal body (escape backslash and double quote) for generated source snippets.
+def escape_for_source(s: string) -> string {
+    out = ""
+    i = 0
+    while i < len(s) {
+        ch = s[i]
+        if ch == "\\" { out = out + "/" }
+        elif ch == "\"" { out = out + "'" }
+        elif ch == "\n" { out = out + " " }
+        else { out = out + ch }
+        i = i + 1
+    }
+    return out
+}
+
+# assert(cond) / assert(cond, "message")
+#   inside a `test` block: print the failure and end the test (the runner counts it)
+#   anywhere else: print the failure and stop the program with exit code 1
+# Built by parsing a small snippet and plugging the caller's expressions into it.
+def build_assert(state: ParserState, call: AstNode, line: int) -> AstNode {
+    where = escape_for_source(state.filename) + ":" + str(line)
+    has_msg = 0
+    if len(call.args) >= 2 { has_msg = 1 }
+    text = "    assertion failed (" + where + ")"
+    if has_msg == 1 { text = text + ": \" + __assert_msg + \"" }
+    leave = "sys_exit(1)"
+    if state.in_test == 1 { leave = "return 1" } else { state.needs_system = 1 }
+    src = "if not __assert_cond \{\n    print(\"" + text + "\")\n    " + leave + "\n\}\n"
+    parsed = parse(tokenize(src), state.filename)
+    stmt = parsed[len(parsed) - 1]
+    stmt.line = line
+    stmt.cond.left = call.args[0]
+    if has_msg == 1 {
+        # print("..." + __assert_msg + "") : the Variable sits in the middle of two string concatenations
+        pnode = stmt.body[0]
+        concat = pnode.left
+        slot = concat
+        if slot.left.kind == "BinOp" { slot = slot.left }
+        if slot.right.kind == "Variable" and slot.right.val_str == "__assert_msg" {
+            slot.right = call.args[1]
+        } elif slot.left.kind == "Variable" and slot.left.val_str == "__assert_msg" {
+            slot.left = call.args[1]
+        }
+    }
+    return stmt
+}
+
 def canonicalMember(name: string) -> string {
     if name == "asList" { return "as_list" }
     if name == "valueByte" { return "value_byte" }
@@ -103,6 +150,7 @@ data AstNode {
     param_defaults: list
     arg_names: list
     arg_is_kw: list
+    file: string
 }
 
 data ParserState {
@@ -117,6 +165,10 @@ data ParserState {
     containers: dict
     container_ends: dict
     data_field_defaults: dict
+    in_test: int
+    needs_system: int
+    test_mode: string
+    test_count: int
 }
 
 def current_tok(state: ParserState) -> Token {
@@ -1562,6 +1614,48 @@ def inject_container_cleanup(stmts: list, end_node: AstNode) -> list {
     return res
 }
 
+# test "adds two numbers" { assert(1 + 1 == 2) }
+# Lowered to `def __nova_test_N() -> int` (0 = passed). Whether it survives depends on the test_mode argument of parse():
+#   drop  normal builds never see tests          keep  `nova check` type-checks them
+#   run   `nova test` calls them from a generated runner
+def parse_test_block(state: ParserState, stmt_line: int, stmt_col: int) -> AstNode {
+    eat_tok(state, "IDENT")
+    name_tok = eat_tok(state, "STRING")
+    outer = state.in_test
+    state.in_test = 1
+    body = parse_block(state)
+    state.in_test = outer
+
+    if state.test_mode == "drop" {
+        n = AstNode()
+        n.kind = "NONE"
+        n.line = stmt_line
+        return n
+    }
+    idx = state.test_count
+    state.test_count = state.test_count + 1
+    # the first statement records the display name for the runner: __nova_test_name = "adds numbers"
+    src = "def __nova_test_" + str(idx) + "() -> int \{\n"
+    shown = name_tok.val
+    if len(shown) >= 2 and shown[0] == "\"" and shown[len(shown) - 1] == "\"" { shown = str_sub(shown, 1, len(shown) - 1) }
+    src = src + "    __nova_test_name = \"" + escape_for_source(shown) + "\"\n"
+    src = src + "    return 0\n"
+    src = src + "\}\n"
+    snippet = parse(tokenize(src), state.filename)
+    fn = snippet[0]
+    fn.line = stmt_line
+    fn.col = stmt_col
+    new_body = [fn.body[0]]
+    bi = 0
+    while bi < len(body) {
+        new_body.append(body[bi])
+        bi = bi + 1
+    }
+    new_body.append(fn.body[1])
+    fn.body = new_body
+    return fn
+}
+
 def parse_statement(state: ParserState) -> AstNode {
     tok = current_tok(state)
     stmt_line = tok.line
@@ -1576,7 +1670,15 @@ def parse_statement(state: ParserState) -> AstNode {
             return parse_statement(state)
         }
     }
-    
+
+    # test "name" { ... }  (`test` is only special when a string literal follows it)
+    if tok.kind == "IDENT" and tok.val == "test" {
+        test_next = peek_tok(state, 1)
+        if test_next.kind == "STRING" {
+            return parse_test_block(state, stmt_line, stmt_col)
+        }
+    }
+
     if tok.kind == "PRINTD" {
         eat_tok(state, "PRINTD")
         eat_tok(state, "LPAREN")
@@ -1968,6 +2070,7 @@ def parse_statement(state: ParserState) -> AstNode {
         node.line = stmt_line
         node.col = stmt_col
         node.kind = "Function"
+        node.file = state.filename
         node.val_str = name
         node.name = name
         node.params = param_names
@@ -2111,6 +2214,7 @@ def parse_statement(state: ParserState) -> AstNode {
                 mbody = parse_block(state)
                 mnode = AstNode()
                 mnode.kind = "Function"
+                mnode.file = state.filename
                 mnode.val_str = mname
                 mnode.line = tok.line
                 mnode.col = tok.col
@@ -2371,6 +2475,10 @@ def parse_statement(state: ParserState) -> AstNode {
             bi = bi + 1
         }
         return block_node
+    }
+
+    if expr.kind == "Call" and expr.val_str == "assert" and len(expr.args) >= 1 and len(expr.args) <= 2 {
+        return build_assert(state, expr, stmt_line)
     }
 
     return expr
@@ -2799,7 +2907,13 @@ def desugar_enums(program: list, state: ParserState) -> list {
     return result
 }
 
+# test_mode: "drop" (test blocks are removed), "keep" (kept as functions so they are type-checked) or
+# "run" (kept and called by the generated runner of `nova test`). Plain parse() drops them.
 def parse(tokens: list, filename: string) -> list {
+    return parse_with_tests(tokens, filename, "drop")
+}
+
+def parse_with_tests(tokens: list, filename: string, test_mode: string) -> list {
     state = ParserState()
     state.tokens = tokens
     state.pos = 0
@@ -2808,6 +2922,10 @@ def parse(tokens: list, filename: string) -> list {
     state.imported_modules = {}
     state.data_fields = {}
     state.data_field_defaults = {}
+    state.in_test = 0
+    state.needs_system = 0
+    state.test_mode = test_mode
+    state.test_count = 0
     state.ctors_used = []
     state.const_table = {}
     state.containers = {"stack": 1, "card": 1, "row": 1, "frame": 1, "ui_stack": 1, "ui_card": 1, "ui_row": 1, "ui_frame": 1}
@@ -2827,7 +2945,27 @@ def parse(tokens: list, filename: string) -> list {
     }
 
     program = desugar_enums(program, state)
-    
+
+    # assert() outside a test stops the program through sys_exit, which lives in module `system`
+    if state.needs_system == 1 {
+        has_system = 0
+        pi = 0
+        while pi < len(program) {
+            if program[pi].kind == "Import" and program[pi].val_str == "system" { has_system = 1 }
+            pi = pi + 1
+        }
+        if has_system == 0 {
+            sys_snippet = parse(tokenize("import system\n"), filename)
+            with_system = [sys_snippet[0]]
+            pi = 0
+            while pi < len(program) {
+                with_system.append(program[pi])
+                pi = pi + 1
+            }
+            program = with_system
+        }
+    }
+
     ci = 0
     while ci < len(state.ctors_used) {
         ctor_name = state.ctors_used[ci]

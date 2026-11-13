@@ -65,3 +65,5 @@ ci-tmp/
 *.egg-info/
 build/
 dist/
+
+.selfhost_cache/

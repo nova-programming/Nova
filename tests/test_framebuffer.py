@@ -39,6 +39,7 @@ def _run_build_and_exec(tmp_path, src_code: str, exe_name: str = "prog"):
 def test_framebuffer_lifecycle(tmp_path):
     src = """import gui
 import buffer
+import time
 
 w = 640
 h = 480

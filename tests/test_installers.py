@@ -14,6 +14,36 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
+class _FakeWinreg:
+    """In-memory stand-in for winreg. These tests used to run against the REAL registry: every run appended its
+    temporary sandbox folder to the user's PATH (dozens of dead nova-test-* entries) and then waited on a
+    system-wide broadcast."""
+    HKEY_CURRENT_USER = object()
+    KEY_READ = 1
+    KEY_WRITE = 2
+    REG_EXPAND_SZ = 2
+
+    def __init__(self, path="C:/Windows"):
+        self.values = {"PATH": (path, self.REG_EXPAND_SZ)}
+
+    def OpenKey(self, hive, sub_key, reserved=0, access=0):
+        class _Key:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+        return _Key()
+
+    def QueryValueEx(self, key, name):
+        if name not in self.values:
+            raise FileNotFoundError(name)
+        return self.values[name]
+
+    def SetValueEx(self, key, name, reserved, reg_type, value):
+        self.values[name] = (value, reg_type)
+
+
 class TestInstallPy(unittest.TestCase):
     """Test install.py logic in isolation with a sandboxed environment."""
 
@@ -23,11 +53,19 @@ class TestInstallPy(unittest.TestCase):
         # Prevent actual PATH modification during tests
         self.env_patch = mock.patch.dict(os.environ, {"PATH": "/usr/bin:/bin"})
         self.env_patch.start()
+        # Never touch the real registry or broadcast to real windows
+        self.fake_reg = _FakeWinreg()
+        self.reg_patch = mock.patch.dict(sys.modules, {"winreg": self.fake_reg})
+        self.reg_patch.start()
+        self.windll_patch = mock.patch("ctypes.windll", create=True)
+        self.windll = self.windll_patch.start()
         # Import install module fresh for each test
         if "install" in sys.modules:
             del sys.modules["install"]
 
     def tearDown(self):
+        self.windll_patch.stop()
+        self.reg_patch.stop()
         self.env_patch.stop()
         shutil.rmtree(self.sandbox, ignore_errors=True)
         if "install" in sys.modules:
@@ -196,6 +234,21 @@ class TestInstallPy(unittest.TestCase):
                 with mock.patch("builtins.open", mock.mock_open()):
                     result = install._add_to_path_windows()
                     self.assertTrue(result)
+        path, _ = self.fake_reg.values["PATH"]
+        self.assertEqual(path, "C:/Windows;" + self.sandbox)       # appended to the (fake) registry value only
+        # the broadcast must be time limited: SendMessageW waits for every window and can block forever
+        self.windll.user32.SendMessageTimeoutW.assert_called_once()
+        self.windll.user32.SendMessageW.assert_not_called()
+
+    @unittest.skipIf(sys.platform != "win32", "Windows PATH test")
+    def test_add_to_path_windows_is_idempotent_and_removal_cleans_it(self):
+        import install
+        with mock.patch.object(install, "INSTALL_DIR", self.sandbox):
+            self.assertTrue(install._add_to_path_windows())
+            self.assertTrue(install._add_to_path_windows())          # second call: already present
+            self.assertEqual(self.fake_reg.values["PATH"][0].count(self.sandbox), 1)
+            install._remove_from_path_windows()
+            self.assertEqual(self.fake_reg.values["PATH"][0], "C:/Windows")
 
     @unittest.skip("winreg is a C module (Windows, cannot mock) or nonexistent (Linux/macOS)")
     def test_path_dedup_detects_existing(self):

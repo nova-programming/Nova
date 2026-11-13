@@ -2555,6 +2555,52 @@ Cleanly partitioned `baremetal_os/` into a modular 7-tier domain architecture:
   - `baremetal_os/test_memmap.py` & `baremetal_os/test_ui_shell.py`: **7/7 PASS (100%)**.
   - `baremetal_os/build.ps1`: Builds all Ring 3 user ELF applications (`hello.elf`, `bench.elf`, `counter.elf`, `pipe_test.elf`, `paint.elf`, `fault.elf`), `counter.nva`, `disk.img`, and freestanding Multiboot `kernel.elf` (93,645 lines) cleanly.
 
+---
+
+## 86. Text-Based UI Widget IDs (`uiHashId`), Automatic Label Fallback, and Deprecation of Integer IDs (Nov 2026)
+- **Status**: **COMPLETED & VERIFIED (100% PASS)**.
+- **Architectural Motivation**:
+  - Previously, UI buttons and click events relied on explicit numeric IDs (`id=0`, `ui.clicked(0)`). These were error-prone, hard to coordinate across large codebases, and lacked readability.
+  - Migrated the entire Nova UI standard library (`nova/stdlib/ui.nv`) and user applications to text-based IDs with automatic fallback to widget labels.
+- **Pillar 1: Hashing & String Widget Identification**:
+  - Implemented `uiHashId(s: string) -> int`: 32-bit positive djb2 hash (`h = ((h * 33) + b) & 0x7FFFFFFF`).
+  - `button(label: string = "", align: int = 1, style: int = 0, width: int = -1, height: int = -1, id: string = "")`:
+    - Automatically hashes `id`; when `id` is omitted (`""`), defaults to hashing `label`.
+  - `ui_button(x, y, w, h, label, style = 0, id: string = "")`:
+    - Emits hashed ID into display list item `[DL_BUTTON, x, y, w, h, hid, style, label]`.
+  - `clicked(id: string) -> bool` and `ui_clicked(id: string) -> bool`:
+    - Checks `uiState(ST_CLICKED_ID) == uiHashId(id)`.
+  - Removed integer IDs without backward compatibility.
+- **Pillar 2: Compiler `nva_objcopy_path` Path Handling**:
+  - Fixed Windows quoted path handling in `nova/stdlib/compiler.nv` (`_find_gcc` returns quoted string). Stripped double quotes before suffix matching to properly locate bundled `objcopy.exe`.
+- **Pillar 3: Verification & Test Coverage**:
+  - `nova` test suite: **94/94 passed (100%)** (`nova/tests/test_check_all.py`).
+  - `baremetal_os` test suite: **22/22 passed (100%)** (`test_nva.py`, `test_ui_shell.py`, `test_memmap.py`, `test_regressions.py`).
+  - `baremetal_os/build.ps1`: Builds all Ring 3 user applications and kernel cleanly with exit code 0.
+
+---
+
+## 87. Nova Service Framework (NSF) Client SDK & NovaNotify Integration (Nov 2026)
+- **Status**: **COMPLETED & VERIFIED (100% PASS)**.
+- **Architectural Motivation**:
+  - Established a unified, secure system service broker protocol (`SYS_NSF_CALL` = 110) connecting Ring 3 Nova user applications with kernel-level and daemon services.
+  - Implemented the first native in-kernel NSF service: `nova.notify` (service ID 2) for desktop toast notifications.
+- **Pillar 1: Freestanding User Library & Standard Library SDK**:
+  - `nova/stdlib/nsf.nv`: Standard library client module offering high-level wrappers `nsfCall`, `notifyShow(title, msg, icon)`, and `notifyDismiss()`. Automatically manages request marshalling and dynamic allocation.
+  - `baremetal_os/user/libnova.s`: Freestanding assembly stub `nova_nsf_call(req_ptr) -> int` invoking syscall 110 (`int $0x80`).
+  - `baremetal_os/user/ulib.nv`: Freestanding user library exports `notifyShow(title, msg, icon)` and `notifyDismiss()` with predefined icon constants (`ICON_INFO=0`, `ICON_SUCCESS=1`, `ICON_WARN=2`, `ICON_APP=3`).
+- **Pillar 2: Manifest Declarations & Authentication**:
+  - Enhanced `nvapack.py` and `baremetal_os/fs/nva.nv` to parse and validate `perms=notify` and `perms=db` in `.nva` application manifests.
+  - Added authenticated process lifecycle: `schedCreateProcessWithAuth` links processes to registered package entries in `MM_APP_TABLE`, ensuring unauthorized plain ELFs cannot invoke restricted NSF services.
+- **Pillar 3: Test Coverage & Verification**:
+  - `nova` self-hosted test suite: **95/95 passed (100%)** (`nova/tests/test_check_all.py`).
+  - `baremetal_os/test_nsf.py`: 5/5 passed.
+  - `baremetal_os/test_nva.py`: 6/6 passed.
+  - `baremetal_os/test_memmap.py`: 2/2 passed.
+  - `baremetal_os/test_regressions.py`: 9/9 passed.
+  - `baremetal_os/test_ui_shell.py`: 5/5 passed.
+
+
 
 
 
@@ -3053,6 +3099,52 @@ Cleanly partitioned `baremetal_os/` into a modular 7-tier domain architecture:
   - `nova/tests/test_names.py`: **21/21 PASS (100%)**.
   - `baremetal_os/test_memmap.py` & `baremetal_os/test_ui_shell.py`: **7/7 PASS (100%)**.
   - `baremetal_os/build.ps1`: Builds all Ring 3 user ELF applications (`hello.elf`, `bench.elf`, `counter.elf`, `pipe_test.elf`, `paint.elf`, `fault.elf`), `counter.nva`, `disk.img`, and freestanding Multiboot `kernel.elf` (93,645 lines) cleanly.
+
+---
+
+## 86. Text-Based UI Widget IDs (`uiHashId`), Automatic Label Fallback, and Deprecation of Integer IDs (Nov 2026)
+- **Status**: **COMPLETED & VERIFIED (100% PASS)**.
+- **Architectural Motivation**:
+  - Previously, UI buttons and click events relied on explicit numeric IDs (`id=0`, `ui.clicked(0)`). These were error-prone, hard to coordinate across large codebases, and lacked readability.
+  - Migrated the entire Nova UI standard library (`nova/stdlib/ui.nv`) and user applications to text-based IDs with automatic fallback to widget labels.
+- **Pillar 1: Hashing & String Widget Identification**:
+  - Implemented `uiHashId(s: string) -> int`: 32-bit positive djb2 hash (`h = ((h * 33) + b) & 0x7FFFFFFF`).
+  - `button(label: string = "", align: int = 1, style: int = 0, width: int = -1, height: int = -1, id: string = "")`:
+    - Automatically hashes `id`; when `id` is omitted (`""`), defaults to hashing `label`.
+  - `ui_button(x, y, w, h, label, style = 0, id: string = "")`:
+    - Emits hashed ID into display list item `[DL_BUTTON, x, y, w, h, hid, style, label]`.
+  - `clicked(id: string) -> bool` and `ui_clicked(id: string) -> bool`:
+    - Checks `uiState(ST_CLICKED_ID) == uiHashId(id)`.
+  - Removed integer IDs without backward compatibility.
+- **Pillar 2: Compiler `nva_objcopy_path` Path Handling**:
+  - Fixed Windows quoted path handling in `nova/stdlib/compiler.nv` (`_find_gcc` returns quoted string). Stripped double quotes before suffix matching to properly locate bundled `objcopy.exe`.
+- **Pillar 3: Verification & Test Coverage**:
+  - `nova` test suite: **94/94 passed (100%)** (`nova/tests/test_check_all.py`).
+  - `baremetal_os` test suite: **22/22 passed (100%)** (`test_nva.py`, `test_ui_shell.py`, `test_memmap.py`, `test_regressions.py`).
+  - `baremetal_os/build.ps1`: Builds all Ring 3 user applications and kernel cleanly with exit code 0.
+
+---
+
+## 87. Nova Service Framework (NSF) Client SDK & NovaNotify Integration (Nov 2026)
+- **Status**: **COMPLETED & VERIFIED (100% PASS)**.
+- **Architectural Motivation**:
+  - Established a unified, secure system service broker protocol (`SYS_NSF_CALL` = 110) connecting Ring 3 Nova user applications with kernel-level and daemon services.
+  - Implemented the first native in-kernel NSF service: `nova.notify` (service ID 2) for desktop toast notifications.
+- **Pillar 1: Freestanding User Library & Standard Library SDK**:
+  - `nova/stdlib/nsf.nv`: Standard library client module offering high-level wrappers `nsfCall`, `notifyShow(title, msg, icon)`, and `notifyDismiss()`. Automatically manages request marshalling and dynamic allocation.
+  - `baremetal_os/user/libnova.s`: Freestanding assembly stub `nova_nsf_call(req_ptr) -> int` invoking syscall 110 (`int $0x80`).
+  - `baremetal_os/user/ulib.nv`: Freestanding user library exports `notifyShow(title, msg, icon)` and `notifyDismiss()` with predefined icon constants (`ICON_INFO=0`, `ICON_SUCCESS=1`, `ICON_WARN=2`, `ICON_APP=3`).
+- **Pillar 2: Manifest Declarations & Authentication**:
+  - Enhanced `nvapack.py` and `baremetal_os/fs/nva.nv` to parse and validate `perms=notify` and `perms=db` in `.nva` application manifests.
+  - Added authenticated process lifecycle: `schedCreateProcessWithAuth` links processes to registered package entries in `MM_APP_TABLE`, ensuring unauthorized plain ELFs cannot invoke restricted NSF services.
+- **Pillar 3: Test Coverage & Verification**:
+  - `nova` self-hosted test suite: **95/95 passed (100%)** (`nova/tests/test_check_all.py`).
+  - `baremetal_os/test_nsf.py`: 5/5 passed.
+  - `baremetal_os/test_nva.py`: 6/6 passed.
+  - `baremetal_os/test_memmap.py`: 2/2 passed.
+  - `baremetal_os/test_regressions.py`: 9/9 passed.
+  - `baremetal_os/test_ui_shell.py`: 5/5 passed.
+
 
 
 

@@ -17,8 +17,10 @@ data TypeChecker {
     global_consts: dict
     fn_missing: dict
     fn_assigned: dict
+    shadow_calls: list
     pending: list
     name_pool: list
+    strict_calls: int
 }
 
 data NamedFunc {
@@ -51,8 +53,10 @@ def tc_init(tc: TypeChecker) {
     tc.global_consts = {}
     tc.fn_missing = {}
     tc.fn_assigned = {}
+    tc.shadow_calls = []
     tc.pending = []
     tc.name_pool = []
+    tc.strict_calls = 0
 
     # sys_alloc(size: int) -> any
     sys_alloc_t = create_func_type([create_scalar_type("int")], create_any_type())
@@ -385,6 +389,42 @@ def tc_suggest_name(tc: TypeChecker, name: string) -> string {
     return "assign it before use (x = ...), or check the spelling"
 }
 
+# C library functions that Nova programs may call directly; the linker resolves them (a typo still fails there).
+def tc_is_libc_name(name: string) -> int {
+    known = ["exit", "abort", "malloc", "calloc", "realloc", "free", "puts", "printf", "putchar", "getchar",
+             "memcpy", "memset", "memmove", "memcmp", "strlen", "strcmp", "strncmp", "strcpy", "strncpy", "strcat",
+             "atoi", "atol", "rand", "srand", "sleep", "usleep", "system", "getenv", "fopen", "fclose", "fread",
+             "fwrite", "fputs", "fgets", "fflush", "time", "clock", "qsort", "sqrt", "pow", "sin", "cos", "floor", "ceil"]
+    i = 0
+    while i < len(known) {
+        if known[i] == name { return 1 }
+        i = i + 1
+    }
+    return 0
+}
+
+def tc_suggest_func(tc: TypeChecker, name: string) -> string {
+    best = ""
+    best_d = 3
+    names = tc.func_name_map.keys()
+    i = 0
+    while i < len(names) {
+        cand = names[i]
+        diff = _slen(cand) - len(name)
+        if diff < 0 { diff = 0 - diff }
+        if diff <= 2 and cand != name {
+            d = _edit_distance(name, cand)
+            if d < best_d {
+                best_d = d
+                best = cand
+            }
+        }
+        i = i + 1
+    }
+    if best != "" { return "did you mean '" + best + "()'?" }
+    return "define it with  def " + name + "(...)  or import the module that provides it"
+}
+
 def suggest_param_name(candidates: list, name: string) -> string {
     best = ""
     best_d = 4
@@ -408,6 +448,18 @@ def suggest_param_name(candidates: list, name: string) -> string {
 
 # Report every recorded read that nothing in the current function/program ever defines
 def tc_flush_pending(tc: TypeChecker) {
+    # A call to a known function whose name is assigned as a variable LATER in the same function: the code
+    # generator treats every name assigned anywhere in a function as a local, so `let x = x(1)` calls through the
+    # (still empty) local instead of the function and jumps to address 0 at run time.
+    si = 0
+    while si < len(tc.shadow_calls) {
+        sc = tc.shadow_calls[si]
+        if tc.fn_assigned.has(sc[0]) == 1 {
+            errors.err("Name", tc.filename, sc[1], "cannot call '" + sc[0] + "': a variable named '" + sc[0] + "' is assigned in this function, so the call goes through the variable, not the function " + sc[0] + "()", "rename the variable (for example a shorter name such as tx instead of " + sc[0] + ")", sc[2])
+        }
+        si = si + 1
+    }
+    tc.shadow_calls = []
     i = 0
     while i < len(tc.pending) {
         rec = tc.pending[i]
@@ -729,7 +781,9 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         outer_pending = tc.pending
         outer_assigned = tc.fn_assigned
         outer_missing = tc.fn_missing
+        outer_shadow = tc.shadow_calls
         tc.fn_missing = {}
+        tc.shadow_calls = []
         tc.pending = []
         tc.fn_assigned = {}
         tc.fn_assigned.set("self", 1)
@@ -762,6 +816,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
         tc.pending = outer_pending
         tc.fn_assigned = outer_assigned
         tc.fn_missing = outer_missing
+        tc.shadow_calls = outer_shadow
 
         tc.current_ret = prev_ret
         tc_pop_env(tc)
@@ -877,7 +932,21 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
             }
             return tc_find_struct(tc, node.val_str)
         }
+        shadow_t = tc_get_var(tc, node.val_str)
         func_type = tc_find_func(tc, node.val_str)
+        if func_type != 0 and shadow_t != 0 and shadow_t.kind == "scalar" {
+            # codegen calls the *variable* when one is in scope, so this used to compile and then crash at run time
+            errors.err("Name", tc.filename, node.line, "cannot call '" + node.val_str + "': here it is a variable of type " + shadow_t.name + ", not the function " + node.val_str + "()", "a parameter or local named '" + node.val_str + "' hides the function; rename the variable so the call reaches the function", node.col)
+            i = 0
+            while i < len(node.args) {
+                tc_visit(tc, node.args[i])
+                i = i + 1
+            }
+            return create_any_type()
+        }
+        if func_type != 0 and shadow_t == 0 {
+            tc.shadow_calls.append([node.val_str, node.line, node.col])
+        }
         if func_type != 0 {
             nf = 0
             if tc.named_func_map.has(node.val_str) == 1 {
@@ -915,6 +984,10 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
                 i = i + 1
             }
             return type_ret(var_t)
+        }
+        # (an int variable that is not a declared function is an indirect call through a raw address: h = mem.read_u64(..); h(x))
+        if var_t == 0 and tc.strict_calls == 1 and tc.global_names.has(node.val_str) == 0 and tc_is_libc_name(node.val_str) == 0 {
+            errors.err("Name", tc.filename, node.line, "call to undefined function '" + node.val_str + "'", tc_suggest_func(tc, node.val_str), node.col)
         }
         i = 0
         while i < len(node.args) {
@@ -1229,6 +1302,8 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
 
     if h == 34 {
         inst_t = tc_find_struct(tc, node.val_str)
+        outer_shadow_cls = tc.shadow_calls
+        tc.shadow_calls = []
         m_idx = 0
         while m_idx < len(node.methods) {
             m = node.methods[m_idx]
@@ -1253,6 +1328,7 @@ def tc_visit_real(tc: TypeChecker, node: AstNode) -> Type {
             tc_pop_env(tc)
             m_idx = m_idx + 1
         }
+        tc.shadow_calls = outer_shadow_cls
         return create_scalar_type("void")
     }
 
@@ -1462,13 +1538,27 @@ def tc_check(tc: TypeChecker, ast: list) {
         i = i + 1
     }
 
-    # Pass 2: Infer everything
+    # Pass 2: Infer everything. Diagnostics name the file a function was written in (not the file being built),
+    # and calls to undefined functions are only reported in user code: the standard library reaches C runtime
+    # entry points that the code generator resolves itself.
+    main_file = tc.filename
     i = 0
     while i < len(ast) {
         stmt = ast[i]
+        stmt_file = ""
+        if stmt.kind == "Function" { stmt_file = stmt.file }
+        if stmt.kind == "ClassDef" and stmt.methods != 0 and len(stmt.methods) > 0 { stmt_file = stmt.methods[0].file }
+        if stmt_file != "" {
+            tc.filename = stmt_file
+        } else {
+            tc.filename = main_file
+        }
+        tc.strict_calls = 1
+        if str_contains(tc.filename, "stdlib") == 1 { tc.strict_calls = 0 }
         tc_visit(tc, stmt)
         i = i + 1
     }
+    tc.filename = main_file
     tc_flush_pending(tc)
     tc_pop_env(tc)
 }

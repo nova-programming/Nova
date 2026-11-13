@@ -1,0 +1,89 @@
+# =============================================================================
+# Nova Service Framework (NSF) Client SDK (stdlib/nsf.nv)
+# Pure native IPC client for Nova OS services (NovaNotify)
+# =============================================================================
+import system
+
+const ICON_INFO    = 0
+const ICON_SUCCESS = 1
+const ICON_WARN    = 2
+const ICON_APP     = 3
+
+extern def nova_nsf_call(req_ptr: int) -> int
+extern def nova_sleep(ms: int) -> int
+
+def nsfPause(ms: int) { nova_sleep(ms) }   # not sleep_ms: that name is declared by the time module
+
+def notify(title: string, message: string, icon: int) -> bool {
+    return notifyShow(title, message, icon)
+}
+
+def notifyShow(title: string, message: string, icon: int) -> bool {
+    let req = system.system_alloc(40)
+    let payload = system.system_alloc(256)
+    if req == 0 or payload == 0 {
+        if req != 0 { system.system_free(req) }
+        if payload != 0 { system.system_free(payload) }
+        return false
+    }
+
+    mem.write_u32(payload + 0, icon)
+    mem.write_u32(payload + 4, 3000)
+
+    let t_ptr = title.ptr
+    let t_len = 0
+    while t_len < 63 and mem.read_u8(t_ptr + t_len) != 0 {
+        mem.write_u8(payload + 8 + t_len, mem.read_u8(t_ptr + t_len))
+        t_len = t_len + 1
+    }
+    mem.write_u8(payload + 8 + t_len, 0)
+
+    let m_off = 8 + t_len + 1
+    let m_ptr = message.ptr
+    let m_len = 0
+    while m_len < 127 and m_off + m_len < 255 and mem.read_u8(m_ptr + m_len) != 0 {
+        mem.write_u8(payload + m_off + m_len, mem.read_u8(m_ptr + m_len))
+        m_len = m_len + 1
+    }
+    mem.write_u8(payload + m_off + m_len, 0)
+    let total_len = m_off + m_len + 1
+
+    mem.write_u32(req + 0, 1)            # version = 1
+    mem.write_u32(req + 4, 2)            # service = 2 (nova.notify)
+    mem.write_u32(req + 8, 1)            # opcode = 1 (SHOW)
+    mem.write_u32(req + 12, 0)           # flags = 0
+    mem.write_u64(req + 16, payload)     # in_ptr
+    mem.write_u64(req + 24, 0)           # out_ptr
+    mem.write_u32(req + 32, total_len)   # in_len
+    mem.write_u32(req + 36, 0)           # out_max
+
+    let res = nova_nsf_call(req)
+    let tries = 0
+    while res == -11 and tries < 5 {      # -EAGAIN: rate limited, try again shortly
+        nsfPause(60)
+        res = nova_nsf_call(req)
+        tries = tries + 1
+    }
+    system.system_free(payload)
+    system.system_free(req)
+    if res == 0 { return true }
+    return false
+}
+
+def notifyDismiss() -> bool {
+    let req = system.system_alloc(40)
+    if req == 0 { return false }
+    mem.write_u32(req + 0, 1)
+    mem.write_u32(req + 4, 2)
+    mem.write_u32(req + 8, 2)
+    mem.write_u32(req + 12, 0)
+    mem.write_u64(req + 16, 0)
+    mem.write_u64(req + 24, 0)
+    mem.write_u32(req + 32, 0)
+    mem.write_u32(req + 36, 0)
+    let res = nova_nsf_call(req)
+    system.system_free(req)
+    if res == 0 { return true }
+    return false
+}
+

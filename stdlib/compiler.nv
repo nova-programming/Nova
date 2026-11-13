@@ -1236,7 +1236,69 @@ def inline_constants_ast(ast: list) -> list {
     return ast
 }
 
+# `nova test`: the file's declarations stay, its own top-level statements and main() are replaced by a runner
+# that calls every lowered `test` block (parse_test_block) and exits non-zero when one fails.
+def add_test_runner(ast: list, path: string) -> list {
+    names = []
+    i = 0
+    while i < len(ast) {
+        node = ast[i]
+        if node.kind == "Function" and len(node.val_str) > 12 and str_sub(node.val_str, 0, 12) == "__nova_test_" {
+            names.append(node.body[0].left.val_str)
+        }
+        i = i + 1
+    }
+    n = len(names)
+    if n == 0 {
+        errors.err("Test", path, 0, "no test blocks found in this file", "add one, e.g.  test \"adds\" \{ assert(1 + 1 == 2) \}", 0)
+        return ast
+    }
+    src = "import system\n__nova_failed = 0\n"
+    src = src + "print(\"running " + str(n) + " test(s)\")\n"
+    ti = 0
+    while ti < n {
+        src = src + "print(\"test " + names[ti] + "\")\n"
+        src = src + "if __nova_test_" + str(ti) + "() != 0 \{\n"
+        src = src + "    __nova_failed = __nova_failed + 1\n    print(\"  FAILED\")\n"
+        src = src + "\} else \{\n"
+        src = src + "    print(\"  ok\")\n"
+        src = src + "\}\n"
+        ti = ti + 1
+    }
+    src = src + "print(str(" + str(n) + " - __nova_failed) + \" passed, \" + str(__nova_failed) + \" failed\")\n"
+    src = src + "if __nova_failed != 0 \{\n"
+    src = src + "    sys_exit(1)\n"
+    src = src + "\}\n"
+    runner = parse(tokenize(src), path)
+
+    kept = [runner[0]]
+    i = 0
+    while i < len(ast) {
+        node = ast[i]
+        k = node.kind
+        keep = 1
+        if k == "Print" or k == "PrintD" or k == "While" or k == "ForLoop" or k == "ForIn" or k == "IfElse" or k == "Call" or k == "MethodCall" or k == "Block" or k == "Switch" { keep = 0 }
+        if k == "Function" and node.val_str == "main" {
+            node.val_str = "__nova_user_main"
+            node.name = "__nova_user_main"
+        }
+        if keep == 1 { kept.append(node) }
+        i = i + 1
+    }
+    ri = 1
+    while ri < len(runner) {
+        kept.append(runner[ri])
+        ri = ri + 1
+    }
+    return kept
+}
+
 def compile_file(path: string, debug_mode: int, target_arch: string, target_os: string) -> list {
+    return compile_file_mode(path, debug_mode, target_arch, target_os, 0)
+}
+
+def compile_file_mode(path: string, debug_mode: int, target_arch: string, target_os: string, test_run: int) -> list {
+
     # This self-hosted compiler has exactly one codegen backend statically compiled into it --
     # whichever of stdlib/backend/{x86_64,arm64}/codegen.nv `import codegen` resolved to at THIS
     # binary's own build time, never at this build invocation (see codegen_native_arch's
@@ -1257,7 +1319,7 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     current_stamp = build_stamp(path)
     cached_size_str = cache_key(cached_lines, path)
     cached_size = 0
-    if cached_size_str != "" {
+    if cached_size_str != "" and test_run == 0 {
         if len(current_stamp) > 0 and cached_size_str == current_stamp {
             print("[cached] " + path + " is up to date" + "\n")
             ext = ""
@@ -1284,7 +1346,10 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
     print("[1/5] done: " + str(len(tokens)) + " tokens")
 
     print("[2/5] Parsing " + path)
-    ast = parse(tokens, path)
+    test_mode = "drop"
+    if test_run == 1 { test_mode = "run" }
+    ast = parse_with_tests(tokens, path, test_mode)
+    if test_run == 1 { ast = add_test_runner(ast, path) }
     print("[2/5] done: " + str(len(ast)) + " top-level nodes")
 
     print("[3/5] Resolving imports")
@@ -1338,7 +1403,7 @@ def compile_file(path: string, debug_mode: int, target_arch: string, target_os: 
         i = i + 1
     }
     if found == 0 { new_cached_lines.append(new_entry) }
-    save_cache(cache_file, new_cached_lines)
+    if test_run == 0 { save_cache(cache_file, new_cached_lines) }
 
     return asm
 }
@@ -1358,7 +1423,7 @@ def check_syntax_source(source: string, filename: string) -> int {
 def check_source(source: string, filename: string, target_arch: string, target_os: string) -> int {
     reset_errors()
     tokens = tokenize(source)
-    ast = parse(tokens, filename)
+    ast = parse_with_tests(tokens, filename, "keep")
     visited = []
     module_exports = {}
     module_candidates = {}
@@ -1688,7 +1753,15 @@ def get_compiler_dir() -> string {
 }
 
 def compile_to_exe(input_path: string, output_path: string, debug_mode: int, target_arch: string, target_os: string) {
-    asm = compile_file(input_path, debug_mode, target_arch, target_os)
+    compile_to_exe_mode(input_path, output_path, debug_mode, target_arch, target_os, 0)
+}
+
+def compile_to_exe_mode(input_path: string, output_path: string, debug_mode: int, target_arch: string, target_os: string, test_run: int) {
+    if target_os == "nova" {
+        build_nva(input_path, output_path, debug_mode, target_arch)
+        return
+    }
+    asm = compile_file_mode(input_path, debug_mode, target_arch, target_os, test_run)
     if len(asm) == 0 { return }
     write_lines(asm, input_path + ".s")
     if target_os == "bare" {
@@ -1733,6 +1806,124 @@ def compile_to_exe(input_path: string, output_path: string, debug_mode: int, tar
         system.system_exec(gcc_cmd)
         _verify_output(output_path)
     }
+    print("Compiled: " + input_path + " -> " + output_path)
+}
+
+# ---- `nova build app.nv --os nova -o app.nva` -------------------------------------------------------------------------
+# A Nova OS application package. The manifest comes from comment lines in the source:
+#     #nva name=Counter id=dev.nova.counter version=1.0 window=320x200 perms=fs icon=app
+# (in `name` an underscore is a space). The runtime files (crt0.s, libnova.s, user.ld, nvapack.py) come from the Nova OS
+# checkout: $NOVA_OS_DIR, or ../baremetal_os next to the compiler.
+def nva_replace_char(text: string, from_ch: string, to_ch: string) -> string {
+    out = ""
+    i = 0
+    while i < len(text) {
+        if text[i] == from_ch { out = out + to_ch } else { out = out + text[i] }
+        i = i + 1
+    }
+    return out
+}
+
+def nva_directive_args(source: string) -> string {
+    args = ""
+    has_name = 0
+    i = 0
+    n = len(source)
+    while i < n {
+        j = i
+        while j < n and source[j] != "\n" { j = j + 1 }
+        line = str_sub(source, i, j)
+        if len(line) > 5 and char_code(line, 0) == 35 and str_sub(line, 1, 5) == "nva " {
+            k = 5
+            while k < len(line) {
+                while k < len(line) and (line[k] == " " or line[k] == "\r") { k = k + 1 }
+                e = k
+                while e < len(line) and line[e] != " " and line[e] != "\r" { e = e + 1 }
+                part = str_sub(line, k, e)
+                eq = 0
+                while eq < len(part) and part[eq] != "=" { eq = eq + 1 }
+                if eq > 0 and eq < len(part) {
+                    key = str_sub(part, 0, eq)
+                    val = str_sub(part, eq + 1, len(part))
+                    if key == "name" {
+                        val = nva_replace_char(val, "_", " ")
+                        has_name = 1
+                    }
+                    args = args + " --" + key + " " + _quote(val)
+                }
+                k = e
+            }
+        }
+        i = j + 1
+    }
+    if has_name == 0 { args = args + " --name " + _quote("App") }
+    return args
+}
+
+def nva_objcopy_path(gcc_name: string) -> string {
+    clean = gcc_name
+    n = len(clean)
+    if n > 2 and str_sub(clean, 0, 1) == "\"" and str_sub(clean, n - 1, n) == "\"" {
+        clean = str_sub(clean, 1, n - 1)
+        n = len(clean)
+    }
+    if n >= 7 and str_sub(clean, n - 7, n) == "gcc.exe" { return str_sub(clean, 0, n - 7) + "objcopy.exe" }
+    if n >= 3 and str_sub(clean, n - 3, n) == "gcc" { return str_sub(clean, 0, n - 3) + "objcopy" }
+    return "objcopy"
+}
+
+def nva_step_failed(what: string, produced: string) -> int {
+    if file_exists(produced) == 1 { return 0 }
+    print("ERROR: nova build --os nova: " + what + " failed (" + produced + " was not produced)")
+    sys_exit(1)
+    return 1
+}
+
+def build_nva(input_path: string, output_path: string, debug_mode: int, target_arch: string) {
+    fd = sys_open(input_path, "r")
+    source = ""
+    if fd != 0 {
+        source = sys_read(fd)
+        sys_close(fd)
+    }
+    asm = compile_file(input_path, debug_mode, target_arch, "bare")
+    if len(asm) == 0 { return }
+    write_lines(asm, input_path + ".s")
+
+    compiler_dir = get_compiler_dir()
+    os_dir = system.system_env_get("NOVA_OS_DIR")
+    if len(os_dir) == 0 { os_dir = compiler_dir + "/../baremetal_os" }
+    if file_exists(os_dir + "/user.ld") == 0 {
+        print("ERROR: nova build --os nova needs the Nova OS runtime files (user.ld, user/crt0.s, user/libnova.s, nvapack.py)")
+        print("  -> set NOVA_OS_DIR to your baremetal_os folder (looked in " + os_dir + ")")
+        sys_exit(1)
+    }
+    host = sys_platform()
+    gcc_name = _find_gcc(host, target_arch, compiler_dir)
+    objcopy = nva_objcopy_path(gcc_name)
+    base = str_sub(input_path, 0, len(input_path) - 3)
+    obj = base + ".o"
+    pe = base + ".pe"
+    elf = base + ".elf"
+    crt0 = base + ".crt0.o"
+    libnova = base + ".libnova.o"
+
+    print("Assembling and linking for Nova OS...")
+    system.system_exec(gcc_name + " -c " + _quote(os_dir + "/user/crt0.s") + " -o " + _quote(crt0) + " -m64 -ffreestanding")
+    system.system_exec(gcc_name + " -c " + _quote(os_dir + "/user/libnova.s") + " -o " + _quote(libnova) + " -m64 -ffreestanding")
+    system.system_exec(gcc_name + " -c " + _quote(input_path + ".s") + " -o " + _quote(obj) + " -m64 -ffreestanding -mno-red-zone")
+    nva_step_failed("assembling the program", obj)
+    system.system_exec(gcc_name + " -nostdlib -m64 -Wl,--image-base,0x0 -Wl,-T," + _quote(os_dir + "/user.ld") + " " + _quote(crt0) + " " + _quote(libnova) + " " + _quote(obj) + " -o " + _quote(pe))
+    nva_step_failed("linking", pe)
+    system.system_exec(_quote(objcopy) + " -O elf64-x86-64 " + _quote(pe) + " " + _quote(elf))
+    nva_step_failed("objcopy", elf)
+    system.system_exec("python " + _quote(os_dir + "/nvapack.py") + " pack " + _quote(elf) + " -o " + _quote(output_path) + nva_directive_args(source))
+    nva_step_failed("packing the .nva", output_path)
+    sys_delete(crt0)
+    sys_delete(libnova)
+    sys_delete(obj)
+    sys_delete(pe)
+    sys_delete(elf)
     print("Compiled: " + input_path + " -> " + output_path)
 }
 
