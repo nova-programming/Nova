@@ -67,3 +67,7 @@ build/
 dist/
 
 .selfhost_cache/
+ci-tmp-test*
+*_preview.bmp
+.nova_build_errors*
+*_shot.bmp

@@ -69,12 +69,23 @@ const UI_EV_KEY   = 2
 
 # ---- fixed layout of the shared display page (must match ui/clients.nv in the OS) ----------------------------
 const UI_PAGE      = 0x74C000     # user address of the display list
-const UI_MAGIC     = 0x3149554E   # "NUI1"
-const UI_CMDS      = 0x74C010
-const UI_POOL      = 0x74E010     # UI_PAGE + 8208
-const UI_POOL_SIZE = 7920
+const UI_MAGIC     = 0x3249554E   # "NUI2"
+const UI_CMDS      = 0x74C020
+const UI_HITS      = 0x74E020     # UI_PAGE + 8224
+const UI_POOL      = 0x74E420     # UI_PAGE + 9248
+const UI_POOL_SIZE = 6880
 const UI_MAX_CMDS  = 256
+const UI_MAX_HITS  = 64
 const UI_STATE     = 0x74FF00     # 256 bytes of library state (the OS never reads it)
+
+# primitives
+const OP_CLEAR     = 1
+const OP_RECT      = 2
+const OP_TEXT      = 3
+const OP_LINE      = 4
+const OP_CLIP_PUSH = 5
+const OP_CLIP_POP  = 6
+const OP_IMAGE     = 7
 
 # state offsets
 const ST_GAP        = 0
@@ -98,6 +109,39 @@ const ST_DEPTH      = 80
 const ST_OVERFLOW   = 84
 const ST_ROW_COL_I  = 88
 const ST_FOCUS      = 224     # id of the input that has keyboard focus (-1: none); 224..255 is free
+const ST_HOVER      = 228     # id of currently hovered hit-region (-1: none)
+const ST_SCROLL_Y   = 232     # current scroll y offset
+const ST_ACTIVE_WIN = 236     # current active window handle/slot
+const ST_STATE_BASE = 240     # reactive state block slots: 240..255 (4 x u32)
+
+# ---- design tokens ---------------------------------------------------------------------------------------------
+const TONE_NEUTRAL  = 0
+const TONE_PRIMARY  = 1
+const TONE_SUCCESS  = 2
+const TONE_WARNING  = 3
+const TONE_DANGER   = 4
+
+const SIZE_XS = 1
+const SIZE_SM = 2
+const SIZE_MD = 3
+const SIZE_LG = 4
+const SIZE_XL = 5
+
+const RADIUS_NONE = 0
+const RADIUS_SM   = 4
+const RADIUS_MD   = 8
+const RADIUS_LG   = 14
+const RADIUS_FULL = 999
+
+const ELEVATION_FLAT     = 0
+const ELEVATION_RAISED   = 1
+const ELEVATION_FLOATING = 2
+
+const SPACE_XS = 4
+const SPACE_SM = 8
+const SPACE_MD = 12
+const SPACE_LG = 16
+const SPACE_XL = 24
 
 # ---- default values -------------------------------------------------------------------------------------------
 const UI_DEFAULT_GAP    = 12
@@ -139,6 +183,40 @@ def ui_padding() -> int { return padding() }
 def ui_button_height() -> int { return buttonHeight() }
 def ui_width() -> int { return width() }
 def ui_height() -> int { return height() }
+
+def toneColor(tone: int, light: int = 0) -> int {
+    if tone == TONE_PRIMARY { return UI_ACCENT }
+    if tone == TONE_SUCCESS { return 0x0110B981 }
+    if tone == TONE_WARNING { return 0x01F59E0B }
+    if tone == TONE_DANGER { return 0x01EF4444 }
+    return UI_MUTED
+}
+
+# ---- reactive state API ----------------------------------------------------------------------------------------
+def stateGet(slot: int) -> int {
+    if slot < 0 or slot >= 4 { return 0 }
+    return mem.read_u32(UI_STATE + ST_STATE_BASE + slot * 4)
+}
+
+def stateSet(slot: int, val: int) {
+    if slot >= 0 and slot < 4 {
+        mem.write_u32(UI_STATE + ST_STATE_BASE + slot * 4, val)
+    }
+}
+
+def stateToggle(slot: int) -> bool {
+    let cur = stateGet(slot)
+    let nxt = 1
+    if cur != 0 { nxt = 0 }
+    stateSet(slot, nxt)
+    return nxt == 1
+}
+
+def isHovered(id: string) -> bool {
+    let target = uiHashId(id)
+    if target < 0 { return false }
+    return uiState(ST_HOVER) == target
+}
 
 # ---- container hierarchy stack --------------------------------------------------------------------------------
 def pushContainer(cType: int, cX: int, cY: int, cW: int) {
@@ -203,10 +281,14 @@ def advanceContainerY(itemH: int) -> int {
 }
 
 # ---- window lifecycle ------------------------------------------------------------------------------------------
+# The OS (and the desktop backend) publish the content size in header words +20 / +24 when the window is created.
+# From the first frame on those words mean hit_count / cap_mask, so the size must be read once, right after
+# nova_create_window and BEFORE the header is initialised (window() does exactly that). Calling this later reads the
+# wrong thing and does nothing.
 def syncSize() {
     let w = mem.read_u32(UI_PAGE + 20)
     let h = mem.read_u32(UI_PAGE + 24)
-    if w > 0 and h > 0 {
+    if w > 0 and h > 0 and w < 8192 and h < 8192 {
         uiSetState(ST_W, w)
         uiSetState(ST_H, h)
     }
@@ -216,21 +298,30 @@ def ui_sync_size() { syncSize() }
 def window(title: string = "App", width: int = 340, height: int = 220) -> int {
     let id = nova_create_window(width, height, title.ptr)
     uiSetState(ST_WIN, id)
+    let real_w = mem.read_u32(UI_PAGE + 20)      # content size the OS gave the window (the manifest decides, not the call)
+    let real_h = mem.read_u32(UI_PAGE + 24)
     uiSetState(ST_GAP, UI_DEFAULT_GAP)
     uiSetState(ST_PAD, UI_DEFAULT_PAD)
     uiSetState(ST_RADIUS, UI_DEFAULT_RADIUS)
     uiSetState(ST_BTN_H, UI_DEFAULT_BTN_H)
     uiSetState(ST_W, width)
     uiSetState(ST_H, height)
+    if real_w > 0 and real_h > 0 and real_w < 8192 and real_h < 8192 {
+        uiSetState(ST_W, real_w)
+        uiSetState(ST_H, real_h)
+    }
     uiSetState(ST_DEPTH, 0)
     uiSetState(ST_OVERFLOW, 0)
     uiSetState(ST_CLICKED_ID, 0 - 1)
     uiSetState(ST_FOCUS, 0 - 1)
     mem.write_u32(UI_PAGE + 0, UI_MAGIC)
-    mem.write_u32(UI_PAGE + 4, 0)
+    mem.write_u32(UI_PAGE + 4, 2)
     mem.write_u32(UI_PAGE + 8, 0)
     mem.write_u32(UI_PAGE + 12, 0)
-    syncSize()
+    mem.write_u32(UI_PAGE + 16, 0)
+    mem.write_u32(UI_PAGE + 20, 0)
+    mem.write_u32(UI_PAGE + 24, 15)
+    mem.write_u32(UI_PAGE + 28, 0)
     return id
 }
 def ui_open(title: string, width: int, height: int) -> int {
@@ -263,9 +354,14 @@ def ui_theme(accent: int = -1, gap: int = -1, padding: int = -1, radius: int = -
 
 # ---- frame management ------------------------------------------------------------------------------------------
 def begin() {
+    mem.write_u32(UI_PAGE + 0, UI_MAGIC)
+    mem.write_u32(UI_PAGE + 4, 2)
     mem.write_u32(UI_PAGE + 8, 0)      # frame not ready
-    mem.write_u32(UI_PAGE + 4, 0)
-    mem.write_u32(UI_PAGE + 12, 0)
+    mem.write_u32(UI_PAGE + 12, 0)     # cmd_count = 0
+    mem.write_u32(UI_PAGE + 16, 0)     # pool_used = 0
+    mem.write_u32(UI_PAGE + 20, 0)     # hit_count = 0
+    mem.write_u32(UI_PAGE + 24, 15)    # cap_mask = 0x0F
+    mem.write_u32(UI_PAGE + 28, 0)     # scroll_y = 0
 }
 def ui_begin() { begin() }
 
@@ -309,7 +405,7 @@ def ui_hash_id(s: string) -> int { return uiHashId(s) }
 # ---- low level buffers -----------------------------------------------------------------------------------------
 def poolAdd(s: string) -> int {
     let p = s.ptr
-    let used = mem.read_u32(UI_PAGE + 12)
+    let used = mem.read_u32(UI_PAGE + 16)
     let n = 0
     while mem.read_u8(p + n) != 0 { n = n + 1 }
     if used + n + 1 > UI_POOL_SIZE { return 0 - 1 }
@@ -319,18 +415,18 @@ def poolAdd(s: string) -> int {
         i = i + 1
     }
     mem.write_u8(UI_POOL + used + n, 0)
-    mem.write_u32(UI_PAGE + 12, used + n + 1)
+    mem.write_u32(UI_PAGE + 16, used + n + 1)
     return used
 }
 def ui_pool_add(s: string) -> int { return poolAdd(s) }
 
 def poolAddInt(val: int) -> int {
-    let used = mem.read_u32(UI_PAGE + 12)
+    let used = mem.read_u32(UI_PAGE + 16)
     if val == 0 {
         if used + 2 > UI_POOL_SIZE { return 0 - 1 }
         mem.write_u8(UI_POOL + used + 0, 48) # '0'
         mem.write_u8(UI_POOL + used + 1, 0)
-        mem.write_u32(UI_PAGE + 12, used + 2)
+        mem.write_u32(UI_PAGE + 16, used + 2)
         return used
     }
     let temp = UI_STATE + 192
@@ -357,14 +453,14 @@ def poolAddInt(val: int) -> int {
         k = k + 1
     }
     mem.write_u8(UI_POOL + used + j, 0)
-    mem.write_u32(UI_PAGE + 12, used + j + 1)
+    mem.write_u32(UI_PAGE + 16, used + j + 1)
     return used
 }
 
 def cmd(op: int) -> int {
-    let n = mem.read_u32(UI_PAGE + 4)
+    let n = mem.read_u32(UI_PAGE + 12)
     if n >= UI_MAX_CMDS { return 0 }
-    mem.write_u32(UI_PAGE + 4, n + 1)
+    mem.write_u32(UI_PAGE + 12, n + 1)
     let c = UI_CMDS + n * 32
     mem.write_u32(c + 0, op)
     mem.write_u32(c + 4, 0)
@@ -378,15 +474,26 @@ def cmd(op: int) -> int {
 }
 def ui_cmd(op: int) -> int { return cmd(op) }
 
-# ---- drawing commands ------------------------------------------------------------------------------------------
+def uiHitRegion(x: int, y: int, w: int, h: int, id: int, flags: int = 1) {
+    let count = mem.read_u32(UI_PAGE + 20)
+    if count >= UI_MAX_HITS { return }
+    mem.write_u32(UI_PAGE + 20, count + 1)
+    let p = UI_HITS + count * 16
+    mem.write_u32(p + 0, (x & 0xFFFF) | ((y & 0xFFFF) << 16))
+    mem.write_u32(p + 4, (w & 0xFFFF) | ((h & 0xFFFF) << 16))
+    mem.write_u32(p + 8, id)
+    mem.write_u32(p + 12, flags)
+}
+
+# ---- drawing primitives ----------------------------------------------------------------------------------------
 def clear(color: int = 0) {
-    let c = cmd(1)
+    let c = cmd(OP_CLEAR)
     if c != 0 { mem.write_u32(c + 4, color) }
 }
 def ui_clear(color: int = 0) { clear(color) }
 
-def rect(x: int, y: int, width: int, height: int, color: int = 0, radius: int = 0) {
-    let c = cmd(2)
+def rect(x: int, y: int, width: int, height: int, color: int = 0, radius: int = 0, border: int = 0) {
+    let c = cmd(OP_RECT)
     if c != 0 {
         mem.write_u32(c + 4, x)
         mem.write_u32(c + 8, y)
@@ -394,20 +501,54 @@ def rect(x: int, y: int, width: int, height: int, color: int = 0, radius: int = 
         mem.write_u32(c + 16, height)
         mem.write_u32(c + 20, radius)
         mem.write_u32(c + 24, color)
+        mem.write_u32(c + 28, border)
     }
 }
 def ui_rect(x: int, y: int, width: int, height: int, color: int = 0, radius: int = 0) {
-    rect(x, y, width, height, color, radius)
+    rect(x, y, width, height, color, radius, 0)
 }
 
-def group(x: int, y: int, width: int, height: int) {
-    let c = cmd(3)
+def textRaw(x: int, y: int, strOff: int, color: int = 0, flags: int = 0, maxW: int = 0, align: int = 0) {
+    let c = cmd(OP_TEXT)
+    if c != 0 {
+        mem.write_u32(c + 4, x)
+        mem.write_u32(c + 8, y)
+        mem.write_u32(c + 12, strOff)
+        mem.write_u32(c + 16, color)
+        mem.write_u32(c + 20, flags)
+        mem.write_u32(c + 24, maxW)
+        mem.write_u32(c + 28, align)
+    }
+}
+
+def line(x0: int, y0: int, x1: int, y1: int, color: int = 0, width: int = 1) {
+    let c = cmd(OP_LINE)
+    if c != 0 {
+        mem.write_u32(c + 4, x0)
+        mem.write_u32(c + 8, y0)
+        mem.write_u32(c + 12, x1)
+        mem.write_u32(c + 16, y1)
+        mem.write_u32(c + 20, color)
+        mem.write_u32(c + 24, width)
+    }
+}
+
+def clipPush(x: int, y: int, width: int, height: int) {
+    let c = cmd(OP_CLIP_PUSH)
     if c != 0 {
         mem.write_u32(c + 4, x)
         mem.write_u32(c + 8, y)
         mem.write_u32(c + 12, width)
         mem.write_u32(c + 16, height)
     }
+}
+
+def clipPop() {
+    cmd(OP_CLIP_POP)
+}
+
+def group(x: int, y: int, width: int, height: int) {
+    rect(x, y, width, height, UI_DEFAULT, 10, UI_MUTED)
 }
 def ui_group(x: int, y: int, width: int, height: int) { group(x, y, width, height) }
 
@@ -419,21 +560,12 @@ def text(content: string = "", align: int = 0, bold: bool = false, color: int = 
     if maxWidth > 0 { w = maxWidth }
     let off = poolAdd(content)
     if off < 0 { return }
-    let c = cmd(4)
-    if c != 0 {
-        let bVal = 0
-        if bold == true { bVal = 1 }
-        let oVal = 0
-        if overflow == true { oVal = 1 }
-        let flags = bVal | (oVal << 1)
-        mem.write_u32(c + 4, x)
-        mem.write_u32(c + 8, y)
-        mem.write_u32(c + 12, color)
-        mem.write_u32(c + 16, w)
-        mem.write_u32(c + 20, off)
-        mem.write_u32(c + 24, flags)
-        mem.write_u32(c + 28, align)
-    }
+    let bVal = 0
+    if bold == true { bVal = 1 }
+    let oVal = 0
+    if overflow == true { oVal = 1 }
+    let flags = bVal | (oVal << 1)
+    textRaw(x, y, off, color, flags, w, align)
 }
 
 def textInt(content: int = 0, align: int = 0, bold: bool = false, color: int = 0, maxWidth: int = -1, overflow: bool = false) {
@@ -444,21 +576,12 @@ def textInt(content: int = 0, align: int = 0, bold: bool = false, color: int = 0
     if maxWidth > 0 { w = maxWidth }
     let off = poolAddInt(content)
     if off < 0 { return }
-    let c = cmd(4)
-    if c != 0 {
-        let bVal = 0
-        if bold == true { bVal = 1 }
-        let oVal = 0
-        if overflow == true { oVal = 1 }
-        let flags = bVal | (oVal << 1)
-        mem.write_u32(c + 4, x)
-        mem.write_u32(c + 8, y)
-        mem.write_u32(c + 12, color)
-        mem.write_u32(c + 16, w)
-        mem.write_u32(c + 20, off)
-        mem.write_u32(c + 24, flags)
-        mem.write_u32(c + 28, align)
-    }
+    let bVal = 0
+    if bold == true { bVal = 1 }
+    let oVal = 0
+    if overflow == true { oVal = 1 }
+    let flags = bVal | (oVal << 1)
+    textRaw(x, y, off, color, flags, w, align)
 }
 
 def textCenter(content: string = "", color: int = 0, bold: bool = false, overflow: bool = false) {
@@ -471,21 +594,12 @@ def textRight(content: string = "", color: int = 0, bold: bool = false, overflow
 def ui_text(x: int, y: int, s: string, color: int = 0, bold: int = 0, align: int = 0, max_w: int = 0, overflow: int = 0) {
     let off = poolAdd(s)
     if off < 0 { return }
-    let c = cmd(4)
-    if c != 0 {
-        if max_w <= 0 {
-            max_w = stackW()
-            if max_w <= 0 { max_w = width() - x }
-        }
-        let flags = (bold & 1) | ((overflow & 1) << 1)
-        mem.write_u32(c + 4, x)
-        mem.write_u32(c + 8, y)
-        mem.write_u32(c + 12, color)
-        mem.write_u32(c + 16, max_w)
-        mem.write_u32(c + 20, off)
-        mem.write_u32(c + 24, flags)
-        mem.write_u32(c + 28, align)
+    if max_w <= 0 {
+        max_w = stackW()
+        if max_w <= 0 { max_w = width() - x }
     }
+    let flags = (bold & 1) | ((overflow & 1) << 1)
+    textRaw(x, y, off, color, flags, max_w, align)
 }
 def ui_text_center(y: int, s: string, color: int = 0, bold: int = 0, overflow: int = 0) {
     let sx = stackX()
@@ -515,28 +629,14 @@ def badge(label: string = "", role: int = UI_ACCENT, width: int = -1, height: in
     let y = advanceContainerY(h)
     let off = poolAdd(label)
     if off < 0 { return }
-    let c = cmd(8)
-    if c != 0 {
-        mem.write_u32(c + 4, x)
-        mem.write_u32(c + 8, y)
-        mem.write_u32(c + 12, w)
-        mem.write_u32(c + 16, h)
-        mem.write_u32(c + 20, off)
-        mem.write_u32(c + 24, role)
-    }
+    rect(x, y, w, h, role, h / 2)
+    textRaw(x, y + (h - 14) / 2, off, 0x01FFFFFF, 1, w, UI_CENTER)
 }
 def ui_badge(x: int, y: int, w: int, h: int, label: string, role: int = UI_ACCENT) {
     let off = poolAdd(label)
     if off < 0 { return }
-    let c = cmd(8)
-    if c != 0 {
-        mem.write_u32(c + 4, x)
-        mem.write_u32(c + 8, y)
-        mem.write_u32(c + 12, w)
-        mem.write_u32(c + 16, h)
-        mem.write_u32(c + 20, off)
-        mem.write_u32(c + 24, role)
-    }
+    rect(x, y, w, h, role, h / 2)
+    textRaw(x, y + (h - 14) / 2, off, 0x01FFFFFF, 1, w, UI_CENTER)
 }
 
 def button(label: string = "", align: int = 1, style: int = 0, width: int = -1, height: int = -1, id: string = "") {
@@ -565,21 +665,24 @@ def button(label: string = "", align: int = 1, style: int = 0, width: int = -1, 
         btn_id = uiHashId(label)
     }
     let off = poolAdd(label)
+    let bg = UI_DEFAULT
+    let fg = UI_DEFAULT
+    let border = UI_MUTED
+    let bBold = 0
+    if style == UI_PRIMARY {
+        bg = UI_ACCENT
+        fg = 0x01FFFFFF
+        border = 0
+        bBold = 1
+    } elif style == UI_HOVER {
+        bg = UI_MUTED
+    }
+    rect(x, y, w, h, bg, 6, border)
     if off >= 0 {
-        let c = cmd(5)
-        if c != 0 {
-            mem.write_u32(c + 4, x)
-            mem.write_u32(c + 8, y)
-            mem.write_u32(c + 12, w)
-            mem.write_u32(c + 16, h)
-            mem.write_u32(c + 20, off)
-            mem.write_u32(c + 24, style)
-            if btn_id >= 0 {
-                mem.write_u32(c + 28, btn_id)
-            }
-        }
+        textRaw(x, y + (h - 14) / 2, off, fg, bBold, w, UI_CENTER)
     }
     if btn_id >= 0 {
+        uiHitRegion(x, y, w, h, btn_id, 1)
         if hit(x, y, w, h) == 1 {
             uiSetState(ST_CLICKED_ID, btn_id)
         }
@@ -591,20 +694,24 @@ def ui_button(x: int, y: int, w: int, h: int, label: string, style: int = 0, id:
         btn_id = uiHashId(label)
     }
     let off = poolAdd(label)
-    if off < 0 { return }
-    let c = cmd(5)
-    if c != 0 {
-        mem.write_u32(c + 4, x)
-        mem.write_u32(c + 8, y)
-        mem.write_u32(c + 12, w)
-        mem.write_u32(c + 16, h)
-        mem.write_u32(c + 20, off)
-        mem.write_u32(c + 24, style)
-        if btn_id >= 0 {
-            mem.write_u32(c + 28, btn_id)
-        }
+    let bg = UI_DEFAULT
+    let fg = UI_DEFAULT
+    let border = UI_MUTED
+    let bBold = 0
+    if style == UI_PRIMARY {
+        bg = UI_ACCENT
+        fg = 0x01FFFFFF
+        border = 0
+        bBold = 1
+    } elif style == UI_HOVER {
+        bg = UI_MUTED
+    }
+    rect(x, y, w, h, bg, 6, border)
+    if off >= 0 {
+        textRaw(x, y + (h - 14) / 2, off, fg, bBold, w, UI_CENTER)
     }
     if btn_id >= 0 {
+        uiHitRegion(x, y, w, h, btn_id, 1)
         if hit(x, y, w, h) == 1 {
             uiSetState(ST_CLICKED_ID, btn_id)
         }
@@ -618,25 +725,19 @@ def meter(percent: int = 0, color: int = 4, width: int = -1, height: int = -1) {
     if width > 0 { w = width }
     let x = currentContainerX()
     let y = advanceContainerY(h)
-    let c = cmd(6)
-    if c != 0 {
-        mem.write_u32(c + 4, x)
-        mem.write_u32(c + 8, y)
-        mem.write_u32(c + 12, w)
-        mem.write_u32(c + 16, h)
-        mem.write_u32(c + 20, percent)
-        mem.write_u32(c + 24, color)
+    rect(x, y, w, h, UI_MUTED, h / 2)
+    let fill = w * percent / 100
+    if percent > 100 { fill = w }
+    if fill > 0 {
+        rect(x, y, fill, h, color, h / 2)
     }
 }
 def ui_meter(x: int, y: int, w: int, h: int, percent: int, color: int = 0) {
-    let c = cmd(6)
-    if c != 0 {
-        mem.write_u32(c + 4, x)
-        mem.write_u32(c + 8, y)
-        mem.write_u32(c + 12, w)
-        mem.write_u32(c + 16, h)
-        mem.write_u32(c + 20, percent)
-        mem.write_u32(c + 24, color)
+    rect(x, y, w, h, UI_MUTED, h / 2)
+    let fill = w * percent / 100
+    if percent > 100 { fill = w }
+    if fill > 0 {
+        rect(x, y, fill, h, color, h / 2)
     }
 }
 
@@ -645,21 +746,17 @@ def divider(length: int = -1, horizontal: int = 1) {
     let y = advanceContainerY(1)
     let l = length
     if l <= 0 { l = currentContainerW() }
-    let c = cmd(7)
-    if c != 0 {
-        mem.write_u32(c + 4, x)
-        mem.write_u32(c + 8, y)
-        mem.write_u32(c + 12, l)
-        mem.write_u32(c + 28, horizontal)
+    if horizontal == 1 {
+        line(x, y, x + l, y, UI_MUTED, 1)
+    } else {
+        line(x, y, x, y + l, UI_MUTED, 1)
     }
 }
 def ui_divider(x: int, y: int, length: int, horizontal: int = 1) {
-    let c = cmd(7)
-    if c != 0 {
-        mem.write_u32(c + 4, x)
-        mem.write_u32(c + 8, y)
-        mem.write_u32(c + 12, length)
-        mem.write_u32(c + 28, horizontal)
+    if horizontal == 1 {
+        line(x, y, x + length, y, UI_MUTED, 1)
+    } else {
+        line(x, y, x, y + length, UI_MUTED, 1)
     }
 }
 
@@ -754,6 +851,106 @@ def ui_row(y: int, h: int, cols: int, gap: int = -1) {
 }
 def ui_end_row() { endRow() }
 
+@container def scroll(height: int = 160, id: string = "") {
+    if height < 0 { height = 160 }
+    let sx = currentContainerX()
+    let sy = currentContainerY()
+    let sw = currentContainerW()
+    let wid = uiHashId(id)
+    clipPush(sx, sy, sw, height)
+    pushContainer(4, sx, sy, sw)
+    if wid >= 0 {
+        uiHitRegion(sx, sy, sw, height, wid, 2)
+    }
+}
+def endScroll() {
+    let childY = currentContainerY()
+    popContainer()
+    let sy = currentContainerY()
+    let sx = currentContainerX()
+    let sw = currentContainerW()
+    let totalH = childY - sy
+    clipPop()
+    if totalH > 160 {
+        rect(sx + sw - 6, sy + 4, 4, 152, UI_MUTED, 2, 0)
+        rect(sx + sw - 6, sy + 8, 4, 32, UI_SECONDARY, 2, 0)
+    }
+    advanceContainerY(160)
+}
+def end_scroll() { endScroll() }
+def ui_scroll(height: int = 160, id: string = "") { scroll(height, id) }
+def ui_end_scroll() { endScroll() }
+
+@container def flexRow(gap: int = 8, align: int = 0) {
+    let rx = currentContainerX()
+    let ry = currentContainerY()
+    let rw = currentContainerW()
+    pushContainer(5, rx, ry, rw)
+}
+def endFlexRow() {
+    popContainer()
+}
+def end_flexRow() { endFlexRow() }
+def end_flex_row() { endFlexRow() }
+
+@container def flexCol(gap: int = 8, align: int = 0) {
+    let cx = currentContainerX()
+    let cy = currentContainerY()
+    let cw = currentContainerW()
+    pushContainer(6, cx, cy, cw)
+}
+def endFlexCol() {
+    popContainer()
+}
+def end_flexCol() { endFlexCol() }
+def end_flex_col() { endFlexCol() }
+
+@container def sidebar(width: int = 160) {
+    let sx = currentContainerX()
+    let sy = currentContainerY()
+    let sh = uiState(ST_H)
+    rect(sx, sy, width, sh, UI_MUTED, 0, 0)
+    line(sx + width, sy, sx + width, sy + sh, UI_SECONDARY, 1)
+    pushContainer(7, sx + 8, sy + 8, width - 16)
+}
+def endSidebar() {
+    popContainer()
+}
+def end_sidebar() { endSidebar() }
+
+def spacer(grow: int = 1) -> int {
+    let h = 8 * grow
+    advanceContainerY(h)
+    return h
+}
+
+@container def dialog(title: string, isOpen: bool = true, id: string = "") {
+    if isOpen == false {
+        pushContainer(8, 0, 0, 0)
+        return
+    }
+    let winW = uiState(ST_W)
+    let winH = uiState(ST_H)
+    rect(0, 0, winW, winH, 0x01101018, 0, 0)
+    let dw = 280
+    if dw > winW - 32 { dw = winW - 32 }
+    let dh = 180
+    if dh > winH - 32 { dh = winH - 32 }
+    let dx = (winW - dw) / 2
+    let dy = (winH - dh) / 2
+    rect(dx, dy, dw, dh, UI_DEFAULT, 12, UI_ACCENT)
+    let off = poolAdd(title)
+    if off >= 0 {
+        textRaw(dx + 16, dy + 16, off, UI_PRIMARY, 1, dw - 32, 0)
+    }
+    line(dx, dy + 42, dx + dw, dy + 42, UI_MUTED, 1)
+    pushContainer(8, dx + 16, dy + 50, dw - 32)
+}
+def endDialog() {
+    popContainer()
+}
+def end_dialog() { endDialog() }
+
 def next(h: int) -> int {
     let y = uiState(ST_SY)
     uiSetState(ST_SY, y + h + uiState(ST_GAP))
@@ -786,7 +983,7 @@ def ui_col_w() -> int { return colW() }
 
 # a NUL-terminated byte string that already lives in memory (not a Nova string)
 def poolAddRaw(p: int) -> int {
-    let used = mem.read_u32(UI_PAGE + 12)
+    let used = mem.read_u32(UI_PAGE + 16)
     let n = 0
     while mem.read_u8(p + n) != 0 and n < 120 { n = n + 1 }
     if used + n + 1 > UI_POOL_SIZE { return 0 - 1 }
@@ -796,7 +993,7 @@ def poolAddRaw(p: int) -> int {
         i = i + 1
     }
     mem.write_u8(UI_POOL + used + n, 0)
-    mem.write_u32(UI_PAGE + 12, used + n + 1)
+    mem.write_u32(UI_PAGE + 16, used + n + 1)
     return used
 }
 
@@ -812,24 +1009,20 @@ def checkbox(label: string = "", checked: bool = false, id: string = "") -> bool
     let wid = uiHashId(id)
     if wid < 0 { wid = uiHashId(label) }
     let value = checked
-    if wid >= 0 and hit(x, y, w, h) == 1 {
-        uiSetState(ST_CLICKED_ID, wid)
-        if checked == true { value = false } else { value = true }
+    if wid >= 0 {
+        uiHitRegion(x, y, w, h, wid, 1)
+        if hit(x, y, w, h) == 1 {
+            uiSetState(ST_CLICKED_ID, wid)
+            if checked == true { value = false } else { value = true }
+        }
+    }
+    rect(x, y + 3, 16, 16, UI_DEFAULT, 4, UI_MUTED)
+    if value == true {
+        rect(x + 4, y + 7, 8, 8, UI_ACCENT, 2)
     }
     let off = poolAdd(label)
     if off >= 0 {
-        let c = cmd(9)
-        if c != 0 {
-            let on = 0
-            if value == true { on = 1 }
-            mem.write_u32(c + 4, x)
-            mem.write_u32(c + 8, y)
-            mem.write_u32(c + 12, w)
-            mem.write_u32(c + 16, h)
-            mem.write_u32(c + 20, off)
-            mem.write_u32(c + 24, on)
-            mem.write_u32(c + 28, wid)
-        }
+        textRaw(x + 24, y + 2, off, UI_DEFAULT, 0, w - 24, UI_LEFT)
     }
     return value
 }
@@ -841,21 +1034,22 @@ def slider(percent: int = 0, id: string = "") -> int {
     let y = advanceContainerY(h)
     let wid = uiHashId(id)
     let value = percent
-    if wid >= 0 and hit(x, y, w, h) == 1 and w > 0 {
-        uiSetState(ST_CLICKED_ID, wid)
-        value = (eventX() - x) * 100 / w
-        if value < 0 { value = 0 }
-        if value > 100 { value = 100 }
+    if wid >= 0 {
+        uiHitRegion(x, y, w, h, wid, 1)
+        if hit(x, y, w, h) == 1 and w > 0 {
+            uiSetState(ST_CLICKED_ID, wid)
+            value = (eventX() - x) * 100 / w
+            if value < 0 { value = 0 }
+            if value > 100 { value = 100 }
+        }
     }
-    let c = cmd(10)
-    if c != 0 {
-        mem.write_u32(c + 4, x)
-        mem.write_u32(c + 8, y)
-        mem.write_u32(c + 12, w)
-        mem.write_u32(c + 16, h)
-        mem.write_u32(c + 20, value)
-        mem.write_u32(c + 28, wid)
+    let ty = y + h / 2 - 3
+    rect(x, ty, w, 6, UI_DEFAULT, 3)
+    let kx = w * value / 100
+    if kx > 0 {
+        rect(x, ty, kx, 6, UI_ACCENT, 3)
     }
+    rect(x + kx - 6, y + h / 2 - 6, 12, 12, UI_DEFAULT, 6)
     return value
 }
 
@@ -867,9 +1061,12 @@ def input(buf: int, cap: int = 32, id: string = "", placeholder: string = "") ->
     let w = currentContainerW()
     let y = advanceContainerY(h)
     let wid = uiHashId(id)
-    if wid >= 0 and hit(x, y, w, h) == 1 {
-        uiSetState(ST_FOCUS, wid)
-        uiSetState(ST_CLICKED_ID, wid)
+    if wid >= 0 {
+        uiHitRegion(x, y, w, h, wid, 1)
+        if hit(x, y, w, h) == 1 {
+            uiSetState(ST_FOCUS, wid)
+            uiSetState(ST_CLICKED_ID, wid)
+        }
     }
     let focused = 0
     if wid >= 0 and uiState(ST_FOCUS) == wid { focused = 1 }
@@ -894,19 +1091,119 @@ def input(buf: int, cap: int = 32, id: string = "", placeholder: string = "") ->
         off = poolAdd(placeholder)
         shown_hint = 1
     }
+    let border = UI_MUTED
+    if focused == 1 { border = UI_ACCENT }
+    rect(x, y, w, h, UI_DEFAULT, 6, border)
     if off >= 0 {
-        let c = cmd(11)
-        if c != 0 {
-            mem.write_u32(c + 4, x)
-            mem.write_u32(c + 8, y)
-            mem.write_u32(c + 12, w)
-            mem.write_u32(c + 16, h)
-            mem.write_u32(c + 20, off)
-            mem.write_u32(c + 24, focused | (shown_hint << 1))
-            mem.write_u32(c + 28, wid)
-        }
+        let col = UI_DEFAULT
+        if shown_hint == 1 { col = UI_MUTED }
+        textRaw(x + 8, y + 4, off, col, 0, w - 16, UI_LEFT)
+    }
+    if focused == 1 and shown_hint == 0 {
+        rect(x + 9 + n * 8, y + 6, 1, h - 12, UI_DEFAULT)
     }
     return n
+}
+
+def toggle(label: string, checked: bool, id: string = "") -> bool {
+    let h = 24
+    let x = currentContainerX()
+    let y = advanceContainerY(h)
+    let w = currentContainerW()
+    let wid = uiHashId(id)
+    if wid >= 0 {
+        uiHitRegion(x, y, w, h, wid, 1)
+        if hit(x, y, w, h) == 1 or uiState(ST_CLICKED_ID) == wid or (mem.read_u32(UI_STATE + ST_EVT) == UI_EV_CLICK and eventKey() == wid) {
+            if checked == true { checked = false } else { checked = true }
+        }
+    }
+    let off = poolAdd(label)
+    if off >= 0 {
+        textRaw(x, y + 2, off, UI_DEFAULT, 0, w - 50, UI_LEFT)
+    }
+    let tx = x + w - 44
+    let trackColor = UI_MUTED
+    let knobX = tx + 2
+    if checked == true {
+        trackColor = UI_ACCENT
+        knobX = tx + 22
+    }
+    rect(tx, y + 2, 42, 20, trackColor, 10, 0)
+    rect(knobX, y + 4, 16, 16, UI_PRIMARY, 8, 0)
+    return checked
+}
+
+def tabs(options: list, active: int, id: string = "") -> int {
+    let n = len(options)
+    if n <= 0 { return active }
+    let h = 28
+    let x = currentContainerX()
+    let y = advanceContainerY(h)
+    let w = currentContainerW()
+    let tabW = w / n
+    let i = 0
+    while i < n {
+        let tx = x + i * tabW
+        let tabId = uiHashId(id) + i + 1
+        uiHitRegion(tx, y, tabW, h, tabId, 1)
+        if (mem.read_u32(UI_STATE + ST_EVT) == UI_EV_CLICK and hit(tx, y, tabW, h) == 1) or (mem.read_u32(UI_STATE + ST_EVT) == UI_EV_CLICK and eventKey() == tabId) {
+            active = i
+        }
+        let txtColor = UI_MUTED
+        if i == active {
+            txtColor = UI_PRIMARY
+            rect(tx + 4, y + h - 3, tabW - 8, 3, UI_ACCENT, 2, 0)
+        }
+        let opt_name = options[i]
+        let off = poolAdd(opt_name)
+        if off >= 0 {
+            let boldFlag = 0
+            if i == active { boldFlag = 1 }
+            textRaw(tx, y + 6, off, txtColor, boldFlag, tabW, UI_CENTER)
+        }
+        i = i + 1
+    }
+    return active
+}
+
+def textarea(buf: int, cap: int, rows: int = 4, id: string = "") -> int {
+    let h = rows * 20 + 12
+    let x = currentContainerX()
+    let y = advanceContainerY(h)
+    let w = currentContainerW()
+    let wid = uiHashId(id)
+    if wid >= 0 {
+        uiHitRegion(x, y, w, h, wid, 1)
+        if hit(x, y, w, h) == 1 {
+            uiSetState(ST_FOCUS, wid)
+        }
+    }
+    let focused = 0
+    if wid >= 0 and uiState(ST_FOCUS) == wid { focused = 1 }
+    let border = UI_MUTED
+    if focused == 1 { border = UI_ACCENT }
+    rect(x, y, w, h, UI_DEFAULT, 6, border)
+    let off = poolAddRaw(buf)
+    if off >= 0 {
+        textRaw(x + 8, y + 8, off, UI_DEFAULT, 0, w - 16, UI_LEFT)
+    }
+    return 0
+}
+
+def progressRing(percent: int, radius: int = 16, color: int = 0) {
+    if color == 0 { color = UI_ACCENT }
+    let d = radius * 2
+    let x = currentContainerX()
+    let y = advanceContainerY(d)
+    rect(x, y, d, d, UI_MUTED, radius, 0)
+    let inner = radius - 4
+    if inner > 0 {
+        rect(x + 4, y + 4, inner * 2, inner * 2, UI_DEFAULT, inner, 0)
+    }
+    let off = poolAddInt(percent)
+    if off >= 0 {
+        textRaw(x, y + radius - 7, off, color, 1, d, UI_CENTER)
+    }
 }
 
 # ---- input & events --------------------------------------------------------------------------------------------
@@ -917,7 +1214,13 @@ def poll() -> int {
         mem.write_u32(buf, 0)
         return UI_EV_NONE
     }
-    return mem.read_u32(buf)
+    let ev = mem.read_u32(buf)
+    if ev == 4 {
+        uiSetState(ST_HOVER, mem.read_u32(buf + 12))
+    } elif ev == 1 {
+        uiSetState(ST_CLICKED_ID, mem.read_u32(buf + 12))
+    }
+    return ev
 }
 def ui_poll() -> int { return poll() }
 
@@ -940,7 +1243,9 @@ def ui_hit(x: int, y: int, width: int, height: int) -> int { return hit(x, y, wi
 def clicked(id: string) -> bool {
     if mem.read_u32(UI_STATE + ST_EVT) != UI_EV_CLICK { return false }
     let target = uiHashId(id)
-    if target >= 0 and uiState(ST_CLICKED_ID) == target { return true }
+    if target < 0 { return false }
+    if uiState(ST_CLICKED_ID) == target { return true }
+    if eventKey() == target { return true }
     return false
 }
 def ui_clicked(id: string) -> bool { return clicked(id) }

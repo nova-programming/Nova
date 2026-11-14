@@ -127,3 +127,58 @@ def test_open_document_diagnostics_do_not_leak_to_other_files(novalsp, tmp_path)
     # The bug: the filename-less type warning matched every document, so the clean file
     # received the other file's warning as well.
     assert clean_diags == []
+
+
+MEMMAP_SOURCE = (
+    "const MM_TOAST_DIRTY = 0x810CD8   # u32 - the toast changed\n"
+    "const PLAIN = 7\n"
+)
+USER_SOURCE = (
+    "import memmap\n"
+    "def run() {\n"
+    "    flag = MM_TOAST_DIRTY\n"
+    "    print(PLAIN)\n"
+    "}\n"
+    "run()\n"
+)
+
+
+def _hover(exe, env, tmp_path, doc_text, line, character, extra_env=None):
+    uri = (tmp_path / "user.nv").as_uri()
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        {"jsonrpc": "2.0", "method": "initialized", "params": {}},
+        {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
+            "textDocument": {"uri": uri, "languageId": "nova", "version": 1, "text": doc_text}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "textDocument/hover", "params": {
+            "textDocument": {"uri": uri}, "position": {"line": line, "character": character}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "shutdown", "params": None},
+        {"jsonrpc": "2.0", "method": "exit", "params": None},
+    ]
+    run_env = dict(env)
+    run_env.update(extra_env or {})
+    r = subprocess.run([str(exe), "--stdio", "--diag-file", str(tmp_path / "diag.jsonl")],
+                       input=b"".join(_frame(m) for m in messages), capture_output=True, timeout=120, env=run_env)
+    assert r.returncode == 0, r.stderr.decode("utf-8", "replace")[-2000:]
+    replies = _parse_frames(r.stdout)
+    init = next(m for m in replies if m.get("id") == 1)
+    hover = next(m for m in replies if m.get("id") == 3)
+    return init, hover
+
+
+def test_hover_shows_the_value_of_a_constant_from_an_imported_module(novalsp, tmp_path):
+    """Hovering MM_TOAST_DIRTY shows its declaration and its decimal value, found through NOVA_PATH."""
+    exe, env = novalsp
+    (tmp_path / "memmap.nv").write_text(MEMMAP_SOURCE, encoding="utf-8")
+    init, hover = _hover(exe, env, tmp_path, USER_SOURCE, 2, 12, {"NOVA_PATH": str(tmp_path)})
+    assert init["result"]["capabilities"]["hoverProvider"] is True
+    value = hover["result"]["contents"]["value"]
+    assert "const MM_TOAST_DIRTY = 0x810CD8" in value
+    assert "8457432" in value   # 0x810CD8
+
+
+def test_hover_on_a_plain_name_is_empty(novalsp, tmp_path):
+    exe, env = novalsp
+    (tmp_path / "memmap.nv").write_text(MEMMAP_SOURCE, encoding="utf-8")
+    _, hover = _hover(exe, env, tmp_path, USER_SOURCE, 1, 5, {"NOVA_PATH": str(tmp_path)})     # `run`
+    assert hover["result"] is None

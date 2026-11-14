@@ -1602,9 +1602,11 @@ def generate_assembly(ast: list, debug_mode: int, tgt: int, target_os: string) -
         emit_data(state, ".align 16")
         emit_data(state, "__nova_bare_heap_ptr:")
         emit_data(state, "    .quad __nova_bare_heap")
+        emit_data(state, ".section .bss")
         emit_data(state, ".align 16")
         emit_data(state, "__nova_bare_heap:")
         emit_data(state, "    .skip 262144")
+        emit_data(state, ".section .data")
     }
 
     emit(state, ".text")

@@ -256,10 +256,148 @@ def lsp_check_doc(st: LspState, uri: string, content: string, full: int) {
     lsp_publish(st, uri, lsp_read_diagnostics(st, uri))
 }
 
+# ---------------------------------------------------------------- hover (constants and offsets)
+#
+# Hovering a name that is declared as `const NAME = value` shows the declaration plus the value in decimal, so addresses
+# like MM_TOAST_DIRTY (0x810CD8) never need a trip to memmap.nv. The declaration is looked up in the open document, then
+# in the modules it imports (searched along NOVA_PATH, the same way the compiler finds them).
+
+def lsp_is_ident_char(ch: string) -> int {
+    if ch == "_" { return 1 }
+    if ch >= "a" and ch <= "z" { return 1 }
+    if ch >= "A" and ch <= "Z" { return 1 }
+    if ch >= "0" and ch <= "9" { return 1 }
+    return 0
+}
+
+# The identifier under (line, character); both are 0-based, character counts bytes (positionEncoding utf-8).
+def lsp_word_at(content: string, line: int, character: int) -> string {
+    pos = 0
+    ln = 0
+    while ln < line and pos < len(content) {
+        if content[pos] == "\n" { ln = ln + 1 }
+        pos = pos + 1
+    }
+    at = pos + character
+    if at >= len(content) { return "" }
+    lo = at
+    while lo > 0 and lsp_is_ident_char(content[lo - 1]) == 1 { lo = lo - 1 }
+    hi = at
+    while hi < len(content) and lsp_is_ident_char(content[hi]) == 1 { hi = hi + 1 }
+    if hi <= lo { return "" }
+    return str_sub(content, lo, hi)
+}
+
+# The `const NAME ...` line for `name` in `content` ("" when there is none)
+def lsp_const_line(content: string, name: string) -> string {
+    want = "const " + name
+    pos = 0
+    while pos < len(content) {
+        end = pos
+        while end < len(content) and content[end] != "\n" { end = end + 1 }
+        text_line = str_sub(content, pos, end)
+        if len(text_line) > 0 and text_line[len(text_line) - 1] == "\r" { text_line = str_sub(text_line, 0, len(text_line) - 1) }
+        k = 0
+        while k < len(text_line) and (text_line[k] == " " or text_line[k] == "\t") { k = k + 1 }
+        rest = str_sub(text_line, k, len(text_line))
+        if len(rest) > len(want) and str_sub(rest, 0, len(want)) == want {
+            nxt = rest[len(want)]
+            if nxt == " " or nxt == "=" or nxt == "\t" { return rest }
+        }
+        pos = end + 1
+    }
+    return ""
+}
+
+def lsp_hex_digit_value(ch: string) -> int {
+    code = char_code(ch, 0)
+    if code >= 48 and code <= 57 { return code - 48 }
+    if code >= 97 and code <= 102 { return 10 + code - 97 }
+    if code >= 65 and code <= 70 { return 10 + code - 65 }
+    return -1
+}
+
+# "const NAME = 0x810CD8   # note" -> "8473816" (decimal text of the value, "" when it is not a plain number)
+def lsp_const_decimal(decl: string) -> string {
+    eq = 0
+    while eq < len(decl) and decl[eq] != "=" { eq = eq + 1 }
+    k = eq + 1
+    while k < len(decl) and decl[k] == " " { k = k + 1 }
+    if k >= len(decl) { return "" }
+    value = 0
+    if k + 1 < len(decl) and decl[k] == "0" and (decl[k + 1] == "x" or decl[k + 1] == "X") {
+        k = k + 2
+        start = k
+        while k < len(decl) and lsp_hex_digit_value(decl[k]) >= 0 {
+            value = value * 16 + lsp_hex_digit_value(decl[k])
+            k = k + 1
+        }
+        if k == start { return "" }
+        return str(value)
+    }
+    return ""
+}
+
+def lsp_read_text(path: string) -> string {
+    if file_exists(path) == 0 { return "" }
+    fd = system.file_open(path, "r")
+    if fd == 0 { return "" }
+    body = system.file_read(fd)
+    system.file_close(fd)
+    return body
+}
+
+# `import name` lines of a document
+def lsp_imports(content: string) -> list {
+    found = []
+    pos = 0
+    while pos < len(content) {
+        end = pos
+        while end < len(content) and content[end] != "\n" { end = end + 1 }
+        text_line = str_sub(content, pos, end)
+        if len(text_line) > 7 and str_sub(text_line, 0, 7) == "import " {
+            nm = ""
+            k = 7
+            while k < len(text_line) and lsp_is_ident_char(text_line[k]) == 1 {
+                nm = nm + text_line[k]
+                k = k + 1
+            }
+            if len(nm) > 0 { found.append(nm) }
+        }
+        pos = end + 1
+    }
+    return found
+}
+
+def lsp_hover_markdown(content: string, name: string) -> string {
+    decl = lsp_const_line(content, name)
+    if len(decl) == 0 {
+        mods = lsp_imports(content)
+        search = system.system_env_get("NOVA_PATH")
+        m = 0
+        while m < len(mods) and len(decl) == 0 {
+            dirs = text_split(search, ";")
+            d = 0
+            while d < len(dirs) and len(decl) == 0 {
+                if len(dirs[d]) > 0 {
+                    decl = lsp_const_line(lsp_read_text(dirs[d] + "/" + mods[m] + ".nv"), name)
+                }
+                d = d + 1
+            }
+            m = m + 1
+        }
+    }
+    if len(decl) == 0 { return "" }
+    dec = lsp_const_decimal(decl)
+    out = decl
+    if len(dec) > 0 { out = out + "\n\n= " + dec + " (decimal)" }
+    return out
+}
+
 # ---------------------------------------------------------------- request routing
 
 def lsp_initialize_result() -> string {
-    return "\{\"capabilities\":\{\"textDocumentSync\":\{\"openClose\":true,\"change\":1,\"save\":\{\"includeText\":true\}\},\"positionEncoding\":\"utf-8\"\},\"serverInfo\":\{\"name\":\"novalsp\",\"version\":\"" + lsp_version() + "\"\}\}"
+    return "\{\"capabilities\":\{\"textDocumentSync\":\{\"openClose\":true,\"change\":1,\"save\":\{\"includeText\":true\}\},\"hoverProvider\":true,\"positionEncoding\":\"utf-8\"\},\"serverInfo\":\{\"name\":\"novalsp\",\"version\":\"" + lsp_version() + "\"\}\}"
 }
 
 def lsp_handle(st: LspState, body: string) -> int {
@@ -338,6 +476,27 @@ def lsp_handle(st: LspState, body: string) -> int {
         uri = json_as_string(json_get(td, "uri"))
         lsp_drop_doc(st, uri)
         lsp_publish(st, uri, "[]")
+        return 1
+    }
+
+    if method == "textDocument/hover" {
+        td = json_get(params, "textDocument")
+        uri = json_as_string(json_get(td, "uri"))
+        idx = lsp_find_doc(st, uri)
+        if idx < 0 {
+            lsp_respond(id_json, "null")
+            return 1
+        }
+        pos = json_get(params, "position")
+        content = st.texts[idx]
+        word = lsp_word_at(content, json_as_int(json_get(pos, "line")), json_as_int(json_get(pos, "character")))
+        md = ""
+        if len(word) > 0 { md = lsp_hover_markdown(content, word) }
+        if len(md) == 0 {
+            lsp_respond(id_json, "null")
+        } else {
+            lsp_respond(id_json, "\{\"contents\":\{\"kind\":\"markdown\",\"value\":" + lsp_json_str(md) + "\}\}")
+        }
         return 1
     }
 

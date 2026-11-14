@@ -2600,6 +2600,39 @@ Cleanly partitioned `baremetal_os/` into a modular 7-tier domain architecture:
   - `baremetal_os/test_regressions.py`: 9/9 passed.
   - `baremetal_os/test_ui_shell.py`: 5/5 passed.
 
+---
+
+## 88. Display List V2 (`NUI2`) & Modern UI Architecture System (Nov 2026)
+- **Status**: **COMPLETED & VERIFIED (100% PASS)**.
+- **Architectural Motivation**:
+  - Transitioned the desktop and bare-metal UI subsystem from rigid widget-specific operations to a clean, versioned primitive display list (`NUI2`), accompanied by hardware-assisted clipping, window server hit-testing, and rich layout containers.
+- **Pillar 1: Versioned Display List (`NUI2`) Primitives**:
+  - Magic `0x3249554E` ("NUI2"), version 2 at `+4`. Replaced "one op per widget" with low-level primitives:
+    - `OP_CLEAR = 1`, `OP_RECT = 2`, `OP_TEXT = 3`, `OP_LINE = 4`, `OP_CLIP_PUSH = 5`, `OP_CLIP_POP = 6`, `OP_IMAGE = 7`.
+    - Maintained full backwards compatibility with legacy `NUI1` (`0x3149554E`) in `ui/clients.nv`.
+- **Pillar 2: Window Server Hit-Testing & Hover**:
+  - Apps emit hit-regions (`CUI_HIT_OFFSET = 8224`, 64 regions x 16B: `xy, wh, id, flags`).
+  - Kernel compositor (`cuiHitTestSlot`, `ws_hover_key`, `ws_hover_rect`) tracks hover directly over client window bounds.
+  - Automatically dispatches `UI_EV_HOVER = 4` and damages client rects on hover state change.
+- **Pillar 3: Clipping Stack & Containers**:
+  - Hardware clipping stack in `core/memmap.nv` (`MM_CLIP_DEPTH = 0x811200`, `MM_CLIP_STACK = 0x811204`).
+  - Primitives `fbClipPush(x, y, w, h)`, `fbClipPop()`, `fbClipReset()` clip all pixels, rect fills, blends, and text glyphs.
+  - `@container def scroll(height, id)` wraps blocks between `clipPush` and `clipPop` with subtle scroll indicator bar and scrollable hit region.
+  - Flex layout containers: `flexRow`, `flexCol`, `sidebar`, `spacer`, `dialog`.
+- **Pillar 4: Per-App Dynamic Heap & Shrunk `.nva` Packages**:
+  - Moved `__nova_bare_heap` from `.data` to `.section .bss` in `backend/x86_64/codegen.nv`.
+  - Dropped `.nva` binary sizes from ~314 KB to ~52 KB (>83% reduction). Mapped and zeroed dynamically by the kernel ELF loader.
+- **Pillar 5: Rich Component Suite & Reactive State**:
+  - Native `toggle`, `tabs`, `textarea`, `progressRing`, `input`, `checkbox`, `slider`.
+  - Reactive app state block: `stateGet`, `stateSet`, `stateToggle`, `isHovered`.
+- **Verification**:
+  - `nova/tests/test_ui_host.py`: **4/4 passed (100%)**.
+  - `nova/tests/test_check_all.py`: **79/79 passed (100%)**.
+  - `baremetal_os/test_nva.py`: **6/6 passed (100%)**.
+  - `baremetal_os/test_nsf.py`: **11/11 passed (100%)**.
+  - `baremetal_os/build.ps1`: Builds all Ring 3 user applications and kernel cleanly with exit code 0.
+
+
 
 
 
@@ -3144,6 +3177,39 @@ Cleanly partitioned `baremetal_os/` into a modular 7-tier domain architecture:
   - `baremetal_os/test_memmap.py`: 2/2 passed.
   - `baremetal_os/test_regressions.py`: 9/9 passed.
   - `baremetal_os/test_ui_shell.py`: 5/5 passed.
+
+---
+
+## 88. Display List V2 (`NUI2`) & Modern UI Architecture System (Nov 2026)
+- **Status**: **COMPLETED & VERIFIED (100% PASS)**.
+- **Architectural Motivation**:
+  - Transitioned the desktop and bare-metal UI subsystem from rigid widget-specific operations to a clean, versioned primitive display list (`NUI2`), accompanied by hardware-assisted clipping, window server hit-testing, and rich layout containers.
+- **Pillar 1: Versioned Display List (`NUI2`) Primitives**:
+  - Magic `0x3249554E` ("NUI2"), version 2 at `+4`. Replaced "one op per widget" with low-level primitives:
+    - `OP_CLEAR = 1`, `OP_RECT = 2`, `OP_TEXT = 3`, `OP_LINE = 4`, `OP_CLIP_PUSH = 5`, `OP_CLIP_POP = 6`, `OP_IMAGE = 7`.
+    - Maintained full backwards compatibility with legacy `NUI1` (`0x3149554E`) in `ui/clients.nv`.
+- **Pillar 2: Window Server Hit-Testing & Hover**:
+  - Apps emit hit-regions (`CUI_HIT_OFFSET = 8224`, 64 regions x 16B: `xy, wh, id, flags`).
+  - Kernel compositor (`cuiHitTestSlot`, `ws_hover_key`, `ws_hover_rect`) tracks hover directly over client window bounds.
+  - Automatically dispatches `UI_EV_HOVER = 4` and damages client rects on hover state change.
+- **Pillar 3: Clipping Stack & Containers**:
+  - Hardware clipping stack in `core/memmap.nv` (`MM_CLIP_DEPTH = 0x811200`, `MM_CLIP_STACK = 0x811204`).
+  - Primitives `fbClipPush(x, y, w, h)`, `fbClipPop()`, `fbClipReset()` clip all pixels, rect fills, blends, and text glyphs.
+  - `@container def scroll(height, id)` wraps blocks between `clipPush` and `clipPop` with subtle scroll indicator bar and scrollable hit region.
+  - Flex layout containers: `flexRow`, `flexCol`, `sidebar`, `spacer`, `dialog`.
+- **Pillar 4: Per-App Dynamic Heap & Shrunk `.nva` Packages**:
+  - Moved `__nova_bare_heap` from `.data` to `.section .bss` in `backend/x86_64/codegen.nv`.
+  - Dropped `.nva` binary sizes from ~314 KB to ~52 KB (>83% reduction). Mapped and zeroed dynamically by the kernel ELF loader.
+- **Pillar 5: Rich Component Suite & Reactive State**:
+  - Native `toggle`, `tabs`, `textarea`, `progressRing`, `input`, `checkbox`, `slider`.
+  - Reactive app state block: `stateGet`, `stateSet`, `stateToggle`, `isHovered`.
+- **Verification**:
+  - `nova/tests/test_ui_host.py`: **4/4 passed (100%)**.
+  - `nova/tests/test_check_all.py`: **79/79 passed (100%)**.
+  - `baremetal_os/test_nva.py`: **6/6 passed (100%)**.
+  - `baremetal_os/test_nsf.py`: **11/11 passed (100%)**.
+  - `baremetal_os/build.ps1`: Builds all Ring 3 user applications and kernel cleanly with exit code 0.
+
 
 
 

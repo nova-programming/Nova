@@ -426,6 +426,8 @@ def parse_primary(state: ParserState) -> AstNode {
             } else {
                 while check.kind == "COMMA" {
                     eat_tok(state, "COMMA")
+                    check = current_tok(state)
+                    if check.kind == "RBRACK" { break }      # a trailing comma before ] is allowed
                     node.args.append(parse_expr(state))
                     check = current_tok(state)
                 }
@@ -446,6 +448,8 @@ def parse_primary(state: ParserState) -> AstNode {
             check = current_tok(state)
             while check.kind == "COMMA" {
                 eat_tok(state, "COMMA")
+                check = current_tok(state)
+                if check.kind == "RBRACE" { break }      # a trailing comma before } is allowed
                 node.args.append(parse_dict_key(state))
                 eat_tok(state, "COLON")
                 node.args.append(parse_expr(state))
@@ -2928,8 +2932,8 @@ def parse_with_tests(tokens: list, filename: string, test_mode: string) -> list 
     state.test_count = 0
     state.ctors_used = []
     state.const_table = {}
-    state.containers = {"stack": 1, "card": 1, "row": 1, "frame": 1, "ui_stack": 1, "ui_card": 1, "ui_row": 1, "ui_frame": 1}
-    state.container_ends = {"stack": "end_stack", "card": "end_card", "row": "end_row", "frame": "end_frame", "ui_stack": "ui_end_stack", "ui_card": "ui_end_card", "ui_row": "ui_end_row", "ui_frame": "ui_end_frame"}
+    state.containers = {"stack": 1, "card": 1, "row": 1, "frame": 1, "ui_stack": 1, "ui_card": 1, "ui_row": 1, "ui_frame": 1, "scroll": 1, "ui_scroll": 1, "flexRow": 1, "flexCol": 1, "sidebar": 1, "dialog": 1, "flex_row": 1, "flex_col": 1}
+    state.container_ends = {"stack": "end_stack", "card": "end_card", "row": "end_row", "frame": "end_frame", "ui_stack": "ui_end_stack", "ui_card": "ui_end_card", "ui_row": "ui_end_row", "ui_frame": "ui_end_frame", "scroll": "end_scroll", "ui_scroll": "end_scroll", "flexRow": "end_flexRow", "flexCol": "end_flexCol", "sidebar": "end_sidebar", "dialog": "end_dialog", "flex_row": "end_flex_row", "flex_col": "end_flex_col"}
     program = []
     
     loop = 1

@@ -238,3 +238,18 @@ def test_build_os_nova_produces_a_nva_with_the_manifest_from_the_source(selfhost
     assert info["manifest"]["version"] == "2.5"
     assert info["manifest"]["window"] == "300x180"
     assert info["manifest"]["perms"] == "fs"
+
+
+# ---- trailing commas -----------------------------------------------------------------------------------------
+
+def test_trailing_commas_are_allowed_in_lists_dicts_and_calls(selfhost_run):
+    source = ("def add(a: int, b: int) -> int {\n    return a + b\n}\n"
+              "items = [1, 2, 3,]\n"
+              "table = {\"a\": 1, \"b\": 2,}\n"
+              "print(len(items))\n"
+              "print(table[\"b\"])\n"
+              "print(add(4, 5,))\n"
+              "print(len([]))\n")
+    r, _ = selfhost_run(source, "dt_trailing_commas")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.stdout.split() == ["3", "2", "9", "0"]

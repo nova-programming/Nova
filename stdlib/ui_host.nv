@@ -72,13 +72,20 @@ def nova_create_window(w: int, h: int, title: int) -> int {
 }
 
 def hostDrawList() {
+    let magic = mem.read_u32(HOST_PAGE + 0)
     let n = mem.read_u32(HOST_PAGE + 4)
-    if n > 256 { n = 256 }
+    let cmds = HOST_PAGE + 16
     let pool = HOST_PAGE + 8208
+    if magic == 0x3249554E {
+        n = mem.read_u32(HOST_PAGE + 12)
+        cmds = HOST_PAGE + 32
+        pool = HOST_PAGE + 9248
+    }
+    if n > 256 { n = 256 }
     gui_clear(0x1e1e2e)
     let i = 0
     while i < n {
-        let c = HOST_PAGE + 16 + i * 32
+        let c = cmds + i * 32
         let op = mem.read_u32(c + 0)
         let a = mem.read_u32(c + 4)
         let b = mem.read_u32(c + 8)
@@ -87,69 +94,99 @@ def hostDrawList() {
         let e = mem.read_u32(c + 20)
         let f = mem.read_u32(c + 24)
         let g = mem.read_u32(c + 28)
-        if op == 1 {
-            gui_clear(hostColor(a, 0x1e1e2e))
-        } elif op == 2 {
-            gui_draw_rect(a, b, w, h, hostColor(f, 0x313244), e)
-        } elif op == 3 {
-            gui_draw_rect(a, b, w, h, 0x181825, 10)
-            gui_draw_border(a, b, w, h, 1, 0x313244)
-        } elif op == 4 {
-            let tw = hostTextWidth(pool + e)
-            let max_w = h
-            if max_w <= 0 { max_w = 100000 }
-            let tx = a
-            if g == 1 and max_w > tw { tx = a + (max_w - tw) / 2 }
-            if g == 2 and max_w > tw { tx = a + (max_w - tw) }
-            let weight = 0
-            if (f & 1) == 1 { weight = 1 }
-            gui_draw_text(hostString(pool + e), tx, b, HOST_FONT, hostColor(w, 0xcdd6f4), weight)
-        } elif op == 5 {
-            let tw = hostTextWidth(pool + e)
-            let bg = 0x313244
-            let fg = 0xcdd6f4
-            if (f & 2) == 2 {
-                bg = 0x89b4fa
-                fg = 0x1e1e2e
+        if magic == 0x3249554E {
+            if op == 1 {
+                gui_clear(hostColor(a, 0x1e1e2e))
+            } elif op == 2 {
+                let bg = hostColor(f, 0x313244)
+                gui_draw_rect(a, b, w, h, bg, e)
+                let b_col = g & 0xFFFFFF
+                if b_col != 0 {
+                    gui_draw_border(a, b, w, h, 1, hostColor(b_col, 0x45475a))
+                }
+            } elif op == 3 {
+                let tw = hostTextWidth(pool + w)
+                let max_w = f
+                if max_w <= 0 { max_w = 100000 }
+                let tx = a
+                if g == 1 and max_w > tw { tx = a + (max_w - tw) / 2 }
+                if g == 2 and max_w > tw { tx = a + (max_w - tw) }
+                let weight = 0
+                if (e & 1) == 1 { weight = 1 }
+                gui_draw_text(hostString(pool + w), tx, b, HOST_FONT, hostColor(h, 0xcdd6f4), weight)
+            } elif op == 4 {
+                let lc = hostColor(e, 0x45475a)
+                let lw = w - a
+                let lh = h - b
+                if lw <= 0 { lw = 1 }
+                if lh <= 0 { lh = 1 }
+                gui_draw_rect(a, b, lw, lh, lc, 0)
             }
-            gui_draw_rect(a, b, w, h, bg, 6)
-            gui_draw_text(hostString(pool + e), a + (w - tw) / 2, b + (h - HOST_FONT) / 2 - 1, HOST_FONT, fg, 0)
-        } elif op == 6 {
-            gui_draw_rect(a, b, w, h, 0x313244, h / 2)
-            let fill = w * e / 100
-            if e > 100 { fill = w }
-            if fill > 0 { gui_draw_rect(a, b, fill, h, hostColor(f, 0x89b4fa), h / 2) }
-        } elif op == 7 {
-            if g == 1 {
-                gui_draw_rect(a, b, w, 1, 0x45475a, 0)
-            } else {
-                gui_draw_rect(a, b, 1, w, 0x45475a, 0)
-            }
-        } elif op == 8 {
-            let tw = hostTextWidth(pool + e)
-            gui_draw_rect(a, b, w, h, hostColor(f, 0x89b4fa), h / 2)
-            gui_draw_text(hostString(pool + e), a + (w - tw) / 2, b + (h - HOST_FONT) / 2 - 1, HOST_FONT, 0xffffff, 1)
-        } elif op == 9 {
-            gui_draw_rect(a, b + 3, 16, 16, 0x313244, 4)
-            gui_draw_border(a, b + 3, 16, 16, 1, 0x45475a)
-            if f == 1 { gui_draw_rect(a + 4, b + 7, 8, 8, 0x89b4fa, 2) }
-            gui_draw_text(hostString(pool + e), a + 24, b + (h - HOST_FONT) / 2 - 1, HOST_FONT, 0xcdd6f4, 0)
-        } elif op == 10 {
-            let ty = b + h / 2 - 3
-            gui_draw_rect(a, ty, w, 6, 0x313244, 3)
-            let kx = w * e / 100
-            if kx > 0 { gui_draw_rect(a, ty, kx, 6, 0x89b4fa, 3) }
-            gui_draw_rect(a + kx - 6, b + h / 2 - 6, 12, 12, 0xcdd6f4, 6)
-        } elif op == 11 {
-            gui_draw_rect(a, b, w, h, 0x313244, 6)
-            let edge = 0x45475a
-            if (f & 1) == 1 { edge = 0x89b4fa }
-            gui_draw_border(a, b, w, h, 1, edge)
-            let col = 0xcdd6f4
-            if (f & 2) == 2 { col = 0x6c7086 }
-            gui_draw_text(hostString(pool + e), a + 8, b + (h - HOST_FONT) / 2 - 1, HOST_FONT, col, 0)
-            if (f & 1) == 1 and (f & 2) == 0 {
-                gui_draw_rect(a + 9 + hostTextWidth(pool + e), b + 6, 1, h - 12, 0xcdd6f4, 0)
+        } else {
+            if op == 1 {
+                gui_clear(hostColor(a, 0x1e1e2e))
+            } elif op == 2 {
+                gui_draw_rect(a, b, w, h, hostColor(f, 0x313244), e)
+            } elif op == 3 {
+                gui_draw_rect(a, b, w, h, 0x181825, 10)
+                gui_draw_border(a, b, w, h, 1, 0x313244)
+            } elif op == 4 {
+                let tw = hostTextWidth(pool + e)
+                let max_w = h
+                if max_w <= 0 { max_w = 100000 }
+                let tx = a
+                if g == 1 and max_w > tw { tx = a + (max_w - tw) / 2 }
+                if g == 2 and max_w > tw { tx = a + (max_w - tw) }
+                let weight = 0
+                if (f & 1) == 1 { weight = 1 }
+                gui_draw_text(hostString(pool + e), tx, b, HOST_FONT, hostColor(w, 0xcdd6f4), weight)
+            } elif op == 5 {
+                let tw = hostTextWidth(pool + e)
+                let bg = 0x313244
+                let fg = 0xcdd6f4
+                if (f & 2) == 2 {
+                    bg = 0x89b4fa
+                    fg = 0x1e1e2e
+                }
+                gui_draw_rect(a, b, w, h, bg, 6)
+                gui_draw_text(hostString(pool + e), a + (w - tw) / 2, b + (h - HOST_FONT) / 2 - 1, HOST_FONT, fg, 0)
+            } elif op == 6 {
+                gui_draw_rect(a, b, w, h, 0x313244, h / 2)
+                let fill = w * e / 100
+                if e > 100 { fill = w }
+                if fill > 0 { gui_draw_rect(a, b, fill, h, hostColor(f, 0x89b4fa), h / 2) }
+            } elif op == 7 {
+                if g == 1 {
+                    gui_draw_rect(a, b, w, 1, 0x45475a, 0)
+                } else {
+                    gui_draw_rect(a, b, 1, w, 0x45475a, 0)
+                }
+            } elif op == 8 {
+                let tw = hostTextWidth(pool + e)
+                gui_draw_rect(a, b, w, h, hostColor(f, 0x89b4fa), h / 2)
+                gui_draw_text(hostString(pool + e), a + (w - tw) / 2, b + (h - HOST_FONT) / 2 - 1, HOST_FONT, 0xffffff, 1)
+            } elif op == 9 {
+                gui_draw_rect(a, b + 3, 16, 16, 0x313244, 4)
+                gui_draw_border(a, b + 3, 16, 16, 1, 0x45475a)
+                if f == 1 { gui_draw_rect(a + 4, b + 7, 8, 8, 0x89b4fa, 2) }
+                gui_draw_text(hostString(pool + e), a + 24, b + (h - HOST_FONT) / 2 - 1, HOST_FONT, 0xcdd6f4, 0)
+            } elif op == 10 {
+                let ty = b + h / 2 - 3
+                gui_draw_rect(a, ty, w, 6, 0x313244, 3)
+                let kx = w * e / 100
+                if kx > 0 { gui_draw_rect(a, ty, kx, 6, 0x89b4fa, 3) }
+                gui_draw_rect(a + kx - 6, b + h / 2 - 6, 12, 12, 0xcdd6f4, 6)
+            } elif op == 11 {
+                gui_draw_rect(a, b, w, h, 0x313244, 6)
+                let edge = 0x45475a
+                if (f & 1) == 1 { edge = 0x89b4fa }
+                gui_draw_border(a, b, w, h, 1, edge)
+                let col = 0xcdd6f4
+                if (f & 2) == 2 { col = 0x6c7086 }
+                gui_draw_text(hostString(pool + e), a + 8, b + (h - HOST_FONT) / 2 - 1, HOST_FONT, col, 0)
+                if (f & 1) == 1 and (f & 2) == 0 {
+                    gui_draw_rect(a + 9 + hostTextWidth(pool + e), b + 6, 1, h - 12, 0xcdd6f4, 0)
+                }
             }
         }
         i = i + 1
@@ -173,10 +210,34 @@ def nova_poll_event(id: int, buf: int) -> int {
         return 1
     }
     if gui_get_mouse_clicked() > 0 {
+        let mx = gui_get_mouse_x()
+        let my = gui_get_mouse_y()
         mem.write_u32(buf, 1)
-        mem.write_u32(buf + 4, gui_get_mouse_x())
-        mem.write_u32(buf + 8, gui_get_mouse_y())
-        mem.write_u32(buf + 12, 0)
+        mem.write_u32(buf + 4, mx)
+        mem.write_u32(buf + 8, my)
+        let key_id = 0
+        let magic = mem.read_u32(HOST_PAGE + 0)
+        if magic == 0x3249554E {
+            let hit_count = mem.read_u32(HOST_PAGE + 20)
+            if hit_count > 64 { hit_count = 64 }
+            let hidx = hit_count - 1
+            while hidx >= 0 {
+                let hp = HOST_PAGE + 8224 + hidx * 16
+                let xy = mem.read_u32(hp + 0)
+                let hx = xy & 0xFFFF
+                let hy = (xy >> 16) & 0xFFFF
+                let wh = mem.read_u32(hp + 4)
+                let hw = wh & 0xFFFF
+                let hh = (wh >> 16) & 0xFFFF
+                if mx >= hx and mx < hx + hw and my >= hy and my < hy + hh {
+                    key_id = mem.read_u32(hp + 8)
+                    hidx = 0 - 1
+                } else {
+                    hidx = hidx - 1
+                }
+            }
+        }
+        mem.write_u32(buf + 12, key_id)
         return 1
     }
     let k = gui_poll_char()
